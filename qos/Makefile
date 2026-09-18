@@ -1,7 +1,7 @@
-# qos/Makefile — the QOS backend, built SEPARATELY from fp-risc.
+# qos/Makefile — the QOS backend, built SEPARATELY from the programs.
 #
 #   make portable          # qosp: the QOS Portable host (unix)
-#   make portable-run      # qosp running ../fp-risc/app.qa
+#   make portable-run      # qosp running ../app.qa
 #   make native            # qos-native.elf: the kernel (system.fpr) for QEMU virt
 #   make native-run        # boot it as a kernel with a seeded disk
 #
@@ -10,13 +10,13 @@
 # OS: system.fpr compiled AOT for RISC-V, linked with hal/{core,virt},
 # loaded by QEMU as the kernel.  Both consume ../hal — the C layer is
 # a HAL, not an implementation.  The kernel is itself an FP-RISC
-# program, so `native` invokes ../fp-risc/fprc as a TOOL; the build
+# program, so `native` invokes the fprisc checkout's fpr as a TOOL; the build
 # products and dependency graph stay entirely on this side.
 
 include ../dependency.mk
 
 HAL    = ../hal
-FPR    = ../fp-risc
+FPR    = ..
 
 HARTS ?= 2
 QOSHARTS ?= 8

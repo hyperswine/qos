@@ -1,0 +1,4 @@
+# browser root: module-table carrier only
+A = use "../programs/mods/browserapp".
+main : unsafe Unit .
+main = A.appMeta 0.

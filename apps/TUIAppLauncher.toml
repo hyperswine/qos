@@ -1,0 +1,10 @@
+name = "App Launcher"
+id = "TUIAppLauncher"
+entry = "launcher_main"
+version = "1"
+
+[permissions.required]
+"/services/keyboard" = "read"
+"/services/display" = "write"
+"/services/clock" = "read"
+"/services/apps" = "read"

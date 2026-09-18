@@ -3,16 +3,20 @@
 """qos.py -- the pipeline layer over the whole tree.
 
 The Makefiles stay what they are: MECHANISM (cross-compilation,
-linking, packaging -- fp-risc/Makefile and qos/Makefile know how each
+linking, packaging -- the root Makefile and qos/Makefile know how each
 artifact is made).  This file is the POLICY layer the project always
 gets used as anyway: one command from the repo root that knows how the
 pieces compose -- compiler -> .qa -> host -> disk -> QEMU -> browser --
 and where every intermediate lives, so you never cd between component
 directories or thread app.qa paths by hand again.
 
+    ./qos.py fprisc ~/src/fprisc    say where the fprisc checkout is, once
+                                    (remembered in fprisc.path; $FPRISC_ROOT
+                                    or --fprisc DIR override it; a sibling
+                                    ../fprisc needs no saying at all)
     ./qos.py build                  bring fpr + qosp up to date
     ./qos.py new myapp --template mvu           scaffold a WORKING app in
-                                    fp-risc/apps/myapp/ (templates: min |
+                                    apps/myapp/ (templates: min |
                                     service | mvu | notes) -- it runs,
                                     self-checks, and packs immediately
     ./qos.py dev apps/myapp/app.fpr             the SKETCH loop: run
@@ -43,7 +47,7 @@ directories or thread app.qa paths by hand again.
     ./qos.py disk my.img 8 a.qa     seed a QLOG image (mkdisk)
     ./qos.py commit mods/qlog.fpr   fpr commit (the .fpr store)
     ./qos.py lock --check           every `use "x#hash"` pin has a committed
-                                    version; fp-risc/fpr.lock is current
+                                    version; fpr.lock is current
     ./qos.py release 0.2.0 --push   cut a release: commit the modules, lock,
                                     smoke, stamped dist bundles, tag v0.2.0
     ./qos.py test                   the fast smoke set;  --all = check-all.sh
@@ -76,22 +80,64 @@ from pathlib import Path
 from typing import NoReturn
 
 ROOT = Path(__file__).resolve().parent
-FPR = ROOT / "fp-risc"
 QOS = ROOT / "qos"
 # an installed tree (`qos.py install`, the Homebrew formula) carries this
 # marker: its fpr / qosp are shipped, never rebuilt, and nothing below
 # ROOT is written -- every artifact goes to the workspace
 INSTALLED = (ROOT / ".installed").is_file()
-from configure import configure, dependency
-try:
-    TOOLCHAIN = dependency()
-    configure(TOOLCHAIN)
-except (ValueError, OSError) as exc:
-    raise SystemExit(f"qos: {exc}")
-COMPILER = TOOLCHAIN / "fpr"
-os.environ["FPRISC_ROOT"] = str(TOOLCHAIN)
-os.environ["FPR_HOME"] = str(FPR)
-os.environ["FPR_PATH"] = str(TOOLCHAIN)
+
+
+# ---- the fprisc checkout ------------------------------------------------------
+# The compiler, runtime and language libraries live in the separate
+# fprisc repository; this tree holds the QOS programs and hosts.  One
+# path names that checkout, found in this order:
+#     --fprisc DIR          this invocation
+#     $FPRISC_ROOT          this shell
+#     fprisc.path           this checkout (`./qos.py fprisc DIR` writes it)
+#     ../fprisc             a sibling checkout, nothing to say
+#     toolchain/            an installed tree ships its own
+# Nothing is copied or linked: the path is handed to the Makefiles as
+# FPRISC_ROOT (dependency.mk applies the same order when make is run
+# directly) and to the compiler as FPR_PATH, its module search root.
+FPRISC_FILE = ROOT / "fprisc.path"
+FPRISC_LOCK = ROOT / "fprisc.lock.json"
+FPRISC_MARKS = ("Makefile", "compiler/Main.hs", "hal/core/runtime.c", "core/prelude.fpr")
+
+
+def is_fprisc(path):
+    return all((path / n).is_file() for n in FPRISC_MARKS)
+
+
+def fprisc_root(given=None, root=ROOT):
+    """(the checkout, how it was found), or SystemExit with the ways to say."""
+    if (root / ".installed").is_file():
+        return root / "toolchain", "the installed toolchain"
+    remembered = (root / FPRISC_FILE.name).read_text().strip() if (root / FPRISC_FILE.name).is_file() else None
+    for value, how in ((given, "--fprisc"), (os.environ.get("FPRISC_ROOT"), "$FPRISC_ROOT"),
+                       (remembered, FPRISC_FILE.name), (str(root.parent / "fprisc"), "the sibling checkout ../fprisc")):
+        if not value:
+            continue
+        path = Path(value).expanduser().resolve()
+        if is_fprisc(path):
+            return path, how
+        if not how.startswith("the sibling"):
+            raise SystemExit(f"qos: {how} names {path}, which is not an fprisc checkout (no compiler/Main.hs)")
+    raise SystemExit("qos: no fprisc checkout found -- say where it is once: ./qos.py fprisc /path/to/fprisc "
+                     "(or export FPRISC_ROOT, or clone fprisc beside this repository)")
+
+
+_pre = argparse.ArgumentParser(add_help=False)
+_pre.add_argument("--fprisc")
+_given = _pre.parse_known_args()[0].fprisc
+if sys.argv[1:2] == ["fprisc"]:
+    TOOLCHAIN, TOOLCHAIN_HOW = None, None  # the command that sets the path must run without one
+else:
+    TOOLCHAIN, TOOLCHAIN_HOW = fprisc_root(_given)
+COMPILER = TOOLCHAIN / "fpr" if TOOLCHAIN else None
+if TOOLCHAIN:
+    os.environ["FPRISC_ROOT"] = str(TOOLCHAIN)
+    os.environ["FPR_HOME"] = str(ROOT)
+    os.environ["FPR_PATH"] = str(TOOLCHAIN)
 
 
 class Workspace:
@@ -202,13 +248,13 @@ def run_scan(cmd, cwd, env=None, expect=None):
 # ---- resolution -------------------------------------------------------------
 
 def resolve_prog(prog):
-    """A program path as typed from anywhere -> the fp-risc-relative
-    path the Makefile wants."""
+    """A program path as typed from anywhere -> the root-relative path
+    the Makefile wants (a program of the fprisc checkout resolves too)."""
     p = Path(prog)
-    for cand in (Path.cwd() / p, FPR / p, ROOT / p, TOOLCHAIN / p):
+    for cand in (Path.cwd() / p, ROOT / p, TOOLCHAIN / p):
         if cand.is_file():
-            return os.path.relpath(cand.resolve(), FPR)
-    die(f"no such program: {prog} (looked in ., fp-risc/, repo root, FPRISC_ROOT)")
+            return os.path.relpath(cand.resolve(), ROOT)
+    die(f"no such program: {prog} (looked in ., the repo root, and the fprisc checkout {TOOLCHAIN})")
 
 
 def prog_directives(path):
@@ -240,7 +286,7 @@ def build_fpr():
             die(f"installed tree at {ROOT} has no fpr: reinstall (qos.py install / brew reinstall qos-fpr)")
         return
     say("fpr (compiler; no-op when fresh)")
-    sh(["make", "-s", "fpr"], cwd=FPR, quiet=True)
+    sh(["make", "-s", "fpr"], cwd=ROOT, quiet=True)
 
 
 def build_qosp(gfx=False):
@@ -269,7 +315,7 @@ def build_app(prog, harts=None):
     cmd = ["make", "-s", target, f"PROG={prog}", f"QA_OUT={qa}"] + WS.make_vars()
     if harts:
         cmd.append(f"HARTS={harts}")
-    sh(cmd, cwd=FPR, quiet=True)
+    sh(cmd, cwd=ROOT, quiet=True)
     return qa
 
 
@@ -279,7 +325,7 @@ def build_plugins(prog, plugins, size_mb=8):
     the livereload harness: plugsyms after the shell build, then one
     plugin-qa per module, then mkdisk."""
     mac = sys.platform == "darwin" and os.uname().machine == "arm64"
-    sh(["make", "-s", "plugsyms-macos" if mac else "plugsyms"] + WS.make_vars(), cwd=FPR, quiet=True)
+    sh(["make", "-s", "plugsyms-macos" if mac else "plugsyms"] + WS.make_vars(), cwd=ROOT, quiet=True)
     qas = []
     for slot, p in enumerate(plugins):
         r = resolve_prog(p)
@@ -287,11 +333,11 @@ def build_plugins(prog, plugins, size_mb=8):
         say(f"plugin-qa {r} (sub-slot {slot})")
         sh(["make", "-s", "plugin-qa-macos" if mac else "plugin-qa",
             f"PROG={r}", f"PLUGSLOT={slot}", f"PLUG_OUT={out}", f"QA_OUT={WS.qa(prog)}"] + WS.make_vars(),
-           cwd=FPR, quiet=True)
+           cwd=ROOT, quiet=True)
         qas.append(str(out))
     img = WS.build / f"plugdisk-{Path(prog).stem}.img"
     say(f"disk: {rel(img)} <- {' '.join(Path(q).name for q in qas)}")
-    sh([sys.executable, str(FPR / "tools" / "mkdisk.py"), str(img), str(size_mb)] + qas,
+    sh([sys.executable, str(ROOT / "tools" / "mkdisk.py"), str(img), str(size_mb)] + qas,
        cwd=WS.build, quiet=True)
     return img
 
@@ -300,16 +346,16 @@ def asset_env(prog):
     """`#: music <file>` (relative to the program): the host resolves music
     beside the .qa or under FPR_ASSETS -- for `run`, point FPR_ASSETS at
     the file's directory; `pack` copies the file into the bundle instead."""
-    files = prog_directives(FPR / prog).get("music", [])
+    files = prog_directives(ROOT / prog).get("music", [])
     if not files:
         return {}
-    return {"FPR_ASSETS": str((FPR / prog).parent.joinpath(files[0]).resolve().parent)}
+    return {"FPR_ASSETS": str((ROOT / prog).parent.joinpath(files[0]).resolve().parent)}
 
 
 def wants_gl(prog):
     """`#: host gl` (or the _desktop_gl name) = the program draws through
     the GLES scene walker: run and pack it on qosp-gl."""
-    return Path(prog).stem.endswith("_desktop_gl") or "gl" in prog_directives(FPR / prog).get("host", [])
+    return Path(prog).stem.endswith("_desktop_gl") or "gl" in prog_directives(ROOT / prog).get("host", [])
 
 
 def declared_plugins(a, prog):
@@ -317,7 +363,7 @@ def declared_plugins(a, prog):
     program's own `#: plugins` line; --no-plugins silences both."""
     if getattr(a, "no_plugins", False):
         return []
-    return getattr(a, "plugin", None) or prog_directives(FPR / prog).get("plugins", [])
+    return getattr(a, "plugin", None) or prog_directives(ROOT / prog).get("plugins", [])
 
 
 # ---- commands ---------------------------------------------------------------
@@ -341,7 +387,7 @@ def cmd_run(a):
     # seed, and its own success line (`#: expect ...`) -- a run that
     # misses it fails, so every program is its own smoke test
     plugins = declared_plugins(a, prog)
-    d = prog_directives(FPR / prog)
+    d = prog_directives(ROOT / prog)
     expect = a.expect or (" ".join(d["expect"]) if "expect" in d else None)
     if plugins and a.on in ("virt", "sol"):
         die(f"--on {a.on}: plugin modules ride FPR_DISK, which is the qosp host's; run on qosp (or seed `./qos.py native --apps` yourself)")
@@ -351,13 +397,13 @@ def cmd_run(a):
     if prog.endswith(".sol") or a.on == "sol": # type: ignore
         # a script runs where YOU are: its paths, its files, its cwd
         say(f"sol profile: {prog}")
-        return run_scan([str(COMPILER), "sol", str((FPR / prog).resolve())], cwd=Path.cwd(), expect=expect)
+        return run_scan([str(COMPILER), "sol", str((ROOT / prog).resolve())], cwd=Path.cwd(), expect=expect)
     if a.on == "virt":
         say(f"bare-metal QEMU virt: {prog}")
         cmd = ["make", "-s", "bare-metal-run", f"PROG={prog}", f"IMAGE={WS.mk().image(prog)}"] + WS.make_vars()
         if a.harts:
             cmd.append(f"HARTS={a.harts}")
-        return run_scan(cmd, cwd=FPR, expect=expect)
+        return run_scan(cmd, cwd=ROOT, expect=expect)
 
     # the default: host the .qa on qosp
     gfx = a.gfx or wants_gl(prog)
@@ -384,7 +430,7 @@ def cmd_run(a):
         sock = str(WS.build / f"fprd-{os.getpid()}.sock")
         say(f"fprd: compiler daemon on {rel(sock)}")
         fprd_proc = subprocess.Popen(
-            [sys.executable, "tools/fprd.py", sock], cwd=FPR, env={**os.environ, "FPRD_BUILD": str(WS.build)},
+            [sys.executable, "tools/fprd.py", sock], cwd=ROOT, env={**os.environ, "FPRD_BUILD": str(WS.build)},
             stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
         env["FPRD_SOCK"] = sock
         time.sleep(0.8)
@@ -409,7 +455,7 @@ def cmd_pack(a):
     to someone."""
     t0 = time.time()
     prog = resolve_prog(a.prog)
-    d = prog_directives(FPR / prog)
+    d = prog_directives(ROOT / prog)
     name = a.name or (d.get("name") or [Path(prog).stem])[0]
     size_mb = int((d.get("disk-mb") or ["8"])[0])
     build_fpr()
@@ -423,7 +469,7 @@ def cmd_pack(a):
     shutil.copy2(built, qa)
     pieces = [f"{qa.name} ({qa.stat().st_size // 1024}KB)"]
     for f in d.get("music", []):
-        src = (FPR / prog).parent / f
+        src = (ROOT / prog).parent / f
         shutil.copy2(src, out / src.name)
         pieces.append(f"{src.name} ({src.stat().st_size // 1024}KB, music)")
     disk = None
@@ -480,7 +526,7 @@ def watch_set(prog_abs):
             names = [Path(spec)] if Path(spec).suffix in (".sol", ".fpr") else [Path(spec).with_suffix(e) for e in exts]
             # Follow importer-local modules first, then QOS and language roots.
             local = [p.parent / name for name in names]
-            fallback = [root / name for name in names for root in (FPR, TOOLCHAIN)]
+            fallback = [root / name for name in names for root in (ROOT, TOOLCHAIN)]
             for c in local + fallback:
                 if c.is_file():
                     visit(c)
@@ -508,12 +554,12 @@ def cmd_dev(a):
     while True:
         t0 = time.time()
         try:
-            r = subprocess.run([str(COMPILER), "sol", str((FPR / prog).resolve())], cwd=Path.cwd(), env=e).returncode
+            r = subprocess.run([str(COMPILER), "sol", str((ROOT / prog).resolve())], cwd=Path.cwd(), env=e).returncode
             say(f"dev: exit {r} in {time.time() - t0:.1f}s")
         except KeyboardInterrupt:
             print()
             say("dev: app interrupted")
-        files = watch_set(FPR / prog)
+        files = watch_set(ROOT / prog)
         say(f"dev: watching {len(files)} file(s) -- save to rerun, Ctrl-C to leave")
         try:
             base = {f: mt(f) for f in files}
@@ -521,7 +567,7 @@ def cmd_dev(a):
             while changed is None:
                 time.sleep(0.3)
                 changed = next((f for f in files if mt(f) != base[f]), None)
-            say(f"dev: changed {os.path.relpath(changed, FPR)}")
+            say(f"dev: changed {os.path.relpath(changed, ROOT)}")
         except KeyboardInterrupt:
             print()
             say("dev: bye")
@@ -783,7 +829,7 @@ def cmd_new(a):
         die(f"name {name!r}: lowercase start, alphanumeric/underscore only (it becomes fn-safe identifiers)")
     # Apps in either location import libraries through the module search path.
     in_tree = not INSTALLED and Path.cwd().resolve().is_relative_to(ROOT)
-    dest = FPR / "apps" / name if in_tree else Path.cwd() / name
+    dest = ROOT / "apps" / name if in_tree else Path.cwd() / name
     std = "std"
     if dest.exists():
         die(f"{rel(dest)} already exists")
@@ -804,7 +850,7 @@ def cmd_native(a):
     if a.apps:
         disk = WS.path("disk-seeded.img")
         say(f"seeding {disk.name} with {len(a.apps)} app(s)")
-        sh([sys.executable, str(FPR / "tools" / "mkdisk.py"), str(disk),
+        sh([sys.executable, str(ROOT / "tools" / "mkdisk.py"), str(disk),
             "8"] + [str(Path(p).resolve()) for p in a.apps], cwd=WS.out)
     qemu = ["qemu-system-riscv64", "-accel", "tcg,thread=multi",
             "-machine", "virt", "-smp", str(a.smp), "-m", a.mem,
@@ -842,12 +888,70 @@ def cmd_native(a):
 def cmd_disk(a):
     build_fpr()  # apps may have just been rebuilt; mkdisk itself is pure
     say(f"mkdisk {a.img} ({a.size_mb}MB, {len(a.apps)} app(s))")
-    sh([sys.executable, str(FPR / "tools" / "mkdisk.py"), a.img, str(a.size_mb)] + a.apps, cwd=Path.cwd())
+    sh([sys.executable, str(ROOT / "tools" / "mkdisk.py"), a.img, str(a.size_mb)] + a.apps, cwd=Path.cwd())
+
+# ---- fprisc: the one path, and its pin for releases ---------------------------
+
+def fprisc_git(*args):
+    return subprocess.check_output(["git", "-C", str(TOOLCHAIN), *args], text=True).strip()
+
+
+def fprisc_pin():
+    return json.loads(FPRISC_LOCK.read_text())["revision"] if FPRISC_LOCK.is_file() else None
+
+
+def fprisc_release_check():
+    """A release names the exact compiler it was cut with: the checkout
+    must be clean and at the pinned commit (fprisc.lock.json)."""
+    try:
+        if fprisc_git("status", "--porcelain", "--untracked-files=normal"):
+            die("fprisc has uncommitted changes; commit them, then ./qos.py fprisc --pin")
+        if fprisc_git("rev-parse", "HEAD") != fprisc_pin():
+            die("fprisc is not at the commit fprisc.lock.json pins; ./qos.py fprisc --pin and commit the lock")
+    except (OSError, subprocess.CalledProcessError) as exc:
+        die(f"fprisc: {exc}")
+
+
+def cmd_fprisc(a):
+    global TOOLCHAIN, TOOLCHAIN_HOW
+    if a.path:
+        path = Path(a.path).expanduser().resolve()
+        if not is_fprisc(path):
+            die(f"{path} is not an fprisc checkout (expected {', '.join(FPRISC_MARKS)})")
+        if INSTALLED:
+            die("an installed tree uses the toolchain it shipped")
+        FPRISC_FILE.write_text(str(path) + "\n")
+        say(f"fprisc: {path} (remembered in {FPRISC_FILE.name}; $FPRISC_ROOT and --fprisc still win)")
+        return 0
+    if TOOLCHAIN is None:
+        TOOLCHAIN, TOOLCHAIN_HOW = fprisc_root(_given)
+    if a.print:
+        print(TOOLCHAIN)
+        return 0
+    if a.pin:
+        try:
+            if fprisc_git("status", "--porcelain", "--untracked-files=normal"):
+                die("commit the fprisc changes before pinning")
+            rev = fprisc_git("rev-parse", "HEAD")
+        except (OSError, subprocess.CalledProcessError) as exc:
+            die(f"fprisc: {exc}")
+        FPRISC_LOCK.write_text(json.dumps({"repository": "fprisc", "revision": rev, "layout": 1}, indent=2) + "\n")
+        say(f"fprisc.lock.json: {rev[:12]} (commit it with the release)")
+        return 0
+    say(f"fprisc: {TOOLCHAIN} (from {TOOLCHAIN_HOW})")
+    try:
+        head = fprisc_git("rev-parse", "HEAD")
+        pin = fprisc_pin()
+        say(f"fprisc: at {head[:12]}" + ("" if pin is None else f", releases pin {pin[:12]}" + (" (same)" if pin == head else " (differs; --pin to move it)")))
+    except (OSError, subprocess.CalledProcessError):
+        pass
+    return 0
+
 
 def cmd_commit(a):
     build_fpr()
     mod = resolve_prog(a.mod)
-    return sh([str(COMPILER), "commit"] + (["--major"] if a.major else []) + [mod], cwd=FPR, check=False)
+    return sh([str(COMPILER), "commit"] + (["--major"] if a.major else []) + [mod], cwd=ROOT, check=False)
 
 # ---- versions: pins, the lock, releases -------------------------------------
 # Three layers, each answering one question (docs/VERSIONING.md):
@@ -856,7 +960,7 @@ def cmd_commit(a):
 #   release  release.toml  -> git tag vX.Y.Z + dist bundles     what did we ship?
 
 RELEASE_TOML = ROOT / "release.toml"
-LOCK_PATH = FPR / "fpr.lock"
+LOCK_PATH = ROOT / "fpr.lock"
 PIN_RE = re.compile(r'^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*use\s+"([^"#]+)#([0-9a-f]{16})"', re.M)
 
 
@@ -895,7 +999,7 @@ def git_describe():
 def versions_db():
     """.fpr/versions.db -> {hash: (name, version)} (last binding wins)."""
     db = {}
-    p = FPR / ".fpr" / "versions.db"
+    p = ROOT / ".fpr" / "versions.db"
     if p.is_file():
         for line in p.read_text().splitlines():
             w = line.split()
@@ -905,12 +1009,13 @@ def versions_db():
 
 
 def tree_pins():
-    """Every `Alias = use "spec#hash"` in the fp-risc tree (sources only:
-    not the store blobs, not build/), as (spec, hash, importer)."""
+    """Every `Alias = use "spec#hash"` in this tree's sources (programs,
+    apps, std, tests: not the store blobs, not a workspace or build
+    directory, not a shipped toolchain), as (spec, hash, importer)."""
     pins = []
-    for p in sorted(FPR.rglob("*.fpr")):
-        rel = p.relative_to(FPR)
-        if rel.parts[0] in (".fpr", "build", "dist"):
+    for p in sorted(ROOT.rglob("*.fpr")):
+        rel = p.relative_to(ROOT)
+        if rel.parts[0].startswith(".") or rel.parts[0] in ("build", "dist", "toolchain", "qos", "hal", "docs"):
             continue
         try:
             src = p.read_text(errors="replace")
@@ -926,7 +1031,7 @@ def render_lock():
     store under a committed version.  A pin is honest when its hash has
     a blob in .fpr/store AND a name/version binding in versions.db."""
     db = versions_db()
-    store = FPR / ".fpr" / "store"
+    store = ROOT / ".fpr" / "store"
     rows, bad = [], []
     for spec, h, by in tree_pins():
         blob = (store / f"{h}.fpr").is_file()
@@ -941,7 +1046,7 @@ def render_lock():
             seen.add(r)
             uniq.append(r)
     lines = ["# fpr.lock -- generated by `qos.py lock`; do not edit by hand.",
-             "# Every `use \"spec#hash\"` pin in the fp-risc tree, resolved to its",
+             "# Every `use \"spec#hash\"` pin in this tree, resolved to its",
              "# committed version (.fpr/versions.db) and content blob (.fpr/store).",
              "# spec  version  hash  pinned-by"]
     for spec, ver, h, by in uniq:
@@ -995,7 +1100,7 @@ def restamp_qa(path, stamps):
 def app_stamps(prog, version, tag=None):
     """The identity a packed app carries: its own `#: version` when it
     declares one, else the release version; the git describe; the date."""
-    d = prog_directives(FPR / prog)
+    d = prog_directives(ROOT / prog)
     v = (d.get("version") or [version])[0]
     return [("version", v), ("release", tag or f"v{version}"), ("git", git_describe()),
             ("built", time.strftime("%Y-%m-%d"))]
@@ -1020,11 +1125,7 @@ def cmd_release(a):
     when the tag lands)."""
     import tarfile
     if not INSTALLED:
-        from configure import check_release
-        try:
-            check_release()
-        except (ValueError, OSError, subprocess.CalledProcessError) as exc:
-            die(str(exc))
+        fprisc_release_check()
     t0 = time.time()
     release = read_release()
     version = (a.version or release["version"]).lstrip("v")
@@ -1047,7 +1148,7 @@ def cmd_release(a):
     # 1. module identity: every library module gets a committed version
     for mod in release["modules"]:
         m = resolve_prog(mod)
-        r = subprocess.run([str(COMPILER), "commit", m], cwd=FPR, capture_output=True, text=True)
+        r = subprocess.run([str(COMPILER), "commit", m], cwd=ROOT, capture_output=True, text=True)
         out = (r.stdout + r.stderr).strip().splitlines()
         if r.returncode != 0:
             for l in out:
@@ -1079,7 +1180,7 @@ def cmd_release(a):
              f"date {time.strftime('%Y-%m-%d')}", f"host {os.uname().sysname.lower()}-{os.uname().machine}", "", "apps:"]
     for app in release["apps"]:
         prog = resolve_prog(app)
-        d = prog_directives(FPR / prog)
+        d = prog_directives(ROOT / prog)
         name = (d.get("name") or [Path(prog).stem])[0]
         cmd_pack(argparse.Namespace(prog=prog, out=str(out / name), name=name, bundle=True, gfx=False,
                                     harts=None, plugin=None, no_plugins=False))
@@ -1098,7 +1199,7 @@ def cmd_release(a):
     say(f"dist: {rel(out)}/ + {tarball.name} ({tarball.stat().st_size // 1024}KB)")
     # 5. identity in git: the version files, then the tag
     if do_git:
-        git("add", "release.toml", "fprisc.lock.json", str(LOCK_PATH.relative_to(ROOT)), "fp-risc/.fpr")
+        git("add", "release.toml", "fprisc.lock.json", str(LOCK_PATH.relative_to(ROOT)), ".fpr")
         if git("status", "--porcelain"):
             git("commit", "-q", "-m", f"Release {tag}\n\n" + "\n".join(lines))
             say(f"committed release {tag}")
@@ -1147,7 +1248,7 @@ def cmd_test(a):
             out = r.stdout.decode("utf-8", "replace")
         else:
             r = subprocess.run(["make", "-s", "bare-metal-run", f"PROG={prog}", f"IMAGE={WS.mk().image(prog)}"] + WS.make_vars(),
-                               cwd=FPR, capture_output=True, timeout=300)
+                               cwd=ROOT, capture_output=True, timeout=300)
             out = r.stdout.decode("utf-8", "replace")
         ok = expect in out
         ran += 1
@@ -1173,7 +1274,7 @@ def cmd_clean(a):
         f.unlink()
     say(f"{rel(WS.out)}/: build/, .qa, .elf removed (qosp.disk and qos-store/ kept: that is the app's state)")
     if not INSTALLED:
-        sh(["make", "-s", "clean"], cwd=FPR, quiet=True, check=False)
+        sh(["make", "-s", "clean"], cwd=ROOT, quiet=True, check=False)
         sh(["make", "-s", "clean"], cwd=QOS, quiet=True, check=False)
         say("tree clean")
 
@@ -1182,9 +1283,10 @@ def cmd_clean(a):
 # What `brew install` lays down, and what a checkout can lay down for
 # itself (`./qos.py install --prefix ~/.local`):
 #
-#   PREFIX/libexec/qos-fpr/    the tree -- fpr, qosp[-gl], core/, std/,
-#                              programs/, sol/, hal/, qos/appside+portable,
-#                              tests/, the .fpr store, docs -- plus the
+#   PREFIX/libexec/qos-fpr/    the tree -- programs/, apps/, std/, tests/,
+#                              the .fpr store, hal/, qos/appside+portable,
+#                              qosp[-gl], docs, and toolchain/ (the fprisc
+#                              checkout: fpr, core/, std/, sol/) -- plus the
 #                              .installed marker that makes qos.py treat
 #                              it as shipped (never rebuilt, never written)
 #   PREFIX/bin/fpr             -> libexec/qos-fpr/toolchain/fpr  (a symlink:
@@ -1199,9 +1301,9 @@ def cmd_clean(a):
 # who wants to rebuild.  Relative symlinks, so the prefix can move.
 
 INSTALL_TREE = [
-    "qos.py", "configure.py", "dependency.mk", "release.toml", "README.md", "docs", "fprisc.lock.json",
-    "fp-risc/Makefile", "fp-risc/qos-app.mk", "fp-risc/std", "fp-risc/programs", "fp-risc/tools", "fp-risc/models",
-    "fp-risc/apps", "fp-risc/tests", "fp-risc/.fpr", "fp-risc/fpr.lock", "hal",
+    "qos.py", "dependency.mk", "release.toml", "README.md", "docs", "fprisc.lock.json",
+    "Makefile", "qos-app.mk", "std", "programs", "tools", "models", "targets",
+    "apps", "tests", ".fpr", "fpr.lock", "hal",
     "qos/Makefile", "qos/native", "qos/appside", "qos/portable", "qos/tests-host", "qos/qosp", "qos/qosp-gl",
 ]
 INSTALL_SKIP = shutil.ignore_patterns("*.o", "*.hi", "*.qa", "*.disk", "*.img", "build", "dist-newstyle",
@@ -1258,6 +1360,14 @@ def main():
     ap = argparse.ArgumentParser(prog="qos.py", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
 
+    ap.add_argument("--fprisc", metavar="DIR", help="the fprisc checkout for this invocation (else $FPRISC_ROOT, fprisc.path, ../fprisc)")
+
+    p = sub.add_parser("fprisc", help="which fprisc checkout this tree uses: DIR remembers it in fprisc.path; --pin records its commit for releases")
+    p.add_argument("path", nargs="?", metavar="DIR")
+    p.add_argument("--pin", action="store_true", help="write the clean checkout's commit to fprisc.lock.json")
+    p.add_argument("--print", action="store_true", help="print the path alone (for scripts)")
+    p.set_defaults(f=cmd_fprisc)
+
     p = sub.add_parser("build", help="bring the toolchain + hosts up to date")
     p.add_argument("what", nargs="?", default="host", choices=["fpr", "host", "native", "all"])
     p.set_defaults(f=cmd_build)
@@ -1276,7 +1386,7 @@ def main():
     p.add_argument("--fprd", action="store_true", help="start the host compiler daemon for the run (Sys.compile / CP.plugin)")
     p.set_defaults(f=cmd_run)
 
-    p = sub.add_parser("new", help="scaffold a working app under fp-risc/apps/<name>/")
+    p = sub.add_parser("new", help="scaffold a working app under apps/<name>/")
     p.add_argument("name", help="project name (lowercase start; becomes the app + artifact name)")
     p.add_argument("--template", choices=sorted(TEMPLATES), default="mvu",
                    help="min (pure compute) | service (actor rpc) | mvu (Model+schema+port, default) | notes (MVU + paths + livereload)")
@@ -1320,7 +1430,7 @@ def main():
     p.add_argument("--major", action="store_true")
     p.set_defaults(f=cmd_commit)
 
-    p = sub.add_parser("lock", help="regenerate fp-risc/fpr.lock from the pins in the tree (--check: verify, no write)")
+    p = sub.add_parser("lock", help="regenerate fpr.lock from the pins in the tree (--check: verify, no write)")
     p.add_argument("--check", action="store_true", help="fail if any pin lacks a committed version or the lock is stale")
     p.set_defaults(f=cmd_lock)
 

@@ -1,0 +1,4 @@
+# clock root: module-table carrier only
+A = use "../programs/mods/clockapp".
+main : unsafe Unit .
+main = A.appMeta 0.

@@ -10,7 +10,7 @@
 # check-all.sh skips the leg without them.
 set -e
 HERE="$(cd "$(dirname "$0")/../.." && pwd)"
-cd "$HERE/fp-risc" && make -s qos-app PROG=programs/terra2.fpr >/dev/null 2>&1
+cd "$HERE" && make -s qos-app PROG=programs/terra2.fpr >/dev/null 2>&1
 cd "$HERE/qos" && make -s portable-gl >/dev/null 2>&1
 # the cursor stays where the last action left it (the placed unit, the
 # attacker), so each turn starts from the board, not the hand
@@ -23,8 +23,8 @@ rm -f /tmp/terra2-*.ppm /tmp/terra2.wav /tmp/terra2.disk
 # music muted here: the effects' bursts over silence are what the WAV
 # assertions read; the decoder is proven separately below
 # a fresh disk: the profile log is what the second run reads back
-FPR_DISK=/tmp/terra2.disk FPR_SND_MUSIC=0 FPR_ASSETS=../fp-risc/models/music FPR_SND_DUMP=/tmp/terra2.wav FPR_EVDEV=/tmp/terra2.evd \
-  timeout 300 xvfb-run -a ./qosp-gl --yes ../fp-risc/app.qa > /tmp/terra2-check.log 2>&1 || true
+FPR_DISK=/tmp/terra2.disk FPR_SND_MUSIC=0 FPR_ASSETS=../models/music FPR_SND_DUMP=/tmp/terra2.wav FPR_EVDEV=/tmp/terra2.evd \
+  timeout 300 xvfb-run -a ./qosp-gl --yes ../app.qa > /tmp/terra2-check.log 2>&1 || true
 fail() { echo "terra2-check: FAIL: $1"; tail -20 /tmp/terra2-check.log; exit 1; }
 grep -aq "profile: 0 games (0 won, 0 lost, 0 abandoned)" /tmp/terra2-check.log || fail "the empty profile"
 grep -aq "game saved: turn 5" /tmp/terra2-check.log || fail "the board saved at the turn's start"
@@ -64,8 +64,8 @@ for f in /tmp/terra2-*.ppm; do mv "$f" "${f/terra2-/terra2-game-}"; done
 python3 tests-host/terra2-keys.py /tmp/terra2-life.evd \
   k p esc s p esc c p right right down p esc t "type:get me.hq" enter "type:set env 4" enter "type:board" enter f1 esc \
   enter esc p down enter p enter esc down down down enter p esc q >/dev/null
-FPR_DISK=/tmp/terra2.disk FPR_SND_MUSIC=0 FPR_ASSETS=../fp-risc/models/music FPR_EVDEV=/tmp/terra2-life.evd \
-  timeout 120 xvfb-run -a ./qosp-gl --yes ../fp-risc/app.qa > /tmp/terra2-life.log 2>&1 || true
+FPR_DISK=/tmp/terra2.disk FPR_SND_MUSIC=0 FPR_ASSETS=../models/music FPR_EVDEV=/tmp/terra2-life.evd \
+  timeout 120 xvfb-run -a ./qosp-gl --yes ../app.qa > /tmp/terra2-life.log 2>&1 || true
 grep -aq "profile: 1 games (0 won, 0 lost, 1 abandoned)" /tmp/terra2-life.log || { cp /tmp/terra2-life.log /tmp/terra2-check.log; fail "the profile read back"; }
 grep -aq "a game is waiting: turn 5" /tmp/terra2-life.log || { cp /tmp/terra2-life.log /tmp/terra2-check.log; fail "the saved game read back"; }
 grep -aq "welcome back: turn 5" /tmp/terra2-life.log || { cp /tmp/terra2-life.log /tmp/terra2-check.log; fail "continue"; }
@@ -99,9 +99,9 @@ assert quiet > 0.3, "never quiet"
 PY
 # the music channel: three seconds of the track through the decoder,
 # read back as a WAV that is not quiet
-cd "$HERE/fp-risc" && make -s qos-app PROG=tests/music.fpr >/dev/null 2>&1
+cd "$HERE" && make -s qos-app PROG=tests/music.fpr >/dev/null 2>&1
 cd "$HERE/qos" && rm -f /tmp/music.wav
-FPR_SND_DUMP=/tmp/music.wav FPR_ASSETS=../fp-risc/models/music timeout 30 ./qosp --yes ../fp-risc/app.qa > /tmp/music-check.log 2>&1 || true
+FPR_SND_DUMP=/tmp/music.wav FPR_ASSETS=../models/music timeout 30 ./qosp --yes ../app.qa > /tmp/music-check.log 2>&1 || true
 grep -aq "44100 Hz stereo, looping" /tmp/music-check.log || fail "the MP3 decode"
 python3 - /tmp/music.wav <<'PY' || fail "the music mix"
 import sys, struct, math
@@ -112,7 +112,7 @@ print(f"music: {n / 44100:.1f} s, rms {rms:.0f}")
 assert n > 44100 * 2 and rms > 300
 PY
 # the game's own .qa is what the leg leaves behind
-cd "$HERE/fp-risc" && make -s qos-app PROG=programs/terra2.fpr >/dev/null 2>&1
+cd "$HERE" && make -s qos-app PROG=programs/terra2.fpr >/dev/null 2>&1
 cd "$HERE/qos"
 SND=$(grep -a -m1 "dump closed" /tmp/terra2-check.log | sed 's/.*(\(.*\) s), \(.*\) tones.*/\1 s, \2 tones/')
 FR=$(grep -a "game over" /tmp/terra2-check.log | sed 's/.*\[mvu: \([0-9]*\) frames.*/\1/')

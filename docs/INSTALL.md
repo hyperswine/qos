@@ -13,11 +13,11 @@ for QEMU virt and QOS Native.
 
 Either way you get:
 
-    PREFIX/bin/fpr     -> libexec/qos-fpr/fp-risc/fpr     compile | sol | commit | ...
+    PREFIX/bin/fpr     -> libexec/qos-fpr/toolchain/fpr     compile | sol | commit | ...
     PREFIX/bin/sol     exec fpr sol "$@"                  the HostedBytecode profile
     PREFIX/bin/qos     -> libexec/qos-fpr/qos.py          run | new | pack | test | ...
     PREFIX/libexec/qos-fpr/
-        fp-risc/       fpr, core/prelude.fpr, std/, programs/ (mods/ and the
+               fpr, core/prelude.fpr, std/, programs/ (mods/ and the
                        examples), sol/ (lib + examples), tools/, tests/,
                        .fpr/ (the committed-version store), compiler/ (source)
         hal/           the C HAL: core (runtime), unix (host tiers), virt
@@ -27,7 +27,7 @@ Either way you get:
 
 `fpr` and `qos` are *symlinks*, deliberately: the binary finds its
 prelude, its std and its store beside its real path
-(`compiler/Home.hs`), and `qos.py` finds `fp-risc/` and `qos/` beside
+(`compiler/Home.hs`), and `qos.py` finds `` and `qos/` beside
 its.  `FPR_HOME=/some/tree` overrides the first; there is no override
 for the second because the tree IS the tool.
 
@@ -48,7 +48,7 @@ to the **workspace**: the directory you invoke it from.
 `qos clean` removes `.qos/build/` and the `.qa`s and keeps the disk and
 the store: those are your app's data, not build output.  From a
 checkout, invoked at the repo root, the workspace is `./.qos` and
-`./dist`; the Makefiles' own defaults (`fp-risc/build/`, `app.qa`,
+`./dist`; the Makefiles' own defaults (`build/`, `app.qa`,
 `qos/qosp.disk`) are untouched, so `make qos-app PROG=...` and every
 `check-all.sh` leg behave as they always did.  `qos.py` is one code
 path in both situations -- which is why `install-check.sh` can prove
@@ -78,7 +78,7 @@ compiler means the same thing from any directory (`--prelude=` empty
 still means none).
 
 `qos new` follows the same split: inside the checkout it scaffolds
-under `fp-risc/apps/<name>/` with `use "../../std/..."`; anywhere else
+under `apps/<name>/` with `use "../../std/..."`; anywhere else
 it scaffolds `./<name>/` with `use "std/..."`.
 
 ## What each tier needs on the machine

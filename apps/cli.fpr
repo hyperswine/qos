@@ -1,0 +1,4 @@
+# cli root: module-table carrier only
+A = use "../programs/mods/cliapp".
+main : unsafe Unit .
+main = A.appMeta 0.

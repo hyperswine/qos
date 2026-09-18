@@ -25,7 +25,7 @@ with the original history and tags retained and no push remotes configured.
 
 `SPLIT-MANIFEST.json` records every original tracked file's destination except the
 root ignore file (replaced by repository-specific rules). Makefile recipes were
-additionally extracted into `fp-risc/qos-app.mk`. Language documentation is in
+additionally extracted into `qos-app.mk`. Language documentation is in
 `fprisc/docs`; QOS documentation stays here. Legacy prose may still use monorepo
 paths or the combined product name; the new READMEs and this guide define current
 checkout layout. Historical release names and installed `libexec/qos-fpr` paths
@@ -33,13 +33,14 @@ are retained for compatibility.
 
 ## Explicit dependency
 
-Set `FPRISC_ROOT` to the separate compiler checkout. `qos.py`, the QOS Makefiles,
-and host checks use that path directly; no source symlinks or compiler wrappers
-are generated. The checkout need not be a sibling. `configure.py --check` only
-validates the dependency and makes no filesystem changes. The old link manifest
-and saved local configuration mechanism have been removed.
+One path names the separate compiler checkout, found in this order: `--fprisc DIR`
+on a `qos.py` invocation, `$FPRISC_ROOT`, `fprisc.path` in the QOS tree (written
+by `./qos.py fprisc DIR`, ignored by git), then a sibling `../fprisc`. `qos.py`,
+the QOS Makefiles (`dependency.mk`) and the host checks use that path directly;
+no source symlinks, copies or compiler wrappers are generated, and `./qos.py
+fprisc` reports what was found and how.
 
-`fp-risc/` now contains only QOS-owned programs, service clients, tests, resources
+The repository root now holds the QOS-owned programs, service clients, tests, resources
 and application build rules. Language tests and tools are accessed at their actual
 paths under `FPRISC_ROOT`. The runtime and machine HAL are compiled there too.
 QOS no longer includes the language Makefile as if its files were locally present.
@@ -60,11 +61,11 @@ backend. Those can now be developed against an explicit ownership boundary.
 
 ## Git and releases
 
-The split is left uncommitted for review. Commit the fprisc split first, run
-`./configure.py --pin` in QOS, then commit QOS including `fprisc.lock.json`.
-Development accepts a dirty or newer compiler checkout. Releasing requires a clean
-compiler at that exact pin (`./configure.py --release-check`). Release manifests
-include the compiler revision as well as the QOS revision.
+Commit the fprisc side first, run `./qos.py fprisc --pin` in QOS, then commit QOS
+including `fprisc.lock.json`. Development accepts a dirty or newer compiler
+checkout. Releasing requires a clean compiler at that exact pin (`./qos.py
+release` checks). Release manifests include the compiler revision as well as the
+QOS revision.
 
 The monorepo GitHub tag workflow is archived in `docs/history/monorepo-release.yml`:
 it cannot truthfully build two repos from one checkout. Before enabling publication,

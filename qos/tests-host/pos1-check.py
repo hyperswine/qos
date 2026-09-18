@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""pos1-check.py -- POS v1 (fp-risc/programs/pos1.fpr, docs/POS1-DESIGN.md)
+"""pos1-check.py -- POS v1 (programs/pos1.fpr, docs/POS1-DESIGN.md)
 under qosp, driven as websocket registers.
 
 The design's example (S9) as pasted: sign in as ana / 1234, add two

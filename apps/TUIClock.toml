@@ -1,0 +1,10 @@
+name = "Clock"
+id = "TUIClock"
+entry = "n/a"
+loadMode = "process"
+version = "2"
+
+[permissions.required]
+"/services/display" = "write"
+"/services/keyboard" = "read"
+"/services/clock" = "read"

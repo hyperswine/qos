@@ -7,7 +7,7 @@ Each layer answers one question, and each is built from the one below:
 | layer   | artifact                                   | question it answers            | minted by              |
 |---------|--------------------------------------------|--------------------------------|------------------------|
 | module  | `.fpr/versions.db` + `.fpr/store/<hash>`   | what code is "qlog v2.0"?      | `fpr commit`           |
-| tree    | `fp-risc/fpr.lock`                         | what does THIS tree pin?       | `./qos.py lock`        |
+| tree    | `fpr.lock`                         | what does THIS tree pin?       | `./qos.py lock`        |
 | release | git tag `vX.Y.Z` + `dist/qos-fpr-vX.Y.Z/`  | what did we ship, exactly?     | `./qos.py release`     |
 
 **Module.** `fpr commit mymod.fpr` mints an immutable, hash-addressed
@@ -18,7 +18,7 @@ forever*: the blob is in the store, the name/version binding is in the
 db, and both are tracked in git.
 
 **Tree.** `./qos.py lock` scans every `Alias = use "spec#hash"` in the
-fp-risc sources and writes `fp-risc/fpr.lock`: one line per pin with
+tree's sources and writes `fpr.lock`: one line per pin with
 the committed version it resolves to and the file that pins it.  A pin
 whose hash has no store blob, or a blob but no `versions.db` binding
 (a closure copy that was never itself committed), is UNRESOLVABLE and
