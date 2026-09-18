@@ -18,7 +18,7 @@
 #   uartsvc: tx=33B flushed; rx=<n>B first=<c>  (n>0 when stdin fed)
 
 UM = use "../programs/mods/uart".
-U = use "../std/uart".
+U = use "std/uart".
 
 # take rx with a deadline: poll the service until bytes arrive or ~2s
 # of mtime passes (10 MHz clint ticks; each poll is a full round trip,

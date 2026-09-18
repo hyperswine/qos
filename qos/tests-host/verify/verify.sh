@@ -1,4 +1,5 @@
 #!/bin/sh
+: "${FPRISC_ROOT:?Set FPRISC_ROOT to the fprisc checkout}"
 # verify.sh -- the verification slice for the QOS C backend
 # (docs/VERIFICATION.md).  Three tools, three targets, each skipped
 # with a message when its tool is absent:
@@ -18,7 +19,7 @@ root=../../..
 fails=0
 
 if python3 -c 'import hypothesis' 2>/dev/null; then
-  gcc -O1 -shared -fPIC -DFPR_POSIX -DFPR_BUDDY_MIN=64 -I$root/hal/core $root/hal/core/buddy.c -o /tmp/libbuddy-verify.so
+  gcc -O1 -shared -fPIC -DFPR_POSIX -DFPR_BUDDY_MIN=64 -I${FPRISC_ROOT}/hal/core ${FPRISC_ROOT}/hal/core/buddy.c -o /tmp/libbuddy-verify.so
   BUDDY_SO=/tmp/libbuddy-verify.so python3 pbt_buddy.py || fails=$((fails + 1))
 else
   echo "pbt buddy: skipped (pip install hypothesis)"
@@ -37,7 +38,7 @@ else
 fi
 
 if [ "${VERIFY_CBMC:-0}" = 1 ] && command -v cbmc >/dev/null 2>&1; then
-  cbmc buddy_cbmc.c $root/hal/core/buddy.c -I$root/hal/core -DFPR_POSIX -DFPR_BUDDY_MIN=64 \
+  cbmc buddy_cbmc.c ${FPRISC_ROOT}/hal/core/buddy.c -I${FPRISC_ROOT}/hal/core -DFPR_POSIX -DFPR_BUDDY_MIN=64 \
     --unwind 8 --unwindset buddy_init.0:26 --unwinding-assertions --slice-formula > /tmp/buddy-cbmc.out 2>&1 \
     && grep -q 'VERIFICATION SUCCESSFUL' /tmp/buddy-cbmc.out \
     && echo "cbmc buddy: one alloc/free cycle over a 4-block arena: $(grep -c ': SUCCESS' /tmp/buddy-cbmc.out) properties, VERIFICATION SUCCESSFUL" \

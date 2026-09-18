@@ -26,8 +26,8 @@
 #   editor: compiled <n>B of qos-portable asm; stored ed/hello.fpr (14B) +
 #   ed/hello.s (<n>B readback ok); bad source -> Err ok
 
-CP = use "../std/compile".
-FS = use "../std/fs".
+CP = use "std/compile".
+FS = use "std/fs".
 
 src = "main = 6 * 7 .".
 

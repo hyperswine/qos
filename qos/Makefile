@@ -13,9 +13,11 @@
 # program, so `native` invokes ../fp-risc/fprc as a TOOL; the build
 # products and dependency graph stay entirely on this side.
 
+include ../dependency.mk
+
 HAL    = ../hal
 FPR    = ../fp-risc
-FPRC   = $(FPR)/fprc
+
 HARTS ?= 2
 QOSHARTS ?= 8
 # the host arena the app's growth grants come from (mmap'd lazily: only
@@ -61,12 +63,12 @@ QOSP_SRC = portable/main.c portable/qa.c portable/haltab.c portable/store.c \
 # source (Codegen.hs codegenRev), not hardcoded -- the first stamped
 # build caught main.c's #define 7 lagging a rev-8 compiler within the
 # hour.  Falls back to main.c's #define if the compiler tree is absent.
-CODEGEN_REV := $(shell grep -m1 '^codegenRev = ' $(FPR)/compiler/Codegen.hs 2>/dev/null | grep -o '[0-9]\+' | head -1)
+CODEGEN_REV := $(shell grep -m1 '^codegenRev = ' $(FPRISC_ROOT)/compiler/Codegen.hs 2>/dev/null | grep -o '[0-9]\+' | head -1)
 REV_FLAG := $(if $(CODEGEN_REV),-DQOSP_CODEGEN_REV=$(CODEGEN_REV),)
 
-portable: $(QOSP_SRC) appside/qos_abi.h portable/qa.h $(FPR)/compiler/Codegen.hs
+portable: $(QOSP_SRC) appside/qos_abi.h portable/qa.h $(FPRISC_ROOT)/compiler/Codegen.hs
 	gcc $(HOST_LDFLAGS) -O2 -Wall -Wextra -DFPR_POSIX -DQOSP_HOST -DFPR_NHARTS=$(QOSHARTS) -DQOS_ARENA_SIZE="($(ARENA_MB)ul << 20)" $(REV_FLAG) $(SND_FLAGS) \
-	  -I$(HAL)/core -I$(HAL)/unix -Iappside $(QOSP_SRC) -o qosp -lpthread -lm $(SND_LIBS)
+	  -I$(FHAL)/core -I$(HAL)/unix -Iappside $(QOSP_SRC) -o qosp -lpthread -lm $(SND_LIBS)
 
 portable-run: portable
 	./qosp --yes $(FPR)/app.qa
@@ -78,22 +80,22 @@ portable-run: portable
 # untouched).  The same source builds on macOS (OpenGL/gl3.h declares
 # prototypes; Linux needs GL_GLEXT_PROTOTYPES, set in gfx.c).
 QOSP_GL_SRC = $(QOSP_SRC) $(HAL)/unix/gfx.c
-portable-gl: $(QOSP_GL_SRC) appside/qos_abi.h portable/qa.h $(FPR)/compiler/Codegen.hs
+portable-gl: $(QOSP_GL_SRC) appside/qos_abi.h portable/qa.h $(FPRISC_ROOT)/compiler/Codegen.hs
 	gcc $(HOST_LDFLAGS) -O2 -Wall -Wextra -DFPR_POSIX -DQOSP_HOST -DFPR_NHARTS=$(QOSHARTS) -DQOS_ARENA_SIZE="($(ARENA_MB)ul << 20)" $(REV_FLAG) \
 	  -DQOSP_GFX -DFPR_DESKTOP_GL $(SND_FLAGS) \
-	  $(DESKTOP_GL_CFLAGS) -I$(HAL)/core -I$(HAL)/unix -Iappside $(QOSP_GL_SRC) -o qosp-gl \
+	  $(DESKTOP_GL_CFLAGS) -I$(FHAL)/core -I$(HAL)/unix -Iappside $(QOSP_GL_SRC) -o qosp-gl \
 	  $(DESKTOP_GL_LIBS) $(SND_LIBS)
 
 # ---- QOS Portable, aarch64 cross (verifies the x28 hart discipline
-portable-a64: $(QOSP_SRC) appside/qos_abi.h portable/qa.h $(FPR)/compiler/Codegen.hs
+portable-a64: $(QOSP_SRC) appside/qos_abi.h portable/qa.h $(FPRISC_ROOT)/compiler/Codegen.hs
 	aarch64-linux-gnu-gcc -static -O2 -Wall -Wextra -DFPR_POSIX -DQOSP_HOST -DFPR_NHARTS=$(QOSHARTS) -DQOS_ARENA_SIZE="($(ARENA_MB)ul << 20)" $(REV_FLAG) \
-	  -I$(HAL)/core -I$(HAL)/unix -Iappside $(QOSP_SRC) -o qosp-a64 -lpthread -lm
+	  -I$(FHAL)/core -I$(HAL)/unix -Iappside $(QOSP_SRC) -o qosp-a64 -lpthread -lm
 
 # ---- QOS Native: the kernel --------------------------------------------
-RT_CORE = $(HAL)/core/runtime.c $(HAL)/core/actors.c $(HAL)/core/bits.c \
-          $(HAL)/core/vec.c $(HAL)/core/sstr.c $(HAL)/core/mod.c $(HAL)/core/buddy.c
-RT_VIRT = $(HAL)/virt/crt0.S $(HAL)/virt/ctx.S $(HAL)/virt/ctx_fab.c \
-          $(HAL)/virt/hal.c $(HAL)/virt/plic.c $(HAL)/virt/net.c $(HAL)/virt/blk.c $(HAL)/virt/memshim.c
+RT_CORE = $(FHAL)/core/runtime.c $(FHAL)/core/actors.c $(FHAL)/core/bits.c \
+          $(FHAL)/core/vec.c $(FHAL)/core/sstr.c $(FHAL)/core/mod.c $(FHAL)/core/buddy.c
+RT_VIRT = $(FHAL)/virt/crt0.S $(FHAL)/virt/ctx.S $(FHAL)/virt/ctx_fab.c \
+          $(FHAL)/virt/hal.c $(FHAL)/virt/plic.c $(FHAL)/virt/net.c $(FHAL)/virt/blk.c $(FHAL)/virt/memshim.c
 ARCHFLAGS = -march=rv64imafdc_zicsr -mabi=lp64 -mcmodel=medany
 CFLAGS = $(ARCHFLAGS) -DFPR_NHARTS=$(HARTS) \
          -ffreestanding -nostdlib -nostartfiles -O2 -Wall -Wextra \
@@ -108,13 +110,13 @@ $(BUILD)/qa0/%.qa: $(FPR)/apps/%.toml $(FPR)/tools/mkqa.py
 $(BUILD)/apps_data.c: $(patsubst %,$(BUILD)/qa0/%.qa,$(QAPPS)) $(FPR)/tools/genapps.py
 	python3 $(FPR)/tools/genapps.py --entries --out $@ -- $(patsubst %,$(BUILD)/qa0/%.qa,$(QAPPS))
 
-$(BUILD)/system.s: $(FPRC) $(FPR)/programs/system.fpr $(FPR)/core/prelude.fpr FORCE
+$(BUILD)/system.s: $(FPRC) $(FPR)/programs/system.fpr $(FPRISC_ROOT)/core/prelude.fpr FORCE
 	@mkdir -p $(BUILD)
-	LC_ALL=C.UTF-8 $(FPRC) --profile=qos-native --prelude=$(FPR)/core/prelude.fpr \
+	LC_ALL=C.UTF-8 "$(FPRC)" --profile=qos-native --prelude=$(FPRISC_ROOT)/core/prelude.fpr \
 	  $(FPR)/programs/system.fpr $@
 
-native: $(BUILD)/system.s $(BUILD)/apps_data.c $(RT_VIRT) $(RT_CORE) $(HAL)/virt/link.ld
-	$(CROSS)gcc $(CFLAGS) -T $(HAL)/virt/link.ld -I$(HAL)/core -I$(HAL)/virt \
+native: $(BUILD)/system.s $(BUILD)/apps_data.c $(RT_VIRT) $(RT_CORE) $(FHAL)/virt/link.ld
+	$(CROSS)gcc $(CFLAGS) -T $(FHAL)/virt/link.ld -I$(FHAL)/core -I$(FHAL)/virt \
 	  $(RT_VIRT) $(BUILD)/system.s $$(cat $(BUILD)/system.s.units) $(RT_CORE) \
 	  $(HAL)/core/apps.c $(BUILD)/apps_data.c $(HAL)/core/qaimg.c $(HAL)/core/process.c \
 	  -o $(KERNEL)

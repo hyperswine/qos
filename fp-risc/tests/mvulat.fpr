@@ -34,7 +34,7 @@
 # stats and the avg frame time; the check leg asserts shape, not
 # numbers (they are host-dependent).
 
-MV = use "../std/mvu".
+MV = use "std/mvu".
 
 MApp = MV.MApp.
 MQuit = MV.MQuit.

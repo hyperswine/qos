@@ -43,7 +43,7 @@
 # ============================================================================
 
 FS = use "fs".
-AC = use "actor".
+AC = use "std/actor".
 
 LMsg = Type (LLoad id | LList u | LReplay u | LLaunch id).
 

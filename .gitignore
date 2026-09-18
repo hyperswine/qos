@@ -22,7 +22,7 @@ qos/disk.img
 qos/disk-seeded.img
 qos/qos-native.elf
 fp-risc/build/prog.s
-fp-risc/build/prog.s.abirev
+fp-risc/build/prog.s.abirevd
 fp-risc/build/*.elf
 fp-risc/build/alpha.s*
 fp-risc/build/beta.s*
@@ -40,3 +40,9 @@ dist/
 
 # the workspace: every run's artifacts (qos.py), never the tree
 .qos/
+
+# Build outputs and Python bytecode.
+/fp-risc/build/
+/fp-risc/image.elf
+**/__pycache__/
+.DS_Store

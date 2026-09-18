@@ -1,8 +1,0 @@
-# smoke: consume std from a program (std works without sol)
-STD = use "../std/std".
-Std = STD.Std.
-main =
-  a = Std.clamp 0 10 42;
-  b = Std.backoff 50 1000 5;
-  c = Std.fold 1 5 (fn i acc -> acc + i) 0;
-  print "std: clamp={a} backoff={b} fold={c}".

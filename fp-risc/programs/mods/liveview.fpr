@@ -47,7 +47,7 @@
 # in-flight request, closes, and returns the run's result string.
 # ============================================================================
 
-MV = use "../../std/mvu".
+MV = use "std/mvu".
 G  = use "genview".
 LJ = use "livejs".
 

@@ -7,7 +7,7 @@
 #   (cd ../qos && make portable-gl && xvfb-run -a ./qosp-gl --yes ../fp-risc/app.qa)
 unsafe program.
 
-MV = use "../std/mvu".
+MV = use "std/mvu".
 GL = use "../programs/mods/glsvc".
 
 App = MV.App.

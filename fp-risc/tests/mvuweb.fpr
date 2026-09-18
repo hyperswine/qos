@@ -19,7 +19,7 @@
 # subs = STick 200: ticks advance the model server-side between
 # requests AND the served page carries the 200 ms poll script.
 
-MV = use "../std/mvu".
+MV = use "std/mvu".
 G  = use "../programs/mods/genview".
 LV = use "../programs/mods/liveview".
 

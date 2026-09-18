@@ -54,7 +54,7 @@
 
 unsafe program.
 
-MV = use "../std/mvu".
+MV = use "std/mvu".
 GL = use "mods/glsvc".
 S2 = use "mods/scene2d".
 Fm = use "mods/fontm".

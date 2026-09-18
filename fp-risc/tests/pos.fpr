@@ -27,8 +27,8 @@
 
 unsafe program.          # the loose mode: no per-function safety ceremony
 
-MV = use "../std/mvu".
-FS = use "../std/fs".
+MV = use "std/mvu".
+FS = use "std/fs".
 G  = use "../programs/mods/genview".
 FL = use "../programs/mods/fprlive".
 Core = use "../programs/mods/coreutil".

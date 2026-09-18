@@ -43,10 +43,10 @@
 #   pathnotes: OK notes=Third note|Fourth one n=4 cap=2
 #   ui=live ver=caps.v2 log=refused notesedbad
 
-FS = use "../std/fs".
-LD = use "../std/loader".
-MV = use "../std/mvu".
-L = use "../std/lens".
+FS = use "std/fs".
+LD = use "std/loader".
+MV = use "std/mvu".
+L = use "std/lens".
 
 MApp = MV.MApp.  MQuit = MV.MQuit.
 EMsg = MV.EMsg.  SPort = MV.SPort.

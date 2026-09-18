@@ -1,4 +1,0 @@
-ana:1234:admin:3
-bo:5555:staff:1
-cy:9999:staff:2
-dee:0000:admin:0

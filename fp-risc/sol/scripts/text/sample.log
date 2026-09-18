@@ -1,9 +1,0 @@
-2026-09-07 10:01:02 INFO  server started port=8080
-2026-09-07 10:01:05 WARN  slow query took=340ms table=orders
-2026-09-07 10:02:10 ERROR db timeout code=504 table=orders
-2026-09-07 10:02:11 INFO  retry ok table=orders
-2026-09-07 10:03:44 ERROR auth failed code=401 user=ana
-2026-09-07 10:04:00 INFO  request took=12ms table=users
-2026-09-07 10:04:01 INFO  request took=9ms table=users
-2026-09-07 10:05:30 ERROR db timeout code=504 table=users
-2026-09-07 10:06:00 WARN  slow query took=910ms table=receipts

@@ -1,4 +1,5 @@
 #!/bin/sh
+: "${FPRISC_ROOT:?Set FPRISC_ROOT to the fprisc checkout}"
 
 # buddy-check.sh -- buddy.c proven on the host, small blocks so every
 # path (split, coalesce, in-place realloc, copy realloc) is cheap to
@@ -8,7 +9,7 @@ set -e
 cd "$(dirname "$0")"
 
 gcc -O2 -Wall -Wextra -DFPR_POSIX -DFPR_BUDDY_MIN=4096 \
-    -I../../hal/core ../../hal/core/buddy.c buddy_check.c \
+    -I"$FPRISC_ROOT/hal/core" "$FPRISC_ROOT/hal/core/buddy.c" buddy_check.c \
     -o /tmp/buddy_check
 
 /tmp/buddy_check

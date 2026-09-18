@@ -23,8 +23,8 @@
 #: plugins tests/mathv1.fpr tests/mathv2.fpr tests/mathbad.fpr
 #: expect livereload: v1: 20 22 | v2 (same actor, acc kept): 30 | bad: refused | still v2: 36 | acc=108
 
-FS = use "../std/fs".
-LD = use "../std/loader".
+FS = use "std/fs".
+LD = use "std/loader".
 
 Nudge = Type (Reload url).
 

@@ -13,8 +13,8 @@
 
 unsafe program.
 
-FS = use "../std/fs".
-LD = use "../std/loader".
+FS = use "std/fs".
+LD = use "std/loader".
 
 expectOk what r = case r of
     Ok v -> v

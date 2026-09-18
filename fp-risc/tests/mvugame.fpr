@@ -23,7 +23,7 @@
 #   gr f2: x=1 vp=32x8
 #   game over [mvu: 3 frames, 1 statics builds]
 
-MV = use "../std/mvu".
+MV = use "std/mvu".
 
 App = MV.App.
 MQuit = MV.MQuit.

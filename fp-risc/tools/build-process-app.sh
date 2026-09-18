@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+: "${FPRISC_ROOT:?Set FPRISC_ROOT to the fprisc checkout}"
 
 # build-process-app.sh -- build a dynamically-loadable QOS process app
 # and wrap it in a QAR2 .qa with loadMode = "process" set.
@@ -15,7 +16,9 @@ set -euo pipefail
 APP_FPR="$1"; MANIFEST="$2"; OUT_QA="$3"; TARGET="${4:-rv64}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
-HAL=../hal
+export FPR_HOME="$ROOT"
+export FPR_PATH="$FPRISC_ROOT"
+HAL="$FPRISC_ROOT/hal"
 QOS=../qos
 KERNEL=$QOS/qos-native.elf
 
@@ -36,7 +39,7 @@ echo "target=$TARGET  _proc_arena_start=0x$ARENA_HEX  PROC_SLOT_BASE=$SLOT_BASE"
 
 BASE=$(basename "$APP_FPR" .fpr)
 mkdir -p build
-LC_ALL=C.UTF-8 ./fprc --target="$TARGET" --prelude=core/prelude.fpr "$APP_FPR" "build/${BASE}.s"
+LC_ALL=C.UTF-8 "$FPRISC_ROOT/fpr" --target="$TARGET" --prelude="$FPRISC_ROOT/core/prelude.fpr" "$APP_FPR" "build/${BASE}.s"
 
 RT="$QOS/native/proc_entry.c $HAL/virt/ctx.S $HAL/virt/ctx_fab.c $HAL/core/runtime.c $HAL/virt/hal.c $HAL/virt/plic.c $HAL/virt/net.c $HAL/virt/blk.c $HAL/virt/memshim.c $HAL/core/actors.c $HAL/core/buddy.c $HAL/core/mod.c $HAL/core/bits.c $HAL/core/vec.c $HAL/core/sstr.c"
 riscv64-unknown-elf-gcc $ARCHFLAGS -DFPR_NHARTS=1 -ffreestanding -nostdlib -nostartfiles -O2 \

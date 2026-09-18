@@ -67,6 +67,7 @@ import argparse
 import os
 import re
 import shutil
+import json
 import stat
 import subprocess
 import sys
@@ -81,6 +82,16 @@ QOS = ROOT / "qos"
 # marker: its fpr / qosp are shipped, never rebuilt, and nothing below
 # ROOT is written -- every artifact goes to the workspace
 INSTALLED = (ROOT / ".installed").is_file()
+from configure import configure, dependency
+try:
+    TOOLCHAIN = dependency()
+    configure(TOOLCHAIN)
+except (ValueError, OSError) as exc:
+    raise SystemExit(f"qos: {exc}")
+COMPILER = TOOLCHAIN / "fpr"
+os.environ["FPRISC_ROOT"] = str(TOOLCHAIN)
+os.environ["FPR_HOME"] = str(FPR)
+os.environ["FPR_PATH"] = str(TOOLCHAIN)
 
 
 class Workspace:
@@ -194,10 +205,10 @@ def resolve_prog(prog):
     """A program path as typed from anywhere -> the fp-risc-relative
     path the Makefile wants."""
     p = Path(prog)
-    for cand in (Path.cwd() / p, FPR / p, ROOT / p):
+    for cand in (Path.cwd() / p, FPR / p, ROOT / p, TOOLCHAIN / p):
         if cand.is_file():
             return os.path.relpath(cand.resolve(), FPR)
-    die(f"no such program: {prog} (looked in ., fp-risc/, repo root)")
+    die(f"no such program: {prog} (looked in ., fp-risc/, repo root, FPRISC_ROOT)")
 
 
 def prog_directives(path):
@@ -225,7 +236,7 @@ def prog_directives(path):
 
 def build_fpr():
     if INSTALLED:
-        if not (FPR / "fpr").is_file():
+        if not COMPILER.is_file():
             die(f"installed tree at {ROOT} has no fpr: reinstall (qos.py install / brew reinstall qos-fpr)")
         return
     say("fpr (compiler; no-op when fresh)")
@@ -340,7 +351,7 @@ def cmd_run(a):
     if prog.endswith(".sol") or a.on == "sol": # type: ignore
         # a script runs where YOU are: its paths, its files, its cwd
         say(f"sol profile: {prog}")
-        return run_scan([str(FPR / "fpr"), "sol", str((FPR / prog).resolve())], cwd=Path.cwd(), expect=expect)
+        return run_scan([str(COMPILER), "sol", str((FPR / prog).resolve())], cwd=Path.cwd(), expect=expect)
     if a.on == "virt":
         say(f"bare-metal QEMU virt: {prog}")
         cmd = ["make", "-s", "bare-metal-run", f"PROG={prog}", f"IMAGE={WS.mk().image(prog)}"] + WS.make_vars()
@@ -466,9 +477,11 @@ def watch_set(prog_abs):
             return
         exts = [p.suffix, ".sol" if p.suffix == ".fpr" else ".fpr"]
         for spec in re.findall(r'use\s+"([^"#]+)', src):
-            base = p.parent / spec
-            cands = [base] if base.suffix in (".sol", ".fpr") else [base.with_suffix(e) for e in exts]
-            for c in cands:
+            names = [Path(spec)] if Path(spec).suffix in (".sol", ".fpr") else [Path(spec).with_suffix(e) for e in exts]
+            # Follow importer-local modules first, then QOS and language roots.
+            local = [p.parent / name for name in names]
+            fallback = [root / name for name in names for root in (FPR, TOOLCHAIN)]
+            for c in local + fallback:
                 if c.is_file():
                     visit(c)
                     break
@@ -495,7 +508,7 @@ def cmd_dev(a):
     while True:
         t0 = time.time()
         try:
-            r = subprocess.run([str(FPR / "fpr"), "sol", str((FPR / prog).resolve())], cwd=Path.cwd(), env=e).returncode
+            r = subprocess.run([str(COMPILER), "sol", str((FPR / prog).resolve())], cwd=Path.cwd(), env=e).returncode
             say(f"dev: exit {r} in {time.time() - t0:.1f}s")
         except KeyboardInterrupt:
             print()
@@ -528,7 +541,7 @@ def cmd_serve(a):
 # ---- scaffolding templates (qos.py new) -------------------------------------
 # Every template is a WORKING app: it compiles, runs, and carries its
 # own `#:` harness + expect line, so run/test/pack work immediately.
-# Tokens: __NAME__ = project name, __STD__ = ../../std from apps/<name>/.
+# Tokens: __NAME__ = project name, __STD__ = library module search namespace.
 
 TPL_MIN = {"app.fpr": '''\
 # __NAME__ -- a minimal QOS app: pure compute through std, one result line.
@@ -768,13 +781,10 @@ def cmd_new(a):
     name = a.name
     if not name.replace("_", "").isalnum() or not name[0].islower():
         die(f"name {name!r}: lowercase start, alphanumeric/underscore only (it becomes fn-safe identifiers)")
-    # inside the checkout the app joins fp-risc/apps/ and reaches std by
-    # the relative path every other program uses; anywhere else it is a
-    # project of its own, right here, and `use "std/..."` resolves under
-    # the toolchain's home (compiler/Home.hs)
+    # Apps in either location import libraries through the module search path.
     in_tree = not INSTALLED and Path.cwd().resolve().is_relative_to(ROOT)
     dest = FPR / "apps" / name if in_tree else Path.cwd() / name
-    std = "../../std" if in_tree else "std"
+    std = "std"
     if dest.exists():
         die(f"{rel(dest)} already exists")
     dest.mkdir(parents=True)
@@ -837,7 +847,7 @@ def cmd_disk(a):
 def cmd_commit(a):
     build_fpr()
     mod = resolve_prog(a.mod)
-    return sh([str(FPR / "fpr"), "commit"] + (["--major"] if a.major else []) + [mod], cwd=FPR, check=False)
+    return sh([str(COMPILER), "commit"] + (["--major"] if a.major else []) + [mod], cwd=FPR, check=False)
 
 # ---- versions: pins, the lock, releases -------------------------------------
 # Three layers, each answering one question (docs/VERSIONING.md):
@@ -1009,9 +1019,15 @@ def cmd_release(a):
     the GitHub release itself is cut by .github/workflows/release.yml
     when the tag lands)."""
     import tarfile
+    if not INSTALLED:
+        from configure import check_release
+        try:
+            check_release()
+        except (ValueError, OSError, subprocess.CalledProcessError) as exc:
+            die(str(exc))
     t0 = time.time()
-    rel = read_release()
-    version = (a.version or rel["version"]).lstrip("v")
+    release = read_release()
+    version = (a.version or release["version"]).lstrip("v")
     if not re.fullmatch(r"\d+\.\d+\.\d+", version):
         die(f"version must be X.Y.Z, got {version!r}")
     tag = f"v{version}"
@@ -1022,16 +1038,16 @@ def cmd_release(a):
             die("working tree not clean -- commit or stash first:\n" + dirty)
         if git("tag", "-l", tag):
             die(f"tag {tag} already exists")
-        if a.version and a.version.lstrip("v") != rel["version"]:
+        if a.version and a.version.lstrip("v") != release["version"]:
             set_release_version(version)
-            say(f"release.toml: version {rel['version']} -> {version}")
-    elif a.version and a.version.lstrip("v") != rel["version"]:
-        die(f"--no-git: release.toml says {rel['version']}, tag says {version}; they must agree")
+            say(f"release.toml: version {release['version']} -> {version}")
+    elif a.version and a.version.lstrip("v") != release["version"]:
+        die(f"--no-git: release.toml says {release['version']}, tag says {version}; they must agree")
     build_fpr()
     # 1. module identity: every library module gets a committed version
-    for mod in rel["modules"]:
+    for mod in release["modules"]:
         m = resolve_prog(mod)
-        r = subprocess.run([str(FPR / "fpr"), "commit", m], cwd=FPR, capture_output=True, text=True)
+        r = subprocess.run([str(COMPILER), "commit", m], cwd=FPR, capture_output=True, text=True)
         out = (r.stdout + r.stderr).strip().splitlines()
         if r.returncode != 0:
             for l in out:
@@ -1059,8 +1075,9 @@ def cmd_release(a):
         shutil.rmtree(out)
     out.mkdir(parents=True)
     lines = [f"qos-fpr {tag}", f"git {git_describe()} ({git('rev-parse', 'HEAD', check=False) or '?'})",
+             f"fprisc {json.loads((ROOT / 'fprisc.lock.json').read_text())['revision']}",
              f"date {time.strftime('%Y-%m-%d')}", f"host {os.uname().sysname.lower()}-{os.uname().machine}", "", "apps:"]
-    for app in rel["apps"]:
+    for app in release["apps"]:
         prog = resolve_prog(app)
         d = prog_directives(FPR / prog)
         name = (d.get("name") or [Path(prog).stem])[0]
@@ -1081,7 +1098,7 @@ def cmd_release(a):
     say(f"dist: {rel(out)}/ + {tarball.name} ({tarball.stat().st_size // 1024}KB)")
     # 5. identity in git: the version files, then the tag
     if do_git:
-        git("add", "release.toml", str(LOCK_PATH.relative_to(ROOT)), "fp-risc/.fpr")
+        git("add", "release.toml", "fprisc.lock.json", str(LOCK_PATH.relative_to(ROOT)), "fp-risc/.fpr")
         if git("status", "--porcelain"):
             git("commit", "-q", "-m", f"Release {tag}\n\n" + "\n".join(lines))
             say(f"committed release {tag}")
@@ -1170,7 +1187,7 @@ def cmd_clean(a):
 #                              tests/, the .fpr store, docs -- plus the
 #                              .installed marker that makes qos.py treat
 #                              it as shipped (never rebuilt, never written)
-#   PREFIX/bin/fpr             -> libexec/qos-fpr/fp-risc/fpr  (a symlink:
+#   PREFIX/bin/fpr             -> libexec/qos-fpr/toolchain/fpr  (a symlink:
 #                              the binary finds core/ and std/ beside its
 #                              REAL path -- compiler/Home.hs)
 #   PREFIX/bin/qos             -> libexec/qos-fpr/qos.py
@@ -1182,12 +1199,10 @@ def cmd_clean(a):
 # who wants to rebuild.  Relative symlinks, so the prefix can move.
 
 INSTALL_TREE = [
-    "qos.py", "release.toml", "README.md", "docs",
-    "fp-risc/fpr", "fp-risc/Makefile", "fp-risc/fp-risc.cabal", "fp-risc/cabal.project", "fp-risc/Setup.hs",
-    "fp-risc/core", "fp-risc/std", "fp-risc/programs", "fp-risc/sol", "fp-risc/tools", "fp-risc/models",
-    "fp-risc/apps", "fp-risc/tests", "fp-risc/compiler", "fp-risc/.fpr", "fp-risc/fpr.lock",
-    "hal",
-    "qos/Makefile", "qos/appside", "qos/portable", "qos/tests-host", "qos/qosp", "qos/qosp-gl",
+    "qos.py", "configure.py", "dependency.mk", "release.toml", "README.md", "docs", "fprisc.lock.json",
+    "fp-risc/Makefile", "fp-risc/qos-app.mk", "fp-risc/std", "fp-risc/programs", "fp-risc/tools", "fp-risc/models",
+    "fp-risc/apps", "fp-risc/tests", "fp-risc/.fpr", "fp-risc/fpr.lock", "hal",
+    "qos/Makefile", "qos/native", "qos/appside", "qos/portable", "qos/tests-host", "qos/qosp", "qos/qosp-gl",
 ]
 INSTALL_SKIP = shutil.ignore_patterns("*.o", "*.hi", "*.qa", "*.disk", "*.img", "build", "dist-newstyle",
                                       "qos-store", "__pycache__", ".DS_Store", "*.s", "*.units", "*.elf")
@@ -1213,14 +1228,21 @@ def cmd_install(a):
         dst = lib / item
         dst.parent.mkdir(parents=True, exist_ok=True)
         if src.is_dir():
-            shutil.copytree(src, dst, ignore=INSTALL_SKIP, symlinks=True)
+            shutil.copytree(src, dst, ignore=INSTALL_SKIP, symlinks=False)
         else:
             shutil.copy2(src, dst)
-    (lib / "fp-risc" / "fprc").symlink_to("fpr")     # the Makefiles' name for it
+    # Ship a distinct compiler tree, never a symlink overlay in the QOS tree.
+    for item in ("fpr", "Makefile", "compiler", "core", "std", "sol", "tests", "tools", "hal", "docs"):
+        src, dst = TOOLCHAIN / item, lib / "toolchain" / item
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        if src.is_dir():
+            shutil.copytree(src, dst, ignore=INSTALL_SKIP)
+        else:
+            shutil.copy2(src, dst)
     ver = read_release()["version"]
     (lib / ".installed").write_text(f"qos-fpr {ver} installed {time.strftime('%Y-%m-%d')} from {ROOT}\n")
     bin_.mkdir(parents=True, exist_ok=True)
-    for name, target in (("fpr", lib / "fp-risc" / "fpr"), ("qos", lib / "qos.py")):
+    for name, target in (("fpr", lib / "toolchain" / "fpr"), ("qos", lib / "qos.py")):
         link = bin_ / name
         link.unlink(missing_ok=True)
         link.symlink_to(os.path.relpath(target, bin_))

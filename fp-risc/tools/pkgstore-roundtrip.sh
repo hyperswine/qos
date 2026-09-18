@@ -1,4 +1,5 @@
 #!/bin/sh
+: "${FPRISC_ROOT:?Set FPRISC_ROOT to the fprisc checkout}"
 
 # pkgstore-roundtrip.sh — fpr push/pull against a live pkgstore.
 # Needs: the pkgstore server running (uvicorn server:app --port 8323)
@@ -7,7 +8,7 @@
 #   pull both -> consumer compiles entirely from the pulled store.
 
 set -e
-FPR=${FPR:-$(dirname "$0")/../fpr}
+FPR=${FPR:-$FPRISC_ROOT/fpr}
 T=$(mktemp -d); cd "$T"
 echo 'helper x = x + 7.' > dep.fpr
 echo 'D = use "dep". probe y = D.helper y.' > probe.fpr
@@ -20,5 +21,5 @@ rm -rf .fpr
 "$FPR" pull dep && "$FPR" pull top
 printf 'T = use "top#%s".\nmain = print "{T.mainish 5}".\n' "$TH" > c.fpr
 rm dep.fpr top.fpr
-LC_ALL=C.UTF-8 "$FPR" --target=rv64 --prelude="$(dirname "$0")/../core/prelude.fpr" c.fpr /tmp/rt.s
+LC_ALL=C.UTF-8 "$FPR" --target=rv64 --prelude="$FPRISC_ROOT/core/prelude.fpr" c.fpr /tmp/rt.s
 echo "pkgstore round trip OK"

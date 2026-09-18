@@ -40,6 +40,13 @@ import subprocess
 import sys
 import tempfile
 
+FPRISC_ROOT = os.environ.get("FPRISC_ROOT")
+if not FPRISC_ROOT:
+    sys.exit("fprd: set FPRISC_ROOT to the fprisc checkout")
+COMPILER = os.path.join(FPRISC_ROOT, "fpr")
+os.environ["FPR_HOME"] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+os.environ["FPR_PATH"] = FPRISC_ROOT
+
 PROFILES = {"qos-portable", "bare-metal"}
 PLUGIN_RE = re.compile(r"^plugin:([0-7]):([a-z][a-z0-9_]{0,15})$")
 MAX_REQ = 4 << 20  # a 4 MiB source bound: honest refusal, not an OOM
@@ -111,7 +118,7 @@ def compile_one(profile, source):
             f.write(source)
         env = dict(os.environ, LC_ALL="C.UTF-8")
         r = subprocess.run(
-            ["./fprc", "--profile=" + profile, "--prelude=core/prelude.fpr",
+            [COMPILER, "--profile=" + profile, "--prelude=" + os.path.join(FPRISC_ROOT, "core/prelude.fpr"),
              src, out],
             capture_output=True, env=env, timeout=120)
         if r.returncode != 0 or not os.path.exists(out):
@@ -122,8 +129,8 @@ def compile_one(profile, source):
 
 
 def serve(path):
-    if not os.path.exists("./fprc"):
-        sys.exit("fprd: run from fp-risc/ (needs ./fprc + core/prelude.fpr)")
+    if not os.path.exists(COMPILER):
+        sys.exit("fprd: build the compiler at FPRISC_ROOT first")
     try:
         os.unlink(path)
     except FileNotFoundError:

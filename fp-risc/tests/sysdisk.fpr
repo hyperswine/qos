@@ -21,8 +21,8 @@
 # Boot 2's expected line (the check-all leg drives both):
 #   sysdisk boot2: replayed 2 [Three] ver=sys.v2 (no loads, no compiler -- the disk decided)
 
-FS = use "../std/fs".
-LD = use "../std/loader".
+FS = use "std/fs".
+LD = use "std/loader".
 
 expectOk what r = case r of
     Ok v -> v

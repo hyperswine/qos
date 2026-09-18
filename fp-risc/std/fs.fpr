@@ -22,7 +22,7 @@
 
 QL = use "../programs/mods/qlog".
 SVC = use "../programs/mods/svc".
-AC = use "actor".
+AC = use "std/actor".
 
 # spawn the service on a device the caller opened; the returned actor
 # handle IS the filesystem from here on

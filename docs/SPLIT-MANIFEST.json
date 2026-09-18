@@ -1,0 +1,2570 @@
+{
+  "source_commit": "8936d1967e654304ff12755219e7e380583763f1",
+  "files": [
+    {
+      "source": ".github/workflows/release.yml",
+      "repository": "qos",
+      "path": "docs/history/monorepo-release.yml"
+    },
+    {
+      "source": "NAMING.txt",
+      "repository": "fprisc",
+      "path": "NAMING.txt"
+    },
+    {
+      "source": "README.md",
+      "repository": "qos",
+      "path": "docs/history/MONOREPO-README.md"
+    },
+    {
+      "source": "SEMANTICS.md",
+      "repository": "fprisc",
+      "path": "SEMANTICS.md"
+    },
+    {
+      "source": "check-all.sh",
+      "repository": "qos",
+      "path": "check-all.sh"
+    },
+    {
+      "source": "docs/API-REVIEW.md",
+      "repository": "fprisc",
+      "path": "docs/API-REVIEW.md"
+    },
+    {
+      "source": "docs/API.txt",
+      "repository": "fprisc",
+      "path": "docs/API.txt"
+    },
+    {
+      "source": "docs/DESIGN_PATTERNS.md",
+      "repository": "fprisc",
+      "path": "docs/DESIGN_PATTERNS.md"
+    },
+    {
+      "source": "docs/DISK.txt",
+      "repository": "qos",
+      "path": "docs/DISK.txt"
+    },
+    {
+      "source": "docs/DOCUMENTATION.md",
+      "repository": "fprisc",
+      "path": "docs/DOCUMENTATION.md"
+    },
+    {
+      "source": "docs/DUNGEON.md",
+      "repository": "qos",
+      "path": "docs/DUNGEON.md"
+    },
+    {
+      "source": "docs/FPR-QOS-REVIEW.md",
+      "repository": "qos",
+      "path": "docs/FPR-QOS-REVIEW.md"
+    },
+    {
+      "source": "docs/FPRLIVE.md",
+      "repository": "qos",
+      "path": "docs/FPRLIVE.md"
+    },
+    {
+      "source": "docs/INSTALL.md",
+      "repository": "qos",
+      "path": "docs/INSTALL.md"
+    },
+    {
+      "source": "docs/MAILBOX.md",
+      "repository": "fprisc",
+      "path": "docs/MAILBOX.md"
+    },
+    {
+      "source": "docs/MEMORY-V2-PLAN.md",
+      "repository": "fprisc",
+      "path": "docs/MEMORY-V2-PLAN.md"
+    },
+    {
+      "source": "docs/MEMORY.md",
+      "repository": "fprisc",
+      "path": "docs/MEMORY.md"
+    },
+    {
+      "source": "docs/MESHES.md",
+      "repository": "qos",
+      "path": "docs/MESHES.md"
+    },
+    {
+      "source": "docs/NOTES.txt",
+      "repository": "qos",
+      "path": "docs/NOTES.txt"
+    },
+    {
+      "source": "docs/PLATFORM.md",
+      "repository": "fprisc",
+      "path": "docs/PLATFORM.md"
+    },
+    {
+      "source": "docs/POS1-DESIGN.md",
+      "repository": "qos",
+      "path": "docs/POS1-DESIGN.md"
+    },
+    {
+      "source": "docs/POS1.md",
+      "repository": "qos",
+      "path": "docs/POS1.md"
+    },
+    {
+      "source": "docs/QA-FORMAT.md",
+      "repository": "qos",
+      "path": "docs/QA-FORMAT.md"
+    },
+    {
+      "source": "docs/SCHEDULER.txt",
+      "repository": "qos",
+      "path": "docs/SCHEDULER.txt"
+    },
+    {
+      "source": "docs/SEMANTICS.txt",
+      "repository": "fprisc",
+      "path": "docs/SEMANTICS.txt"
+    },
+    {
+      "source": "docs/SOL-REVIEW.txt",
+      "repository": "fprisc",
+      "path": "docs/SOL-REVIEW.txt"
+    },
+    {
+      "source": "docs/SOL-TEXT.md",
+      "repository": "fprisc",
+      "path": "docs/SOL-TEXT.md"
+    },
+    {
+      "source": "docs/SOUND.md",
+      "repository": "qos",
+      "path": "docs/SOUND.md"
+    },
+    {
+      "source": "docs/STD-PLAN.md",
+      "repository": "fprisc",
+      "path": "docs/STD-PLAN.md"
+    },
+    {
+      "source": "docs/TERRA2-V1.md",
+      "repository": "qos",
+      "path": "docs/TERRA2-V1.md"
+    },
+    {
+      "source": "docs/TERRA2.md",
+      "repository": "qos",
+      "path": "docs/TERRA2.md"
+    },
+    {
+      "source": "docs/TOOLCHAIN.md",
+      "repository": "fprisc",
+      "path": "docs/TOOLCHAIN.md"
+    },
+    {
+      "source": "docs/UI2D.md",
+      "repository": "qos",
+      "path": "docs/UI2D.md"
+    },
+    {
+      "source": "docs/V2-AUDIT.md",
+      "repository": "fprisc",
+      "path": "docs/V2-AUDIT.md"
+    },
+    {
+      "source": "docs/V2.md",
+      "repository": "fprisc",
+      "path": "docs/V2.md"
+    },
+    {
+      "source": "docs/VEC.md",
+      "repository": "fprisc",
+      "path": "docs/VEC.md"
+    },
+    {
+      "source": "docs/VERIFICATION.md",
+      "repository": "qos",
+      "path": "docs/VERIFICATION.md"
+    },
+    {
+      "source": "docs/VERSIONING.md",
+      "repository": "qos",
+      "path": "docs/VERSIONING.md"
+    },
+    {
+      "source": "fp-risc/.DS_Store",
+      "repository": "fprisc",
+      "path": ".DS_Store"
+    },
+    {
+      "source": "fp-risc/.fpr/store/0fe2ebd63a9638fe.fpr",
+      "repository": "qos",
+      "path": "fp-risc/.fpr/store/0fe2ebd63a9638fe.fpr"
+    },
+    {
+      "source": "fp-risc/.fpr/store/28388960a8f6aa26.fpr",
+      "repository": "qos",
+      "path": "fp-risc/.fpr/store/28388960a8f6aa26.fpr"
+    },
+    {
+      "source": "fp-risc/.fpr/store/3865188589abf611.fpr",
+      "repository": "qos",
+      "path": "fp-risc/.fpr/store/3865188589abf611.fpr"
+    },
+    {
+      "source": "fp-risc/.fpr/store/39dff276efd647a1.fpr",
+      "repository": "qos",
+      "path": "fp-risc/.fpr/store/39dff276efd647a1.fpr"
+    },
+    {
+      "source": "fp-risc/.fpr/store/47b139af84410e49.fpr",
+      "repository": "qos",
+      "path": "fp-risc/.fpr/store/47b139af84410e49.fpr"
+    },
+    {
+      "source": "fp-risc/.fpr/store/5bb5fae33c7ae0e9.fpr",
+      "repository": "qos",
+      "path": "fp-risc/.fpr/store/5bb5fae33c7ae0e9.fpr"
+    },
+    {
+      "source": "fp-risc/.fpr/store/71c5cbf3387af767.fpr",
+      "repository": "qos",
+      "path": "fp-risc/.fpr/store/71c5cbf3387af767.fpr"
+    },
+    {
+      "source": "fp-risc/.fpr/store/76272128909340bd.fpr",
+      "repository": "qos",
+      "path": "fp-risc/.fpr/store/76272128909340bd.fpr"
+    },
+    {
+      "source": "fp-risc/.fpr/store/76ba27032712e60f.fpr",
+      "repository": "qos",
+      "path": "fp-risc/.fpr/store/76ba27032712e60f.fpr"
+    },
+    {
+      "source": "fp-risc/.fpr/store/7a68b33b8a0de04e.fpr",
+      "repository": "qos",
+      "path": "fp-risc/.fpr/store/7a68b33b8a0de04e.fpr"
+    },
+    {
+      "source": "fp-risc/.fpr/store/8e1c0cdaaa6f8a71.fpr",
+      "repository": "qos",
+      "path": "fp-risc/.fpr/store/8e1c0cdaaa6f8a71.fpr"
+    },
+    {
+      "source": "fp-risc/.fpr/store/98bba41cabd0ee7c.fpr",
+      "repository": "qos",
+      "path": "fp-risc/.fpr/store/98bba41cabd0ee7c.fpr"
+    },
+    {
+      "source": "fp-risc/.fpr/store/a5233a24b14a1da7.fpr",
+      "repository": "qos",
+      "path": "fp-risc/.fpr/store/a5233a24b14a1da7.fpr"
+    },
+    {
+      "source": "fp-risc/.fpr/store/db7ad34be58483c9.fpr",
+      "repository": "qos",
+      "path": "fp-risc/.fpr/store/db7ad34be58483c9.fpr"
+    },
+    {
+      "source": "fp-risc/.fpr/store/dc6467238bba8c3e.fpr",
+      "repository": "qos",
+      "path": "fp-risc/.fpr/store/dc6467238bba8c3e.fpr"
+    },
+    {
+      "source": "fp-risc/.fpr/store/e40b6ecf8391aada.fpr",
+      "repository": "qos",
+      "path": "fp-risc/.fpr/store/e40b6ecf8391aada.fpr"
+    },
+    {
+      "source": "fp-risc/.fpr/versions.db",
+      "repository": "qos",
+      "path": "fp-risc/.fpr/versions.db"
+    },
+    {
+      "source": "fp-risc/.gitignore",
+      "repository": "fprisc",
+      "path": ".gitignore"
+    },
+    {
+      "source": "fp-risc/Makefile",
+      "repository": "fprisc",
+      "path": "Makefile"
+    },
+    {
+      "source": "fp-risc/Setup.hs",
+      "repository": "fprisc",
+      "path": "Setup.hs"
+    },
+    {
+      "source": "fp-risc/apps/.gitignore",
+      "repository": "qos",
+      "path": "fp-risc/apps/.gitignore"
+    },
+    {
+      "source": "fp-risc/apps/HelloProc.toml",
+      "repository": "qos",
+      "path": "fp-risc/apps/HelloProc.toml"
+    },
+    {
+      "source": "fp-risc/apps/TUIAppLauncher.toml",
+      "repository": "qos",
+      "path": "fp-risc/apps/TUIAppLauncher.toml"
+    },
+    {
+      "source": "fp-risc/apps/TUIClock.toml",
+      "repository": "qos",
+      "path": "fp-risc/apps/TUIClock.toml"
+    },
+    {
+      "source": "fp-risc/apps/TUINotes.toml",
+      "repository": "qos",
+      "path": "fp-risc/apps/TUINotes.toml"
+    },
+    {
+      "source": "fp-risc/apps/browser.fpr",
+      "repository": "qos",
+      "path": "fp-risc/apps/browser.fpr"
+    },
+    {
+      "source": "fp-risc/apps/cli.fpr",
+      "repository": "qos",
+      "path": "fp-risc/apps/cli.fpr"
+    },
+    {
+      "source": "fp-risc/apps/clock.fpr",
+      "repository": "qos",
+      "path": "fp-risc/apps/clock.fpr"
+    },
+    {
+      "source": "fp-risc/apps/disk.fpr",
+      "repository": "qos",
+      "path": "fp-risc/apps/disk.fpr"
+    },
+    {
+      "source": "fp-risc/apps/hello.fpr",
+      "repository": "qos",
+      "path": "fp-risc/apps/hello.fpr"
+    },
+    {
+      "source": "fp-risc/apps/hello_proc.fpr",
+      "repository": "qos",
+      "path": "fp-risc/apps/hello_proc.fpr"
+    },
+    {
+      "source": "fp-risc/apps/logs.fpr",
+      "repository": "qos",
+      "path": "fp-risc/apps/logs.fpr"
+    },
+    {
+      "source": "fp-risc/apps/monitor.fpr",
+      "repository": "qos",
+      "path": "fp-risc/apps/monitor.fpr"
+    },
+    {
+      "source": "fp-risc/apps/pnotes.fpr",
+      "repository": "qos",
+      "path": "fp-risc/apps/pnotes.fpr"
+    },
+    {
+      "source": "fp-risc/apps/tuiclock.fpr",
+      "repository": "qos",
+      "path": "fp-risc/apps/tuiclock.fpr"
+    },
+    {
+      "source": "fp-risc/apps/tuinotes.fpr",
+      "repository": "qos",
+      "path": "fp-risc/apps/tuinotes.fpr"
+    },
+    {
+      "source": "fp-risc/cabal.project",
+      "repository": "fprisc",
+      "path": "cabal.project"
+    },
+    {
+      "source": "fp-risc/cabal.project.local.example",
+      "repository": "fprisc",
+      "path": "cabal.project.local.example"
+    },
+    {
+      "source": "fp-risc/compiler/.DS_Store",
+      "repository": "fprisc",
+      "path": "compiler/.DS_Store"
+    },
+    {
+      "source": "fp-risc/compiler/A64.hs",
+      "repository": "fprisc",
+      "path": "compiler/A64.hs"
+    },
+    {
+      "source": "fp-risc/compiler/Codegen.hs",
+      "repository": "fprisc",
+      "path": "compiler/Codegen.hs"
+    },
+    {
+      "source": "fp-risc/compiler/Commit.hs",
+      "repository": "fprisc",
+      "path": "compiler/Commit.hs"
+    },
+    {
+      "source": "fp-risc/compiler/Compile.hs",
+      "repository": "fprisc",
+      "path": "compiler/Compile.hs"
+    },
+    {
+      "source": "fp-risc/compiler/FPRISC.hs",
+      "repository": "fprisc",
+      "path": "compiler/FPRISC.hs"
+    },
+    {
+      "source": "fp-risc/compiler/Home.hs",
+      "repository": "fprisc",
+      "path": "compiler/Home.hs"
+    },
+    {
+      "source": "fp-risc/compiler/Infer.hs",
+      "repository": "fprisc",
+      "path": "compiler/Infer.hs"
+    },
+    {
+      "source": "fp-risc/compiler/Main.hs",
+      "repository": "fprisc",
+      "path": "compiler/Main.hs"
+    },
+    {
+      "source": "fp-risc/compiler/Modules.hs",
+      "repository": "fprisc",
+      "path": "compiler/Modules.hs"
+    },
+    {
+      "source": "fp-risc/compiler/Precond.hs",
+      "repository": "fprisc",
+      "path": "compiler/Precond.hs"
+    },
+    {
+      "source": "fp-risc/compiler/Safety.hs",
+      "repository": "fprisc",
+      "path": "compiler/Safety.hs"
+    },
+    {
+      "source": "fp-risc/compiler/Sol/AsmA64.hs",
+      "repository": "fprisc",
+      "path": "compiler/Sol/AsmA64.hs"
+    },
+    {
+      "source": "fp-risc/compiler/Sol/AsmX64.hs",
+      "repository": "fprisc",
+      "path": "compiler/Sol/AsmX64.hs"
+    },
+    {
+      "source": "fp-risc/compiler/Sol/Bytecode.hs",
+      "repository": "fprisc",
+      "path": "compiler/Sol/Bytecode.hs"
+    },
+    {
+      "source": "fp-risc/compiler/Sol/Gpu.hs",
+      "repository": "fprisc",
+      "path": "compiler/Sol/Gpu.hs"
+    },
+    {
+      "source": "fp-risc/compiler/Sol/HandJIT.hs",
+      "repository": "fprisc",
+      "path": "compiler/Sol/HandJIT.hs"
+    },
+    {
+      "source": "fp-risc/compiler/Sol/Infer.hs",
+      "repository": "fprisc",
+      "path": "compiler/Sol/Infer.hs"
+    },
+    {
+      "source": "fp-risc/compiler/Sol/JitCore.hs",
+      "repository": "fprisc",
+      "path": "compiler/Sol/JitCore.hs"
+    },
+    {
+      "source": "fp-risc/compiler/Sol/KIR.hs",
+      "repository": "fprisc",
+      "path": "compiler/Sol/KIR.hs"
+    },
+    {
+      "source": "fp-risc/compiler/Sol/Lang.hs",
+      "repository": "fprisc",
+      "path": "compiler/Sol/Lang.hs"
+    },
+    {
+      "source": "fp-risc/compiler/Sol/Main.hs",
+      "repository": "fprisc",
+      "path": "compiler/Sol/Main.hs"
+    },
+    {
+      "source": "fp-risc/compiler/Sol/Mod.hs",
+      "repository": "fprisc",
+      "path": "compiler/Sol/Mod.hs"
+    },
+    {
+      "source": "fp-risc/compiler/Sol/Preamble.hs",
+      "repository": "fprisc",
+      "path": "compiler/Sol/Preamble.hs"
+    },
+    {
+      "source": "fp-risc/compiler/Sol/Txn.hs",
+      "repository": "fprisc",
+      "path": "compiler/Sol/Txn.hs"
+    },
+    {
+      "source": "fp-risc/compiler/Sol/VM.hs",
+      "repository": "fprisc",
+      "path": "compiler/Sol/VM.hs"
+    },
+    {
+      "source": "fp-risc/compiler/Sol/Val.hs",
+      "repository": "fprisc",
+      "path": "compiler/Sol/Val.hs"
+    },
+    {
+      "source": "fp-risc/compiler/Sol/Web.hs",
+      "repository": "fprisc",
+      "path": "compiler/Sol/Web.hs"
+    },
+    {
+      "source": "fp-risc/compiler/Sol/Width.hs",
+      "repository": "fprisc",
+      "path": "compiler/Sol/Width.hs"
+    },
+    {
+      "source": "fp-risc/compiler/StdBridge.hs",
+      "repository": "fprisc",
+      "path": "compiler/StdBridge.hs"
+    },
+    {
+      "source": "fp-risc/compiler/StdCheck.hs",
+      "repository": "fprisc",
+      "path": "compiler/StdCheck.hs"
+    },
+    {
+      "source": "fp-risc/compiler/Struct.hs",
+      "repository": "fprisc",
+      "path": "compiler/Struct.hs"
+    },
+    {
+      "source": "fp-risc/compiler/Target.hs",
+      "repository": "fprisc",
+      "path": "compiler/Target.hs"
+    },
+    {
+      "source": "fp-risc/compiler/X64.hs",
+      "repository": "fprisc",
+      "path": "compiler/X64.hs"
+    },
+    {
+      "source": "fp-risc/compiler/cbits/fsx.c",
+      "repository": "fprisc",
+      "path": "compiler/cbits/fsx.c"
+    },
+    {
+      "source": "fp-risc/compiler/cbits/handjit.c",
+      "repository": "fprisc",
+      "path": "compiler/cbits/handjit.c"
+    },
+    {
+      "source": "fp-risc/compiler/cbits/vecgpu.c",
+      "repository": "fprisc",
+      "path": "compiler/cbits/vecgpu.c"
+    },
+    {
+      "source": "fp-risc/core/prelude.fpr",
+      "repository": "fprisc",
+      "path": "core/prelude.fpr"
+    },
+    {
+      "source": "fp-risc/dispatch.sol",
+      "repository": "fprisc",
+      "path": "dispatch.sol"
+    },
+    {
+      "source": "fp-risc/docs/JIT.md",
+      "repository": "fprisc",
+      "path": "docs/JIT.md"
+    },
+    {
+      "source": "fp-risc/docs/NOTES.txt",
+      "repository": "fprisc",
+      "path": "docs/NOTES.txt"
+    },
+    {
+      "source": "fp-risc/docs/PATHS.md",
+      "repository": "fprisc",
+      "path": "docs/PATHS.md"
+    },
+    {
+      "source": "fp-risc/docs/SAFETY.md",
+      "repository": "fprisc",
+      "path": "docs/SAFETY.md"
+    },
+    {
+      "source": "fp-risc/docs/SCRIPTING.md",
+      "repository": "fprisc",
+      "path": "docs/SCRIPTING.md"
+    },
+    {
+      "source": "fp-risc/docs/SPANS.md",
+      "repository": "fprisc",
+      "path": "docs/SPANS.md"
+    },
+    {
+      "source": "fp-risc/docs/STYLE.md",
+      "repository": "fprisc",
+      "path": "docs/STYLE.md"
+    },
+    {
+      "source": "fp-risc/docs/TRANSACTION.md",
+      "repository": "fprisc",
+      "path": "docs/TRANSACTION.md"
+    },
+    {
+      "source": "fp-risc/fp-risc.cabal",
+      "repository": "fprisc",
+      "path": "fp-risc.cabal"
+    },
+    {
+      "source": "fp-risc/fpr.lock",
+      "repository": "qos",
+      "path": "fp-risc/fpr.lock"
+    },
+    {
+      "source": "fp-risc/hie.yaml",
+      "repository": "fprisc",
+      "path": "hie.yaml"
+    },
+    {
+      "source": "fp-risc/models/build.sh",
+      "repository": "qos",
+      "path": "fp-risc/models/build.sh"
+    },
+    {
+      "source": "fp-risc/models/hq/hq.coscad",
+      "repository": "qos",
+      "path": "fp-risc/models/hq/hq.coscad"
+    },
+    {
+      "source": "fp-risc/models/hq/hq.fpr",
+      "repository": "qos",
+      "path": "fp-risc/models/hq/hq.fpr"
+    },
+    {
+      "source": "fp-risc/models/hq/hq.scad",
+      "repository": "qos",
+      "path": "fp-risc/models/hq/hq.scad"
+    },
+    {
+      "source": "fp-risc/models/hq/hq.stl",
+      "repository": "qos",
+      "path": "fp-risc/models/hq/hq.stl"
+    },
+    {
+      "source": "fp-risc/models/hq/hq_dish.coscad",
+      "repository": "qos",
+      "path": "fp-risc/models/hq/hq_dish.coscad"
+    },
+    {
+      "source": "fp-risc/models/hq/hq_dish.scad",
+      "repository": "qos",
+      "path": "fp-risc/models/hq/hq_dish.scad"
+    },
+    {
+      "source": "fp-risc/models/hq/hq_dish.stl",
+      "repository": "qos",
+      "path": "fp-risc/models/hq/hq_dish.stl"
+    },
+    {
+      "source": "fp-risc/models/hq/hq_fence.coscad",
+      "repository": "qos",
+      "path": "fp-risc/models/hq/hq_fence.coscad"
+    },
+    {
+      "source": "fp-risc/models/hq/hq_fence.scad",
+      "repository": "qos",
+      "path": "fp-risc/models/hq/hq_fence.scad"
+    },
+    {
+      "source": "fp-risc/models/hq/hq_fence.stl",
+      "repository": "qos",
+      "path": "fp-risc/models/hq/hq_fence.stl"
+    },
+    {
+      "source": "fp-risc/models/infantry/infantry.coscad",
+      "repository": "qos",
+      "path": "fp-risc/models/infantry/infantry.coscad"
+    },
+    {
+      "source": "fp-risc/models/infantry/infantry.fpr",
+      "repository": "qos",
+      "path": "fp-risc/models/infantry/infantry.fpr"
+    },
+    {
+      "source": "fp-risc/models/infantry/infantry.scad",
+      "repository": "qos",
+      "path": "fp-risc/models/infantry/infantry.scad"
+    },
+    {
+      "source": "fp-risc/models/infantry/infantry.stl",
+      "repository": "qos",
+      "path": "fp-risc/models/infantry/infantry.stl"
+    },
+    {
+      "source": "fp-risc/models/infantry/infantry_kit.coscad",
+      "repository": "qos",
+      "path": "fp-risc/models/infantry/infantry_kit.coscad"
+    },
+    {
+      "source": "fp-risc/models/infantry/infantry_kit.scad",
+      "repository": "qos",
+      "path": "fp-risc/models/infantry/infantry_kit.scad"
+    },
+    {
+      "source": "fp-risc/models/infantry/infantry_kit.stl",
+      "repository": "qos",
+      "path": "fp-risc/models/infantry/infantry_kit.stl"
+    },
+    {
+      "source": "fp-risc/models/infantry/infantry_rifle.coscad",
+      "repository": "qos",
+      "path": "fp-risc/models/infantry/infantry_rifle.coscad"
+    },
+    {
+      "source": "fp-risc/models/infantry/infantry_rifle.scad",
+      "repository": "qos",
+      "path": "fp-risc/models/infantry/infantry_rifle.scad"
+    },
+    {
+      "source": "fp-risc/models/infantry/infantry_rifle.stl",
+      "repository": "qos",
+      "path": "fp-risc/models/infantry/infantry_rifle.stl"
+    },
+    {
+      "source": "fp-risc/models/music/Sunrise_Over_The_Spire.mp3",
+      "repository": "qos",
+      "path": "fp-risc/models/music/Sunrise_Over_The_Spire.mp3"
+    },
+    {
+      "source": "fp-risc/models/tank/tank.fpr",
+      "repository": "qos",
+      "path": "fp-risc/models/tank/tank.fpr"
+    },
+    {
+      "source": "fp-risc/models/tank/tank_hull.coscad",
+      "repository": "qos",
+      "path": "fp-risc/models/tank/tank_hull.coscad"
+    },
+    {
+      "source": "fp-risc/models/tank/tank_hull.scad",
+      "repository": "qos",
+      "path": "fp-risc/models/tank/tank_hull.scad"
+    },
+    {
+      "source": "fp-risc/models/tank/tank_hull.stl",
+      "repository": "qos",
+      "path": "fp-risc/models/tank/tank_hull.stl"
+    },
+    {
+      "source": "fp-risc/models/tank/tank_turret.coscad",
+      "repository": "qos",
+      "path": "fp-risc/models/tank/tank_turret.coscad"
+    },
+    {
+      "source": "fp-risc/models/tank/tank_turret.scad",
+      "repository": "qos",
+      "path": "fp-risc/models/tank/tank_turret.scad"
+    },
+    {
+      "source": "fp-risc/models/tank/tank_turret.stl",
+      "repository": "qos",
+      "path": "fp-risc/models/tank/tank_turret.stl"
+    },
+    {
+      "source": "fp-risc/models/truck/truck.coscad",
+      "repository": "qos",
+      "path": "fp-risc/models/truck/truck.coscad"
+    },
+    {
+      "source": "fp-risc/models/truck/truck.fpr",
+      "repository": "qos",
+      "path": "fp-risc/models/truck/truck.fpr"
+    },
+    {
+      "source": "fp-risc/models/truck/truck.scad",
+      "repository": "qos",
+      "path": "fp-risc/models/truck/truck.scad"
+    },
+    {
+      "source": "fp-risc/models/truck/truck.stl",
+      "repository": "qos",
+      "path": "fp-risc/models/truck/truck.stl"
+    },
+    {
+      "source": "fp-risc/models/truck/truck_canvas.coscad",
+      "repository": "qos",
+      "path": "fp-risc/models/truck/truck_canvas.coscad"
+    },
+    {
+      "source": "fp-risc/models/truck/truck_canvas.scad",
+      "repository": "qos",
+      "path": "fp-risc/models/truck/truck_canvas.scad"
+    },
+    {
+      "source": "fp-risc/models/truck/truck_canvas.stl",
+      "repository": "qos",
+      "path": "fp-risc/models/truck/truck_canvas.stl"
+    },
+    {
+      "source": "fp-risc/models/truck/truck_kit.coscad",
+      "repository": "qos",
+      "path": "fp-risc/models/truck/truck_kit.coscad"
+    },
+    {
+      "source": "fp-risc/models/truck/truck_kit.scad",
+      "repository": "qos",
+      "path": "fp-risc/models/truck/truck_kit.scad"
+    },
+    {
+      "source": "fp-risc/models/truck/truck_kit.stl",
+      "repository": "qos",
+      "path": "fp-risc/models/truck/truck_kit.stl"
+    },
+    {
+      "source": "fp-risc/programs/dungeon.fpr",
+      "repository": "qos",
+      "path": "fp-risc/programs/dungeon.fpr"
+    },
+    {
+      "source": "fp-risc/programs/interactive_desktop_gl.fpr",
+      "repository": "qos",
+      "path": "fp-risc/programs/interactive_desktop_gl.fpr"
+    },
+    {
+      "source": "fp-risc/programs/maapp.fpr",
+      "repository": "qos",
+      "path": "fp-risc/programs/maapp.fpr"
+    },
+    {
+      "source": "fp-risc/programs/mods/appkit.fpr",
+      "repository": "qos",
+      "path": "fp-risc/programs/mods/appkit.fpr"
+    },
+    {
+      "source": "fp-risc/programs/mods/arcsvc.fpr",
+      "repository": "qos",
+      "path": "fp-risc/programs/mods/arcsvc.fpr"
+    },
+    {
+      "source": "fp-risc/programs/mods/bbspi.fpr",
+      "repository": "qos",
+      "path": "fp-risc/programs/mods/bbspi.fpr"
+    },
+    {
+      "source": "fp-risc/programs/mods/browserapp.fpr",
+      "repository": "qos",
+      "path": "fp-risc/programs/mods/browserapp.fpr"
+    },
+    {
+      "source": "fp-risc/programs/mods/cliapp.fpr",
+      "repository": "qos",
+      "path": "fp-risc/programs/mods/cliapp.fpr"
+    },
+    {
+      "source": "fp-risc/programs/mods/clockapp.fpr",
+      "repository": "qos",
+      "path": "fp-risc/programs/mods/clockapp.fpr"
+    },
+    {
+      "source": "fp-risc/programs/mods/coreutil.fpr",
+      "repository": "qos",
+      "path": "fp-risc/programs/mods/coreutil.fpr"
+    },
+    {
+      "source": "fp-risc/programs/mods/diskapp.fpr",
+      "repository": "qos",
+      "path": "fp-risc/programs/mods/diskapp.fpr"
+    },
+    {
+      "source": "fp-risc/programs/mods/docsdata.fpr",
+      "repository": "qos",
+      "path": "fp-risc/programs/mods/docsdata.fpr"
+    },
+    {
+      "source": "fp-risc/programs/mods/dungeonrules.fpr",
+      "repository": "qos",
+      "path": "fp-risc/programs/mods/dungeonrules.fpr"
+    },
+    {
+      "source": "fp-risc/programs/mods/fontm.fpr",
+      "repository": "qos",
+      "path": "fp-risc/programs/mods/fontm.fpr"
+    },
+    {
+      "source": "fp-risc/programs/mods/fprlive.fpr",
+      "repository": "qos",
+      "path": "fp-risc/programs/mods/fprlive.fpr"
+    },
+    {
+      "source": "fp-risc/programs/mods/fprlivejs.fpr",
+      "repository": "qos",
+      "path": "fp-risc/programs/mods/fprlivejs.fpr"
+    },
+    {
+      "source": "fp-risc/programs/mods/genview.fpr",
+      "repository": "qos",
+      "path": "fp-risc/programs/mods/genview.fpr"
+    },
+    {
+      "source": "fp-risc/programs/mods/glsvc.fpr",
+      "repository": "qos",
+      "path": "fp-risc/programs/mods/glsvc.fpr"
+    },
+    {
+      "source": "fp-risc/programs/mods/helloapp.fpr",
+      "repository": "qos",
+      "path": "fp-risc/programs/mods/helloapp.fpr"
+    },
+    {
+      "source": "fp-risc/programs/mods/livejs.fpr",
+      "repository": "qos",
+      "path": "fp-risc/programs/mods/livejs.fpr"
+    },
+    {
+      "source": "fp-risc/programs/mods/liveview.fpr",
+      "repository": "qos",
+      "path": "fp-risc/programs/mods/liveview.fpr"
+    },
+    {
+      "source": "fp-risc/programs/mods/logsapp.fpr",
+      "repository": "qos",
+      "path": "fp-risc/programs/mods/logsapp.fpr"
+    },
+    {
+      "source": "fp-risc/programs/mods/ma.fpr",
+      "repository": "qos",
+      "path": "fp-risc/programs/mods/ma.fpr"
+    },
+    {
+      "source": "fp-risc/programs/mods/matrixkpd.fpr",
+      "repository": "qos",
+      "path": "fp-risc/programs/mods/matrixkpd.fpr"
+    },
+    {
+      "source": "fp-risc/programs/mods/monitorapp.fpr",
+      "repository": "qos",
+      "path": "fp-risc/programs/mods/monitorapp.fpr"
+    },
+    {
+      "source": "fp-risc/programs/mods/oled.fpr",
+      "repository": "qos",
+      "path": "fp-risc/programs/mods/oled.fpr"
+    },
+    {
+      "source": "fp-risc/programs/mods/persist.fpr",
+      "repository": "qos",
+      "path": "fp-risc/programs/mods/persist.fpr"
+    },
+    {
+      "source": "fp-risc/programs/mods/pnotes.fpr",
+      "repository": "qos",
+      "path": "fp-risc/programs/mods/pnotes.fpr"
+    },
+    {
+      "source": "fp-risc/programs/mods/procapp.fpr",
+      "repository": "qos",
+      "path": "fp-risc/programs/mods/procapp.fpr"
+    },
+    {
+      "source": "fp-risc/programs/mods/qar.fpr",
+      "repository": "qos",
+      "path": "fp-risc/programs/mods/qar.fpr"
+    },
+    {
+      "source": "fp-risc/programs/mods/qlog.fpr",
+      "repository": "qos",
+      "path": "fp-risc/programs/mods/qlog.fpr"
+    },
+    {
+      "source": "fp-risc/programs/mods/qsys.fpr",
+      "repository": "qos",
+      "path": "fp-risc/programs/mods/qsys.fpr"
+    },
+    {
+      "source": "fp-risc/programs/mods/scene2d.fpr",
+      "repository": "qos",
+      "path": "fp-risc/programs/mods/scene2d.fpr"
+    },
+    {
+      "source": "fp-risc/programs/mods/sfx.fpr",
+      "repository": "qos",
+      "path": "fp-risc/programs/mods/sfx.fpr"
+    },
+    {
+      "source": "fp-risc/programs/mods/svc.fpr",
+      "repository": "qos",
+      "path": "fp-risc/programs/mods/svc.fpr"
+    },
+    {
+      "source": "fp-risc/programs/mods/timefmt.fpr",
+      "repository": "qos",
+      "path": "fp-risc/programs/mods/timefmt.fpr"
+    },
+    {
+      "source": "fp-risc/programs/mods/timer.fpr",
+      "repository": "qos",
+      "path": "fp-risc/programs/mods/timer.fpr"
+    },
+    {
+      "source": "fp-risc/programs/mods/ttp229.fpr",
+      "repository": "qos",
+      "path": "fp-risc/programs/mods/ttp229.fpr"
+    },
+    {
+      "source": "fp-risc/programs/mods/tui.fpr",
+      "repository": "qos",
+      "path": "fp-risc/programs/mods/tui.fpr"
+    },
+    {
+      "source": "fp-risc/programs/mods/uart.fpr",
+      "repository": "qos",
+      "path": "fp-risc/programs/mods/uart.fpr"
+    },
+    {
+      "source": "fp-risc/programs/mouse_desktop_gl.fpr",
+      "repository": "qos",
+      "path": "fp-risc/programs/mouse_desktop_gl.fpr"
+    },
+    {
+      "source": "fp-risc/programs/pos1.fpr",
+      "repository": "qos",
+      "path": "fp-risc/programs/pos1.fpr"
+    },
+    {
+      "source": "fp-risc/programs/system.fpr",
+      "repository": "qos",
+      "path": "fp-risc/programs/system.fpr"
+    },
+    {
+      "source": "fp-risc/programs/terra2.fpr",
+      "repository": "qos",
+      "path": "fp-risc/programs/terra2.fpr"
+    },
+    {
+      "source": "fp-risc/programs/voxel-interactive.fpr",
+      "repository": "qos",
+      "path": "fp-risc/programs/voxel-interactive.fpr"
+    },
+    {
+      "source": "fp-risc/qos-store/.gitignore",
+      "repository": "fprisc",
+      "path": "qos-store/.gitignore"
+    },
+    {
+      "source": "fp-risc/sol/.DS_Store",
+      "repository": "fprisc",
+      "path": "sol/.DS_Store"
+    },
+    {
+      "source": "fp-risc/sol/examples/.gitignore",
+      "repository": "fprisc",
+      "path": "sol/examples/.gitignore"
+    },
+    {
+      "source": "fp-risc/sol/examples/algebra.sol",
+      "repository": "fprisc",
+      "path": "sol/examples/algebra.sol"
+    },
+    {
+      "source": "fp-risc/sol/examples/bad_double.sol",
+      "repository": "fprisc",
+      "path": "sol/examples/bad_double.sol"
+    },
+    {
+      "source": "fp-risc/sol/examples/bad_leak.sol",
+      "repository": "fprisc",
+      "path": "sol/examples/bad_leak.sol"
+    },
+    {
+      "source": "fp-risc/sol/examples/bboard.sol",
+      "repository": "fprisc",
+      "path": "sol/examples/bboard.sol"
+    },
+    {
+      "source": "fp-risc/sol/examples/bench.sol",
+      "repository": "fprisc",
+      "path": "sol/examples/bench.sol"
+    },
+    {
+      "source": "fp-risc/sol/examples/blog.sol",
+      "repository": "fprisc",
+      "path": "sol/examples/blog.sol"
+    },
+    {
+      "source": "fp-risc/sol/examples/bstr.sol",
+      "repository": "fprisc",
+      "path": "sol/examples/bstr.sol"
+    },
+    {
+      "source": "fp-risc/sol/examples/counter.sol",
+      "repository": "fprisc",
+      "path": "sol/examples/counter.sol"
+    },
+    {
+      "source": "fp-risc/sol/examples/csvmatrix.sol",
+      "repository": "fprisc",
+      "path": "sol/examples/csvmatrix.sol"
+    },
+    {
+      "source": "fp-risc/sol/examples/dash.sol",
+      "repository": "fprisc",
+      "path": "sol/examples/dash.sol"
+    },
+    {
+      "source": "fp-risc/sol/examples/dispatch.sol",
+      "repository": "fprisc",
+      "path": "sol/examples/dispatch.sol"
+    },
+    {
+      "source": "fp-risc/sol/examples/dtree.sol",
+      "repository": "fprisc",
+      "path": "sol/examples/dtree.sol"
+    },
+    {
+      "source": "fp-risc/sol/examples/example.sol",
+      "repository": "fprisc",
+      "path": "sol/examples/example.sol"
+    },
+    {
+      "source": "fp-risc/sol/examples/fileops.sol",
+      "repository": "fprisc",
+      "path": "sol/examples/fileops.sol"
+    },
+    {
+      "source": "fp-risc/sol/examples/handint.sol",
+      "repository": "fprisc",
+      "path": "sol/examples/handint.sol"
+    },
+    {
+      "source": "fp-risc/sol/examples/hello.sol",
+      "repository": "fprisc",
+      "path": "sol/examples/hello.sol"
+    },
+    {
+      "source": "fp-risc/sol/examples/interactive_script.sol",
+      "repository": "fprisc",
+      "path": "sol/examples/interactive_script.sol"
+    },
+    {
+      "source": "fp-risc/sol/examples/jit.sol",
+      "repository": "fprisc",
+      "path": "sol/examples/jit.sol"
+    },
+    {
+      "source": "fp-risc/sol/examples/jsoncsv.sol",
+      "repository": "fprisc",
+      "path": "sol/examples/jsoncsv.sol"
+    },
+    {
+      "source": "fp-risc/sol/examples/linreg.sol",
+      "repository": "fprisc",
+      "path": "sol/examples/linreg.sol"
+    },
+    {
+      "source": "fp-risc/sol/examples/mandel.sol",
+      "repository": "fprisc",
+      "path": "sol/examples/mandel.sol"
+    },
+    {
+      "source": "fp-risc/sol/examples/mlpipe.sol",
+      "repository": "fprisc",
+      "path": "sol/examples/mlpipe.sol"
+    },
+    {
+      "source": "fp-risc/sol/examples/modules.sol",
+      "repository": "fprisc",
+      "path": "sol/examples/modules.sol"
+    },
+    {
+      "source": "fp-risc/sol/examples/mymod.sol",
+      "repository": "fprisc",
+      "path": "sol/examples/mymod.sol"
+    },
+    {
+      "source": "fp-risc/sol/examples/nn.sol",
+      "repository": "fprisc",
+      "path": "sol/examples/nn.sol"
+    },
+    {
+      "source": "fp-risc/sol/examples/operators.sol",
+      "repository": "fprisc",
+      "path": "sol/examples/operators.sol"
+    },
+    {
+      "source": "fp-risc/sol/examples/physics.sol",
+      "repository": "fprisc",
+      "path": "sol/examples/physics.sol"
+    },
+    {
+      "source": "fp-risc/sol/examples/plotdemo.sol",
+      "repository": "fprisc",
+      "path": "sol/examples/plotdemo.sol"
+    },
+    {
+      "source": "fp-risc/sol/examples/pos.sol",
+      "repository": "fprisc",
+      "path": "sol/examples/pos.sol"
+    },
+    {
+      "source": "fp-risc/sol/examples/pos2.sol",
+      "repository": "fprisc",
+      "path": "sol/examples/pos2.sol"
+    },
+    {
+      "source": "fp-risc/sol/examples/procs.sol",
+      "repository": "fprisc",
+      "path": "sol/examples/procs.sol"
+    },
+    {
+      "source": "fp-risc/sol/examples/prolog.sol",
+      "repository": "fprisc",
+      "path": "sol/examples/prolog.sol"
+    },
+    {
+      "source": "fp-risc/sol/examples/railway.sol",
+      "repository": "fprisc",
+      "path": "sol/examples/railway.sol"
+    },
+    {
+      "source": "fp-risc/sol/examples/realtime.sol",
+      "repository": "fprisc",
+      "path": "sol/examples/realtime.sol"
+    },
+    {
+      "source": "fp-risc/sol/examples/stddemo.sol",
+      "repository": "fprisc",
+      "path": "sol/examples/stddemo.sol"
+    },
+    {
+      "source": "fp-risc/sol/examples/strings.sol",
+      "repository": "fprisc",
+      "path": "sol/examples/strings.sol"
+    },
+    {
+      "source": "fp-risc/sol/examples/structs.sol",
+      "repository": "fprisc",
+      "path": "sol/examples/structs.sol"
+    },
+    {
+      "source": "fp-risc/sol/examples/svm.sol",
+      "repository": "fprisc",
+      "path": "sol/examples/svm.sol"
+    },
+    {
+      "source": "fp-risc/sol/examples/tabling.sol",
+      "repository": "fprisc",
+      "path": "sol/examples/tabling.sol"
+    },
+    {
+      "source": "fp-risc/sol/examples/terra.sol",
+      "repository": "fprisc",
+      "path": "sol/examples/terra.sol"
+    },
+    {
+      "source": "fp-risc/sol/examples/todo.sol",
+      "repository": "fprisc",
+      "path": "sol/examples/todo.sol"
+    },
+    {
+      "source": "fp-risc/sol/examples/todo2.sol",
+      "repository": "fprisc",
+      "path": "sol/examples/todo2.sol"
+    },
+    {
+      "source": "fp-risc/sol/examples/tryops.sol",
+      "repository": "fprisc",
+      "path": "sol/examples/tryops.sol"
+    },
+    {
+      "source": "fp-risc/sol/examples/txn_iso.sol",
+      "repository": "fprisc",
+      "path": "sol/examples/txn_iso.sol"
+    },
+    {
+      "source": "fp-risc/sol/examples/vec.sol",
+      "repository": "fprisc",
+      "path": "sol/examples/vec.sol"
+    },
+    {
+      "source": "fp-risc/sol/examples/vecbench.sol",
+      "repository": "fprisc",
+      "path": "sol/examples/vecbench.sol"
+    },
+    {
+      "source": "fp-risc/sol/lib/auth.sol",
+      "repository": "fprisc",
+      "path": "sol/lib/auth.sol"
+    },
+    {
+      "source": "fp-risc/sol/lib/base.sol",
+      "repository": "fprisc",
+      "path": "sol/lib/base.sol"
+    },
+    {
+      "source": "fp-risc/sol/lib/csv.sol",
+      "repository": "fprisc",
+      "path": "sol/lib/csv.sol"
+    },
+    {
+      "source": "fp-risc/sol/lib/fix.sol",
+      "repository": "fprisc",
+      "path": "sol/lib/fix.sol"
+    },
+    {
+      "source": "fp-risc/sol/lib/git.sol",
+      "repository": "fprisc",
+      "path": "sol/lib/git.sol"
+    },
+    {
+      "source": "fp-risc/sol/lib/json.sol",
+      "repository": "fprisc",
+      "path": "sol/lib/json.sol"
+    },
+    {
+      "source": "fp-risc/sol/lib/logic.sol",
+      "repository": "fprisc",
+      "path": "sol/lib/logic.sol"
+    },
+    {
+      "source": "fp-risc/sol/lib/matrix.sol",
+      "repository": "fprisc",
+      "path": "sol/lib/matrix.sol"
+    },
+    {
+      "source": "fp-risc/sol/lib/plot.sol",
+      "repository": "fprisc",
+      "path": "sol/lib/plot.sol"
+    },
+    {
+      "source": "fp-risc/sol/lib/plparse.sol",
+      "repository": "fprisc",
+      "path": "sol/lib/plparse.sol"
+    },
+    {
+      "source": "fp-risc/sol/lib/proc.sol",
+      "repository": "fprisc",
+      "path": "sol/lib/proc.sol"
+    },
+    {
+      "source": "fp-risc/sol/lib/rand.sol",
+      "repository": "fprisc",
+      "path": "sol/lib/rand.sol"
+    },
+    {
+      "source": "fp-risc/sol/lib/ui.sol",
+      "repository": "fprisc",
+      "path": "sol/lib/ui.sol"
+    },
+    {
+      "source": "fp-risc/sol/lib/web.sol",
+      "repository": "fprisc",
+      "path": "sol/lib/web.sol"
+    },
+    {
+      "source": "fp-risc/sol/scripts/archive.sol",
+      "repository": "fprisc",
+      "path": "sol/scripts/archive.sol"
+    },
+    {
+      "source": "fp-risc/sol/scripts/lowercase.sol",
+      "repository": "fprisc",
+      "path": "sol/scripts/lowercase.sol"
+    },
+    {
+      "source": "fp-risc/sol/scripts/system-report.sol",
+      "repository": "fprisc",
+      "path": "sol/scripts/system-report.sol"
+    },
+    {
+      "source": "fp-risc/sol/scripts/text/awk.sol",
+      "repository": "fprisc",
+      "path": "sol/scripts/text/awk.sol"
+    },
+    {
+      "source": "fp-risc/sol/scripts/text/grep.sol",
+      "repository": "fprisc",
+      "path": "sol/scripts/text/grep.sol"
+    },
+    {
+      "source": "fp-risc/sol/scripts/text/rx.sol",
+      "repository": "fprisc",
+      "path": "sol/scripts/text/rx.sol"
+    },
+    {
+      "source": "fp-risc/sol/scripts/text/sample.log",
+      "repository": "fprisc",
+      "path": "sol/scripts/text/sample.log"
+    },
+    {
+      "source": "fp-risc/sol/scripts/text/sed.sol",
+      "repository": "fprisc",
+      "path": "sol/scripts/text/sed.sol"
+    },
+    {
+      "source": "fp-risc/sol/scripts/text/shell.sol",
+      "repository": "fprisc",
+      "path": "sol/scripts/text/shell.sol"
+    },
+    {
+      "source": "fp-risc/sol/scripts/text/sortuniq.sol",
+      "repository": "fprisc",
+      "path": "sol/scripts/text/sortuniq.sol"
+    },
+    {
+      "source": "fp-risc/sol/scripts/text/staff.txt",
+      "repository": "fprisc",
+      "path": "sol/scripts/text/staff.txt"
+    },
+    {
+      "source": "fp-risc/sol/scripts/text/stdin.sol",
+      "repository": "fprisc",
+      "path": "sol/scripts/text/stdin.sol"
+    },
+    {
+      "source": "fp-risc/sol/scripts/version-compare.sol",
+      "repository": "fprisc",
+      "path": "sol/scripts/version-compare.sol"
+    },
+    {
+      "source": "fp-risc/std/actor.fpr",
+      "repository": "fprisc",
+      "path": "std/actor.fpr"
+    },
+    {
+      "source": "fp-risc/std/checkdemo.fpr",
+      "repository": "fprisc",
+      "path": "std/checkdemo.fpr"
+    },
+    {
+      "source": "fp-risc/std/compile.fpr",
+      "repository": "qos",
+      "path": "fp-risc/std/compile.fpr"
+    },
+    {
+      "source": "fp-risc/std/fs.fpr",
+      "repository": "qos",
+      "path": "fp-risc/std/fs.fpr"
+    },
+    {
+      "source": "fp-risc/std/lens.fpr",
+      "repository": "fprisc",
+      "path": "std/lens.fpr"
+    },
+    {
+      "source": "fp-risc/std/livereload.fpr",
+      "repository": "qos",
+      "path": "fp-risc/std/livereload.fpr"
+    },
+    {
+      "source": "fp-risc/std/loader.fpr",
+      "repository": "qos",
+      "path": "fp-risc/std/loader.fpr"
+    },
+    {
+      "source": "fp-risc/std/mvu.fpr",
+      "repository": "fprisc",
+      "path": "std/mvu.fpr"
+    },
+    {
+      "source": "fp-risc/std/std.fpr",
+      "repository": "fprisc",
+      "path": "std/std.fpr"
+    },
+    {
+      "source": "fp-risc/std/std.sol",
+      "repository": "fprisc",
+      "path": "std/std.sol"
+    },
+    {
+      "source": "fp-risc/std/timer.fpr",
+      "repository": "qos",
+      "path": "fp-risc/std/timer.fpr"
+    },
+    {
+      "source": "fp-risc/std/uart.fpr",
+      "repository": "qos",
+      "path": "fp-risc/std/uart.fpr"
+    },
+    {
+      "source": "fp-risc/targets/qos.fpr",
+      "repository": "qos",
+      "path": "fp-risc/targets/qos.fpr"
+    },
+    {
+      "source": "fp-risc/tests/actors.fpr",
+      "repository": "fprisc",
+      "path": "tests/actors.fpr"
+    },
+    {
+      "source": "fp-risc/tests/appa.fpr",
+      "repository": "qos",
+      "path": "fp-risc/tests/appa.fpr"
+    },
+    {
+      "source": "fp-risc/tests/appb.fpr",
+      "repository": "qos",
+      "path": "fp-risc/tests/appb.fpr"
+    },
+    {
+      "source": "fp-risc/tests/apps.fpr",
+      "repository": "qos",
+      "path": "fp-risc/tests/apps.fpr"
+    },
+    {
+      "source": "fp-risc/tests/arcaudit.fpr",
+      "repository": "qos",
+      "path": "fp-risc/tests/arcaudit.fpr"
+    },
+    {
+      "source": "fp-risc/tests/arena.fpr",
+      "repository": "qos",
+      "path": "fp-risc/tests/arena.fpr"
+    },
+    {
+      "source": "fp-risc/tests/args.sol",
+      "repository": "fprisc",
+      "path": "tests/args.sol"
+    },
+    {
+      "source": "fp-risc/tests/autodrop.fpr",
+      "repository": "fprisc",
+      "path": "tests/autodrop.fpr"
+    },
+    {
+      "source": "fp-risc/tests/bigframe.fpr",
+      "repository": "fprisc",
+      "path": "tests/bigframe.fpr"
+    },
+    {
+      "source": "fp-risc/tests/bigfree.fpr",
+      "repository": "fprisc",
+      "path": "tests/bigfree.fpr"
+    },
+    {
+      "source": "fp-risc/tests/both.sol",
+      "repository": "fprisc",
+      "path": "tests/both.sol"
+    },
+    {
+      "source": "fp-risc/tests/coreutil.fpr",
+      "repository": "qos",
+      "path": "fp-risc/tests/coreutil.fpr"
+    },
+    {
+      "source": "fp-risc/tests/deepsend.fpr",
+      "repository": "fprisc",
+      "path": "tests/deepsend.fpr"
+    },
+    {
+      "source": "fp-risc/tests/demo.fpr",
+      "repository": "fprisc",
+      "path": "tests/demo.fpr"
+    },
+    {
+      "source": "fp-risc/tests/dtree.fpr",
+      "repository": "fprisc",
+      "path": "tests/dtree.fpr"
+    },
+    {
+      "source": "fp-risc/tests/dungeon.fpr",
+      "repository": "qos",
+      "path": "fp-risc/tests/dungeon.fpr"
+    },
+    {
+      "source": "fp-risc/tests/editor.fpr",
+      "repository": "qos",
+      "path": "fp-risc/tests/editor.fpr"
+    },
+    {
+      "source": "fp-risc/tests/eq.fpr",
+      "repository": "fprisc",
+      "path": "tests/eq.fpr"
+    },
+    {
+      "source": "fp-risc/tests/ergo.fpr",
+      "repository": "fprisc",
+      "path": "tests/ergo.fpr"
+    },
+    {
+      "source": "fp-risc/tests/fanin.fpr",
+      "repository": "fprisc",
+      "path": "tests/fanin.fpr"
+    },
+    {
+      "source": "fp-risc/tests/float.fpr",
+      "repository": "fprisc",
+      "path": "tests/float.fpr"
+    },
+    {
+      "source": "fp-risc/tests/fmath.fpr",
+      "repository": "fprisc",
+      "path": "tests/fmath.fpr"
+    },
+    {
+      "source": "fp-risc/tests/frames.fpr",
+      "repository": "fprisc",
+      "path": "tests/frames.fpr"
+    },
+    {
+      "source": "fp-risc/tests/fuse.fpr",
+      "repository": "fprisc",
+      "path": "tests/fuse.fpr"
+    },
+    {
+      "source": "fp-risc/tests/fvec.fpr",
+      "repository": "fprisc",
+      "path": "tests/fvec.fpr"
+    },
+    {
+      "source": "fp-risc/tests/fvec2.fpr",
+      "repository": "fprisc",
+      "path": "tests/fvec2.fpr"
+    },
+    {
+      "source": "fp-risc/tests/gfxkeys.fpr",
+      "repository": "qos",
+      "path": "fp-risc/tests/gfxkeys.fpr"
+    },
+    {
+      "source": "fp-risc/tests/gfxmesh.fpr",
+      "repository": "qos",
+      "path": "fp-risc/tests/gfxmesh.fpr"
+    },
+    {
+      "source": "fp-risc/tests/gfxsmoke.fpr",
+      "repository": "qos",
+      "path": "fp-risc/tests/gfxsmoke.fpr"
+    },
+    {
+      "source": "fp-risc/tests/gitorder.sol",
+      "repository": "fprisc",
+      "path": "tests/gitorder.sol"
+    },
+    {
+      "source": "fp-risc/tests/gitpush.sol",
+      "repository": "fprisc",
+      "path": "tests/gitpush.sol"
+    },
+    {
+      "source": "fp-risc/tests/gitquery.sol",
+      "repository": "fprisc",
+      "path": "tests/gitquery.sol"
+    },
+    {
+      "source": "fp-risc/tests/gitsecond.sol",
+      "repository": "fprisc",
+      "path": "tests/gitsecond.sol"
+    },
+    {
+      "source": "fp-risc/tests/gitundo.sol",
+      "repository": "fprisc",
+      "path": "tests/gitundo.sol"
+    },
+    {
+      "source": "fp-risc/tests/gitwrap.sol",
+      "repository": "fprisc",
+      "path": "tests/gitwrap.sol"
+    },
+    {
+      "source": "fp-risc/tests/gl2d.fpr",
+      "repository": "qos",
+      "path": "fp-risc/tests/gl2d.fpr"
+    },
+    {
+      "source": "fp-risc/tests/gltext.fpr",
+      "repository": "qos",
+      "path": "fp-risc/tests/gltext.fpr"
+    },
+    {
+      "source": "fp-risc/tests/growlog.fpr",
+      "repository": "qos",
+      "path": "fp-risc/tests/growlog.fpr"
+    },
+    {
+      "source": "fp-risc/tests/hello.fpr",
+      "repository": "fprisc",
+      "path": "tests/hello.fpr"
+    },
+    {
+      "source": "fp-risc/tests/holes.sol",
+      "repository": "fprisc",
+      "path": "tests/holes.sol"
+    },
+    {
+      "source": "fp-risc/tests/holes_named.fpr",
+      "repository": "fprisc",
+      "path": "tests/holes_named.fpr"
+    },
+    {
+      "source": "fp-risc/tests/hostlog.fpr",
+      "repository": "qos",
+      "path": "fp-risc/tests/hostlog.fpr"
+    },
+    {
+      "source": "fp-risc/tests/linpap.fpr",
+      "repository": "fprisc",
+      "path": "tests/linpap.fpr"
+    },
+    {
+      "source": "fp-risc/tests/livereload.fpr",
+      "repository": "qos",
+      "path": "fp-risc/tests/livereload.fpr"
+    },
+    {
+      "source": "fp-risc/tests/logstorm.fpr",
+      "repository": "qos",
+      "path": "fp-risc/tests/logstorm.fpr"
+    },
+    {
+      "source": "fp-risc/tests/mailbox.fpr",
+      "repository": "fprisc",
+      "path": "tests/mailbox.fpr"
+    },
+    {
+      "source": "fp-risc/tests/mathbad.fpr",
+      "repository": "qos",
+      "path": "fp-risc/tests/mathbad.fpr"
+    },
+    {
+      "source": "fp-risc/tests/mathv1.fpr",
+      "repository": "qos",
+      "path": "fp-risc/tests/mathv1.fpr"
+    },
+    {
+      "source": "fp-risc/tests/mathv2.fpr",
+      "repository": "qos",
+      "path": "fp-risc/tests/mathv2.fpr"
+    },
+    {
+      "source": "fp-risc/tests/matvec.fpr",
+      "repository": "fprisc",
+      "path": "tests/matvec.fpr"
+    },
+    {
+      "source": "fp-risc/tests/measure.fpr",
+      "repository": "fprisc",
+      "path": "tests/measure.fpr"
+    },
+    {
+      "source": "fp-risc/tests/memory.fpr",
+      "repository": "fprisc",
+      "path": "tests/memory.fpr"
+    },
+    {
+      "source": "fp-risc/tests/msgpack.fpr",
+      "repository": "fprisc",
+      "path": "tests/msgpack.fpr"
+    },
+    {
+      "source": "fp-risc/tests/music.fpr",
+      "repository": "qos",
+      "path": "fp-risc/tests/music.fpr"
+    },
+    {
+      "source": "fp-risc/tests/mvugame.fpr",
+      "repository": "qos",
+      "path": "fp-risc/tests/mvugame.fpr"
+    },
+    {
+      "source": "fp-risc/tests/mvulat.fpr",
+      "repository": "qos",
+      "path": "fp-risc/tests/mvulat.fpr"
+    },
+    {
+      "source": "fp-risc/tests/mvutick.fpr",
+      "repository": "qos",
+      "path": "fp-risc/tests/mvutick.fpr"
+    },
+    {
+      "source": "fp-risc/tests/mvuweb.fpr",
+      "repository": "qos",
+      "path": "fp-risc/tests/mvuweb.fpr"
+    },
+    {
+      "source": "fp-risc/tests/notesed1.fpr",
+      "repository": "qos",
+      "path": "fp-risc/tests/notesed1.fpr"
+    },
+    {
+      "source": "fp-risc/tests/notesed2.fpr",
+      "repository": "qos",
+      "path": "fp-risc/tests/notesed2.fpr"
+    },
+    {
+      "source": "fp-risc/tests/notesedbad.fpr",
+      "repository": "qos",
+      "path": "fp-risc/tests/notesedbad.fpr"
+    },
+    {
+      "source": "fp-risc/tests/opsugar.fpr",
+      "repository": "fprisc",
+      "path": "tests/opsugar.fpr"
+    },
+    {
+      "source": "fp-risc/tests/panicpersist.fpr",
+      "repository": "qos",
+      "path": "fp-risc/tests/panicpersist.fpr"
+    },
+    {
+      "source": "fp-risc/tests/patguard.fpr",
+      "repository": "fprisc",
+      "path": "tests/patguard.fpr"
+    },
+    {
+      "source": "fp-risc/tests/pathnotes.fpr",
+      "repository": "qos",
+      "path": "fp-risc/tests/pathnotes.fpr"
+    },
+    {
+      "source": "fp-risc/tests/paths.fpr",
+      "repository": "fprisc",
+      "path": "tests/paths.fpr"
+    },
+    {
+      "source": "fp-risc/tests/pingpong.fpr",
+      "repository": "fprisc",
+      "path": "tests/pingpong.fpr"
+    },
+    {
+      "source": "fp-risc/tests/plughello.fpr",
+      "repository": "qos",
+      "path": "fp-risc/tests/plughello.fpr"
+    },
+    {
+      "source": "fp-risc/tests/plugmini.fpr",
+      "repository": "qos",
+      "path": "fp-risc/tests/plugmini.fpr"
+    },
+    {
+      "source": "fp-risc/tests/pos.fpr",
+      "repository": "qos",
+      "path": "fp-risc/tests/pos.fpr"
+    },
+    {
+      "source": "fp-risc/tests/precond.fpr",
+      "repository": "fprisc",
+      "path": "tests/precond.fpr"
+    },
+    {
+      "source": "fp-risc/tests/procdefer.sol",
+      "repository": "fprisc",
+      "path": "tests/procdefer.sol"
+    },
+    {
+      "source": "fp-risc/tests/procfail.sol",
+      "repository": "fprisc",
+      "path": "tests/procfail.sol"
+    },
+    {
+      "source": "fp-risc/tests/procorder.sol",
+      "repository": "fprisc",
+      "path": "tests/procorder.sol"
+    },
+    {
+      "source": "fp-risc/tests/procquery.sol",
+      "repository": "fprisc",
+      "path": "tests/procquery.sol"
+    },
+    {
+      "source": "fp-risc/tests/qar.fpr",
+      "repository": "qos",
+      "path": "fp-risc/tests/qar.fpr"
+    },
+    {
+      "source": "fp-risc/tests/qdisk.fpr",
+      "repository": "qos",
+      "path": "fp-risc/tests/qdisk.fpr"
+    },
+    {
+      "source": "fp-risc/tests/qdisk2.fpr",
+      "repository": "qos",
+      "path": "fp-risc/tests/qdisk2.fpr"
+    },
+    {
+      "source": "fp-risc/tests/qload.fpr",
+      "repository": "qos",
+      "path": "fp-risc/tests/qload.fpr"
+    },
+    {
+      "source": "fp-risc/tests/qsys.fpr",
+      "repository": "qos",
+      "path": "fp-risc/tests/qsys.fpr"
+    },
+    {
+      "source": "fp-risc/tests/rawdata/asus-cleaned.csv",
+      "repository": "fprisc",
+      "path": "tests/rawdata/asus-cleaned.csv"
+    },
+    {
+      "source": "fp-risc/tests/rawdata/samsung-cleaned.csv",
+      "repository": "fprisc",
+      "path": "tests/rawdata/samsung-cleaned.csv"
+    },
+    {
+      "source": "fp-risc/tests/rawdata/samsung.csv",
+      "repository": "fprisc",
+      "path": "tests/rawdata/samsung.csv"
+    },
+    {
+      "source": "fp-risc/tests/rawdata/samsung2.csv",
+      "repository": "fprisc",
+      "path": "tests/rawdata/samsung2.csv"
+    },
+    {
+      "source": "fp-risc/tests/recfold.fpr",
+      "repository": "fprisc",
+      "path": "tests/recfold.fpr"
+    },
+    {
+      "source": "fp-risc/tests/selfhost.fpr",
+      "repository": "qos",
+      "path": "fp-risc/tests/selfhost.fpr"
+    },
+    {
+      "source": "fp-risc/tests/sendarc.fpr",
+      "repository": "fprisc",
+      "path": "tests/sendarc.fpr"
+    },
+    {
+      "source": "fp-risc/tests/sendlin.fpr",
+      "repository": "fprisc",
+      "path": "tests/sendlin.fpr"
+    },
+    {
+      "source": "fp-risc/tests/split.fpr",
+      "repository": "fprisc",
+      "path": "tests/split.fpr"
+    },
+    {
+      "source": "fp-risc/tests/stduse.fpr",
+      "repository": "fprisc",
+      "path": "tests/stduse.fpr"
+    },
+    {
+      "source": "fp-risc/tests/svcurl.fpr",
+      "repository": "qos",
+      "path": "fp-risc/tests/svcurl.fpr"
+    },
+    {
+      "source": "fp-risc/tests/sysbad.fpr",
+      "repository": "qos",
+      "path": "fp-risc/tests/sysbad.fpr"
+    },
+    {
+      "source": "fp-risc/tests/sysdisk.fpr",
+      "repository": "qos",
+      "path": "fp-risc/tests/sysdisk.fpr"
+    },
+    {
+      "source": "fp-risc/tests/sysed1.fpr",
+      "repository": "qos",
+      "path": "fp-risc/tests/sysed1.fpr"
+    },
+    {
+      "source": "fp-risc/tests/sysed2.fpr",
+      "repository": "qos",
+      "path": "fp-risc/tests/sysed2.fpr"
+    },
+    {
+      "source": "fp-risc/tests/timer.fpr",
+      "repository": "qos",
+      "path": "fp-risc/tests/timer.fpr"
+    },
+    {
+      "source": "fp-risc/tests/timerroute.fpr",
+      "repository": "qos",
+      "path": "fp-risc/tests/timerroute.fpr"
+    },
+    {
+      "source": "fp-risc/tests/tpar.fpr",
+      "repository": "fprisc",
+      "path": "tests/tpar.fpr"
+    },
+    {
+      "source": "fp-risc/tests/txnabort.sol",
+      "repository": "fprisc",
+      "path": "tests/txnabort.sol"
+    },
+    {
+      "source": "fp-risc/tests/txnpanic.sol",
+      "repository": "fprisc",
+      "path": "tests/txnpanic.sol"
+    },
+    {
+      "source": "fp-risc/tests/txnrace.sol",
+      "repository": "fprisc",
+      "path": "tests/txnrace.sol"
+    },
+    {
+      "source": "fp-risc/tests/txnretry.sol",
+      "repository": "fprisc",
+      "path": "tests/txnretry.sol"
+    },
+    {
+      "source": "fp-risc/tests/txnshqfail.sol",
+      "repository": "fprisc",
+      "path": "tests/txnshqfail.sol"
+    },
+    {
+      "source": "fp-risc/tests/typed.fpr",
+      "repository": "fprisc",
+      "path": "tests/typed.fpr"
+    },
+    {
+      "source": "fp-risc/tests/uartroute.fpr",
+      "repository": "qos",
+      "path": "fp-risc/tests/uartroute.fpr"
+    },
+    {
+      "source": "fp-risc/tests/uartsvc.fpr",
+      "repository": "qos",
+      "path": "fp-risc/tests/uartsvc.fpr"
+    },
+    {
+      "source": "fp-risc/tests/vecedge.fpr",
+      "repository": "fprisc",
+      "path": "tests/vecedge.fpr"
+    },
+    {
+      "source": "fp-risc/tests/vecfuse2.fpr",
+      "repository": "fprisc",
+      "path": "tests/vecfuse2.fpr"
+    },
+    {
+      "source": "fp-risc/tests/vfilter.fpr",
+      "repository": "fprisc",
+      "path": "tests/vfilter.fpr"
+    },
+    {
+      "source": "fp-risc/tests/wideabi.fpr",
+      "repository": "fprisc",
+      "path": "tests/wideabi.fpr"
+    },
+    {
+      "source": "fp-risc/tests/widearity.fpr",
+      "repository": "fprisc",
+      "path": "tests/widearity.fpr"
+    },
+    {
+      "source": "fp-risc/tools/build-process-app.sh",
+      "repository": "qos",
+      "path": "fp-risc/tools/build-process-app.sh"
+    },
+    {
+      "source": "fp-risc/tools/dedup-ratchet.sh",
+      "repository": "fprisc",
+      "path": "tools/dedup-ratchet.sh"
+    },
+    {
+      "source": "fp-risc/tools/fprd.py",
+      "repository": "qos",
+      "path": "fp-risc/tools/fprd.py"
+    },
+    {
+      "source": "fp-risc/tools/genapps.py",
+      "repository": "qos",
+      "path": "fp-risc/tools/genapps.py"
+    },
+    {
+      "source": "fp-risc/tools/gfx-gl-check.sh",
+      "repository": "qos",
+      "path": "fp-risc/tools/gfx-gl-check.sh"
+    },
+    {
+      "source": "fp-risc/tools/hjrun.c",
+      "repository": "fprisc",
+      "path": "tools/hjrun.c"
+    },
+    {
+      "source": "fp-risc/tools/kbwriter.py",
+      "repository": "qos",
+      "path": "fp-risc/tools/kbwriter.py"
+    },
+    {
+      "source": "fp-risc/tools/mkdisk.py",
+      "repository": "qos",
+      "path": "fp-risc/tools/mkdisk.py"
+    },
+    {
+      "source": "fp-risc/tools/mkfont.py",
+      "repository": "qos",
+      "path": "fp-risc/tools/mkfont.py"
+    },
+    {
+      "source": "fp-risc/tools/mkmesh.py",
+      "repository": "qos",
+      "path": "fp-risc/tools/mkmesh.py"
+    },
+    {
+      "source": "fp-risc/tools/mkqa.py",
+      "repository": "qos",
+      "path": "fp-risc/tools/mkqa.py"
+    },
+    {
+      "source": "fp-risc/tools/pkgstore-roundtrip.sh",
+      "repository": "qos",
+      "path": "fp-risc/tools/pkgstore-roundtrip.sh"
+    },
+    {
+      "source": "fp-risc/tools/sol-hjit-a64-check.sh",
+      "repository": "fprisc",
+      "path": "tools/sol-hjit-a64-check.sh"
+    },
+    {
+      "source": "fp-risc/tools/sol-proc-git-check.sh",
+      "repository": "fprisc",
+      "path": "tools/sol-proc-git-check.sh"
+    },
+    {
+      "source": "fp-risc/tools/sol-safety-check.sh",
+      "repository": "fprisc",
+      "path": "tools/sol-safety-check.sh"
+    },
+    {
+      "source": "fp-risc/tools/sol-scripts-check.sh",
+      "repository": "fprisc",
+      "path": "tools/sol-scripts-check.sh"
+    },
+    {
+      "source": "fp-risc/tools/sol-txn-check.sh",
+      "repository": "fprisc",
+      "path": "tools/sol-txn-check.sh"
+    },
+    {
+      "source": "fp-risc/tools/unsafe-fixup.py",
+      "repository": "fprisc",
+      "path": "tools/unsafe-fixup.py"
+    },
+    {
+      "source": "fp-risc/tools/wcet-ratchet.sh",
+      "repository": "fprisc",
+      "path": "tools/wcet-ratchet.sh"
+    },
+    {
+      "source": "hal/core/actors.c",
+      "repository": "fprisc",
+      "path": "hal/core/actors.c"
+    },
+    {
+      "source": "hal/core/apps.c",
+      "repository": "qos",
+      "path": "hal/core/apps.c"
+    },
+    {
+      "source": "hal/core/bits.c",
+      "repository": "fprisc",
+      "path": "hal/core/bits.c"
+    },
+    {
+      "source": "hal/core/buddy.c",
+      "repository": "fprisc",
+      "path": "hal/core/buddy.c"
+    },
+    {
+      "source": "hal/core/elfload.c",
+      "repository": "qos",
+      "path": "hal/core/elfload.c"
+    },
+    {
+      "source": "hal/core/fpr.h",
+      "repository": "fprisc",
+      "path": "hal/core/fpr.h"
+    },
+    {
+      "source": "hal/core/mod.c",
+      "repository": "fprisc",
+      "path": "hal/core/mod.c"
+    },
+    {
+      "source": "hal/core/process.c",
+      "repository": "qos",
+      "path": "hal/core/process.c"
+    },
+    {
+      "source": "hal/core/qaimg.c",
+      "repository": "qos",
+      "path": "hal/core/qaimg.c"
+    },
+    {
+      "source": "hal/core/runtime.c",
+      "repository": "fprisc",
+      "path": "hal/core/runtime.c"
+    },
+    {
+      "source": "hal/core/sstr.c",
+      "repository": "fprisc",
+      "path": "hal/core/sstr.c"
+    },
+    {
+      "source": "hal/core/vec.c",
+      "repository": "fprisc",
+      "path": "hal/core/vec.c"
+    },
+    {
+      "source": "hal/core/vec_layout.h",
+      "repository": "fprisc",
+      "path": "hal/core/vec_layout.h"
+    },
+    {
+      "source": "hal/unix/blk_raw.c",
+      "repository": "qos",
+      "path": "hal/unix/blk_raw.c"
+    },
+    {
+      "source": "hal/unix/blk_raw.h",
+      "repository": "qos",
+      "path": "hal/unix/blk_raw.h"
+    },
+    {
+      "source": "hal/unix/ctx_a64.S",
+      "repository": "fprisc",
+      "path": "hal/unix/ctx_a64.S"
+    },
+    {
+      "source": "hal/unix/ctx_x64.S",
+      "repository": "fprisc",
+      "path": "hal/unix/ctx_x64.S"
+    },
+    {
+      "source": "hal/unix/drm_scanout.h",
+      "repository": "qos",
+      "path": "hal/unix/drm_scanout.h"
+    },
+    {
+      "source": "hal/unix/evdev_raw.c",
+      "repository": "qos",
+      "path": "hal/unix/evdev_raw.c"
+    },
+    {
+      "source": "hal/unix/evdev_raw.h",
+      "repository": "qos",
+      "path": "hal/unix/evdev_raw.h"
+    },
+    {
+      "source": "hal/unix/font_sdf.h",
+      "repository": "qos",
+      "path": "hal/unix/font_sdf.h"
+    },
+    {
+      "source": "hal/unix/gfx.c",
+      "repository": "qos",
+      "path": "hal/unix/gfx.c"
+    },
+    {
+      "source": "hal/unix/gfx_raw.h",
+      "repository": "qos",
+      "path": "hal/unix/gfx_raw.h"
+    },
+    {
+      "source": "hal/unix/hostlog.c",
+      "repository": "qos",
+      "path": "hal/unix/hostlog.c"
+    },
+    {
+      "source": "hal/unix/hostlog.h",
+      "repository": "qos",
+      "path": "hal/unix/hostlog.h"
+    },
+    {
+      "source": "hal/unix/minimp3.h",
+      "repository": "qos",
+      "path": "hal/unix/minimp3.h"
+    },
+    {
+      "source": "hal/unix/net_raw.c",
+      "repository": "qos",
+      "path": "hal/unix/net_raw.c"
+    },
+    {
+      "source": "hal/unix/net_raw.h",
+      "repository": "qos",
+      "path": "hal/unix/net_raw.h"
+    },
+    {
+      "source": "hal/unix/snd_raw.c",
+      "repository": "qos",
+      "path": "hal/unix/snd_raw.c"
+    },
+    {
+      "source": "hal/unix/snd_raw.h",
+      "repository": "qos",
+      "path": "hal/unix/snd_raw.h"
+    },
+    {
+      "source": "hal/unix/tty_raw.c",
+      "repository": "qos",
+      "path": "hal/unix/tty_raw.c"
+    },
+    {
+      "source": "hal/virt/asm.h",
+      "repository": "fprisc",
+      "path": "hal/virt/asm.h"
+    },
+    {
+      "source": "hal/virt/blk.c",
+      "repository": "fprisc",
+      "path": "hal/virt/blk.c"
+    },
+    {
+      "source": "hal/virt/crt0.S",
+      "repository": "fprisc",
+      "path": "hal/virt/crt0.S"
+    },
+    {
+      "source": "hal/virt/ctx.S",
+      "repository": "fprisc",
+      "path": "hal/virt/ctx.S"
+    },
+    {
+      "source": "hal/virt/ctx_fab.c",
+      "repository": "fprisc",
+      "path": "hal/virt/ctx_fab.c"
+    },
+    {
+      "source": "hal/virt/hal.c",
+      "repository": "fprisc",
+      "path": "hal/virt/hal.c"
+    },
+    {
+      "source": "hal/virt/link-app.ld",
+      "repository": "fprisc",
+      "path": "hal/virt/link-app.ld"
+    },
+    {
+      "source": "hal/virt/link.ld",
+      "repository": "fprisc",
+      "path": "hal/virt/link.ld"
+    },
+    {
+      "source": "hal/virt/memshim.c",
+      "repository": "fprisc",
+      "path": "hal/virt/memshim.c"
+    },
+    {
+      "source": "hal/virt/net.c",
+      "repository": "fprisc",
+      "path": "hal/virt/net.c"
+    },
+    {
+      "source": "hal/virt/plic.c",
+      "repository": "fprisc",
+      "path": "hal/virt/plic.c"
+    },
+    {
+      "source": "packaging/homebrew/qos-fpr.rb",
+      "repository": "qos",
+      "path": "packaging/homebrew/qos-fpr.rb"
+    },
+    {
+      "source": "qos.py",
+      "repository": "qos",
+      "path": "qos.py"
+    },
+    {
+      "source": "qos/.DS_Store",
+      "repository": "qos",
+      "path": "qos/.DS_Store"
+    },
+    {
+      "source": "qos/Makefile",
+      "repository": "qos",
+      "path": "qos/Makefile"
+    },
+    {
+      "source": "qos/appside/entry.c",
+      "repository": "qos",
+      "path": "qos/appside/entry.c"
+    },
+    {
+      "source": "qos/appside/hal.c",
+      "repository": "qos",
+      "path": "qos/appside/hal.c"
+    },
+    {
+      "source": "qos/appside/link-qosapp-a64.ld",
+      "repository": "qos",
+      "path": "qos/appside/link-qosapp-a64.ld"
+    },
+    {
+      "source": "qos/appside/link-qosapp.ld",
+      "repository": "qos",
+      "path": "qos/appside/link-qosapp.ld"
+    },
+    {
+      "source": "qos/appside/link-qosplug.ld",
+      "repository": "qos",
+      "path": "qos/appside/link-qosplug.ld"
+    },
+    {
+      "source": "qos/appside/qos_abi.h",
+      "repository": "qos",
+      "path": "qos/appside/qos_abi.h"
+    },
+    {
+      "source": "qos/appside/support.c",
+      "repository": "qos",
+      "path": "qos/appside/support.c"
+    },
+    {
+      "source": "qos/native/proc_entry.c",
+      "repository": "qos",
+      "path": "qos/native/proc_entry.c"
+    },
+    {
+      "source": "qos/portable/compile.c",
+      "repository": "qos",
+      "path": "qos/portable/compile.c"
+    },
+    {
+      "source": "qos/portable/haltab.c",
+      "repository": "qos",
+      "path": "qos/portable/haltab.c"
+    },
+    {
+      "source": "qos/portable/main.c",
+      "repository": "qos",
+      "path": "qos/portable/main.c"
+    },
+    {
+      "source": "qos/portable/qa.c",
+      "repository": "qos",
+      "path": "qos/portable/qa.c"
+    },
+    {
+      "source": "qos/portable/qa.h",
+      "repository": "qos",
+      "path": "qos/portable/qa.h"
+    },
+    {
+      "source": "qos/portable/store.c",
+      "repository": "qos",
+      "path": "qos/portable/store.c"
+    },
+    {
+      "source": "qos/qos-store/qsys.kv",
+      "repository": "qos",
+      "path": "qos/qos-store/qsys.kv"
+    },
+    {
+      "source": "qos/qosp-a64",
+      "repository": "qos",
+      "path": "qos/qosp-a64"
+    },
+    {
+      "source": "qos/tests-host/blkraw-check.sh",
+      "repository": "qos",
+      "path": "qos/tests-host/blkraw-check.sh"
+    },
+    {
+      "source": "qos/tests-host/blkraw_check.c",
+      "repository": "qos",
+      "path": "qos/tests-host/blkraw_check.c"
+    },
+    {
+      "source": "qos/tests-host/buddy-check.sh",
+      "repository": "qos",
+      "path": "qos/tests-host/buddy-check.sh"
+    },
+    {
+      "source": "qos/tests-host/buddy_check.c",
+      "repository": "qos",
+      "path": "qos/tests-host/buddy_check.c"
+    },
+    {
+      "source": "qos/tests-host/dungeon-check.sh",
+      "repository": "qos",
+      "path": "qos/tests-host/dungeon-check.sh"
+    },
+    {
+      "source": "qos/tests-host/fprlive-check.py",
+      "repository": "qos",
+      "path": "qos/tests-host/fprlive-check.py"
+    },
+    {
+      "source": "qos/tests-host/fprlive-check.sh",
+      "repository": "qos",
+      "path": "qos/tests-host/fprlive-check.sh"
+    },
+    {
+      "source": "qos/tests-host/install-check.sh",
+      "repository": "qos",
+      "path": "qos/tests-host/install-check.sh"
+    },
+    {
+      "source": "qos/tests-host/mvuweb-check.sh",
+      "repository": "qos",
+      "path": "qos/tests-host/mvuweb-check.sh"
+    },
+    {
+      "source": "qos/tests-host/plugload-check.sh",
+      "repository": "qos",
+      "path": "qos/tests-host/plugload-check.sh"
+    },
+    {
+      "source": "qos/tests-host/plugload_check.c",
+      "repository": "qos",
+      "path": "qos/tests-host/plugload_check.c"
+    },
+    {
+      "source": "qos/tests-host/pos1-check.py",
+      "repository": "qos",
+      "path": "qos/tests-host/pos1-check.py"
+    },
+    {
+      "source": "qos/tests-host/pos1-check.sh",
+      "repository": "qos",
+      "path": "qos/tests-host/pos1-check.sh"
+    },
+    {
+      "source": "qos/tests-host/terra2-check.sh",
+      "repository": "qos",
+      "path": "qos/tests-host/terra2-check.sh"
+    },
+    {
+      "source": "qos/tests-host/terra2-keys.py",
+      "repository": "qos",
+      "path": "qos/tests-host/terra2-keys.py"
+    },
+    {
+      "source": "qos/tests-host/verify/buddy_cbmc.c",
+      "repository": "qos",
+      "path": "qos/tests-host/verify/buddy_cbmc.c"
+    },
+    {
+      "source": "qos/tests-host/verify/pbt_buddy.py",
+      "repository": "qos",
+      "path": "qos/tests-host/verify/pbt_buddy.py"
+    },
+    {
+      "source": "qos/tests-host/verify/spsc.pml",
+      "repository": "qos",
+      "path": "qos/tests-host/verify/spsc.pml"
+    },
+    {
+      "source": "qos/tests-host/verify/verify.sh",
+      "repository": "qos",
+      "path": "qos/tests-host/verify/verify.sh"
+    },
+    {
+      "source": "release.toml",
+      "repository": "qos",
+      "path": "release.toml"
+    },
+    {
+      "source": "zip-project.sh",
+      "repository": "qos",
+      "path": "zip-project.sh"
+    }
+  ]
+}

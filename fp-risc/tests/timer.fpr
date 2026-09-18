@@ -19,7 +19,7 @@
 # deadlines both fire through the ONE armed slot, nearest first.
 
 TM = use "../programs/mods/timer".
-T = use "../std/timer".
+T = use "std/timer".
 
 TFire = TM.TFire.
 

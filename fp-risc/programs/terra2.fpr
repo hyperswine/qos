@@ -45,11 +45,11 @@
 
 unsafe program.
 
-MV = use "../std/mvu".
+MV = use "std/mvu".
 GL = use "mods/glsvc".
 S2 = use "mods/scene2d".
 Fm = use "mods/fontm".
-FS = use "../std/fs".
+FS = use "std/fs".
 Core = use "mods/coreutil".
 Sfx = use "mods/sfx".
 Tank = use "../models/tank/tank".

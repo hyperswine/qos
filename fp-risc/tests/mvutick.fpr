@@ -19,7 +19,7 @@
 # Expected result line:
 #   mvutick: final count=31, arena <g>g/<m>MB [mvu: <n> frames, 4 statics builds]
 
-MV = use "../std/mvu".
+MV = use "std/mvu".
 
 MApp = MV.MApp.
 MQuit = MV.MQuit.

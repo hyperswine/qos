@@ -1,8 +1,0 @@
--- per-machine knobs (copy to cabal.project.local):
-package fp-risc
-  -- `make fpr` discovers Homebrew llvm@18 automatically on macOS.
-  -- These are only needed for direct `cabal build` on this example host.
-  extra-lib-dirs: /opt/homebrew/opt/llvm@18/lib
-  extra-include-dirs: /opt/homebrew/opt/llvm@18/include
-  -- profiling build: uncomment
-  -- profiling: True

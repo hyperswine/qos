@@ -1,4 +1,5 @@
 #!/bin/bash
+: "${FPRISC_ROOT:?Set FPRISC_ROOT to the fprisc checkout}"
 # install-check.sh -- the tree as a TOOLCHAIN: installed under a prefix,
 # then used from an empty directory the way `brew install qos-fpr` would
 # be used, with the checkout nowhere in sight.
@@ -16,8 +17,8 @@ P="$T/prefix"
 W="$T/work"
 fail() { echo "install-check: FAIL: $1"; tail -20 "$T/log" 2>/dev/null; exit 1; }
 "$HERE/qos.py" install --prefix "$P" > "$T/log" 2>&1 || fail "install"
-for f in bin/fpr bin/qos bin/sol libexec/qos-fpr/.installed libexec/qos-fpr/fp-risc/fpr libexec/qos-fpr/qos/qosp \
-         libexec/qos-fpr/fp-risc/core/prelude.fpr libexec/qos-fpr/fp-risc/std/mvu.fpr libexec/qos-fpr/hal/core/runtime.c; do
+for f in bin/fpr bin/qos bin/sol libexec/qos-fpr/.installed libexec/qos-fpr/toolchain/fpr libexec/qos-fpr/qos/qosp \
+         libexec/qos-fpr/toolchain/core/prelude.fpr libexec/qos-fpr/toolchain/std/mvu.fpr libexec/qos-fpr/toolchain/hal/core/runtime.c; do
   [ -e "$P/$f" ] || fail "missing $P/$f"
 done
 [ -L "$P/bin/fpr" ] && [ -L "$P/bin/qos" ] || fail "bin/fpr and bin/qos must be symlinks (Home.hs resolves the real path)"
@@ -34,7 +35,7 @@ qos run hello/app.fpr > "$T/log" 2>&1 || fail "qos run hello"
 grep -aq "expect: found" "$T/log" || fail "the template's own expect line"
 [ -f .qos/app.qa ] || fail "the .qa should land in the project's .qos/ (got: $(ls -a))"
 # 2. an in-tree test program by absolute path (the compiler's home store + std)
-qos run "$P/libexec/qos-fpr/fp-risc/tests/eq.fpr" > "$T/log" 2>&1 || fail "qos run tests/eq.fpr"
+qos run "$P/libexec/qos-fpr/toolchain/tests/eq.fpr" > "$T/log" 2>&1 || fail "qos run tests/eq.fpr"
 grep -aq "eq: done" "$T/log" || fail "eq.fpr's transcript"
 # 3. sol, with the installed lib
 printf 'B = use "sol/lib/base".\n> print "sol: {B.max0 7}{B.boolInt True}".\n' > s.sol

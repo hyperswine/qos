@@ -44,11 +44,11 @@
 # Frames above 4096 bytes are refused (1009).
 # ============================================================================
 
-MV = use "../../std/mvu".
+MV = use "std/mvu".
 G  = use "genview".
 LJ = use "fprlivejs".
 Core = use "coreutil".
-AC = use "../../std/actor".
+AC = use "std/actor".
 
 STick = MV.STick.
 MQuit = MV.MQuit.
