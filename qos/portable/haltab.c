@@ -89,6 +89,14 @@ static void t_mmio_write(uint64_t addr, uint64_t v, uint32_t width) {
 }
 
 static int64_t qosp_clock_now(void) { return (int64_t)time(NULL); }
+/* the stack guard IS the posix HAL's (qosp is a posix FP-RISC program, so
+ * fprisc/hal/posix/hal.c is linked here): one implementation, two callers */
+void hal_stack_guard(void *lo, uint64_t size);
+void hal_stack_unguard(void *lo, uint64_t size);
+static void qosp_stack_guard(void *lo, uint64_t size) { hal_stack_guard(lo, size); }
+static void qosp_stack_unguard(void *lo, uint64_t size) { hal_stack_unguard(lo, size); }
+void *(*qosp_app_stack_query)(uint64_t *id, uint64_t *size); /* host.c's fault handler asks it */
+static void qosp_set_stack_query(void *(*q)(uint64_t *, uint64_t *)) { qosp_app_stack_query = q; }
 
 static qos_hal_t the_table = {
     .version = QOS_ABI_VERSION,
@@ -141,6 +149,9 @@ static qos_hal_t the_table = {
 #endif
     /* v11: the wall clock */
     .clock_now = qosp_clock_now,
+    .stack_guard = qosp_stack_guard,
+    .stack_unguard = qosp_stack_unguard,
+    .set_stack_query = qosp_set_stack_query,
 };
 
 const qos_hal_t *qosp_hal_table(void) { return &the_table; }

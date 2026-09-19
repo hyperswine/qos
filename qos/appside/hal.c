@@ -15,6 +15,9 @@ extern const qos_hal_t *qos_hal; /* entry.c installs it first thing */
 
 /* ---- the hal_* obligations (actors.c / runtime.c contract) ---------- */
 void hal_putc(char c) { qos_hal->putc(c); }
+/* actors.c's stack guard: this image cannot protect memory, its host can */
+void hal_stack_guard(void *lo, uw size) { qos_hal->stack_guard(lo, size); }
+void hal_stack_unguard(void *lo, uw size) { qos_hal->stack_unguard(lo, size); }
 void hal_poweroff(int code) { qos_hal->poweroff(code); }
 void fpr_park(void) {
   for (;;) qos_hal->wfi();

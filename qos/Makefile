@@ -75,6 +75,11 @@ REV_FLAG := $(if $(CODEGEN_REV),-DQOSP_CODEGEN_REV=$(CODEGEN_REV),)
 # for module resolution, and qosp.fpr's `use` lines are importer-relative.
 QOSP_FPR = portable/qosp.fpr ../programs/mods/qar.fpr ../programs/mods/manifest.fpr
 QOSP_DEFS = -DQOSP_HOST -DQOS_ARENA_SIZE=($(ARENA_MB)ul<<20) $(REV_FLAG)
+# on arm64 the app keeps its hart in x28; the host's C must never borrow it,
+# or its fault handler could not ask the app which actor was running
+ifneq ($(filter arm64 aarch64,$(shell uname -m)),)
+QOSP_DEFS += -ffixed-x28
+endif
 QOSP_INCS = -I$(HAL)/unix -Iappside -Iportable
 fpr_host = FPR_HOME="$(FPRISC_ROOT)" "$(FPRC)" build portable/qosp.fpr -o $(1) --harts 1 \
 	  $(foreach f,$(2),--with $(f)) \

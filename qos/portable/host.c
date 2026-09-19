@@ -213,10 +213,12 @@ static uint64_t qosp_tls_off(void) {
 static pthread_t hart_threads[QOSP_MAXHARTS];
 static unsigned hart_nthreads;
 struct hart_arg { uint64_t idx; void (*fn)(uint64_t); };
+void hal_fault_altstack(void); /* fprisc/hal/posix/hal.c: this thread's alternate signal stack */
 static void *hart_tramp(void *p) {
   struct hart_arg a = *(struct hart_arg *)p;
   free(p);
   qosp_tls_blk.hart = 0; /* the app's fpr_set_tp fills it */
+  hal_fault_altstack();  /* an alternate signal stack is per thread */
   a.fn(a.idx);
   return 0;
 }
@@ -251,7 +253,21 @@ static uint64_t resolve_nharts(void) {
   return (uint64_t)n;
 }
 
+/* fprisc/hal/posix/hal.c, linked here: the guard's check and its last words */
+int hal_stack_guard_hit(void *lo, uint64_t size, void *addr);
+void hal_stack_overflow_die(uint64_t id, uint64_t size);
+extern void *(*qosp_app_stack_query)(uint64_t *id, uint64_t *size); /* haltab.c */
+static int g_in_app; /* x28 / the TLS hart slot are the APP's while this is set */
+
 static void bus_handler(int sig, siginfo_t *info, void *vctx) {
+  /* first: did an actor run off its stack?  The app's runtime knows which
+   * one is running on this hart; this file is built -ffixed-x28 on arm64,
+   * so the app's hart register is still what the faulting code left. */
+  if (g_in_app && qosp_app_stack_query) {
+    uint64_t id = 0, size = 0;
+    void *lo = qosp_app_stack_query(&id, &size);
+    if (hal_stack_guard_hit(lo, size, info->si_addr)) hal_stack_overflow_die(id, size);
+  }
   /* Diagnostic only: report where the app faulted, then die.  The arena
    * is plain rw with an r-x code prefix (see stage 2), so any fault here
    * is a real bug in the app or the loader, not a protection artifact. */
@@ -333,7 +349,7 @@ static V h_init(V tracev) {
   struct sigaction sa = {0};
   sa.sa_sigaction = bus_handler;
   sigemptyset(&sa.sa_mask);
-  sa.sa_flags = SA_SIGINFO;
+  sa.sa_flags = SA_SIGINFO | SA_ONSTACK; /* the faulting stack may be the exhausted one */
   sigaction(SIGBUS, &sa, NULL);
   sigaction(SIGSEGV, &sa, NULL);
   TRACE("stage 1 (initializer): mapping arena at %#lx (+%lu MiB)\n",
@@ -463,7 +479,9 @@ static V h_run(V idv, V namev, V capsv) {
         arena_base, arena_size >> 20, (int64_t)boot.tls_off);
   static char result[64 * 1024]; /* the entry ABI's buffer (docs/BOUNDS.md) */
   fflush(stdout);
+  g_in_app = 1;
   int64_t rc = enter_app((qos_app_entry_t)g_ld.entry, &boot, result, sizeof result);
+  g_in_app = 0;
   join_harts(); /* every hart loop exited through fpr_process_done */
   if (rc) return res_err("the app entry rejected the boot record (abi mismatch?)");
   return res_ok_str(result, strlen(result));

@@ -201,6 +201,14 @@ typedef struct {
    * person will read back (a receipt's time).  0 where the host has no
    * clock; the monotonic mtime stays the timer. */
   int64_t (*clock_now)(void);
+  /* ---- v13 additions ------------------------------------------------
+   * the stack guard: the app's runtime carves actor stacks out of its own
+   * arena but cannot make memory inaccessible; the host can.  The app
+   * registers `current` so the host's fault handler can ask WHICH actor
+   * ran off its stack and say so by name (docs/BOUNDS.md). */
+  void (*stack_guard)(void *lo, uint64_t size);
+  void (*stack_unguard)(void *lo, uint64_t size);
+  void (*set_stack_query)(void *(*current)(uint64_t *id, uint64_t *size));
 } qos_hal_t;
 
 /* ---- the memory-growth grant (RETIRED in v12) ----------------------

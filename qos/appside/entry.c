@@ -183,6 +183,8 @@ int64_t qos_app_entry(const qos_boot_t *boot, char *result_out,
 
   if (!boot || boot->abi_version != QOS_ABI_VERSION) return -1;
   qos_hal = boot->hal; /* first: panics from here on can reach putc */
+  /* the host's fault handler asks this which actor ran off its stack */
+  qos_hal->set_stack_query((void *(*)(uint64_t *, uint64_t *))fpr_current_stack);
   if (!qos_hal || qos_hal->version != QOS_ABI_VERSION) return -1;
 #if !defined(FPR_QOSAPP_SINGLE) && !defined(__aarch64__)
   fpr_g_tlsoff = boot->tls_off; /* before ANY tp read: fpr_set_tp below
