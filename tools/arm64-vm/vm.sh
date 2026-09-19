@@ -83,8 +83,10 @@ up)
   echo " no ssh after 3 min: see $DIR/serial.log" >&2; exit 1
   ;;
 down)
+  PID=$(cat "$DIR/qemu.pid" 2>/dev/null || true)
   ssh $SSHO dev@127.0.0.1 sudo poweroff 2>/dev/null || true
-  [ -f "$DIR/qemu.pid" ] && { sleep 3; kill "$(cat "$DIR/qemu.pid")" 2>/dev/null || true; rm -f "$DIR/qemu.pid"; }
+  # a clean poweroff ends qemu (and removes its pidfile); otherwise end it
+  [ -n "$PID" ] && { sleep 5; kill "$PID" 2>/dev/null || true; rm -f "$DIR/qemu.pid"; }
   ;;
 provision)
   # what `make fpr`, `./qos.py build` and tools/gfx-gl-check.sh (a GL window under
