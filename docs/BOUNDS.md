@@ -40,31 +40,56 @@ Two build-side fixes from the same day, recorded here because both were silent:
   the apps linked for them use 1 TiB (`qos_abi.h`, `qos-app.mk`); Linux is
   unchanged. This is a symptom of the section below.
 
-## Open: the memory layout is one decision
+## Fixed on 2026-09-20: the arena is a reservation (ABI v14)
 
-App images are linked non-PIC at a fixed address. Everything here follows from
-that:
+| Limit | Was | Now |
+|---|---|---|
+| the arena's size, `ARENA_MB ?= 2048` (`qos/Makefile`, `qos-app.mk`) | 2 GiB, chosen at build time, on both sides | gone: qosp RESERVES address space at the apps' base -- the largest span it can get, 1 TiB down -- and the OS commits pages as the app touches them. `QOSP_ARENA_MB` caps a run. `tests/bigarena.fpr` runs a live heap past the old 2 GiB |
+| the arena's END linked into each app (`--defsym=_proc_arena_end`), which **had to equal** the host's `ARENA_MB` -- "found as random corruption past ~220 sessions" | a silent must-agree between two builds | the app reads the span from the boot record at run time; nothing is linked in |
+| the image, `LENGTH = 16M` | link error past 16 MiB | 1 GiB |
+| the plugin window: 32 MiB at base + 128 MiB, "8 sub-slots of 4 MiB", `PLUG_MAX 8`, and `MOD_MAXATTACH 8` in the runtime | "plugin registry full" at the ninth | 1 GiB at base + 1 GiB; any number of plugins, each of any size, each where it was linked (`PLUGBASE`; `PLUGSLOT` * 4 MiB is only the default spacing); both tables double |
+| freed memory | never returned to the OS | the app's buddy gives the pages of a freed block of 1 MiB or more back through the HAL table (`heap_release`) |
+
+The host makes the reservation before its own heap is reserved (its heap is a
+reservation too, and would otherwise be free to land on the apps' address):
+`hal_heap_before_reserve` in `qos/portable/host.c`. App stacks grow and arity is
+unbounded as everywhere else: `../fprisc/docs/BOUNDS.md`.
+
+## Open: images are linked at a fixed address
+
+What is left of the memory layout is one fact: app and plugin images are
+non-PIC, linked for an address.
 
 | Limit | Where |
 |---|---|
-| the arena's size, `ARENA_MB ?= 2048` | `qos/Makefile`, `qos-app.mk` |
-| the arena's END baked into each app by `--defsym=_proc_arena_end`, which **must** equal the host's `ARENA_MB` -- "found as random corruption past ~220 sessions" | `qos-app.mk` |
-| the image, `LENGTH = 16M` | `qos/appside/link-qosapp.ld`, `link-qosapp-a64.ld` |
-| eight plugin sub-slots of 4 MiB at base + 128 MiB: `QOS_PLUG_SIZE`, `PLUG_MAX 8`, `PLUGSLOT`, and `MOD_MAXATTACH 8` in the runtime | `qos_abi.h`, `qos/portable/main.c`, `qos-app.mk` |
-| the base address itself | `qos_abi.h`, `qos-app.mk` |
-| one process in the native slot, "image larger than the process slot" | `loader/process.c` |
+| the base address itself (16 GiB; 1 TiB on macOS, which reserves the range below) | `qos_abi.h`, `qos-app.mk` |
+| the 1 GiB image window and the 1 GiB plugin window: a plugin reaches the image's symbols with `adrp`, +-4 GiB on aarch64, so the two must sit within reach of each other | `qos_abi.h`, `link-qosapp*.ld` |
+| a plugin's address is chosen when it is BUILT (`PLUGBASE`), so two plugins built for the same address cannot be loaded together, and a plugin must be rebuilt against every shell build (the `plugsyms` absolute-address script) | `qos-app.mk` |
+| one process in the native slot (32 MiB after the kernel's heap), "image larger than the process slot" | `loader/process.c`, `machine/virt/link.ld` |
 
-Two steps, the first small:
+The fix for all four is the same: **relocatable images.** Link apps and plugins
+position-independent (or keep their relocations) and have `fpr_qaimg_place` apply
+them; a plugin then reaches the shell through a symbol table instead of baked
+addresses. That needs the code generators to address external symbols through a
+GOT (`A64.hs`, `X64.hs`, and `la` on rv64), which is why it was not done with the
+rest: it is a compiler change across three backends, not a loader change.
 
-1. **Reserve, then commit.** Hosted, map a very large `PROT_NONE` /
-   `MAP_NORESERVE` range and let the buddy and the counted growth gateway commit
-   into it; pass the arena's end in the boot record (which already exists)
-   instead of linking it in. That retires `ARENA_MB`, `FPR_HEAP_MB` and the
-   must-agree hazard. On bare metal, take the RAM size from the device tree.
-2. **Relocatable images.** Link apps and plugins PIC, or keep relocations and
-   apply them in the loader. The base address, the 16 MiB image cap, the plugin
-   slot count and size, and the macOS problem all disappear together, leaving
-   the address space and physical RAM as the only bounds.
+## Deferred: written down, to be addressed another time
+
+In rough order of worth. The first four are still SILENT and come first.
+
+1. `Host.run`'s `static char result[64 * 1024]`: an app's result string is cut at
+   64 KiB by the entry ABI's buffer. Let the app hand back a pointer and a length.
+2. `QOSP_MAXHARTS 64`: the hart count is clamped without a message.
+3. `MAXKBD 8` (`hal/unix/evdev_raw.c`): a ninth keyboard is not opened.
+4. `PIN_TRACE_CAP 4096` (`hal/virt/pins.c`): the pin trace stops recording.
+5. Relocatable images (above): the base address, the two 1 GiB windows,
+   build-time plugin addresses, the native process slot.
+6. `QOS_NET_MAXCONN 1024` with a static 8 KiB buffer each; the virt TCP table
+   (`NETCONN 4`); `MAX_MESHES 32`, `MAX_TEXT`, `MAX_INST` in `gfx.c`; `NPINS 32`.
+   All named panics or refusals: the table below.
+7. The terminal tier has no text-input event and no terminal mouse
+   (`docs/INPUT.md`).
 
 ## Open: named panics and refusals that could grow
 
@@ -76,6 +101,8 @@ Two steps, the first small:
 | `MAXKBD 8` (`hal/unix/evdev_raw.c`) | the scan stops at eight keyboards; a ninth is not opened | a growing table |
 | `static char result[64 * 1024]` in `Host.run` (`qos/portable/host.c`) | the app's result string is cut at 64 KiB by the entry ABI's buffer | let the app hand back a pointer and a length |
 | `NVOICE 24` (`hal/unix/snd_raw.c`) | voice stealing | ordinary for a mixer; listed for completeness |
+| `NPINS 32`, `PIN_TRACE_CAP 4096` (`hal/virt/pins.c`) | a pin past 31 panics by name; the pin trace **stops recording** at 4096 entries without saying so | size from the board description; make the trace a ring or report the truncation |
+| `NETCONN 4`, `RXRING 16384`, virtqueue `QSZ 8` (`hal/virt/net.c`, `blk.c`) | small fixed TCP table | allocate connections from the heap |
 
 ## Legitimate, left alone
 

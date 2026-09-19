@@ -63,7 +63,7 @@ Knobs, all build-time:
 |------|-------|---------|---------|
 | `QOS_NET_MAXCONN` | `hal/unix/net_raw.h` | 1024 | connection slots (8 KiB static rx buffer each) |
 | `QOS_NET_TXCAP` | `hal/unix/net_raw.h` | 256 KiB | unsent tail per peer before it is dropped |
-| `ARENA_MB` | `qos/Makefile` **and** `fp-risc/Makefile` | 2048 | the host arena grants come from; both must agree |
+| `QOSP_ARENA_MB` (environment, optional) | -- | unset | caps the host arena for a run; by default it is a reservation of address space with no size (`docs/BOUNDS.md`) |
 | `QOSSLAB` | `fp-risc/Makefile` | 32 KiB | minimum slab for hosted apps (was 256 KiB) |
 | `QOSSTACK` | `fp-risc/Makefile` | 256 KiB | per-actor stack for hosted apps |
 
