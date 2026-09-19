@@ -53,7 +53,7 @@ endif
 DESKTOP_GL_CFLAGS := $(shell pkg-config --cflags glfw3 2>/dev/null)
 
 # ---- QOS Portable: the qosp host ---------------------------------------
-QOSP_SRC = portable/host.c portable/qa.c portable/haltab.c portable/store.c \
+QOSP_SRC = portable/host.c portable/sha256.c portable/haltab.c portable/store.c \
            portable/compile.c \
            $(HAL)/unix/net_raw.c $(HAL)/unix/blk_raw.c $(HAL)/unix/hostlog.c \
            $(HAL)/unix/tty_raw.c $(HAL)/unix/evdev_raw.c $(HAL)/unix/snd_raw.c \
@@ -81,7 +81,7 @@ fpr_host = FPR_HOME="$(FPRISC_ROOT)" "$(FPRC)" build portable/qosp.fpr -o $(1) -
 	  $(foreach f,$(QOSP_DEFS) $(QOSP_INCS) $(3),--cflag '$(f)') \
 	  $(foreach f,$(4),--link $(f))
 
-portable: $(QOSP_SRC) $(QOSP_FPR) appside/qos_abi.h portable/qa.h $(FPRISC_ROOT)/compiler/Codegen.hs
+portable: $(QOSP_SRC) $(QOSP_FPR) appside/qos_abi.h $(FPRISC_ROOT)/compiler/Codegen.hs
 	$(call fpr_host,qosp,$(QOSP_SRC),$(SND_FLAGS),$(SND_LIBS))
 
 portable-run: portable
@@ -94,11 +94,11 @@ portable-run: portable
 # untouched).  The same source builds on macOS (OpenGL/gl3.h declares
 # prototypes; Linux needs GL_GLEXT_PROTOTYPES, set in gfx.c).
 QOSP_GL_SRC = $(QOSP_SRC) $(HAL)/unix/gfx.c
-portable-gl: $(QOSP_GL_SRC) $(QOSP_FPR) appside/qos_abi.h portable/qa.h $(FPRISC_ROOT)/compiler/Codegen.hs
+portable-gl: $(QOSP_GL_SRC) $(QOSP_FPR) appside/qos_abi.h $(FPRISC_ROOT)/compiler/Codegen.hs
 	$(call fpr_host,qosp-gl,$(QOSP_GL_SRC),-DQOSP_GFX -DFPR_DESKTOP_GL $(SND_FLAGS) $(DESKTOP_GL_CFLAGS),$(DESKTOP_GL_LIBS) $(SND_LIBS))
 
 # ---- QOS Portable, aarch64 cross (verifies the x28 hart discipline
-portable-a64: $(QOSP_SRC) appside/qos_abi.h portable/qa.h $(FPRISC_ROOT)/compiler/Codegen.hs
+portable-a64: $(QOSP_SRC) appside/qos_abi.h $(FPRISC_ROOT)/compiler/Codegen.hs
 	aarch64-linux-gnu-gcc -static -O2 -Wall -Wextra -DFPR_POSIX -DQOSP_HOST -DFPR_NHARTS=$(QOSHARTS) -DQOS_ARENA_SIZE="($(ARENA_MB)ul << 20)" $(REV_FLAG) \
 	  -I$(FHAL)/core -I$(HAL)/unix -Iappside $(QOSP_SRC) -o qosp-a64 -lpthread -lm
 

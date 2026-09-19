@@ -1,0 +1,33 @@
+# plug.fpr -- attach a plugin: the archive is interpreted HERE, in the app.
+#
+#   Plug.attach qa  ->  Ok "" | Err reason        (qa = the .qa BYTES, read
+#                                                  off qosp.disk with mods/qlog)
+#
+# QOS Portable's host used to parse the plugin's archive itself, in C
+# (qos/portable/qa.c) -- a second container parser and a third manifest
+# parser, reached from an app thread where the host's own FP-RISC cannot
+# run.  Native never worked that way: Sys.loadImageAt takes section extents
+# that system.fpr computed with QAR.  This is the same shape: the app reads
+# the archive with the modules the kernel and the host launch with, and
+# hands the host the five things it needs.  The host parses nothing, and
+# that was the last C archive parser.  (../fprisc/docs/C-REDUCTION.md)
+
+QAR = use "qar".
+M   = use "manifest".
+
+# this module's one foreign primitive (qos/appside/entry.c): id, abi stamp,
+# shell stamp, the LOAD section, the IMAGE section
+Sys.attachImage : String -> String -> String -> String -> String -> Result String String .
+
+attach : String -> Result String String .
+attach qa = case M.parseQa qa of
+    Err e -> Err e
+  | Ok man -> attachLoad qa man (QAR.sectionBytes qa "LOAD").
+
+attachLoad qa man r = case r of
+    Err e -> Err e
+  | Ok load -> attachImg man load (QAR.sectionBytes qa "IMAGE").
+
+attachImg man load r = case r of
+    Err e -> Err e
+  | Ok img -> Sys.attachImage (M.id man) (M.abi man) (M.shell man) load img.

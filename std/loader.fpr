@@ -44,6 +44,7 @@
 
 FS = use "fs".
 AC = use "std/actor".
+Plug = use "../programs/mods/plug".
 
 LMsg = Type (LLoad id | LList u | LReplay u | LLaunch id).
 
@@ -101,7 +102,7 @@ lLaunch fs me chain from id =
   | Ok qa -> lLaunch2 fs me chain from id r qa.
 lLaunch2 : unsafe Int -> Int -> List String -> Int -> String -> _ -> String -> a .
 lLaunch2 fs me chain from id r qa =
-  ar = Sys.attachQa qa;
+  ar = Plug.attach qa;
   _ = drop r;                        # the image is in its window now
   case ar of
     Err e -> send from (Err "launch {id}: {e}") >> lLoop fs me chain
@@ -131,7 +132,7 @@ lLoad fs me chain from id wm =
 lAttach : unsafe Int -> Int -> List String -> Int -> String -> Int -> _ -> String -> Int -> a .
 lAttach fs me chain from id u r qa wm =
   before = Mod.plugs 0;
-  ar = Sys.attachQa qa;
+  ar = Plug.attach qa;
   _ = drop r;                        # the record's bytes are in the window now
   case ar of
     Err e -> send from (Err "loader {id}: {e}") >> lLoop fs me chain
@@ -189,7 +190,7 @@ lRep1 fs me chain from rest n id =
 lRepAtt : unsafe Int -> Int -> List String -> Int -> List String -> Int -> String -> _ -> String -> a .
 lRepAtt fs me chain from rest n id r qa =
   before = Mod.plugs 0;
-  ar = Sys.attachQa qa;
+  ar = Plug.attach qa;
   _ = drop r;
   case ar of
     Err e -> send from (Err "replay {id}: {e}") >> lLoop fs me chain

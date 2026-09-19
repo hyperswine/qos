@@ -30,7 +30,6 @@
  */
 #include "qos_abi.h"
 #include "snd_raw.h"
-#include "qa.h"
 
 /* ---- the ABI stamp (kills the apps-qa desync class) -----------------
  * fprc stamps `abi = "<QOS_ABI_VERSION>.<codegenRev>"` into every
@@ -87,6 +86,7 @@ static int plug_n;
  * addresses into the plugin, so under any other shell its global
  * accesses poke the wrong memory; the corruption is silent and
  * layout-dependent, hence a HARD gate, not a warning) */
+void qosp_sha256(const unsigned char *msg, uint64_t n, unsigned char out[32]); /* sha256.c */
 static char g_shell_sha[72];
 static void load_sha_hex(const unsigned char *load, uint64_t n, char *out,
                          uint64_t cap) {
@@ -99,56 +99,57 @@ static void load_sha_hex(const unsigned char *load, uint64_t n, char *out,
       return;
     }
 }
-int64_t qosp_load_plugin_bytes(const char *bytes, uint64_t len, char *err,
-                               uint64_t errcap) {
+static int span_is(qos_span_t a, const char *z) {
+  uint64_t n = strlen(z);
+  return a.n == n && !memcmp(a.p, z, n);
+}
+int64_t qosp_load_plugin(const qos_plugin_t *pl, char *err, uint64_t errcap) {
   if (plug_n >= PLUG_MAX) {
     snprintf(err, errcap, "plugin registry full");
     return -1;
   }
-  if (len < 5 || memcmp(bytes, "QAR2\n", 5)) {
-    snprintf(err, errcap,
-             "payload is not a QAR2 archive (attachQa takes the .qa BYTES "
-             "now -- read apps/<id>.qa off the disk first)");
+  int idn = (int)pl->id.n;
+  const char *id = (const char *)pl->id.p;
+  /* The enforcer's checks, over fields the app read from the archive: is
+   * this plugin from the same build as the image it is joining?  They
+   * catch a stale matched set, not a hostile app -- one address space has
+   * no such boundary.  An unstamped plugin is a pre-stamp archive. */
+  char want[24];
+  snprintf(want, sizeof want, "%u.%u", (unsigned)QOS_ABI_VERSION, (unsigned)QOSP_CODEGEN_REV);
+  if (pl->abi.n && !span_is(pl->abi, want)) {
+    snprintf(err, errcap, "abi mismatch: plugin %.*s built for %.*s, shell wants "
+             "%s -- rebuild as a matched set", idn, id, (int)pl->abi.n, (const char *)pl->abi.p, want);
     return -1;
   }
-  qa_t qa;
-  if (qa_parse((const unsigned char *)bytes, len, &qa)) {
-    snprintf(err, errcap, "malformed .qa payload (see stderr)");
-    return -1;
-  }
-  /* the app's own gate is qosp.fpr's; a plugin arrives on an APP thread,
-   * where this program's FP-RISC cannot run, so its stamp is compared here
-   * until plugin attach takes fields the app computed (C-REDUCTION.md).
-   * An unstamped plugin is a pre-stamp archive: accepted. */
-  char plug_want[24];
-  snprintf(plug_want, sizeof plug_want, "%u.%u", (unsigned)QOS_ABI_VERSION, (unsigned)QOSP_CODEGEN_REV);
-  if (qa.abi[0] && strcmp(qa.abi, plug_want) != 0) {
-    snprintf(err, errcap, "abi mismatch: plugin %s built for %s, shell wants "
-             "%u.%u -- rebuild as a matched set", qa.id,
-             qa.abi[0] ? qa.abi : "(unstamped)",
-             (unsigned)QOS_ABI_VERSION, (unsigned)QOSP_CODEGEN_REV);
-    qa_free(&qa);
-    return -1;
-  }
-  if (qa.shell[0] && g_shell_sha[0] && strcmp(qa.shell, g_shell_sha) != 0) {
-    snprintf(err, errcap, "matched-set REFUSED: plugin %s was linked against "
+  if (pl->shell.n && g_shell_sha[0] && !span_is(pl->shell, g_shell_sha)) {
+    snprintf(err, errcap, "matched-set REFUSED: plugin %.*s was linked against "
              "shell %.12s... but this shell is %.12s... -- repackage against "
-             "the running image", qa.id, qa.shell, g_shell_sha);
-    qa_free(&qa);
+             "the running image", idn, id, (const char *)pl->shell.p, g_shell_sha);
     return -1;
   }
-  if (!qa.shell[0])
-    fprintf(stderr, "[qos] warning: plugin %s carries no shell stamp "
-            "(pre-stamp archive); the matched-set gate cannot protect it\n",
-            qa.id);
+  if (!pl->shell.n)
+    fprintf(stderr, "[qos] warning: plugin %.*s carries no shell stamp "
+            "(pre-stamp archive); the matched-set gate cannot protect it\n", idn, id);
+  /* the image is what its LOAD section says it is, or it does not load */
+  char claimed[72];
+  load_sha_hex(pl->load.p, pl->load.n, claimed, sizeof claimed);
+  if (claimed[0]) {
+    unsigned char d[32];
+    char hex[65];
+    qosp_sha256(pl->img.p, pl->img.n, d);
+    for (int i = 0; i < 32; i++) snprintf(hex + 2 * i, 3, "%02x", d[i]);
+    if (strcmp(hex, claimed)) {
+      snprintf(err, errcap, "plugin %.*s: IMAGE does not match the sha its LOAD section claims", idn, id);
+      return -1;
+    }
+  }
   /* the archive DECLARES its span (LOAD base/memsz) -- no more
    * recovering it from segment high-water marks and 4 MiB masks.
    * Overlap-check the declared span first, load second: a bad plugin
    * is refused before a byte lands. */
   fpr_qaimg_t qp;
-  if (!fpr_qaimg_params(qa.load, qa.load_len, &qp) || qp.memsz == 0) {
+  if (!fpr_qaimg_params(pl->load.p, pl->load.n, &qp) || qp.memsz == 0) {
     snprintf(err, errcap, "plugin LOAD section unusable");
-    qa_free(&qa);
     return -1;
   }
   uintptr_t pg = (uintptr_t)getpagesize();
@@ -158,36 +159,31 @@ int64_t qosp_load_plugin_bytes(const char *bytes, uint64_t len, char *err,
     if (imlo < plug_ranges[i].hi && imhi > plug_ranges[i].lo) {
       snprintf(err, errcap, "plugin overlaps an already-loaded image "
                "(link each app at its own sub-slot base)");
-      qa_free(&qa);
-      return -1;
+        return -1;
     }
-  fpr_elf_load_t ld = fpr_qaimg_load(qa.load, qa.load_len, qa.img, qa.img_len,
+  fpr_elf_load_t ld = fpr_qaimg_load(pl->load.p, pl->load.n, pl->img.p, pl->img.n,
                                      (void *)QOS_PLUG_BASE, QOS_PLUG_SIZE);
   if (!ld.ok) {
     snprintf(err, errcap, "plugin image: %s", ld.err);
-    qa_free(&qa);
     return -1;
   }
   uintptr_t xend = ((uintptr_t)ld.exec_end + pg - 1) & ~(pg - 1);
   if (ld.exec_end && (uintptr_t)ld.rw_start < xend) {
     snprintf(err, errcap, "plugin not page-separated (exec_end=%p rw=%p)",
              ld.exec_end, ld.rw_start);
-    qa_free(&qa);
     return -1;
   }
   if (mprotect((void *)imlo, xend - imlo, PROT_READ | PROT_EXEC)) {
     snprintf(err, errcap, "plugin mprotect: %s", strerror(errno));
-    qa_free(&qa);
     return -1;
   }
   __builtin___clear_cache((char *)imlo, (char *)ld.image_end);
   plug_ranges[plug_n].lo = imlo;
   plug_ranges[plug_n].hi = imhi;
   plug_n++;
-  qos_hostlog("[qosp] plugin %s (%llu B): table at %p, image %#lx-%#lx",
-              qa.id, (unsigned long long)len, ld.entry, (unsigned long)imlo,
+  qos_hostlog("[qosp] plugin %.*s (%llu B): table at %p, image %#lx-%#lx",
+              idn, id, (unsigned long long)pl->img.n, ld.entry, (unsigned long)imlo,
               (unsigned long)imhi);
-  qa_free(&qa); /* the IMAGE bytes are in the window now */
   return (int64_t)(uintptr_t)ld.entry;
 }
 
@@ -288,7 +284,6 @@ static void bus_handler(int sig, siginfo_t *info, void *vctx) {
  * ==================================================================== */
 extern int fpr_posix_argc;
 extern char **fpr_posix_argv;
-void qosp_sha256(const unsigned char *msg, uint64_t n, unsigned char out[32]); /* qa.c */
 
 static V res_ok_str(const char *s2, uw n) { return fpr_mkresultn(0, s2, n); }
 static V res_err(const char *msg) { return fpr_mkresultn(1, msg, strlen(msg)); }

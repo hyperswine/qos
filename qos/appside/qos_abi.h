@@ -19,7 +19,7 @@
 
 #include <stdint.h>
 
-#define QOS_ABI_VERSION 12u
+#define QOS_ABI_VERSION 13u /* v13: tag 4 takes a qos_plugin_t, not archive bytes */
 
 /* ---- the address plan (linux-x86-64) --------------------------------
  * The host is linked non-PIE (default 0x400000 text); the arena is a
@@ -69,6 +69,13 @@
  * server on its unix socket -- portable/compile.c + tools/fprd.py --
  * and out gets the framed "ok\n<asm>" / "err\n<msg>" reply) */
 #define QOS_SYS_LOADQA 4
+/* tag 4's payload (v13).  The APP interprets the plugin's archive -- with
+ * mods/qar.fpr and mods/manifest.fpr, the code the kernel and the host
+ * launch with -- and hands over what it found; the host parses nothing.
+ * Spans point into the app's own Strings: one address space, so a pointer
+ * pass, the same discipline gfx_render uses. */
+typedef struct { const unsigned char *p; uint64_t n; } qos_span_t;
+typedef struct { qos_span_t id, abi, shell, load, img; } qos_plugin_t;
 #define QOS_SYS_SLEEPUS 6
 #define QOS_SYS_COMPILE 7
 

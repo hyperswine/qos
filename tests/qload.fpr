@@ -1,7 +1,7 @@
 # qload.fpr -- stage 2 of qosp.disk: the System.qa loading mechanism in
 # miniature.  A .qa is BYTES ON THE LOG like anything else: read
 # apps/plugmini.qa off the disk with mods/qlog, hand the bytes to
-# Sys.attachQa (syscall tag 4 -- the host filesystem never enters the
+# Plug.attach (syscall tag 4 -- the host filesystem never enters the
 # path), then resolve and call the plugin's exports through Mod.findAt.
 #
 #   make qos-app-macos PROG=tests/qload.fpr
@@ -15,6 +15,7 @@
 # shell build, plugin AFTER plugsyms, disk-seed AFTER the plugin.
 
 QL = use "../programs/mods/qlog".
+Plug = use "../programs/mods/plug".
 
 main =
   dsk = device "blk";
@@ -27,7 +28,7 @@ load dsk h = load2 dsk (QL.readLatest dsk h "apps/plugmini.qa").
 load2 dsk r =
   case r of
     Err e -> "qload: apps/plugmini.qa not on the disk ({e}) -- seed it: make -C qos disk-seed QAS=../plugmini.qa"
-  | Ok bytes -> att (Mod.plugs 0) (strlen bytes) (Sys.attachQa bytes).
+  | Ok bytes -> att (Mod.plugs 0) (strlen bytes) (Plug.attach bytes).
 att n0 bl r =
   case r of
     Err e -> "qload: attach failed: {e}"
