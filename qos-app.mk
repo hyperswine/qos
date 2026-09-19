@@ -43,7 +43,7 @@ $(BUILD)/qosapp.elf: $(BUILD)/qosapp-prog.s $(QOSAPP_RT) $(QOS)/appside/link-qos
 	  -Wl,--build-id=none -Wl,-z,noexecstack \
 	  $(BUILD)/qosapp-prog.s $$(cat $(BUILD)/qosapp-prog.s.units) $(QOSAPP_RT) -o $@
 
-qos-app: $(BUILD)/qosapp.elf tools/mkqa.py
+qos-app-x64: $(BUILD)/qosapp.elf tools/mkqa.py
 	@MF=$(BUILD)/qosapp-gen.toml; ID=$$(basename $(SOURCE) .fpr); \
 	ABIV=$$(grep -m1 'define QOS_ABI_VERSION' $(QOS)/appside/qos_abi.h | grep -o '[0-9]\+' | head -1); \
 	REV=$$(cat $(BUILD)/qosapp-prog.s.abirev 2>/dev/null || echo 0); \
@@ -101,7 +101,7 @@ PLUGID    = $(basename $(notdir $(SOURCE)))
 PLUG_OUT ?= $(PLUGID).qa
 PLUGBASE  = $(shell printf '0x%x' $$(( $(QOS_SLOT_BASE) + 0x8000000 + $(PLUGSLOT) * 4194304 )))
 
-plugsyms:
+plugsyms-x64:
 	@test -f $(BUILD)/qosapp.elf || { echo "build the shell first: make qos-app PROG=<shell>"; exit 1; }
 	nm --defined-only $(BUILD)/qosapp.elf | \
 	  awk '$$2 ~ /^[A-Z]$$/ && $$3 != "" && $$3 !~ /^\$$/ { printf "PROVIDE(%s = 0x%s);\n", $$3, $$1 }' > $(BUILD)/plugsyms-x64.ld
@@ -113,7 +113,7 @@ plugsyms-macos:
 	  awk '$$2 ~ /^[A-Z]$$/ && $$3 != "" && $$3 !~ /^\$$/ { printf "PROVIDE(%s = 0x%s);\n", $$3, $$1 }' > $(BUILD)/plugsyms-a64.ld
 	@echo "plugsyms-a64.ld: $$(wc -l < $(BUILD)/plugsyms-a64.ld) shell symbols"
 
-plugin-qa: fprc $(FPRISC_ROOT)/core/prelude.fpr
+plugin-qa-x64: fprc $(FPRISC_ROOT)/core/prelude.fpr
 	@test -f $(BUILD)/plugsyms-x64.ld || { echo "no plugsyms: make plugsyms first (after the shell build)"; exit 1; }
 	@mkdir -p $(BUILD)
 	LC_ALL=C.UTF-8 "$(FPRC)" --target=qx64 --plugin --prelude=$(FPRISC_ROOT)/core/prelude.fpr $(SOURCE) $(BUILD)/plug-$(PLUGID).s
@@ -153,3 +153,18 @@ qos-app-macos-object: fprc $(SOURCE) $(FPRISC_ROOT)/core/prelude.fpr
 	LC_ALL=C.UTF-8 "$(FPRC)" --target=qa64mac --prelude=$(FPRISC_ROOT)/core/prelude.fpr $(SOURCE) $(BUILD)/qosapp-mac.s
 	clang --target=arm64-apple-macos11 -c $(BUILD)/qosapp-mac.s -o $(BUILD)/qosapp-mac.o
 	@echo "emitted $(BUILD)/qosapp-mac.s (Mach-O syntax, QOS-app cells)"
+
+# ---- which image a bare `qos-app` builds is the HOST's to say, once --------
+# qos.py chose the -macos targets on Apple Silicon while check-all.sh and the
+# qos/tests-host scripts said `make qos-app`, so every one of them failed
+# there.  The choice lives here now; both say `qos-app`, `plugsyms`,
+# `plugin-qa` and get the image this machine's qosp can run.
+ifeq ($(shell uname -s)-$(shell uname -m),Darwin-arm64)
+APP_HOST = macos
+else
+APP_HOST = x64
+endif
+qos-app: qos-app-$(APP_HOST)
+plugsyms: plugsyms-$(APP_HOST)
+plugin-qa: plugin-qa-$(APP_HOST)
+.PHONY: qos-app plugsyms plugin-qa qos-app-x64 plugsyms-x64 plugin-qa-x64 qos-app-macos plugsyms-macos plugin-qa-macos

@@ -92,7 +92,8 @@ Two steps, the first small:
 
 ## Found along the way (not bounds)
 
-- Seven scripts in `qos/tests-host/` and `check-all.sh` build with the Linux
-  `make qos-app` target, so they fail on Apple Silicon where `qos.py` picks
-  `qos-app-macos`. It is the one failing leg of `./qos.py test` on macOS;
-  LiveView itself passes every leg with the target swapped.
+- FIXED: seven scripts in `qos/tests-host/` and `check-all.sh` said
+  `make qos-app` while `qos.py` chose `qos-app-macos` on Apple Silicon, so they
+  failed there -- the one red leg of `./qos.py test`. `qos-app.mk` owns the
+  choice now (`qos-app`, `plugsyms`, `plugin-qa` dispatch on the host), and
+  `qos.py` no longer makes it. `./qos.py test`: 11/11 on macOS.
