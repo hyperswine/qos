@@ -31,7 +31,17 @@
  * the image is the APP'S OWN arena (v12): the host hands it over in
  * the boot record and the app runs the buddy -- behind its memory
  * actor (docs/MEMORY.md) -- itself; the host allocates nothing there. */
-#define QOS_ARENA_BASE 0x400000000ul /* 16 GiB (bumped for macOS arm64 mmap compatibility) */
+/* 16 GiB everywhere but macOS, which reserves 0x180000000-0x7000000000 in
+ * every process (the dyld shared region, then a no-access block): a hint
+ * in there is never honoured, so the Darwin slot is 1 TiB.  App images for
+ * macOS are freestanding ELF (no __APPLE__), so qos-app.mk passes the base. */
+#ifndef QOS_ARENA_BASE
+#ifdef __APPLE__
+#define QOS_ARENA_BASE 0x10000000000ul
+#else
+#define QOS_ARENA_BASE 0x400000000ul
+#endif
+#endif
 #ifndef QOS_ARENA_SIZE
 #define QOS_ARENA_SIZE (256ul << 20) /* the host build sets ARENA_MB (qos/Makefile) */
 #endif

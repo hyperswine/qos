@@ -2,7 +2,17 @@
 # The .qa is freestanding at the published slot; every effect goes
 # through the qos_hal_t table (qos/appside/hal.c).  The HOST is built
 # separately: make -C qos portable.
+# macOS reserves 0x180000000-0x7000000000 in every process (the dyld
+# shared region, then a no-access block): an address hint in there is never
+# honoured, so Darwin hosts and the apps linked for them sit at 1 TiB.
+# qos_abi.h makes the same choice for the host; the macOS app rules pass it
+# down because their freestanding ELF target does not define __APPLE__.
+ifeq ($(shell uname -s),Darwin)
+QOS_SLOT_BASE  = 0x10000000000
+else
 QOS_SLOT_BASE  = 0x400000000
+endif
+QOS_BASE_FLAG  = -DQOS_ARENA_BASE=$(QOS_SLOT_BASE)ul
 # the app's notion of "the heap" (fpr_in_heap) ends where the host's
 # arena ends: MUST agree with qos/Makefile's ARENA_MB, or a grant above
 # the line is mistaken for a static and shared by identity (found as
@@ -20,7 +30,9 @@ $(BUILD)/qosapp-prog.s: fprc $(SOURCE) $(FPRISC_ROOT)/core/prelude.fpr FORCE
 	@mkdir -p $(BUILD)
 	LC_ALL=C.UTF-8 "$(FPRC)" --system=qos-portable --prelude=$(FPRISC_ROOT)/core/prelude.fpr $(SOURCE) $@
 
-$(BUILD)/qosapp.elf: $(BUILD)/qosapp-prog.s $(QOSAPP_RT) $(QOS)/appside/link-qosapp.ld
+# FORCE: the .s is regenerated every time, and a make with 1-second mtimes
+# (Apple's 3.81) otherwise packs the PREVIOUS program's image into this .qa
+$(BUILD)/qosapp.elf: $(BUILD)/qosapp-prog.s $(QOSAPP_RT) $(QOS)/appside/link-qosapp.ld FORCE
 	gcc -O2 -Wall -Wextra -ffreestanding -nostdlib -nostartfiles -static \
 	  -fno-stack-protector -fno-asynchronous-unwind-tables -fno-pic -mcmodel=large \
 	  -DFPR_POSIX -DFPR_QOSAPP -DFPR_NHARTS=$(QOSHARTS) -DFPR_SLAB_SZ=$(QOSSLAB) -DFPR_STACK_SZ=$(QOSSTACK) $(QOSCFLAGS_EXTRA) \
@@ -49,11 +61,11 @@ $(BUILD)/qosapp-a64.s: fprc $(SOURCE) $(FPRISC_ROOT)/core/prelude.fpr FORCE
 	@mkdir -p $(BUILD)
 	LC_ALL=C.UTF-8 "$(FPRC)" --target=qa64 --prelude=$(FPRISC_ROOT)/core/prelude.fpr $(SOURCE) $@
 
-$(BUILD)/qosapp-a64.elf: $(BUILD)/qosapp-a64.s $(QOSAPP_RT_COMMON) $(FHAL)/unix/ctx_a64.S $(QOS)/appside/link-qosapp-a64.ld
+$(BUILD)/qosapp-a64.elf: $(BUILD)/qosapp-a64.s $(QOSAPP_RT_COMMON) $(FHAL)/unix/ctx_a64.S $(QOS)/appside/link-qosapp-a64.ld FORCE
 	clang --target=aarch64-none-elf -fuse-ld=lld -O2 -Wall -Wextra \
 	  -ffreestanding -nostdlib -nostartfiles -fno-stack-protector \
 	  -fno-asynchronous-unwind-tables -fno-pic -ffixed-x18 -ffixed-x28 \
-	  -DFPR_POSIX -DFPR_QOSAPP -DFPR_NHARTS=$(QOSHARTS) -DFPR_SLAB_SZ=$(QOSSLAB) -DFPR_STACK_SZ=$(QOSSTACK) $(QOSCFLAGS_EXTRA) \
+	  -DFPR_POSIX -DFPR_QOSAPP $(QOS_BASE_FLAG) -DFPR_NHARTS=$(QOSHARTS) -DFPR_SLAB_SZ=$(QOSSLAB) -DFPR_STACK_SZ=$(QOSSTACK) $(QOSCFLAGS_EXTRA) \
 	  -I$(FHAL)/core -I$(QOS)/appside \
 	  -T $(QOS)/appside/link-qosapp-a64.ld -Wl,--defsym=QOS_SLOT_BASE=$(QOS_SLOT_BASE) \
 	  -Wl,--defsym=_heap_start=_proc_image_end -Wl,--defsym=_heap_end=_proc_image_end \
@@ -87,7 +99,7 @@ qos-app-macos: $(BUILD)/qosapp-a64.elf tools/mkqa.py
 PLUGSLOT ?= 0
 PLUGID    = $(basename $(notdir $(SOURCE)))
 PLUG_OUT ?= $(PLUGID).qa
-PLUGBASE  = $(shell printf '0x%x' $$(( 0x408000000 + $(PLUGSLOT) * 4194304 )))
+PLUGBASE  = $(shell printf '0x%x' $$(( $(QOS_SLOT_BASE) + 0x8000000 + $(PLUGSLOT) * 4194304 )))
 
 plugsyms:
 	@test -f $(BUILD)/qosapp.elf || { echo "build the shell first: make qos-app PROG=<shell>"; exit 1; }
@@ -123,7 +135,7 @@ plugin-qa-macos: fprc $(FPRISC_ROOT)/core/prelude.fpr
 	clang --target=aarch64-none-elf -fuse-ld=lld -O2 -Wall -Wextra \
 	  -ffreestanding -nostdlib -nostartfiles -fno-stack-protector \
 	  -fno-asynchronous-unwind-tables -fno-pic -ffixed-x28 \
-	  -DFPR_POSIX -DFPR_QOSAPP -DFPR_NHARTS=$(QOSHARTS) -DFPR_SLAB_SZ=$(QOSSLAB) -DFPR_STACK_SZ=$(QOSSTACK) $(QOSCFLAGS_EXTRA) -I$(FHAL)/core -I$(QOS)/appside \
+	  -DFPR_POSIX -DFPR_QOSAPP $(QOS_BASE_FLAG) -DFPR_NHARTS=$(QOSHARTS) -DFPR_SLAB_SZ=$(QOSSLAB) -DFPR_STACK_SZ=$(QOSSTACK) $(QOSCFLAGS_EXTRA) -I$(FHAL)/core -I$(QOS)/appside \
 	  -T $(QOS)/appside/link-qosplug.ld -T $(BUILD)/plugsyms-a64.ld \
 	  -Wl,--defsym=PLUG_BASE=$(PLUGBASE) \
 	  $(BUILD)/plug-$(PLUGID)-a64.s $$(cat $(BUILD)/plug-$(PLUGID)-a64.s.units) -o $(BUILD)/plug-$(PLUGID)-a64.elf
