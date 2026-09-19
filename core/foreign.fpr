@@ -1,0 +1,63 @@
+# foreign.fpr -- the primitives QOS supplies, declared by QOS.
+#
+# Every name here is implemented in C in THIS tree, and a signature with no
+# definition is a foreign declaration: it resolves at link time to the
+# `fpr_g_` symbol of that name.  The compiler is handed this file with
+# `--foreign=` (dependency.mk: QOS_FOREIGN) and joins it to the prelude, so
+# every unit sees these names exactly as it used to see builtins.
+#
+# They USED to be builtins: the compiler's own type environment named one
+# operating system's HAL -- glRender, blkRead, Pin.*, Sys.caps, Apps.* -- so
+# a language implementation could not be read without QOS in it.  The line
+# is now where the implementation is (../fprisc/docs/HAL.md): what the
+# runtime or the machine layer implements, the compiler declares (actors,
+# Mod.*, the logs, Sys.irqBind, register access); what QOS implements, QOS
+# declares -- here.
+#
+# The types are the ones the compiler had, verbatim, including the many that
+# are `a -> b`: those were never really typed, and giving them honest types is
+# now a change to THIS file rather than to the compiler.
+
+
+# ---- graphics, input, sound  (qos/appside/hal.c -> the host's gfx.c, evdev_raw.c, snd_raw.c)
+glInit : Int -> Int -> Int .
+glMesh : String -> String -> Int .
+glRender : a -> b .
+glRenderUi : a -> b -> Int -> c .
+glSavePpm : String -> Int .
+inputPoll : a -> b .
+sndPlay : a -> Int .
+sndMusic : String -> Int -> Int .
+
+# ---- block and net devices  (hal/virt/blk.c, net.c natively; hal/unix/*_raw.c portably)
+blkPages : a -> Int .
+blkRead : a -> Int -> b .
+blkWrite : a -> Int -> b -> Unit .
+netPoll : Int -> a .
+netRead : Int -> a .
+netWrite : Int -> a -> Unit .
+netClose : Int -> Unit .
+
+# ---- the pin bus  (hal/virt/pins.c; docs/PINS.md)
+Pin.mode : a -> Int -> Unit .
+Pin.read : a -> Int .
+Pin.write : a -> Int -> Unit .
+Pin.wire : a -> b -> Unit .
+Pin.feed : a -> Int -> Int -> Unit .
+Pin.tget : a -> Int .
+Pin.tlen : a -> Int .
+Pin.tclear : a -> Unit .
+
+# ---- the system: what an app was granted, its store, its compiler  (qos/appside/entry.c, qos/native/proc_entry.c)
+Sys.caps : Unit -> a .
+Sys.storeReq : a -> b .
+Sys.compile : String -> String -> Result String String .
+timeNow : a -> Int .
+
+# ---- the kernel's launcher  (loader/process.c, loader/apps.c)
+Sys.init : Unit -> Unit .
+Sys.arenaFree : Unit -> Int .
+Sys.bindApp : a -> b .
+Sys.bindStore : a -> b .
+Apps.list : Unit -> a .
+Apps.read : String -> a .

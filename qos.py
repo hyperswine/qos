@@ -138,6 +138,7 @@ if TOOLCHAIN:
     os.environ["FPRISC_ROOT"] = str(TOOLCHAIN)
     os.environ["FPR_HOME"] = str(ROOT)
     os.environ["FPR_PATH"] = str(TOOLCHAIN)
+    os.environ["FPR_FOREIGN"] = str(ROOT / "core" / "foreign.fpr")  # the primitives QOS implements, declared by QOS
 
 
 class Workspace:
@@ -1302,7 +1303,7 @@ def cmd_clean(a):
 INSTALL_TREE = [
     "qos.py", "dependency.mk", "release.toml", "README.md", "docs", "fprisc.lock.json",
     "Makefile", "qos-app.mk", "std", "programs", "tools", "models", "targets",
-    "apps", "tests", ".fpr", "fpr.lock", "hal", "loader",
+    "apps", "tests", ".fpr", "fpr.lock", "hal", "loader", "core",
     "qos/Makefile", "qos/native", "qos/appside", "qos/portable", "qos/tests-host", "qos/qosp", "qos/qosp-gl",
 ]
 INSTALL_SKIP = shutil.ignore_patterns("*.o", "*.hi", "*.qa", "*.disk", "*.img", "build", "dist-newstyle",

@@ -10,6 +10,7 @@ FPRISC_ROOT="$(cd "$FPRISC_ROOT" && pwd)"
 export FPRISC_ROOT
 export FPR_HOME="$ROOT"
 export FPR_PATH="$FPRISC_ROOT"
+export FPR_FOREIGN="$ROOT/core/foreign.fpr"
 echo "== fprc =="                && (make -s fpr) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
 echo "== stdcheck =="            && (${FPRISC_ROOT}/fpr stdcheck ${FPRISC_ROOT}/std/checkdemo.fpr | tail -1) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
 echo "== stdcheck: the REAL std library (lifted lambdas) ==" && (${FPRISC_ROOT}/fpr stdcheck ${FPRISC_ROOT}/std/std.fpr > /tmp/ck-std.out 2>&1; grep -q "stdcheck: OK" /tmp/ck-std.out && grep -q "pow2 (n : \[0,+inf\])" /tmp/ck-std.out && grep -q "wcet: n·2 ops" /tmp/ck-std.out && grep -qE "retryN.*UNSAFE" /tmp/ck-std.out && echo "${FPRISC_ROOT}/std/std.fpr checkable: pow2 static (n·2), retryN carries its ω(step) equation") || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }

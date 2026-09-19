@@ -17,6 +17,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 export FPR_HOME="$ROOT"
 export FPR_PATH="$FPRISC_ROOT"
+export FPR_FOREIGN="$ROOT/core/foreign.fpr"
 RUNTIME="$FPRISC_ROOT/runtime"
 MACHINE="$FPRISC_ROOT/machine"
 QOS=qos   # relative to the repository root (it was ../qos from fp-risc/tools/, before the programs moved up)

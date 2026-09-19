@@ -19,6 +19,15 @@ drivers, for all three places that link them: a bare-metal image built from this
 tree (`make bare-metal`, which hands them to the compiler's Makefile as
 `EXTRA_RT`), the native kernel (`qos/Makefile`), and `tools/build-process-app.sh`.
 
+## QOS declares what QOS implements
+
+`core/foreign.fpr` holds a signature for every primitive implemented in this
+tree -- graphics, input, sound, block, net, the pin bus, the app's grants and
+store, the kernel's launcher. The compiler is handed it as `FPR_FOREIGN`
+(`dependency.mk`, `qos.py`, the scripts that set their own environment) and
+types none of them itself. A program that uses one on a system that does not
+implement it fails at LINK time on the `fpr_g_` name.
+
 ## Still mixed
 
 `qos/appside/hal.c` holds both an app image's machine layer and its device

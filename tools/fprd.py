@@ -46,6 +46,7 @@ if not FPRISC_ROOT:
 COMPILER = os.path.join(FPRISC_ROOT, "fpr")
 os.environ["FPR_HOME"] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 os.environ["FPR_PATH"] = FPRISC_ROOT
+os.environ["FPR_FOREIGN"] = os.path.join(os.environ["FPR_HOME"], "core", "foreign.fpr")
 
 PROFILES = {"qos-portable", "bare-metal"}
 PLUGIN_RE = re.compile(r"^plugin:([0-7]):([a-z][a-z0-9_]{0,15})$")
