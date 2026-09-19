@@ -1,0 +1,5 @@
+# capsecho.fpr -- print the capability blob exactly as the host delivered it.
+# The app half of tools/qainfo-parity.sh: whatever launched this wrote the
+# blob, and mods/manifest.fpr says what it should have been.
+unsafe program.
+main = _ = print "CAPS-BEGIN"; _ = print (Sys.caps Unit); print "CAPS-END".

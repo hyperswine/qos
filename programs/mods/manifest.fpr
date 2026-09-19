@@ -1,0 +1,177 @@
+# manifest.fpr -- the .qa MANIFEST, interpreted in ONE place.
+#
+# QAR (qar.fpr) owns the container: magic, section table, extents.  This
+# module owns what the MANIFEST section says: the line-oriented TOML subset
+# of docs/QA-FORMAT.md, folded into a Man, and the capability blob a launch
+# hands the app ("<id>\n" then "<url> <mode>\n" per GRANTED permission).
+#
+# Both used to exist twice more: inline in system.fpr (the native launcher)
+# and in C in qos/portable/qa.c (the portable host).  The C copy is where
+# the limits lived -- 32 permissions, 95-byte urls, a 4 KiB blob, each
+# silently cut -- because C below the allocator says `perm_t perms[32]`
+# where this file says `List (String, String)`.  Nothing here has a
+# capacity: a manifest may ask for any number of permissions of any length,
+# and the only bound is memory.  (docs/BOUNDS.md, ../fprisc/docs/C-REDUCTION.md)
+#
+# Pure: strings in, values out.  No services, no IO, no actor -- so the same
+# code serves the kernel (system.fpr), a host tool (tools/qainfo.fpr, the
+# posix system) and whatever launches apps next.
+
+QAR = use "qar".
+
+and2 a b = case a of True -> b | False -> False.
+or2 a b = case a of True -> True | False -> b.
+
+# ---- strings ----------------------------------------------------------------
+# every cut is `substr` (O(1), the runtime prim): nothing here builds a
+# string a byte at a time
+slice s i j = substr s i (j - i + 1).
+byteAt s i = case or2 (i < 1) (i > strlen s) of True -> 0 | False -> charAt s i.
+# space, tab, and CR -- so a CRLF manifest reads the same as an LF one
+isSpace c = or2 (c == 32) (or2 (c == 9) (c == 13)).
+
+findByte : unsafe String -> Int -> Int -> Int .
+findByte s b i =
+  case i > strlen s of
+    True -> 0
+  | False -> case charAt s i == b of
+      True -> i
+    | False -> findByte s b (i + 1).
+
+ltrim : unsafe String -> Int -> Int .
+ltrim s i = case and2 (i <= strlen s) (isSpace (byteAt s i)) of True -> ltrim s (i + 1) | False -> i.
+rtrim : unsafe String -> Int -> Int .
+rtrim s j = case and2 (j >= 1) (isSpace (byteAt s j)) of True -> rtrim s (j - 1) | False -> j.
+trim : unsafe String -> String .
+trim s = slice s (ltrim s 1) (rtrim s (strlen s)).
+
+unquote s =
+  n = strlen s;
+  case and2 (n >= 2) (and2 (byteAt s 1 == 34) (byteAt s n == 34)) of
+    True -> slice s 2 (n - 1)
+  | False -> s.
+
+revGo : unsafe List (String, String) -> List (String, String) -> List (String, String) .
+revGo xs acc = case xs of Nil -> acc | x :: r -> revGo r (x :: acc).
+
+# ---- one line ---------------------------------------------------------------
+# [header] -> Ok its text
+asHeader : unsafe String -> Result String String .
+asHeader t =
+  case and2 (strlen t >= 2) (and2 (byteAt t 1 == 91) (byteAt t (strlen t) == 93)) of
+    True -> Ok (slice t 2 (strlen t - 1))
+  | False -> Err "not header".
+
+# key = value -> Ok (key, value), each trimmed and unquoted
+asKV : unsafe String -> Result (String, String) String .
+asKV ln =
+  eq = findByte ln 61 1;
+  case eq == 0 of
+    True -> Err "no ="
+  | False -> Ok (unquote (trim (slice ln 1 (eq - 1))), unquote (trim (slice ln (eq + 1) (strlen ln)))).
+
+isBlankOrComment t =
+  case strlen t == 0 of
+    True -> True
+  | False -> charAt t 1 == 35.
+
+# 0 = top level, 1 = [permissions.required], 2 = [permissions.optional],
+# 3 = some other table, whose keys are not ours to read
+headerState : unsafe String -> Int .
+headerState h =
+  case QAR.strEq h "permissions.required" of
+    True -> 1
+  | False -> case QAR.strEq h "permissions.optional" of True -> 2 | False -> 3.
+
+# ---- the fold ---------------------------------------------------------------
+# the top-level keys, then the two permission lists in manifest order
+Man = Type (Man name id entry version mode abi shell req opt).
+Top = Type (Top name id entry version mode abi shell).
+
+pick cur want k v = case QAR.strEq k want of True -> v | False -> cur.
+topSet : unsafe Top -> String -> String -> Top .
+topSet t k v =
+  Top name id entry version mode abi shell = t;
+  Top (pick name "name" k v) (pick id "id" k v) (pick entry "entry" k v)
+      (pick version "version" k v) (pick mode "loadMode" k v)
+      (pick abi "abi" k v) (pick shell "shell" k v).
+
+# walk the text line by line: i is the first byte of the line, n the length
+go : unsafe String -> Int -> Int -> Int -> Top -> List (String, String) -> List (String, String) -> Man .
+go s i n st top req opt =
+  case i > n of
+    True -> finish top req opt
+  | False -> goLine s i n st top req opt (lineStop s i n).
+
+# the index of the newline ending the line at i, or n + 1
+lineStop : unsafe String -> Int -> Int -> Int .
+lineStop s i n = case i > n of True -> n + 1 | False -> case charAt s i == 10 of True -> i | False -> lineStop s (i + 1) n.
+
+goLine : unsafe String -> Int -> Int -> Int -> Top -> List (String, String) -> List (String, String) -> Int -> Man .
+goLine s i n st top req opt e = goTrimmed s (e + 1) n st top req opt (trim (slice s i (e - 1))).
+
+goTrimmed : unsafe String -> Int -> Int -> Int -> Top -> List (String, String) -> List (String, String) -> String -> Man .
+goTrimmed s nx n st top req opt t =
+  case isBlankOrComment t of
+    True -> go s nx n st top req opt
+  | False -> goHeader s nx n st top req opt t (asHeader t).
+
+goHeader : unsafe String -> Int -> Int -> Int -> Top -> List (String, String) -> List (String, String) -> String -> Result String String -> Man .
+goHeader s nx n st top req opt t h =
+  case h of
+    Ok name -> go s nx n (headerState name) top req opt
+  | Err _ -> goKV s nx n st top req opt (asKV t).
+
+goKV : unsafe String -> Int -> Int -> Int -> Top -> List (String, String) -> List (String, String) -> Result (String, String) String -> Man .
+goKV s nx n st top req opt r =
+  case r of
+    Err _ -> go s nx n st top req opt
+  | Ok kv -> goPut s nx n st top req opt kv.
+
+goPut : unsafe String -> Int -> Int -> Int -> Top -> List (String, String) -> List (String, String) -> (String, String) -> Man .
+goPut s nx n st top req opt kv =
+  (k, v) = kv;
+  case st of
+    0 -> go s nx n st (topSet top k v) req opt
+  | 1 -> go s nx n st top (kv :: req) opt
+  | 2 -> go s nx n st top req (kv :: opt)
+  | _ -> go s nx n st top req opt.
+
+finish : unsafe Top -> List (String, String) -> List (String, String) -> Man .
+finish top req opt =
+  Top name id entry version mode abi shell = top;
+  Man name id entry version mode abi shell (revGo req Nil) (revGo opt Nil).
+
+# the MANIFEST section's text -> Man
+parse : unsafe String -> Man .
+parse text = go text 1 (strlen text) 0 (Top "" "" "" "" "" "" "") Nil Nil.
+
+# a whole .qa archive -> Man, or QAR's reason it is not one
+parseQa : unsafe String -> Result Man String .
+parseQa qa =
+  case QAR.manifestOf qa of
+    Err e -> Err e
+  | Ok text -> Ok (parse text).
+
+name (Man a _ _ _ _ _ _ _ _) = a.
+id (Man _ a _ _ _ _ _ _ _) = a.
+entry (Man _ _ a _ _ _ _ _ _) = a.
+version (Man _ _ _ a _ _ _ _ _) = a.
+mode (Man _ _ _ _ a _ _ _ _) = a.
+abi (Man _ _ _ _ _ a _ _ _) = a.
+shell (Man _ _ _ _ _ _ a _ _) = a.
+req (Man _ _ _ _ _ _ _ a _) = a.
+opt (Man _ _ _ _ _ _ _ _ a) = a.
+
+# ---- the capability blob ----------------------------------------------------
+# "<id>\n" then "<url> <mode>\n" per grant: what Sys.caps returns in the app.
+# Built back to front so each strcat adds one line to a finished tail.
+grantLines : unsafe List (String, String) -> String .
+grantLines g =
+  case g of
+    Nil -> ""
+  | p :: r -> case p of (u, m) ->
+      strcat u (strcat " " (strcat m (strcat (chr 10) (grantLines r)))).
+
+capsBlob : unsafe String -> List (String, String) -> String .
+capsBlob appId granted = strcat appId (strcat (chr 10) (grantLines granted)).
