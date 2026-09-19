@@ -20,10 +20,8 @@ FPR    = ..
 
 HARTS ?= 2
 QOSHARTS ?= 8
-# the host arena the app's growth grants come from (mmap'd lazily: only
-# touched pages cost RSS).  Sessions, actors, and message slabs all live
-# here, so this is the "scale to memory" ceiling for a hosted server.
-ARENA_MB ?= 2048
+# (the host arena has no size: qosp reserves address space for it at run
+# time -- portable/host.c, docs/BOUNDS.md; QOSP_ARENA_MB caps a run)
 CROSS  = riscv64-unknown-elf-
 QEMU   = qemu-system-riscv64
 # outputs qos.py redirects into the project's .qos/ (an installed tree is
@@ -74,7 +72,7 @@ REV_FLAG := $(if $(CODEGEN_REV),-DQOSP_CODEGEN_REV=$(CODEGEN_REV),)
 # FPR_HOME names the compiler's checkout here: dependency.mk points it at QOS
 # for module resolution, and qosp.fpr's `use` lines are importer-relative.
 QOSP_FPR = portable/qosp.fpr ../programs/mods/qar.fpr ../programs/mods/manifest.fpr ../programs/mods/qaimg.fpr
-QOSP_DEFS = -DQOSP_HOST -DQOS_ARENA_SIZE=($(ARENA_MB)ul<<20) $(REV_FLAG)
+QOSP_DEFS = -DQOSP_HOST $(REV_FLAG)
 # on arm64 the app keeps its hart in x28; the host's C must never borrow it,
 # or its fault handler could not ask the app which actor was running
 ifneq ($(filter arm64 aarch64,$(shell uname -m)),)
@@ -104,7 +102,7 @@ portable-gl: $(QOSP_GL_SRC) $(QOSP_FPR) appside/qos_abi.h $(FPRISC_ROOT)/compile
 
 # ---- QOS Portable, aarch64 cross (verifies the x28 hart discipline
 portable-a64: $(QOSP_SRC) appside/qos_abi.h $(FPRISC_ROOT)/compiler/Codegen.hs
-	aarch64-linux-gnu-gcc -static -O2 -Wall -Wextra -DFPR_POSIX -DQOSP_HOST -DFPR_NHARTS=$(QOSHARTS) -DQOS_ARENA_SIZE="($(ARENA_MB)ul << 20)" $(REV_FLAG) \
+	aarch64-linux-gnu-gcc -static -O2 -Wall -Wextra -DFPR_POSIX -DQOSP_HOST -DFPR_NHARTS=$(QOSHARTS) $(REV_FLAG) \
 	  -I$(FRUNTIME) -I$(HAL)/unix -Iappside $(QOSP_SRC) -o qosp-a64 -lpthread -lm
 
 # ---- QOS Native: the kernel --------------------------------------------

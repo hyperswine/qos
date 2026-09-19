@@ -5,7 +5,7 @@ OUTPUT_FORMAT("elf64-littleaarch64")
 OUTPUT_ARCH(aarch64)
 ENTRY(qos_app_entry)
 
-MEMORY { SLOT (rwx) : ORIGIN = QOS_SLOT_BASE, LENGTH = 16M }
+MEMORY { SLOT (rwx) : ORIGIN = QOS_SLOT_BASE, LENGTH = 1024M }
 
 /* Two PT_LOADs so the host can enforce W^X: code+rodata r-x, data+bss
  * rw.  The 64 KiB alignment between them means no host page round-up

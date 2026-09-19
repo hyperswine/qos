@@ -213,6 +213,8 @@ int64_t qos_app_entry(const qos_boot_t *boot, char *result_out,
     uw hi = (uw)boot->arena_base + boot->arena_size;
     if (!boot->arena_size || hi <= lo + 4 * minb) return -1;
     buddy_init((void *)lo, hi - lo);
+    fpr_heap_lo = (char *)boot->arena_base; /* fpr_in_heap's span: run-time, from the */
+    fpr_heap_hi = (char *)hi;               /* boot record -- never linked in (v14) */
     if (QOS_PLUG_BASE >= lo && QOS_PLUG_BASE + QOS_PLUG_SIZE <= hi &&
         !buddy_reserve_range((void *)QOS_PLUG_BASE, QOS_PLUG_SIZE))
       return -1;

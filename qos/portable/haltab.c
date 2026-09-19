@@ -93,6 +93,8 @@ void hal_stack_guard(void *lo, uint64_t size);
 void hal_stack_unguard(void *lo, uint64_t size);
 static void qosp_stack_guard(void *lo, uint64_t size) { hal_stack_guard(lo, size); }
 static void qosp_stack_unguard(void *lo, uint64_t size) { hal_stack_unguard(lo, size); }
+void hal_heap_release(void *p, uint64_t bytes); /* machine/posix: madvise */
+static void qosp_heap_release(void *p, uint64_t bytes) { hal_heap_release(p, bytes); }
 void *(*qosp_app_stack_query)(uint64_t *id, uint64_t *size); /* host.c's fault handler asks it */
 static void qosp_set_stack_query(void *(*q)(uint64_t *, uint64_t *)) { qosp_app_stack_query = q; }
 
@@ -150,6 +152,7 @@ static qos_hal_t the_table = {
     .stack_guard = qosp_stack_guard,
     .stack_unguard = qosp_stack_unguard,
     .set_stack_query = qosp_set_stack_query,
+    .heap_release = qosp_heap_release,
 };
 
 const qos_hal_t *qosp_hal_table(void) { return &the_table; }

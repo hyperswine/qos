@@ -75,11 +75,10 @@ static int g_trace;
  * -- the image was linked for its QOS_PLUG_BASE sub-slot), enforce the
  * identical W^X discipline as the shell image, and hand back the
  * module-table address (the plugin's e_entry -- ENTRY(fpr_modtab) in
- * link-qosplug.ld).  Up to PLUG_MAX images at distinct sub-slots;
+ * link-qosplug.ld).  Any number of images, each where it was linked;
  * re-load / overlap refused (v1: no unload). */
-#define PLUG_MAX 8
-static struct { uintptr_t lo, hi; } plug_ranges[PLUG_MAX];
-static int plug_n;
+static struct plug_range { uintptr_t lo, hi; } *plug_ranges; /* doubles */
+static int plug_n, plug_cap;
 
 /* the hosted shell image's LOAD sha -- the identity every plugin must
  * have been linked against (plugsyms bakes the shell's ABSOLUTE symbol
@@ -93,9 +92,12 @@ static int span_is(qos_span_t a, const char *z) {
   return a.n == n && !memcmp(a.p, z, n);
 }
 int64_t qosp_load_plugin(const qos_plugin_t *pl, char *err, uint64_t errcap) {
-  if (plug_n >= PLUG_MAX) {
-    snprintf(err, errcap, "plugin registry full");
-    return -1;
+  if (plug_n == plug_cap) {
+    int cap = plug_cap ? plug_cap * 2 : 8;
+    struct plug_range *r = realloc(plug_ranges, (size_t)cap * sizeof *r);
+    if (!r) { snprintf(err, errcap, "out of memory"); return -1; }
+    plug_ranges = r;
+    plug_cap = cap;
   }
   int idn = (int)pl->id.n;
   const char *id = (const char *)pl->id.p;
@@ -329,6 +331,20 @@ FPR_FN(fpr_g_Host_x2esha256, h_sha256, 1);
 
 /* Host.init : Bool -> Result String String -- fault reporting, and the
  * arena at its published address.  Ok "" | Err reason. */
+/* The arena: address space RESERVED at the address app images are linked
+ * for, committed by the OS as the app touches it -- so it has no size to
+ * choose (it was ARENA_MB, 2048, and had to agree with a number linked into
+ * every app).  Made before this host's own heap is reserved, which would
+ * otherwise be free to land here (machine/posix hal_heap_before_reserve).
+ * QOSP_ARENA_MB caps it for a run: a test of exhaustion. */
+static uint64_t g_arena_size; /* 0: could not reserve at the published address */
+void hal_heap_before_reserve(void) {
+  uw max = QOS_ARENA_MAX, min = QOS_ARENA_MIN, got = 0;
+  const char *cap = getenv("QOSP_ARENA_MB");
+  if (cap && atol(cap) > 0) max = min = (uw)atol(cap) << 20;
+  g_arena_size = fpr_heap_reserve((void *)QOS_ARENA_BASE, max, min, &got) ? got : 0;
+}
+
 static V h_init(V tracev) {
   g_trace = !ISINT(tracev) && ((hdr_t *)tracev)->var != 0;
   if (getenv("QOSP_TRACE")) g_trace = 1;
@@ -338,12 +354,9 @@ static V h_init(V tracev) {
   sa.sa_flags = SA_SIGINFO | SA_ONSTACK; /* the faulting stack may be the exhausted one */
   sigaction(SIGBUS, &sa, NULL);
   sigaction(SIGSEGV, &sa, NULL);
-  TRACE("stage 1 (initializer): mapping arena at %#lx (+%lu MiB)\n",
-        QOS_ARENA_BASE, QOS_ARENA_SIZE >> 20);
-  void *arena = mmap((void *)QOS_ARENA_BASE, QOS_ARENA_SIZE, PROT_READ | PROT_WRITE,
-                     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-  if (arena != (void *)QOS_ARENA_BASE) {
-    if (arena != MAP_FAILED) munmap(arena, QOS_ARENA_SIZE);
+  TRACE("stage 1 (initializer): arena at %#lx, %lu MiB of address space reserved\n",
+        QOS_ARENA_BASE, (unsigned long)(g_arena_size >> 20));
+  if (!g_arena_size) {
 #ifdef __APPLE__
     /* arm64 macOS forces PIE, and occasionally slides this host across the
      * fixed app arena.  A new exec gets a fresh slide; never MAP_FIXED over
@@ -389,7 +402,7 @@ static V h_load_image(V pathv, V shav, V imgv, V numsv) {
   g_shell_sha[sha->len] = 0;
 
   fpr_qaimg_t q = {n[0], n[1], n[2], n[3], n[4]};
-  fpr_elf_load_t ld = fpr_qaimg_place(&q, img->bytes, img->len, (void *)QOS_SLOT_BASE, QOS_ARENA_SIZE);
+  fpr_elf_load_t ld = fpr_qaimg_place(&q, img->bytes, img->len, (void *)QOS_SLOT_BASE, QOS_SLOT_SIZE);
   if (!ld.ok) return res_err(ld.err);
   /* Publish the code: the arena is one rw anonymous mapping, and a page is
    * never writable and executable at once, so flip just the executable
@@ -446,7 +459,7 @@ static V h_run(V idv, V namev, V capsv) {
   qosp_store_bind(cid);
 
   uint64_t arena_base = ((uint64_t)g_ld.image_end + 15) & ~15ull;
-  uint64_t arena_size = (QOS_ARENA_BASE + QOS_ARENA_SIZE) - arena_base;
+  uint64_t arena_size = (QOS_ARENA_BASE + g_arena_size) - arena_base;
   qos_boot_t boot = {
       .abi_version = QOS_ABI_VERSION,
       .hal = qosp_hal_table(),

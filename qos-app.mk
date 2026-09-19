@@ -13,12 +13,9 @@ else
 QOS_SLOT_BASE  = 0x400000000
 endif
 QOS_BASE_FLAG  = -DQOS_ARENA_BASE=$(QOS_SLOT_BASE)ul
-# the app's notion of "the heap" (fpr_in_heap) ends where the host's
-# arena ends: MUST agree with qos/Makefile's ARENA_MB, or a grant above
-# the line is mistaken for a static and shared by identity (found as
-# random corruption past ~220 sessions when the host arena grew to 2 GiB)
-ARENA_MB ?= 2048
-PROC_ARENA_END := $(shell printf '0x%x' $$(( $(QOS_SLOT_BASE) + $(ARENA_MB) * 1048576 )))
+# the app's notion of "the heap" (fpr_in_heap) comes from the boot record at
+# run time.  It used to be linked in here as ARENA_MB and had to agree with
+# the host's (found as random corruption past ~220 sessions): docs/BOUNDS.md
 QOSHARTS ?= 8
 QOSAPP_RT_COMMON = $(QOS)/appside/entry.c $(QOS)/appside/hal.c $(QOS)/appside/support.c \
 				   $(FRUNTIME)/runtime.c $(FRUNTIME)/actors.c $(FRUNTIME)/bits.c \
@@ -39,7 +36,6 @@ $(BUILD)/qosapp.elf: $(BUILD)/qosapp-prog.s $(QOSAPP_RT) $(QOS)/appside/link-qos
 	  -I$(FRUNTIME) -I$(QOS)/appside \
 	  -T $(QOS)/appside/link-qosapp.ld -Wl,--defsym=QOS_SLOT_BASE=$(QOS_SLOT_BASE) \
 	  -Wl,--defsym=_heap_start=_proc_image_end -Wl,--defsym=_heap_end=_proc_image_end \
-	  -Wl,--defsym=_proc_arena_end=$(PROC_ARENA_END) \
 	  -Wl,--build-id=none -Wl,-z,noexecstack \
 	  $(BUILD)/qosapp-prog.s $$(cat $(BUILD)/qosapp-prog.s.units) $(QOSAPP_RT) -o $@
 
@@ -69,7 +65,6 @@ $(BUILD)/qosapp-a64.elf: $(BUILD)/qosapp-a64.s $(QOSAPP_RT_COMMON) $(FMACHINE)/u
 	  -I$(FRUNTIME) -I$(QOS)/appside \
 	  -T $(QOS)/appside/link-qosapp-a64.ld -Wl,--defsym=QOS_SLOT_BASE=$(QOS_SLOT_BASE) \
 	  -Wl,--defsym=_heap_start=_proc_image_end -Wl,--defsym=_heap_end=_proc_image_end \
-	  -Wl,--defsym=_proc_arena_end=$(PROC_ARENA_END) \
 	  $(BUILD)/qosapp-a64.s $$(cat $(BUILD)/qosapp-a64.s.units) \
 	  $(QOSAPP_RT_COMMON) $(FMACHINE)/unix/ctx_a64.S -o $@
 
@@ -82,8 +77,8 @@ qos-app-a64: $(BUILD)/qosapp-a64.elf tools/mkqa.py
 	@echo "$(QA_OUT) built for Apple Silicon"
 
 # ---- plugin .qa: a library image loaded into the RUNNING shell -----------
-# Linked at a PLUG sub-slot (qos_abi.h: 0x408000000 + PLUGSLOT * 4 MiB,
-# 8 slots) against the running app image's OWN symbol addresses -- a
+# Linked at a base inside the plugin window (qos_abi.h: slot base + 1 GiB;
+# by default PLUGSLOT * 4 MiB into it -- pass PLUGBASE for a bigger image) against the running app image's OWN symbol addresses -- a
 # PROVIDE() script generated from nm.  The plugin carries only its own
 # generated code + module table (ENTRY(fpr_modtab) in link-qosplug.ld);
 # the runtime C, prelude, and any shared mods resolve to the shell's
@@ -99,7 +94,7 @@ qos-app-a64: $(BUILD)/qosapp-a64.elf tools/mkqa.py
 PLUGSLOT ?= 0
 PLUGID    = $(basename $(notdir $(SOURCE)))
 PLUG_OUT ?= $(PLUGID).qa
-PLUGBASE  = $(shell printf '0x%x' $$(( $(QOS_SLOT_BASE) + 0x8000000 + $(PLUGSLOT) * 4194304 )))
+PLUGBASE ?= $(shell printf '0x%x' $$(( $(QOS_SLOT_BASE) + 0x40000000 + $(PLUGSLOT) * 4194304 )))
 
 plugsyms-x64:
 	@test -f $(BUILD)/qosapp.elf || { echo "build the shell first: make qos-app PROG=<shell>"; exit 1; }
