@@ -11,6 +11,8 @@
 unsafe base.
 
 M = use "../programs/mods/manifest".
+QAR = use "../programs/mods/qar".
+QI = use "../programs/mods/qaimg".
 
 count xs acc = case xs of Nil -> acc | _ :: r -> count r (acc + 1).
 append xs ys = case xs of Nil -> ys | h :: t -> h :: append t ys.
@@ -29,12 +31,23 @@ report man =
   _ = showPerms "required" (M.req man);
   showPerms "optional" (M.opt man).
 
+# the LOAD section as the loaders read it (mods/qaimg.fpr), checked against IMAGE
+image qa = case QAR.sectionBytes qa "LOAD" of
+    Err e -> print "image: {e}"
+  | Ok load -> imageOf load (QAR.sectionBytes qa "IMAGE").
+imageOf load r = case r of
+    Err e -> print "image: {e}"
+  | Ok img -> imageShow (QI.load load img).
+imageShow r = case r of
+    Err e -> print "image: REFUSED: {e}"
+  | Ok m -> print "image: base={QI.base m} entry={QI.entry m} execsz={QI.execsz m} rwoff={QI.rwoff m} imagesz={QI.imagesz m} memsz={QI.memsz m} sha={QI.sha m}".
+
 run path wantCaps =
   case M.parseQa (fileRead path) of
     Err e -> _ = Sys.stderr "qainfo: {path}: {e}\n"; Sys.exit 1
   | Ok man -> case wantCaps of
       True -> print (M.capsBlob (M.id man) (append (M.req man) (M.opt man)))
-    | False -> report man.
+    | False -> _ = report man; image (fileRead path).
 
 main = case Sys.args Unit of
     path :: Nil -> run path False

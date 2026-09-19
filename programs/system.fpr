@@ -76,6 +76,7 @@ TimeFmt = use "mods/timefmt#39dff276efd647a1".
 SVCM    = use "mods/svc".
 QAR     = use "mods/qar".
 Manifest = use "mods/manifest".
+QaImg   = use "mods/qaimg".
 Caps    = SVCM.Caps.
 Rpc     = SVCM.Rpc.
 Svc  = SVCM.Svc.
@@ -583,7 +584,7 @@ keepGranted perms bs =
       | False -> keepGranted pr br.
 
 # runEntry: the load seam. loadMode="process" -> QAR2 flat-image
-# loading (Sys.loadImageAt, hal/core/qaimg.c) -- one copy, one
+# loading (Sys.placeImageAt, hal/core/qaimg.c) -- one copy, one
 # zero-fill, no header walking. Anything else keeps the co-compiled
 # name-dispatch path (Apps.entry/Apps.run), which is what every app
 # shipped as rodata in this build actually uses.
@@ -615,24 +616,37 @@ runBuiltin con entry caps =
     True -> launcher_main caps
   | False -> putLn con (strcat entry ": not a builtin; ship it as loadMode = process").
 
-# QAR2: the container work stays HERE (the Loader does the dirty work;
-# C never parses the archive) -- find LOAD and IMAGE, pass both extents
-# to Sys.loadImageAt by (offset,length) ONLY, never as sliced Strings
-# (the O(n^2)-slice hazard applies to the image payload as it did to
-# the ELF one).
-runProcess : unsafe (Int, Int) -> String -> v300 -> Unit .
-runProcess con qa blob =
-  case QAR.extent qa "LOAD" of
-    Err e -> putLn con (strcat "No LOAD section in this .qa: " e)
-  | Ok l -> case QAR.extent qa "IMAGE" of
-      Err e -> putLn con (strcat "No IMAGE section in this .qa: " e)
-    | Ok r -> runProcessAt con qa l r blob.
+# QAR2: the container work stays HERE (the Loader does the dirty work; C
+# never parses the archive, nor -- any more -- the LOAD section inside it).
+# LOAD is a few lines of text: it is sliced out and read by mods/qaimg.fpr,
+# which also refuses an inconsistent one by name.  IMAGE is the payload: it
+# goes to the placer by (offset, length) ONLY, never as a sliced String.
+#
+# The placer is this file's own foreign primitive (hal/core/process.c): the
+# archive, IMAGE's extent, LOAD's numbers [base, entry, execsz, rwoff, memsz]
+# and the capability blob.
+Sys.placeImageAt : String -> Int -> Int -> List Int -> String -> (Int, String) .
 
-runProcessAt : unsafe (Int, Int) -> String -> (Int, Int) -> (Int, Int) -> d302 -> Unit .
-runProcessAt con qa l r blob =
-  (lpos, lln) = l;
+runProcess : unsafe (Int, Int) -> String -> String -> Unit .
+runProcess con qa blob =
+  case QAR.sectionBytes qa "LOAD" of
+    Err e -> putLn con (strcat "No LOAD section in this .qa: " e)
+  | Ok load -> case QAR.extent qa "IMAGE" of
+      Err e -> putLn con (strcat "No IMAGE section in this .qa: " e)
+    | Ok r -> runProcessAt con qa (QaImg.parse load) r blob.
+
+runProcessAt : unsafe (Int, Int) -> String -> Result QaImg.Img String -> (Int, Int) -> String -> Unit .
+runProcessAt con qa parsed r blob =
   (ipos, iln) = r;
-  runProcessLoaded con (Sys.loadImageAt qa (lpos - 1) lln (ipos - 1) iln blob).
+  case parsed of
+    Err e -> putLn con (strcat "process load failed: " e)
+  | Ok m -> runProcessChecked con qa (QaImg.check m iln) (ipos - 1) iln blob.
+
+runProcessChecked : unsafe (Int, Int) -> String -> Result QaImg.Img String -> Int -> Int -> String -> Unit .
+runProcessChecked con qa checked ioff iln blob =
+  case checked of
+    Err e -> putLn con (strcat "process load failed: " e)
+  | Ok m -> runProcessLoaded con (Sys.placeImageAt qa ioff iln (QaImg.nums m) blob).
 
 runProcessLoaded : unsafe (Int, Int) -> (Int, String) -> Unit .
 runProcessLoaded con res =

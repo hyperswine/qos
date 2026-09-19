@@ -88,17 +88,6 @@ static int plug_n;
  * layout-dependent, hence a HARD gate, not a warning) */
 void qosp_sha256(const unsigned char *msg, uint64_t n, unsigned char out[32]); /* sha256.c */
 static char g_shell_sha[72];
-static void load_sha_hex(const unsigned char *load, uint64_t n, char *out,
-                         uint64_t cap) {
-  out[0] = 0;
-  for (uint64_t i = 0; i + 4 < n; i++)
-    if (!memcmp(load + i, "sha ", 4) && (i == 0 || load[i - 1] == '\n')) {
-      uint64_t j = i + 4, k = 0;
-      while (j < n && load[j] != '\n' && k + 1 < cap) out[k++] = (char)load[j++];
-      out[k] = 0;
-      return;
-    }
-}
 static int span_is(qos_span_t a, const char *z) {
   uint64_t n = strlen(z);
   return a.n == n && !memcmp(a.p, z, n);
@@ -131,24 +120,21 @@ int64_t qosp_load_plugin(const qos_plugin_t *pl, char *err, uint64_t errcap) {
     fprintf(stderr, "[qos] warning: plugin %.*s carries no shell stamp "
             "(pre-stamp archive); the matched-set gate cannot protect it\n", idn, id);
   /* the image is what its LOAD section says it is, or it does not load */
-  char claimed[72];
-  load_sha_hex(pl->load.p, pl->load.n, claimed, sizeof claimed);
-  if (claimed[0]) {
+  if (pl->sha.n) {
     unsigned char d[32];
     char hex[65];
     qosp_sha256(pl->img.p, pl->img.n, d);
     for (int i = 0; i < 32; i++) snprintf(hex + 2 * i, 3, "%02x", d[i]);
-    if (strcmp(hex, claimed)) {
+    if (!span_is(pl->sha, hex)) {
       snprintf(err, errcap, "plugin %.*s: IMAGE sha256 mismatch (corrupt archive)", idn, id);
       return -1;
     }
   }
-  /* the archive DECLARES its span (LOAD base/memsz) -- no more
-   * recovering it from segment high-water marks and 4 MiB masks.
-   * Overlap-check the declared span first, load second: a bad plugin
-   * is refused before a byte lands. */
-  fpr_qaimg_t qp;
-  if (!fpr_qaimg_params(pl->load.p, pl->load.n, &qp) || qp.memsz == 0) {
+  /* the archive DECLARES its span (LOAD base/memsz, read by the app with
+   * mods/qaimg.fpr).  Overlap-check the declared span first, place second: a
+   * bad plugin is refused before a byte lands. */
+  fpr_qaimg_t qp = {pl->base, pl->entry, pl->execsz, pl->rwoff, pl->memsz};
+  if (qp.memsz == 0) {
     snprintf(err, errcap, "plugin LOAD section unusable");
     return -1;
   }
@@ -161,8 +147,8 @@ int64_t qosp_load_plugin(const qos_plugin_t *pl, char *err, uint64_t errcap) {
                "(link each app at its own sub-slot base)");
         return -1;
     }
-  fpr_elf_load_t ld = fpr_qaimg_load(pl->load.p, pl->load.n, pl->img.p, pl->img.n,
-                                     (void *)QOS_PLUG_BASE, QOS_PLUG_SIZE);
+  fpr_elf_load_t ld = fpr_qaimg_place(&qp, pl->img.p, pl->img.n,
+                                      (void *)QOS_PLUG_BASE, QOS_PLUG_SIZE);
   if (!ld.ok) {
     snprintf(err, errcap, "plugin image: %s", ld.err);
     return -1;
@@ -381,23 +367,29 @@ static V h_init(V tracev) {
 }
 FPR_FN(fpr_g_Host_x2einit, h_init, 1);
 
-/* Host.loadImage : String -> String -> String -> Result String String
- * the archive's path (assets resolve beside it), its LOAD section and its
- * IMAGE section: place the image in the slot and publish its code r-x. */
+/* Host.loadImage : String -> String -> String -> List Int -> Result String String
+ * the archive's path (assets resolve beside it), the sha its LOAD section
+ * claims (this image's identity: every plugin must have been linked against
+ * it), its IMAGE section and LOAD's numbers as mods/qaimg.fpr read them:
+ * place the image in the slot and publish its code r-x. */
 static fpr_elf_load_t g_ld;
-static V h_load_image(V pathv, V loadv, V imgv) {
+static V h_load_image(V pathv, V shav, V imgv, V numsv) {
   const str_t *path = arg_str(pathv, "Host.loadImage: path must be a String");
-  const str_t *load = arg_str(loadv, "Host.loadImage: LOAD must be a String");
+  const str_t *sha = arg_str(shav, "Host.loadImage: sha must be a String");
   const str_t *img = arg_str(imgv, "Host.loadImage: IMAGE must be a String");
+  uw n[5];
+  if (!fpr_list_ints(numsv, n, 5)) fpr_cpanic("Host.loadImage: nums must be [base, entry, execsz, rwoff, memsz]");
   char *cpath = malloc(path->len + 1); /* qos_snd keeps the pointer */
   if (!cpath) return res_err("out of memory");
   memcpy(cpath, path->bytes, path->len);
   cpath[path->len] = 0;
   qos_snd_set_assets(cpath); /* music and other assets resolve beside the .qa */
-  load_sha_hex(load->bytes, load->len, g_shell_sha, sizeof g_shell_sha);
+  if (sha->len >= sizeof g_shell_sha) return res_err("sha too long");
+  memcpy(g_shell_sha, sha->bytes, sha->len);
+  g_shell_sha[sha->len] = 0;
 
-  fpr_elf_load_t ld = fpr_qaimg_load(load->bytes, load->len, img->bytes, img->len,
-                                     (void *)QOS_SLOT_BASE, QOS_ARENA_SIZE);
+  fpr_qaimg_t q = {n[0], n[1], n[2], n[3], n[4]};
+  fpr_elf_load_t ld = fpr_qaimg_place(&q, img->bytes, img->len, (void *)QOS_SLOT_BASE, QOS_ARENA_SIZE);
   if (!ld.ok) return res_err(ld.err);
   /* Publish the code: the arena is one rw anonymous mapping, and a page is
    * never writable and executable at once, so flip just the executable
@@ -421,7 +413,7 @@ static V h_load_image(V pathv, V loadv, V imgv) {
   g_ld = ld;
   return res_ok_str("", 0);
 }
-FPR_FN(fpr_g_Host_x2eloadImage, h_load_image, 3);
+FPR_FN(fpr_g_Host_x2eloadImage, h_load_image, 4);
 
 /* the app's entry is freestanding code that keeps ITS hart in x28 and does
  * not restore ours; this program's own hart lives there too */

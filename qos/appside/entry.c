@@ -66,26 +66,30 @@ int fpr_hal_sleep_us(uintptr_t us) {
 }
 static char g_sysout[256 * 1024];
 
-/* Sys.attachImage <id> <abi> <shell> <LOAD> <IMAGE> -> Ok "" | Err reason:
+/* Sys.attachImage <id> <abi> <shell> <sha> <IMAGE> <nums> -> Ok "" | Err reason:
  * load a plugin into the plugin window (syscall tag 4) and register its
- * module table (mod.c) so Mod.findAt resolves its exports.  The five
- * Strings are what mods/plug.fpr found in the archive; programs call
- * Plug.attach with the .qa bytes (read off qosp.disk with mods/qlog --
- * name->bytes resolution is the FPRISC side's job too). */
+ * module table (mod.c) so Mod.findAt resolves its exports.  Everything here
+ * is what mods/plug.fpr found in the archive -- nums is mods/qaimg.fpr's
+ * [base, entry, execsz, rwoff, memsz]; programs call Plug.attach with the .qa
+ * bytes (read off qosp.disk with mods/qlog -- name->bytes resolution is the
+ * FPRISC side's job too). */
 int fpr_mod_attach(const uw *tab);
 static qos_span_t span_of(V v, const char *who) {
   if (ISINT(v) || ((hdr_t *)v)->tid != T_STR) fpr_cpanic(who);
   str_t *s = (str_t *)v;
   return (qos_span_t){s->bytes, s->len};
 }
-static V h_sys_attach_image(V idv, V abiv, V shellv, V loadv, V imgv) {
+static V h_sys_attach_image(V idv, V abiv, V shellv, V shav, V imgv, V numsv) {
   if (!g_syscall) return fpr_mkresult(1, "no syscall channel (standalone run)");
+  uw n[5];
+  if (!fpr_list_ints(numsv, n, 5)) fpr_cpanic("Sys.attachImage: nums must be [base, entry, execsz, rwoff, memsz]");
   qos_plugin_t pl = {
       span_of(idv, "Sys.attachImage: id must be a String"),
       span_of(abiv, "Sys.attachImage: abi must be a String"),
       span_of(shellv, "Sys.attachImage: shell must be a String"),
-      span_of(loadv, "Sys.attachImage: LOAD must be a String"),
+      span_of(shav, "Sys.attachImage: sha must be a String"),
       span_of(imgv, "Sys.attachImage: IMAGE must be a String"),
+      n[0], n[1], n[2], n[3], n[4],
   };
   g_sysout[0] = 0;
   int64_t r = g_syscall(QOS_SYS_LOADQA, (const char *)&pl, sizeof pl, g_sysout, sizeof g_sysout);
@@ -94,7 +98,7 @@ static V h_sys_attach_image(V idv, V abiv, V shellv, V loadv, V imgv) {
     return fpr_mkresult(1, "module registry full");
   return fpr_mkresult(0, "");
 }
-FPR_FN(fpr_g_Sys_x2eattachImage, h_sys_attach_image, 5);
+FPR_FN(fpr_g_Sys_x2eattachImage, h_sys_attach_image, 6);
 
 /* Sys.compile <profile> <source> -> Ok asm | Err reason: the host-
  * side fpr compiler server, reached over the syscall channel (tag 7,

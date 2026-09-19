@@ -1,0 +1,134 @@
+# qaimg.fpr -- the LOAD section, interpreted in ONE place.
+#
+# A .qa's LOAD section is text: six `key <decimal>` lines (base, entry,
+# execsz, rwoff, imagesz, memsz), in any order, plus an optional
+# `sha <64 hex>` naming the IMAGE's sha-256 (docs/QA-FORMAT.md).  This module
+# reads it and refuses an inconsistent one.
+#
+# It used to be C (hal/core/qaimg.c: a hand-rolled key/decimal scanner and
+# five refusals), reached by three callers -- the portable host loading an
+# app, the portable host loading a plugin, the native kernel loading a
+# process -- while qosp.fpr scanned the same section a second time for the
+# sha line.  Every one of those callers has FP-RISC on its side of the call
+# now, so the text is read here and the C keeps only what C must do: check
+# the image lies in the window it was given, copy it there, and zero its
+# tail (fpr_qaimg_place).  ../fprisc/docs/C-REDUCTION.md.
+#
+# Pure: strings in, values out.
+
+and2 a b = case a of True -> b | False -> False.
+or2 a b = case a of True -> True | False -> b.
+
+# -1 = not seen; sha "" = none claimed
+Img = Type (Img base entry execsz rwoff imagesz memsz sha).
+
+base (Img a _ _ _ _ _ _) = a.
+entry (Img _ a _ _ _ _ _) = a.
+execsz (Img _ _ a _ _ _ _) = a.
+rwoff (Img _ _ _ a _ _ _) = a.
+imagesz (Img _ _ _ _ a _ _) = a.
+memsz (Img _ _ _ _ _ a _) = a.
+sha (Img _ _ _ _ _ _ a) = a.
+
+# what fpr_qaimg_place takes, in its order
+nums : Img -> List Int .
+nums m = base m :: entry m :: execsz m :: rwoff m :: memsz m :: Nil.
+
+# ---- one line ---------------------------------------------------------------
+# the index of the newline ending the line at i, or n + 1
+lineStop : unsafe String -> Int -> Int -> Int .
+lineStop s i n = case i > n of True -> n + 1 | False -> case charAt s i == 10 of True -> i | False -> lineStop s (i + 1) n.
+
+# the first space in [i, e), or e
+spaceIn : unsafe String -> Int -> Int -> Int .
+spaceIn s i e = case i >= e of True -> e | False -> case charAt s i == 32 of True -> i | False -> spaceIn s (i + 1) e.
+
+isDigit c = and2 (c >= 48) (c <= 57).
+
+# the decimal starting at i (before e): (value, digits read); 0 digits = no number
+decimal : unsafe String -> Int -> Int -> Int -> Int -> (Int, Int) .
+decimal s i e acc k = case i >= e of
+    True -> (acc, k)
+  | False -> decimalAt s i e acc k (charAt s i).
+decimalAt : unsafe String -> Int -> Int -> Int -> Int -> Int -> (Int, Int) .
+decimalAt s i e acc k c = case isDigit c of
+    True -> decimal s (i + 1) e (acc * 10 + (c - 48)) (k + 1)
+  | False -> (acc, k).
+
+# ---- the fold ---------------------------------------------------------------
+go : unsafe String -> Int -> Int -> Img -> Img .
+go s i n m = case i > n of
+    True -> m
+  | False -> goLine s i n m (lineStop s i n).
+
+goLine : unsafe String -> Int -> Int -> Img -> Int -> Img .
+goLine s i n m e = go s (e + 1) n (line s i e (spaceIn s i e) m).
+
+# [i, sp) is the key, (sp, e) its value; a line without a space is not ours
+line : unsafe String -> Int -> Int -> Int -> Img -> Img .
+line s i e sp m = case sp >= e of
+    True -> m
+  | False -> put (substr s i (sp - i)) s (sp + 1) e m.
+
+put : unsafe String -> String -> Int -> Int -> Img -> Img .
+put key s v e m = case key == "sha" of
+    True -> putSha s v e m
+  | False -> putNum key (decimal s v e 0 0) m.
+
+# exactly 64 characters claim a sha; anything else is an unknown line
+putSha s v e m =
+  Img a b c d f g _ = m;
+  case e - v >= 64 of
+    True -> Img a b c d f g (substr s v 64)
+  | False -> m.
+
+# a key with no digits after it is an unknown line, as it was in C
+putNum key r m = case r of (x, k) -> case k == 0 of
+    True -> m
+  | False -> setNum key x m.
+
+setNum key x m =
+  Img a b c d f g h = m;
+  case key == "base" of
+    True -> Img x b c d f g h
+  | False -> (case key == "entry" of
+    True -> Img a x c d f g h
+  | False -> (case key == "execsz" of
+    True -> Img a b x d f g h
+  | False -> (case key == "rwoff" of
+    True -> Img a b c x f g h
+  | False -> (case key == "imagesz" of
+    True -> Img a b c d x g h
+  | False -> (case key == "memsz" of
+    True -> Img a b c d f x h
+  | False -> m))))).
+
+complete m = and2 (base m >= 0) (and2 (entry m >= 0) (and2 (execsz m >= 0) (and2 (rwoff m >= 0) (and2 (imagesz m >= 0) (memsz m >= 0))))).
+
+# the LOAD section's text -> Img, or why not
+parse : unsafe String -> Result Img String .
+parse load =
+  m = go load 1 (strlen load) (Img (0 - 1) (0 - 1) (0 - 1) (0 - 1) (0 - 1) (0 - 1) "");
+  case complete m of
+    True -> Ok m
+  | False -> Err "LOAD section missing a required field".
+
+# is this LOAD consistent with an IMAGE of `imgLen` bytes?  (Whether the image
+# lies inside the window it is being placed in is the placer's own check: that
+# one guards a copy.)
+check : Img -> Int -> Result Img String .
+check m imgLen = case memsz m == 0 of
+    True -> Err "placeholder .qa (memsz 0): nothing to load"
+  | False -> (case imgLen != imagesz m of
+    True -> Err "IMAGE length disagrees with LOAD imagesz"
+  | False -> (case or2 (imagesz m > memsz m) (execsz m > imagesz m) of
+    True -> Err "LOAD spans inconsistent (need execsz <= imagesz <= memsz)"
+  | False -> (case entry m >= execsz m of
+    True -> Err "entry offset outside the r-x prefix"
+  | False -> Ok m))).
+
+# parse, then check against the IMAGE that came with it
+load : unsafe String -> String -> Result Img String .
+load loadText img = case parse loadText of
+    Err e -> Err e
+  | Ok m -> check m (strlen img).

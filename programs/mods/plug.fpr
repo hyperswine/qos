@@ -14,10 +14,12 @@
 
 QAR = use "qar".
 M   = use "manifest".
+QI  = use "qaimg".
 
 # this module's one foreign primitive (qos/appside/entry.c): id, abi stamp,
-# shell stamp, the LOAD section, the IMAGE section
-Sys.attachImage : String -> String -> String -> String -> String -> Result String String .
+# shell stamp, the sha LOAD claims for IMAGE, IMAGE, and LOAD's numbers
+# [base, entry, execsz, rwoff, memsz] as mods/qaimg.fpr read them
+Sys.attachImage : String -> String -> String -> String -> String -> List Int -> Result String String .
 
 attach : String -> Result String String .
 attach qa = case M.parseQa qa of
@@ -30,4 +32,9 @@ attachLoad qa man r = case r of
 
 attachImg man load r = case r of
     Err e -> Err e
-  | Ok img -> Sys.attachImage (M.id man) (M.abi man) (M.shell man) load img.
+  | Ok img -> attachChecked man img (QI.load load img).
+
+# an inconsistent LOAD is refused HERE, by name, before the host sees anything
+attachChecked man img r = case r of
+    Err e -> Err e
+  | Ok m -> Sys.attachImage (M.id man) (M.abi man) (M.shell man) (QI.sha m) img (QI.nums m).

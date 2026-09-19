@@ -17,16 +17,16 @@ unsafe base.
 
 QAR = use "../../programs/mods/qar".
 M   = use "../../programs/mods/manifest".
+QI  = use "../../programs/mods/qaimg".
 
 Host.init      : Bool -> Result String String .                       # fault reporting; the arena at its address
 Host.abi       : Unit -> String .                                     # "<abi>.<codegenRev>" this host was built for
 Host.sha256    : String -> String .                                   # lower-case hex
-Host.loadImage : String -> String -> String -> Result String String . # path, LOAD, IMAGE: place it, publish code r-x
+Host.loadImage : String -> String -> String -> List Int -> Result String String . # path, sha, IMAGE, LOAD's numbers: place it, publish code r-x
 Host.run       : String -> String -> String -> Result String String . # id, name, caps: enter the image; main's result
 Host.log       : String -> Unit .                                     # one /logs/host line
 
 # ---- small things -----------------------------------------------------------
-and2 a b = case a of True -> b | False -> False.
 or2 a b = case a of True -> True | False -> b.
 isSet name = case Sys.env name of Ok _ -> True | Err _ -> False.
 append xs ys = case xs of Nil -> ys | h :: t -> h :: append t ys.
@@ -62,22 +62,11 @@ abiGate man =
 
 # ---- the image's integrity --------------------------------------------------
 # the LOAD section may carry `sha <hex>`: the sha-256 of IMAGE.  Absent =
-# nothing claimed, nothing to refuse (docs/QA-FORMAT.md).
-shaLine load i n =
-  case i > n of
-    True -> ""
-  | False -> shaAt load i n (lineStop load i n).
-lineStop s i n = case i > n of True -> n + 1 | False -> case charAt s i == 10 of True -> i | False -> lineStop s (i + 1) n.
-shaAt load i n e =
-  case and2 (e - i >= 68) (substr load i 4 == "sha ") of
-    True -> substr load (i + 4) 64
-  | False -> shaLine load (e + 1) n.
-
-shaGate load img =
-  claimed = shaLine load 1 (strlen load);
-  case claimed == "" of
+# nothing claimed, nothing to refuse (docs/QA-FORMAT.md).  mods/qaimg.fpr
+# reads the section; hashing is the host's one piece of arithmetic.
+shaGate m img = case QI.sha m == "" of
     True -> Unit
-  | False -> case claimed == Host.sha256 img of
+  | False -> case QI.sha m == Host.sha256 img of
       True -> Unit
     | False -> die "IMAGE sha256 mismatch (corrupt archive)".   # the wording check-all.sh names
 
@@ -122,11 +111,11 @@ launch o =
       True -> Unit
     | False -> die "loadMode \"{M.mode man}\" is a name-dispatch archive; qosp runs loadMode = \"process\" images";
   _ = abiGate man;
-  load = section qa "LOAD";
   img = section qa "IMAGE";
-  _ = shaGate load img;
+  m = case QI.load (section qa "LOAD") img of Ok x -> x | Err e -> die "image load failed: {e}";
+  _ = shaGate m img;
   granted = append (gate man yes "required" (M.req man)) (gate man yes "optional" (M.opt man));
-  _ = case Host.loadImage path load img of Ok _ -> Unit | Err e -> die "image load failed: {e}";
+  _ = case Host.loadImage path (QI.sha m) img (QI.nums m) of Ok _ -> Unit | Err e -> die "image load failed: {e}";
   case Host.run (M.id man) (M.name man) (M.capsBlob (M.id man) granted) of
     Err e -> die e
   | Ok result -> print "\n[qos] {M.id man} => {result}".

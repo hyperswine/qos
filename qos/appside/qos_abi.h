@@ -71,11 +71,17 @@
 #define QOS_SYS_LOADQA 4
 /* tag 4's payload (v13).  The APP interprets the plugin's archive -- with
  * mods/qar.fpr and mods/manifest.fpr, the code the kernel and the host
- * launch with -- and hands over what it found; the host parses nothing.
+ * launch with -- and hands over what it found, LOAD's numbers included; the
+ * host parses nothing, not even that section's text.
  * Spans point into the app's own Strings: one address space, so a pointer
  * pass, the same discipline gfx_render uses. */
 typedef struct { const unsigned char *p; uint64_t n; } qos_span_t;
-typedef struct { qos_span_t id, abi, shell, load, img; } qos_plugin_t;
+typedef struct {
+  qos_span_t id, abi, shell;
+  qos_span_t sha;  /* the sha-256 the LOAD section claims for IMAGE (64 hex), or empty */
+  qos_span_t img;
+  uint64_t base, entry, execsz, rwoff, memsz; /* LOAD's numbers, read by mods/qaimg.fpr */
+} qos_plugin_t;
 #define QOS_SYS_SLEEPUS 6
 #define QOS_SYS_COMPILE 7
 

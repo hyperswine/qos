@@ -73,7 +73,7 @@ REV_FLAG := $(if $(CODEGEN_REV),-DQOSP_CODEGEN_REV=$(CODEGEN_REV),)
 # runtime only ever runs main (the APP's harts are pthreads host.c starts).
 # FPR_HOME names the compiler's checkout here: dependency.mk points it at QOS
 # for module resolution, and qosp.fpr's `use` lines are importer-relative.
-QOSP_FPR = portable/qosp.fpr ../programs/mods/qar.fpr ../programs/mods/manifest.fpr
+QOSP_FPR = portable/qosp.fpr ../programs/mods/qar.fpr ../programs/mods/manifest.fpr ../programs/mods/qaimg.fpr
 QOSP_DEFS = -DQOSP_HOST -DQOS_ARENA_SIZE=($(ARENA_MB)ul<<20) $(REV_FLAG)
 # on arm64 the app keeps its hart in x28; the host's C must never borrow it,
 # or its fault handler could not ask the app which actor was running
