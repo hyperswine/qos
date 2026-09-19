@@ -33,7 +33,7 @@ echo "-- fpr_modtab @ 0x$TAB, plug_probe @ 0x$PROBE"
 
 printf 'name = "plugstub"\nid = "plugstub"\nentry = "fpr_modtab"\nversion = "1"\nloadMode = "plugin"\n' \
   > $B/plugstub.toml
-python3 ../../fp-risc/tools/mkqa.py $B/plugstub.toml $B/plugstub.elf -o $B/plugstub.qa
+python3 ../../tools/mkqa.py $B/plugstub.toml $B/plugstub.elf -o $B/plugstub.qa
 
 # ---- the harness: qosp's own objects, main renamed away --------------
 gcc -O2 -Wall -Wextra -DFPR_POSIX -DFPR_NHARTS=8 \

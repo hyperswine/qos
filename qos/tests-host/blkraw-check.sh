@@ -28,7 +28,7 @@ FPR_DISK=/tmp/qdisk-test.disk /tmp/blkraw_check boot2
 # a seeded image: fake .qa payloads are fine, the walk is format-level
 printf 'fake-qa-one' > /tmp/one.qa
 printf 'fake-qa-two-with-more-bytes' > /tmp/two.qa
-python3 ../../fp-risc/tools/mkdisk.py /tmp/qdisk-seeded.disk 4 /tmp/one.qa /tmp/two.qa
+python3 ../../tools/mkdisk.py /tmp/qdisk-seeded.disk 4 /tmp/one.qa /tmp/two.qa
 FPR_DISK=/tmp/qdisk-seeded.disk /tmp/blkraw_check seeded
 
 echo "blkraw-check: ALL LEGS PASS"

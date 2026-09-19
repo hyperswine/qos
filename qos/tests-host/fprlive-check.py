@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""fprlive-check.py -- POS v2 on FPRLive (fp-risc/tests/pos.fpr) under
+"""fprlive-check.py -- POS v2 on FPRLive (tests/pos.fpr) under
 qosp, driven as several websocket clients: the well-behaved ones (the
 browser's protocol: login, buy, checkout, restock, per-session deltas,
 push to every session, persistence across a restart) and the

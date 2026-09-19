@@ -8,41 +8,44 @@ hal/.DS_Store
 *.project.local
 ROUNDS.md
 
-# local build outputs (only the a64 prebuilts in fp-risc/build are tracked)
-fp-risc/build/.fpr-host-Linux-*
-fp-risc/build/ck-proc.*
-fp-risc/build/qosapp-gen.toml
-fp-risc/build/qosapp-prog.s
-fp-risc/build/qosapp-prog.s.abirev
-fp-risc/build/qosapp.elf
-fp-risc/build/units/*qx64r*.s
-fp-risc/build/units/*-rv64.s
+# local build outputs
+/build/.fpr-host-Linux-*
+/build/ck-proc.*
+/build/qosapp-gen.toml
+/build/qosapp-prog.s
+/build/qosapp-prog.s.abirev
+/build/qosapp.elf
+/build/units/*qx64r*.s
+/build/units/*-rv64.s
 qos/build/
 qos/disk.img
 qos/disk-seeded.img
 qos/qos-native.elf
-fp-risc/build/prog.s
-fp-risc/build/prog.s.abirevd
-fp-risc/build/*.elf
-fp-risc/build/alpha.s*
-fp-risc/build/beta.s*
-fp-risc/image.elf
+/build/prog.s
+/build/prog.s.abirevd
+/build/*.elf
+/build/alpha.s*
+/build/beta.s*
+/image.elf
 qos/qos-store/*.kv
 !qos/qos-store/qsys.kv
-fp-risc/build/tp.*
-fp-risc/build/tpar.*
-fp-risc/build/ck-par.*
-fp-risc/build/units/*-rvv.s
-fp-risc/build/ck-uneg*.fpr
-fp-risc/build/ck-m*.s
-fp-risc/tests/_cksuf.fpr
+/build/tp.*
+/build/tpar.*
+/build/ck-par.*
+/build/units/*-rvv.s
+/build/ck-uneg*.fpr
+/build/ck-m*.s
+tests/_cksuf.fpr
 dist/
 
 # the workspace: every run's artifacts (qos.py), never the tree
 .qos/
 
 # Build outputs and Python bytecode.
-/fp-risc/build/
-/fp-risc/image.elf
+/build/
+/image.elf
 **/__pycache__/
 .DS_Store
+
+# where the fprisc checkout is on THIS machine (`./qos.py fprisc DIR`)
+fprisc.path

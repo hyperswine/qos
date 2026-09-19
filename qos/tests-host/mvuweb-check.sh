@@ -25,10 +25,10 @@ JA=/tmp/mvuweb-ja.txt
 JB=/tmp/mvuweb-jb.txt
 CURL="curl -s --noproxy 127.0.0.1 --max-time 10"
 
-(cd ../../fp-risc && make -s qos-app PROG=tests/mvuweb.fpr >/dev/null 2>&1)
+(cd ../.. && make -s qos-app PROG=tests/mvuweb.fpr >/dev/null 2>&1)
 
 rm -f "$OUT" "$JA" "$JB"
-(cd .. && FPR_PORT=$PORT ./qosp --yes ../fp-risc/app.qa > "$OUT" 2>&1) &
+(cd .. && FPR_PORT=$PORT ./qosp --yes ../app.qa > "$OUT" 2>&1) &
 QOSP=$!
 trap 'kill $QOSP 2>/dev/null || true' EXIT
 sleep 2

@@ -63,7 +63,7 @@
 #ifndef FPR_DESKTOP_GL
 #include "drm_scanout.h"
 #endif
-#include "font_sdf.h" /* the text face: an SDF atlas baked by fp-risc/tools/mkfont.py */
+#include "font_sdf.h" /* the text face: an SDF atlas baked by tools/mkfont.py */
 
 /* ==== small math (vecmath.hpp, column-major, ported verbatim) ======== */
 typedef struct { float x, y, z; } v3;

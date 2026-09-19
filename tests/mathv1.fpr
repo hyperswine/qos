@@ -1,0 +1,3 @@
+# mathv1 -- the v1 module: mathOp doubles.
+mathOp v = v * 2.
+mathName u = "double.v1".

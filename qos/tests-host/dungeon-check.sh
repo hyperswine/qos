@@ -16,7 +16,7 @@
 # tick -- so this key file plays the same game on every machine.
 set -e
 HERE="$(cd "$(dirname "$0")/../.." && pwd)"
-cd "$HERE/fp-risc" && make -s qos-app PROG=programs/dungeon.fpr >/dev/null 2>&1
+cd "$HERE" && make -s qos-app PROG=programs/dungeon.fpr >/dev/null 2>&1
 cd "$HERE/qos" && make -s portable-gl >/dev/null 2>&1
 
 # The winning line, key by key.  Start; look at the help screen and come
@@ -41,7 +41,7 @@ python3 tests-host/terra2-keys.py /tmp/dungeon.evd \
   d s d  d d space  p \
   r p q >/dev/null
 rm -f /tmp/dungeon-*.ppm
-FPR_EVDEV=/tmp/dungeon.evd timeout 300 xvfb-run -a ./qosp-gl --yes ../fp-risc/app.qa > /tmp/dungeon-check.log 2>&1 || true
+FPR_EVDEV=/tmp/dungeon.evd timeout 300 xvfb-run -a ./qosp-gl --yes ../app.qa > /tmp/dungeon-check.log 2>&1 || true
 fail() { echo "dungeon-check: FAIL: $1"; tail -25 /tmp/dungeon-check.log; exit 1; }
 say() { grep -aq "\[dungeon\] $1" /tmp/dungeon-check.log || fail "$2"; }
 say "treasure"                    "walking over treasure takes it"
@@ -83,7 +83,7 @@ for f in /tmp/dungeon-*.ppm; do mv "$f" "${f/dungeon-/dungeon-win-}"; done
 python3 tests-host/terra2-keys.py /tmp/dungeon-die.evd \
   space  d d d  s s s s s s  a a a a a  p \
   r p q >/dev/null
-FPR_EVDEV=/tmp/dungeon-die.evd timeout 300 xvfb-run -a ./qosp-gl --yes ../fp-risc/app.qa > /tmp/dungeon-die.log 2>&1 || true
+FPR_EVDEV=/tmp/dungeon-die.evd timeout 300 xvfb-run -a ./qosp-gl --yes ../app.qa > /tmp/dungeon-die.log 2>&1 || true
 cp /tmp/dungeon-die.log /tmp/dungeon-check.log
 grep -aq "\[dungeon\] you died" /tmp/dungeon-die.log || fail "bare hands lose"
 grep -aq "\[dungeon\] DIED on turn 14" /tmp/dungeon-die.log || fail "the death banner"

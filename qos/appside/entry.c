@@ -108,7 +108,7 @@ static V h_sys_compile(V profv, V srcv) {
   req[prof->len] = '\n';
   for (uw i = 0; i < src->len; i++) req[prof->len + 1 + i] = (char)src->bytes[i];
   int64_t r = g_syscall(7, req, plen, g_sysout, sizeof g_sysout);
-  if (r == -2) return fpr_mkresult(1, "no compiler server (start fp-risc/tools/fprd.py)");
+  if (r == -2) return fpr_mkresult(1, "no compiler server (start tools/fprd.py)");
   if (r == -4) return fpr_mkresult(1, "compiled asm larger than the channel buffer");
   if (r < 3) return fpr_mkresult(1, "compiler channel error");
   if (g_sysout[0] == 'o' && g_sysout[1] == 'k' && g_sysout[2] == '\n')

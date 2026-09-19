@@ -1,36 +1,36 @@
 # QOS
 
-QOS Native, QOS Portable, their HAL and services, and the `qos.py` application driver.
-The compiler and language runtime are developed in the separate `fprisc` repository.
-
-Set the compiler checkout explicitly (it can be anywhere):
+QOS Native, QOS Portable, their HAL and services, the QOS programs written in
+FP-RISC, and the `qos.py` driver.  The compiler, runtime and language libraries
+are developed in the separate [fprisc](https://github.com/hyperswine/fprisc)
+repository; this tree only needs to know where a checkout of it is.
 
 ```sh
-export FPRISC_ROOT=/Users/jasonqin/Documents/GitHub/fprisc
+git clone https://github.com/hyperswine/fprisc ../fprisc   # a sibling needs no setup
+./qos.py fprisc ~/wherever/fprisc                          # or say where it is, once
 ./qos.py build
 ./qos.py run tests/hello.fpr
 ./qos.py run programs/interactive_desktop_gl.fpr
 ```
 
-The same variable is used by the Makefiles and host checks. No setup step, source
-copies, compiler wrappers or dependency symlinks are generated. `./configure.py
---check` optionally validates the path; `./configure.py --pin` records a clean
-compiler commit for releases. Put the export in your shell configuration if desired.
+One path names the fprisc checkout, found in this order: `--fprisc DIR` on an
+invocation, `$FPRISC_ROOT` in the shell, `fprisc.path` in this tree (what
+`./qos.py fprisc DIR` writes; it is ignored by git), then a sibling `../fprisc`.
+`make` run directly applies the same order (`dependency.mk`).  Nothing is
+copied, linked or generated into either checkout; `./qos.py fprisc` prints
+what was found and where.  `./qos.py fprisc --pin` records the clean compiler
+commit in `fprisc.lock.json` for releases.
 
-- `qos/`: portable host, native entry, application-side HAL and host checks.
-- `hal/unix/`: Unix devices and graphics/audio/input backends.
-- `hal/core/`: QOS application/process/image loaders.
-- `fp-risc/programs/`: QOS kernel, services and examples.
-- `fp-risc/{apps,models,std,tests,tools}/`: QOS application resources,
-  service clients, integration checks and packaging tools owned by QOS.
+- `programs/`: the QOS kernel, services (`programs/mods/`) and examples.
+- `apps/`, `models/`, `std/`, `tests/`, `tools/`: applications, meshes and
+  music, QOS-side library modules, integration checks, packaging tools.
+- `qos/`: the portable host, native entry, application-side HAL and host checks.
+- `hal/unix/`: Unix devices and the graphics/audio/input backends.
+- `hal/core/`: QOS application, process and image loaders.
+- `Makefile` + `qos-app.mk`: how a program becomes a `.qa`; `qos/Makefile`: the hosts.
 - `qos.py`: build, run, disk, bundle, install and release commands.
+- `.fpr/` + `fpr.lock`: the committed module versions this tree pins.
 
-`fp-risc/` contains QOS programs written in FP-RISC and their application build
-rules. The compiler, runtime and language libraries remain exclusively in
-`FPRISC_ROOT`. `FPR_PATH` supplies module search roots; `qos.py` and the Makefiles
-set it together with the QOS module home. The root `fprisc.lock.json` pins the
-compiler Git revision; `fp-risc/fpr.lock` independently pins QOS modules.
-
-See [the split guide](docs/REPOSITORY-SPLIT.md) for the full ownership map,
-validation, and the release transition. The previous combined README and tag
-workflow are preserved under `docs/history/` as historical reference.
+See [the split guide](docs/REPOSITORY-SPLIT.md) for the ownership map and the
+release transition.  The previous combined README and tag workflow are kept
+under `docs/history/` for reference.

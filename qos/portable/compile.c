@@ -1,5 +1,5 @@
 /* compile.c -- qosp's UNIX-DOMAIN-SOCKET bridge to the host-side fpr
- * compiler server (fp-risc/tools/fprd.py).
+ * compiler server (tools/fprd.py).
  *
  * The app never sees a socket: it calls Sys.compile (std/compile.fpr),
  * the app-side shim rides the syscall channel with tag 7 (store.c
