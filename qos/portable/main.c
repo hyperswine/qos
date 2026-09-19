@@ -461,8 +461,13 @@ int main(int argc, char **argv) {
   }
   __builtin___clear_cache((char *)QOS_SLOT_BASE, (char *)ld.image_end);
 
-  static char caps[4096];
-  uint64_t caps_len = qa_caps_serialize(&qa, caps, sizeof caps);
+  /* sized to the grants; it lives as long as the app reads its boot record */
+  uint64_t caps_len = 0;
+  char *caps = qa_caps_serialize(&qa, &caps_len);
+  if (!caps) {
+    qos_hostlog("qosp: out of memory serializing the granted permissions");
+    return 1;
+  }
   qosp_store_bind(qa.id);
 
   qos_boot_t boot = {

@@ -11,11 +11,12 @@
 
 #include <stdint.h>
 
-#define QA_MAX_PERMS 32
-
+/* a permission's url and mode are owned strings of whatever length the
+ * manifest gave: a capability path cut to fit a buffer would be a
+ * DIFFERENT, possibly broader, grant */
 typedef struct {
-  char url[96];
-  char mode[16]; /* read / write / readwrite */
+  char *url;
+  char *mode; /* read / write / readwrite */
   int required;  /* 1 = [permissions.required], 0 = optional */
   int granted;   /* filled by the permission gate */
 } qa_perm_t;
@@ -38,8 +39,8 @@ typedef struct {
   char abi[24];       /* "<QOS_ABI_VERSION>.<codegenRev>" or empty (pre-stamp) */
   char shell[72];     /* plugin matched-set stamp: the LOAD sha of the shell
                        * image it linked against; empty = pre-stamp */
-  qa_perm_t perms[QA_MAX_PERMS];
-  int nperms;
+  qa_perm_t *perms; /* grows by doubling: a manifest may ask for any number */
+  int nperms, perms_cap;
 } qa_t;
 
 /* read + parse; returns 0 ok, -1 with a message on stderr */
@@ -52,6 +53,6 @@ void qa_free(qa_t *qa);
 
 /* serialize the granted set in System.qa's caps format:
  * "appid\nurl mode\n" lines.  Returns bytes written. */
-uint64_t qa_caps_serialize(const qa_t *qa, char *out, uint64_t cap);
+char *qa_caps_serialize(const qa_t *qa, uint64_t *len);
 
 #endif

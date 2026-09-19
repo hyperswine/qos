@@ -141,17 +141,15 @@ sw qos_store_call(uw tag, const char *pay, uw plen, char *out, uw outcap) {
 }
 
 
-#define MAX_GRANTS 64
-static void *grants[MAX_GRANTS];
-static int ngrants;
-
+/* a growth grant is a shared-buddy slab: it is reaped with the acbs that
+ * own it, so the loader keeps no ledger of its own (it once kept a
+ * 64-entry one that nothing read) and a process may grow without count */
 static fpr_grant_t loader_grow_memory(uw want_bytes) {
   fpr_grant_t g = {0, 0};
   void *p = buddy_alloc(want_bytes);
   if (p) {
     g.ptr = p;
     g.size = buddy_block_usable_size(p);
-    if (ngrants < MAX_GRANTS) grants[ngrants++] = p; /* reclaimed on exit */
   }
   return g;
 }
@@ -212,7 +210,6 @@ static V g_sys_load_image_at(V qastr, V loffv, V llenv, V ioffv, V ilenv, V caps
   if (blen + (64 * 1024) > slot_size)
     return mktup2v(TAG(0), (V)fpr_mkstr((const uint8_t *)"image larger than the process slot", 34));
 
-  ngrants = 0;
   fpr_static_lo = fpr_static_hi = 0; /* the outgoing image's window, if any */
   fpr_elf_load_t r = fpr_qaimg_load(lbytes, (uw)llen, ibytes, blen, slot, slot_size);
   if (!r.ok) {

@@ -110,15 +110,28 @@ static int table_line(const char *p, const char *end, char *name, uint64_t *off,
   return (int)(q + 1 - p);
 }
 
-static void copy_tok(char *dst, uint64_t cap, const char *src, uint64_t n) {
-  if (n >= cap) n = cap - 1;
+/* a fixed-format identity field (name, id, abi, ...).  One that does not
+ * fit is REFUSED, never cut: the id keys the app's store, and two ids
+ * sharing a truncated prefix would silently share it. */
+static int copy_tok(char *dst, uint64_t cap, const char *src, uint64_t n) {
+  if (n >= cap) return -1;
   memcpy(dst, src, n);
   dst[n] = 0;
+  return 0;
 }
 
 /* the manifest: `key = value` lines, values "quoted" or bare;
  * [section.sub] opens a table (docs/QA-FORMAT.md's exact subset) */
-static void parse_manifest(qa_t *qa) {
+/* an owned, NUL-terminated copy of a manifest token, whatever its length */
+static char *dup_tok(const char *src, uint64_t n) {
+  char *d = malloc((size_t)n + 1);
+  if (!d) return 0;
+  memcpy(d, src, (size_t)n);
+  d[n] = 0;
+  return d;
+}
+
+static int parse_manifest(qa_t *qa) {
   const char *p = (const char *)qa->manifest;
   const char *end = p + qa->manifest_len;
   int in_req = 0, in_opt = 0;
@@ -144,28 +157,36 @@ static void parse_manifest(qa_t *qa) {
         if (kn >= 2 && k[0] == '"' && k[kn - 1] == '"') { k++; kn -= 2; }
         if (vn >= 2 && v[0] == '"' && v[vn - 1] == '"') { v++; vn -= 2; }
         if (in_req || in_opt) {
-          if (qa->nperms < QA_MAX_PERMS) {
-            qa_perm_t *pm = &qa->perms[qa->nperms++];
-            copy_tok(pm->url, sizeof pm->url, k, kn);
-            copy_tok(pm->mode, sizeof pm->mode, v, vn);
-            pm->required = in_req;
-            pm->granted = 0;
+          if (qa->nperms == qa->perms_cap) {
+            int cap = qa->perms_cap ? qa->perms_cap * 2 : 8;
+            qa_perm_t *np = realloc(qa->perms, (size_t)cap * sizeof *np);
+            if (!np) return fail("out of memory (permissions)");
+            qa->perms = np;
+            qa->perms_cap = cap;
           }
+          qa_perm_t *pm = &qa->perms[qa->nperms];
+          pm->url = dup_tok(k, kn);
+          pm->mode = dup_tok(v, vn);
+          pm->required = in_req;
+          pm->granted = 0;
+          qa->nperms++; /* counted even half-built, so qa_free releases it */
+          if (!pm->url || !pm->mode) return fail("out of memory (permissions)");
         } else if (kn == 4 && !strncmp(k, "name", 4))
-          copy_tok(qa->name, sizeof qa->name, v, vn);
+          { if (copy_tok(qa->name, sizeof qa->name, v, vn)) return fail("manifest: name is too long"); }
         else if (kn == 2 && !strncmp(k, "id", 2))
-          copy_tok(qa->id, sizeof qa->id, v, vn);
+          { if (copy_tok(qa->id, sizeof qa->id, v, vn)) return fail("manifest: id is too long"); }
         else if (kn == 8 && !strncmp(k, "loadMode", 8))
-          copy_tok(qa->load_mode, sizeof qa->load_mode, v, vn);
+          { if (copy_tok(qa->load_mode, sizeof qa->load_mode, v, vn)) return fail("manifest: load_mode is too long"); }
         else if (kn == 3 && !strncmp(k, "abi", 3))
-          copy_tok(qa->abi, sizeof qa->abi, v, vn);
+          { if (copy_tok(qa->abi, sizeof qa->abi, v, vn)) return fail("manifest: abi is too long"); }
         else if (kn == 5 && !strncmp(k, "shell", 5))
-          copy_tok(qa->shell, sizeof qa->shell, v, vn);
+          { if (copy_tok(qa->shell, sizeof qa->shell, v, vn)) return fail("manifest: shell is too long"); }
       }
     }
     if (!nl) break;
     p = nl + 1;
   }
+  return 0;
 }
 
 int qa_parse(const unsigned char *bytes, uint64_t len, qa_t *qa) {
@@ -241,7 +262,7 @@ static int qa_parse_owned(qa_t *qa) {
   /* IMAGE may be empty (placeholder .qa); qaimg refuses memsz 0 with
    * a named reason if someone tries to LOAD one */
   if (qa_sha_check(qa)) return fail("IMAGE sha256 mismatch (corrupt archive)");
-  parse_manifest(qa);
+  if (parse_manifest(qa)) return -1;
   if (!qa->id[0]) return fail("manifest has no id");
   return 0;
 }
@@ -249,16 +270,31 @@ static int qa_parse_owned(qa_t *qa) {
 void qa_free(qa_t *qa) {
   free(qa->bytes);
   qa->bytes = 0;
+  for (int i = 0; i < qa->nperms; i++) {
+    free(qa->perms[i].url);
+    free(qa->perms[i].mode);
+  }
+  free(qa->perms);
+  qa->perms = 0;
+  qa->nperms = qa->perms_cap = 0;
 }
 
-uint64_t qa_caps_serialize(const qa_t *qa, char *out, uint64_t cap) {
+/* "<id>\n" then one "<url> <mode>\n" per GRANTED permission, in a buffer
+ * sized to fit exactly (the caller frees it): every grant reaches the app,
+ * however many there are.  NULL when out of memory. */
+char *qa_caps_serialize(const qa_t *qa, uint64_t *len) {
+  uint64_t need = strlen(qa->id) + 1;
+  for (int i = 0; i < qa->nperms; i++)
+    if (qa->perms[i].granted)
+      need += strlen(qa->perms[i].url) + 1 + strlen(qa->perms[i].mode) + 1;
+  char *out = malloc((size_t)need + 1);
+  if (!out) return 0;
   uint64_t n = 0;
-#define PUT(s, l)                                    \
-  do {                                               \
-    uint64_t _l = (l);                               \
-    if (n + _l >= cap) return n;                     \
-    memcpy(out + n, (s), _l);                        \
-    n += _l;                                         \
+#define PUT(s, l)                 \
+  do {                            \
+    uint64_t _l = (l);            \
+    memcpy(out + n, (s), _l);     \
+    n += _l;                      \
   } while (0)
   PUT(qa->id, strlen(qa->id));
   PUT("\n", 1);
@@ -271,5 +307,6 @@ uint64_t qa_caps_serialize(const qa_t *qa, char *out, uint64_t cap) {
     }
 #undef PUT
   out[n] = 0;
-  return n;
+  *len = n;
+  return out;
 }
