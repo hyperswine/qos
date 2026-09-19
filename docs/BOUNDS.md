@@ -18,8 +18,9 @@ until memory is the bound; and reaching a limit must never be silent.
 The same day the manifest's interpretation became ONE FP-RISC module,
 `programs/mods/manifest.fpr` (lists, no capacity), used by the kernel and by a
 host tool; `tools/qainfo-parity.sh` holds `qa.c` to it byte for byte, including
-a manifest of 300 permissions with a 1000-byte url. `qa.c` stays until FP-RISC
-can run host-side inside qosp: `../fprisc/docs/C-REDUCTION.md`.
+a manifest of 300 permissions with a 1000-byte url. qosp itself is an FP-RISC program now
+(`qos/portable/qosp.fpr`); what is left of `qa.c` serves plugin attach only:
+`../fprisc/docs/C-REDUCTION.md`.
 
 Measured with a 101-permission manifest (one url 326 bytes long) and an app that
 reports what `Sys.caps` hands it: the old host delivered 32 grants with the last
@@ -73,6 +74,7 @@ Two steps, the first small:
 | `QOS_NET_MAXCONN 1024`, each with a static `RXCAP 8192` buffer (`hal/unix/net_raw.c`) | about 8 MiB held whether used or not, and a hard ceiling | allocate a connection's buffer when it opens |
 | `QOSP_MAXHARTS 64` (`qos/portable/main.c`) | the hart count is clamped without a message | size from `sysconf` |
 | `MAXKBD 8` (`hal/unix/evdev_raw.c`) | the scan stops at eight keyboards; a ninth is not opened | a growing table |
+| `static char result[64 * 1024]` in `Host.run` (`qos/portable/host.c`) | the app's result string is cut at 64 KiB by the entry ABI's buffer | let the app hand back a pointer and a length |
 | `secs[8]` in `qa_parse_owned` | refused: "too many sections" | honest, and the format has five sections today |
 | `NVOICE 24` (`hal/unix/snd_raw.c`) | voice stealing | ordinary for a mixer; listed for completeness |
 

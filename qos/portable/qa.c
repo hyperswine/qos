@@ -48,7 +48,7 @@ static void sha_block(uint32_t h[8], const unsigned char *p) {
   }
   h[0]+=a; h[1]+=b; h[2]+=c; h[3]+=d; h[4]+=e; h[5]+=f; h[6]+=g; h[7]+=hh;
 }
-static void sha256(const unsigned char *msg, uint64_t n, unsigned char out[32]) {
+void qosp_sha256(const unsigned char *msg, uint64_t n, unsigned char out[32]) {
   uint32_t h[8] = {0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
                    0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19};
   uint64_t i = 0;
@@ -86,7 +86,7 @@ static int qa_sha_check(const qa_t *qa) {
         lo = b >= 'a' ? b - 'a' + 10 : b - '0';
         want[i] = (unsigned char)((hi << 4) | lo);
       }
-      sha256(qa->img, qa->img_len, got);
+      qosp_sha256(qa->img, qa->img_len, got);
       return memcmp(want, got, 32) ? -1 : 0;
     }
     if (!nl) break;
@@ -203,25 +203,6 @@ int qa_parse(const unsigned char *bytes, uint64_t len, qa_t *qa) {
   return qa_parse_owned(qa);
 }
 
-int qa_load(const char *path, qa_t *qa) {
-  memset(qa, 0, sizeof *qa);
-  FILE *f = fopen(path, "rb");
-  if (!f) return fail("cannot open archive");
-  fseek(f, 0, SEEK_END);
-  long sz = ftell(f);
-  fseek(f, 0, SEEK_SET);
-  if (sz <= 0) { fclose(f); return fail("empty archive"); }
-  qa->bytes = malloc((size_t)sz + 1);
-  qa->bytes[sz] = 0; /* strtoull in table_line stays in bounds at EOF */
-  qa->len = (uint64_t)sz;
-  if (fread(qa->bytes, 1, (size_t)sz, f) != (size_t)sz) {
-    fclose(f);
-    return fail("short read");
-  }
-  fclose(f);
-  return qa_parse_owned(qa);
-}
-
 /* parse the archive qa->bytes already owns (NUL-terminated at len) */
 static int qa_parse_owned(qa_t *qa) {
   const char *p = (const char *)qa->bytes;
@@ -277,36 +258,4 @@ void qa_free(qa_t *qa) {
   free(qa->perms);
   qa->perms = 0;
   qa->nperms = qa->perms_cap = 0;
-}
-
-/* "<id>\n" then one "<url> <mode>\n" per GRANTED permission, in a buffer
- * sized to fit exactly (the caller frees it): every grant reaches the app,
- * however many there are.  NULL when out of memory. */
-char *qa_caps_serialize(const qa_t *qa, uint64_t *len) {
-  uint64_t need = strlen(qa->id) + 1;
-  for (int i = 0; i < qa->nperms; i++)
-    if (qa->perms[i].granted)
-      need += strlen(qa->perms[i].url) + 1 + strlen(qa->perms[i].mode) + 1;
-  char *out = malloc((size_t)need + 1);
-  if (!out) return 0;
-  uint64_t n = 0;
-#define PUT(s, l)                 \
-  do {                            \
-    uint64_t _l = (l);            \
-    memcpy(out + n, (s), _l);     \
-    n += _l;                      \
-  } while (0)
-  PUT(qa->id, strlen(qa->id));
-  PUT("\n", 1);
-  for (int i = 0; i < qa->nperms; i++)
-    if (qa->perms[i].granted) {
-      PUT(qa->perms[i].url, strlen(qa->perms[i].url));
-      PUT(" ", 1);
-      PUT(qa->perms[i].mode, strlen(qa->perms[i].mode));
-      PUT("\n", 1);
-    }
-#undef PUT
-  out[n] = 0;
-  *len = n;
-  return out;
 }

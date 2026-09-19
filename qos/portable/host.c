@@ -40,7 +40,6 @@
 #ifndef QOSP_CODEGEN_REV
 #define QOSP_CODEGEN_REV 7
 #endif
-static int abi_gate(qa_t *); /* defined with perm_gate below */
 #include "hostlog.h"
 
 #include <inttypes.h>
@@ -65,13 +64,6 @@ int64_t qosp_store_call(uint64_t, const char *, uint64_t, char *, uint64_t);
 
 static int g_trace;
 
-/* gfx.c (compiled into a GFX=1 qosp) faults through fpr_cpanic; in the
- * HOST image that is a loud exit, the host idiom for the same honesty
- * the co-compiled HAL expresses with a panic. */
-__attribute__((noreturn)) void fpr_cpanic(const char *msg) {
-  qos_hostlog("qosp: %s", msg);
-  exit(1);
-}
 #define TRACE(...) \
   do { if (g_trace) qos_hostlog("qosp: " __VA_ARGS__); } while (0)
 
@@ -124,7 +116,13 @@ int64_t qosp_load_plugin_bytes(const char *bytes, uint64_t len, char *err,
     snprintf(err, errcap, "malformed .qa payload (see stderr)");
     return -1;
   }
-  if (abi_gate(&qa)) {
+  /* the app's own gate is qosp.fpr's; a plugin arrives on an APP thread,
+   * where this program's FP-RISC cannot run, so its stamp is compared here
+   * until plugin attach takes fields the app computed (C-REDUCTION.md).
+   * An unstamped plugin is a pre-stamp archive: accepted. */
+  char plug_want[24];
+  snprintf(plug_want, sizeof plug_want, "%u.%u", (unsigned)QOS_ABI_VERSION, (unsigned)QOSP_CODEGEN_REV);
+  if (qa.abi[0] && strcmp(qa.abi, plug_want) != 0) {
     snprintf(err, errcap, "abi mismatch: plugin %s built for %s, shell wants "
              "%u.%u -- rebuild as a matched set", qa.id,
              qa.abi[0] ? qa.abi : "(unstamped)",
@@ -257,49 +255,6 @@ static uint64_t resolve_nharts(void) {
   return (uint64_t)n;
 }
 
-/* abi_gate: see the stamp comment at the top.  Empty stamp = pre-stamp
- * archive, accepted with a warning (transition path). */
-static int abi_gate(qa_t *qa) {
-  char want[24];
-  snprintf(want, sizeof want, "%u.%u", (unsigned)QOS_ABI_VERSION,
-           (unsigned)QOSP_CODEGEN_REV);
-  if (!qa->abi[0]) {
-    fprintf(stderr,
-            "[qos] warning: %s carries no abi stamp (pre-stamp archive); "
-            "shell expects %s -- rebuild to silence\n",
-            qa->id, want);
-    return 0;
-  }
-  if (strcmp(qa->abi, want) != 0) {
-    fprintf(stderr,
-            "[qos] REFUSED: %s was built for abi %s but this shell is %s "
-            "-- rebuild the app (and any plugins) against this shell\n",
-            qa->id, qa->abi, want);
-    return -1;
-  }
-  return 0;
-}
-
-static int perm_gate(qa_t *qa, int auto_yes) {
-  for (int i = 0; i < qa->nperms; i++) {
-    qa_perm_t *p = &qa->perms[i];
-    if (auto_yes) { p->granted = 1; continue; }
-    fprintf(stderr, "%s \"%s\" requests %s %s (%s) -- allow? [y/n] ",
-            qa->name[0] ? qa->name : qa->id, qa->id, p->mode, p->url,
-            p->required ? "required" : "optional");
-    int c = getchar(), d;
-    while ((d = getchar()) != '\n' && d != EOF) {}
-    p->granted = (c == 'y' || c == 'Y');
-    if (!p->granted && p->required) {
-      fprintf(stderr,
-              "Cannot Run Application without all required compulsory "
-              "Permissions\n");
-      return -1;
-    }
-  }
-  return 0;
-}
-
 static void bus_handler(int sig, siginfo_t *info, void *vctx) {
   /* Diagnostic only: report where the app faulted, then die.  The arena
    * is plain rw with an r-x code prefix (see stage 2), so any fault here
@@ -322,35 +277,74 @@ static void bus_handler(int sig, siginfo_t *info, void *vctx) {
   _exit(139);
 }
 
-int main(int argc, char **argv) {
-  int auto_yes = 0;
-  const char *qa_path = 0;
-  for (int i = 1; i < argc; i++) {
-    if (!strcmp(argv[i], "--yes")) auto_yes = 1;
-    else if (!strcmp(argv[i], "--trace")) g_trace = 1;
-    else qa_path = argv[i];
-  }
-  if (getenv("QOSP_TRACE")) g_trace = 1;
-  if (getenv("QOSP_YES")) auto_yes = 1;
-  if (!qa_path) {
-    fprintf(stderr, "usage: qosp [--yes] [--trace] <app.qa>\n");
-    return 2;
-  }
+/* ====================================================================
+ * THE HOST'S PRIMITIVES.  qosp is an FP-RISC program (portable/qosp.fpr):
+ * it reads the archive, interprets the manifest, gates the abi, verifies
+ * the image, asks for permissions and builds the capability blob -- with
+ * the same modules the kernel launches with.  What is left here is what
+ * only C on this OS can do: map memory at an address, hash, place and
+ * protect an image, and hand the machine to it.  Each is declared in
+ * qosp.fpr as a signature with no definition.
+ * ==================================================================== */
+extern int fpr_posix_argc;
+extern char **fpr_posix_argv;
+void qosp_sha256(const unsigned char *msg, uint64_t n, unsigned char out[32]); /* qa.c */
 
-  /* catch bus errors inside the loaded app for diagnosis */
+static V res_ok_str(const char *s2, uw n) { return fpr_mkresultn(0, s2, n); }
+static V res_err(const char *msg) { return fpr_mkresultn(1, msg, strlen(msg)); }
+static const str_t *arg_str(V v, const char *who) {
+  if (ISINT(v) || TID(v) != T_STR) fpr_cpanic(who);
+  return (const str_t *)v;
+}
+
+/* Host.log : String -> Unit -- one /logs/host line */
+static V h_log(V sv) {
+  const str_t *t = arg_str(sv, "Host.log: expected a String");
+  qos_hostlog("%.*s", (int)t->len, (const char *)t->bytes);
+  return (V)&fpr_unit;
+}
+FPR_FN(fpr_g_Host_x2elog, h_log, 1);
+
+/* Host.abi : Unit -> String -- "<QOS_ABI_VERSION>.<codegenRev>", what this
+ * host was built against; whether an archive's stamp is acceptable is
+ * qosp.fpr's call */
+static V h_abi(V u) {
+  (void)u;
+  char want[24];
+  int n = snprintf(want, sizeof want, "%u.%u", (unsigned)QOS_ABI_VERSION, (unsigned)QOSP_CODEGEN_REV);
+  return (V)fpr_mkstr((const uint8_t *)want, (uw)n);
+}
+FPR_FN(fpr_g_Host_x2eabi, h_abi, 1);
+
+/* Host.sha256 : String -> String -- lower-case hex */
+static V h_sha256(V sv) {
+  const str_t *t = arg_str(sv, "Host.sha256: expected a String");
+  unsigned char d[32];
+  char hex[64];
+  qosp_sha256(t->bytes, t->len, d);
+  for (int i = 0; i < 32; i++) {
+    hex[2 * i] = "0123456789abcdef"[d[i] >> 4];
+    hex[2 * i + 1] = "0123456789abcdef"[d[i] & 15];
+  }
+  return (V)fpr_mkstr((const uint8_t *)hex, 64);
+}
+FPR_FN(fpr_g_Host_x2esha256, h_sha256, 1);
+
+/* Host.init : Bool -> Result String String -- fault reporting, and the
+ * arena at its published address.  Ok "" | Err reason. */
+static V h_init(V tracev) {
+  g_trace = !ISINT(tracev) && ((hdr_t *)tracev)->var != 0;
+  if (getenv("QOSP_TRACE")) g_trace = 1;
   struct sigaction sa = {0};
   sa.sa_sigaction = bus_handler;
   sigemptyset(&sa.sa_mask);
   sa.sa_flags = SA_SIGINFO;
   sigaction(SIGBUS, &sa, NULL);
   sigaction(SIGSEGV, &sa, NULL);
-
-  /* ---- Stage 1: Initializer ---------------------------------------- */
   TRACE("stage 1 (initializer): mapping arena at %#lx (+%lu MiB)\n",
         QOS_ARENA_BASE, QOS_ARENA_SIZE >> 20);
-	void *arena =
-      mmap((void *)QOS_ARENA_BASE, QOS_ARENA_SIZE, PROT_READ | PROT_WRITE,
-           MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  void *arena = mmap((void *)QOS_ARENA_BASE, QOS_ARENA_SIZE, PROT_READ | PROT_WRITE,
+                     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
   if (arena != (void *)QOS_ARENA_BASE) {
     if (arena != MAP_FAILED) munmap(arena, QOS_ARENA_SIZE);
 #ifdef __APPLE__
@@ -363,121 +357,101 @@ int main(int argc, char **argv) {
       char next[16];
       snprintf(next, sizeof next, "%d", retry + 1);
       setenv("QOSP_ARENA_REEXEC", next, 1);
-      execvp(argv[0], argv);
-      qos_hostlog("qosp: cannot retry arena mapping: %s", strerror(errno));
+      execvp(fpr_posix_argv[0], fpr_posix_argv);
     }
 #endif
-    qos_hostlog("qosp: cannot map the arena at %#lx (ASLR collision or RWX "
-                "policy) -- the app image is linked at this address, so "
-                "there is no fallback",
-                QOS_ARENA_BASE);
-    return 1;
+    return res_err("cannot map the arena at its published address (ASLR collision or RWX "
+                   "policy) -- the app image is linked there, so there is no fallback");
   }
 #ifdef __APPLE__
   unsetenv("QOSP_ARENA_REEXEC");
 #endif
-  const qos_hal_t *hal = qosp_hal_table();
-  TRACE("stage 1: HAL table at %p (abi v%" PRIu64 ")\n", (const void *)hal,
-        hal->version);
+  return res_ok_str("", 0);
+}
+FPR_FN(fpr_g_Host_x2einit, h_init, 1);
 
-  /* ---- Stage 2: Loader --------------------------------------------- */
-  TRACE("stage 2 (loader): the image into the slot; the rest of the "
-        "arena is the app's (abi v12)\n");
+/* Host.loadImage : String -> String -> String -> Result String String
+ * the archive's path (assets resolve beside it), its LOAD section and its
+ * IMAGE section: place the image in the slot and publish its code r-x. */
+static fpr_elf_load_t g_ld;
+static V h_load_image(V pathv, V loadv, V imgv) {
+  const str_t *path = arg_str(pathv, "Host.loadImage: path must be a String");
+  const str_t *load = arg_str(loadv, "Host.loadImage: LOAD must be a String");
+  const str_t *img = arg_str(imgv, "Host.loadImage: IMAGE must be a String");
+  char *cpath = malloc(path->len + 1); /* qos_snd keeps the pointer */
+  if (!cpath) return res_err("out of memory");
+  memcpy(cpath, path->bytes, path->len);
+  cpath[path->len] = 0;
+  qos_snd_set_assets(cpath); /* music and other assets resolve beside the .qa */
+  load_sha_hex(load->bytes, load->len, g_shell_sha, sizeof g_shell_sha);
 
-  qa_t qa;
-  qos_snd_set_assets(qa_path); /* music and other assets resolve beside the .qa */
-  if (qa_load(qa_path, &qa)) return 1;
-  load_sha_hex(qa.load, qa.load_len, g_shell_sha, sizeof g_shell_sha);
-  TRACE("stage 2: %s (id=%s, loadMode=%s), image %" PRIu64 "B, %d perms\n",
-        qa.name, qa.id, qa.load_mode, qa.img_len, qa.nperms);
-  if (qa.load_mode[0] && strcmp(qa.load_mode, "process")) {
-    qos_hostlog("qosp: loadMode \"%s\" is a name-dispatch archive; qosp "
-                "runs loadMode = \"process\" images",
-                qa.load_mode);
-    return 1;
-  }
-  if (abi_gate(&qa)) return 1;
-  if (perm_gate(&qa, auto_yes)) return 1;
-
-  fpr_elf_load_t ld = fpr_qaimg_load(qa.load, qa.load_len, qa.img, qa.img_len,
-                                     (void *)QOS_SLOT_BASE, QOS_SLOT_SIZE);
-  if (!ld.ok) {
-    qos_hostlog("qosp: image load failed: %s", ld.err);
-    return 1;
-  }
-	uint64_t arena_base = ((uint64_t)ld.image_end + 15) & ~15ull;
-  uint64_t arena_size = (QOS_ARENA_BASE + QOS_ARENA_SIZE) - arena_base;
-  TRACE("stage 2: image [%#lx..%p), entry %p, the app's arena %#" PRIx64
-        " (+%" PRIu64 " MiB)\n",
-        QOS_SLOT_BASE, ld.image_end, ld.entry, arena_base, arena_size >> 20);
-
-	/* Publish the code: the arena is a single rw anonymous mapping, but on
-   * macOS arm64 a page can never be writable and executable at once, so
-   * flip just the executable prefix of the image (the PF_X PT_LOADs, as
-   * reported by elfload) to r-x and leave everything after it -- rodata
-   * tail, data, bss, heap, and the buddy arena -- rw.  The linker script
-   * places .text first and the RW segment on its own 64 KiB-aligned page,
-   * so the 16 KiB host-page round-up never captures a writable byte.
-   * This runs on EVERY host: a plain rw anonymous mapping is NOT
-   * executable on modern Linux either (NX applies; "no W^X policy"
-   * only means an rwx mmap is *allowed*, not that rw implies x) --
-   * discovered when the Darwin-only version of this block left Linux
-   * qosp jumping into a non-exec page.  The icache clear below is
-   * needed on any arm64 host. */
-  {
-    uintptr_t pg = (uintptr_t)getpagesize();
-    uintptr_t xend = ((uintptr_t)ld.exec_end + pg - 1) & ~(pg - 1);
-    if (xend <= (uintptr_t)QOS_SLOT_BASE || ld.exec_end == 0) {
-      qos_hostlog("qosp: image has no executable segment");
-      return 1;
-    }
-    if ((uintptr_t)ld.rw_start < xend) {
-      qos_hostlog("qosp: executable pages would capture writable image data "
-                  "(exec_end=%p rounds to %#lx, first rw byte at %p, page=%lu) "
-                  "-- relink with page-separated segments",
-                  ld.exec_end, (unsigned long)xend, ld.rw_start,
-                  (unsigned long)pg);
-      return 1;
-    }
-  { /* protection precondition (docs/QA-FORMAT.md): the r-x round-up
-     * must not capture a writable byte.  qaimg reports the boundary;
-     * the protector checks it -- the linker script's ALIGN(0x10000)
-     * is what makes this pass. */
-    uintptr_t pgq = (uintptr_t)getpagesize();
-    uintptr_t xq = ((uintptr_t)ld.exec_end + pgq - 1) & ~(pgq - 1);
-    if (ld.exec_end && (uintptr_t)ld.rw_start < xq) {
-      qos_hostlog("qosp: image not page-separated (exec_end=%p rw=%p)",
-                  ld.exec_end, ld.rw_start);
-      return 1;
-    }
-  }
-      if (mprotect((void *)QOS_SLOT_BASE, xend - QOS_SLOT_BASE,
-                 PROT_READ | PROT_EXEC)) {
-      perror("qosp: mprotect(code, r-x)");
-      return 1;
-    }
-    TRACE("stage 2: code [%#lx..%#lx) r-x, data+heap rw\n",
-          (unsigned long)QOS_SLOT_BASE, (unsigned long)xend);
-  }
+  fpr_elf_load_t ld = fpr_qaimg_load(load->bytes, load->len, img->bytes, img->len,
+                                     (void *)QOS_SLOT_BASE, QOS_ARENA_SIZE);
+  if (!ld.ok) return res_err(ld.err);
+  /* Publish the code: the arena is one rw anonymous mapping, and a page is
+   * never writable and executable at once, so flip just the executable
+   * prefix (the PF_X PT_LOADs) to r-x and leave the rest rw.  The linker
+   * script puts .text first and the RW segment on its own 64 KiB-aligned
+   * page, so the host-page round-up never captures a writable byte.  This
+   * runs on EVERY host: a plain rw mapping is not executable on Linux
+   * either.  The icache clear is needed on any arm64 host. */
+  uintptr_t pg = (uintptr_t)getpagesize();
+  uintptr_t xend = ((uintptr_t)ld.exec_end + pg - 1) & ~(pg - 1);
+  if (xend <= (uintptr_t)QOS_SLOT_BASE || ld.exec_end == 0)
+    return res_err("image has no executable segment");
+  if ((uintptr_t)ld.rw_start < xend)
+    return res_err("executable pages would capture writable image data -- relink "
+                   "with page-separated segments");
+  if (mprotect((void *)QOS_SLOT_BASE, xend - QOS_SLOT_BASE, PROT_READ | PROT_EXEC))
+    return res_err("mprotect(code, r-x) failed");
+  TRACE("stage 2: image [%#lx..%p), entry %p, code r-x to %#lx\n",
+        QOS_SLOT_BASE, ld.image_end, ld.entry, (unsigned long)xend);
   __builtin___clear_cache((char *)QOS_SLOT_BASE, (char *)ld.image_end);
+  g_ld = ld;
+  return res_ok_str("", 0);
+}
+FPR_FN(fpr_g_Host_x2eloadImage, h_load_image, 3);
 
-  /* sized to the grants; it lives as long as the app reads its boot record */
-  uint64_t caps_len = 0;
-  char *caps = qa_caps_serialize(&qa, &caps_len);
-  if (!caps) {
-    qos_hostlog("qosp: out of memory serializing the granted permissions");
-    return 1;
-  }
-  qosp_store_bind(qa.id);
+/* the app's entry is freestanding code that keeps ITS hart in x28 and does
+ * not restore ours; this program's own hart lives there too */
+static int64_t enter_app(qos_app_entry_t entry, qos_boot_t *boot, char *result, uint64_t cap) {
+#if defined(__aarch64__)
+  volatile uint64_t mine;
+  __asm__ volatile("mov x9, x28\n" "str x9, %0" : "=*m"(mine) : : "x9");
+  int64_t rc = entry(boot, result, cap);
+  __asm__ volatile("ldr x9, %0\n" "mov x28, x9" : : "*m"(mine) : "x9");
+  return rc;
+#else
+  return entry(boot, result, cap);
+#endif
+}
 
+/* Host.run : String -> String -> String -> Result String String
+ * the app's id, its display name and its capability blob: bind the store,
+ * build the boot record, start the harts and enter the loaded image.
+ * Ok <main's result> | Err reason. */
+static V h_run(V idv, V namev, V capsv) {
+  const str_t *id = arg_str(idv, "Host.run: id must be a String");
+  const str_t *name = arg_str(namev, "Host.run: name must be a String");
+  const str_t *capss = arg_str(capsv, "Host.run: caps must be a String");
+  if (!g_ld.ok) return res_err("Host.run before Host.loadImage");
+  /* the app reads these for as long as it runs: out of this runtime's heap */
+  char *cid = malloc(id->len + 1), *caps = malloc(capss->len + 1);
+  if (!cid || !caps) return res_err("out of memory");
+  memcpy(cid, id->bytes, id->len); cid[id->len] = 0;
+  memcpy(caps, capss->bytes, capss->len); caps[capss->len] = 0;
+  qosp_store_bind(cid);
+
+  uint64_t arena_base = ((uint64_t)g_ld.image_end + 15) & ~15ull;
+  uint64_t arena_size = (QOS_ARENA_BASE + QOS_ARENA_SIZE) - arena_base;
   qos_boot_t boot = {
       .abi_version = QOS_ABI_VERSION,
-      .hal = hal,
+      .hal = qosp_hal_table(),
       .heap_base = 0, /* v12: the app carves its own first slab */
       .heap_size = 0,
       .grow = 0,      /* v12: retired -- the arena is the app's */
       .caps = (const unsigned char *)caps,
-      .caps_len = caps_len,
+      .caps_len = capss->len,
       .syscall_fn = qosp_store_call,
       .tls_off = qosp_tls_off(),
       .arena_base = (void *)arena_base,
@@ -486,26 +460,17 @@ int main(int argc, char **argv) {
   qosp_hal_set_smp(resolve_nharts(), start_hart_cb);
   /* the guaranteed first /logs/host line: which host, which app, how
    * many harts -- pends here, replays into the ring at registration */
-  qos_hostlog("qosp: hosting %s (%" PRIu64 " harts, abi v%u)",
-              qa.name[0] ? qa.name : qa.id, resolve_nharts(),
-              (unsigned)QOS_ABI_VERSION);
-  TRACE("stage 2: nharts %" PRIu64 " (cores %ld), tls_off %" PRId64 "\n",
-        resolve_nharts(), sysconf(_SC_NPROCESSORS_ONLN),
-        (int64_t)boot.tls_off);
-
-	/* ---- Stage 3: the app's own world -------------------------------- */
-  TRACE("stage 3: entering the app\n");
-  static char result[64 * 1024];
-  qos_app_entry_t entry = (qos_app_entry_t)ld.entry;
-  int64_t rc = entry(&boot, result, sizeof result);
+  qos_hostlog("qosp: hosting %.*s (%" PRIu64 " harts, abi v%u)",
+              (int)(name->len ? name->len : id->len),
+              (const char *)(name->len ? name->bytes : id->bytes),
+              resolve_nharts(), (unsigned)QOS_ABI_VERSION);
+  TRACE("stage 3: entering the app (arena %#" PRIx64 " +%" PRIu64 " MiB, tls_off %" PRId64 ")\n",
+        arena_base, arena_size >> 20, (int64_t)boot.tls_off);
+  static char result[64 * 1024]; /* the entry ABI's buffer (docs/BOUNDS.md) */
+  fflush(stdout);
+  int64_t rc = enter_app((qos_app_entry_t)g_ld.entry, &boot, result, sizeof result);
   join_harts(); /* every hart loop exited through fpr_process_done */
-  if (rc) {
-    qos_hostlog("qosp: app entry rejected the boot record (%" PRId64
-                ", abi mismatch?)",
-                rc);
-    return 1;
-  }
-  printf("\n[qos] %s => %s\n", qa.id, result);
-  qa_free(&qa);
-  return 0;
+  if (rc) return res_err("the app entry rejected the boot record (abi mismatch?)");
+  return res_ok_str(result, strlen(result));
 }
+FPR_FN(fpr_g_Host_x2erun, h_run, 3);

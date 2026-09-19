@@ -1,9 +1,12 @@
 #!/bin/sh
-# qainfo-parity.sh -- hold the portable host's C manifest parser to the
-# FP-RISC one.  For each manifest: pack it with tests/capsecho.fpr's image,
-# launch it under qosp --yes, and compare the capability blob the app
-# RECEIVED with the blob mods/manifest.fpr computes (tools/qainfo.fpr, a
-# Base program on the posix system).  Byte for byte.
+# qainfo-parity.sh -- the capability blob, end to end.  For each manifest: pack
+# it with tests/capsecho.fpr's image, launch it under qosp --yes, and compare
+# the blob the app RECEIVED through its boot record with the blob
+# mods/manifest.fpr computes (tools/qainfo.fpr).  Byte for byte.
+#
+# It began as the check that held qosp's C manifest parser to the FP-RISC
+# one.  qosp is an FP-RISC program now and uses the same module, so what
+# this guards is the path: manifest -> gate -> blob -> boot record -> Sys.caps.
 #
 # The manifests are the shipped ones plus a generated one past every limit
 # the C parser used to have: 300 permissions (was 32), a 1000-byte url

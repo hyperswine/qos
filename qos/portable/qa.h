@@ -43,16 +43,11 @@ typedef struct {
   int nperms, perms_cap;
 } qa_t;
 
-/* read + parse; returns 0 ok, -1 with a message on stderr */
-int qa_load(const char *path, qa_t *out);
 /* parse an in-memory archive (the syscall tag-4 path: the caller hands
  * the .qa BYTES it read off the disk).  Takes its own copy -- the
  * caller's buffer owes nothing after the call.  0 ok, -1 + stderr. */
 int qa_parse(const unsigned char *bytes, uint64_t len, qa_t *out);
 void qa_free(qa_t *qa);
 
-/* serialize the granted set in System.qa's caps format:
- * "appid\nurl mode\n" lines.  Returns bytes written. */
-char *qa_caps_serialize(const qa_t *qa, uint64_t *len);
 
 #endif
