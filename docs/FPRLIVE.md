@@ -23,6 +23,10 @@ The four functions are `std.mvu`'s Elm surface, unchanged — the same
 `App` value a game driver or the long-poll driver runs. What FPRLive
 adds is the wire and the session bookkeeping.
 
+The same idea on a PLAIN POSIX PROCESS -- `std/live` over `std/tcp`, this module's
+view layer and client script unchanged -- is measured in
+`../fprisc/docs/LIVE.md`; its demo is `programs/liveboard.fpr`.
+
 ## The shape: an actor per connection
 
 The server is BEAM-shaped. An **acceptor** actor is the only thing that
