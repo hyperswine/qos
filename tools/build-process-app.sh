@@ -42,10 +42,11 @@ LC_ALL=C.UTF-8 "$FPRISC_ROOT/fpr" --target="$TARGET" --prelude="$FPRISC_ROOT/cor
 
 # the virt HAL's PLIC and CLINT drivers are FP-RISC raw library units; the
 # compiler tree's make fragment owns their rules and export lists
-make -s -f "$HAL/virt/virt.mk" FPRC="$FPRISC_ROOT/fpr" BUILD=build VIRT_HAL="$HAL" build/virt-plic.s build/virt-clint.s
-VIRT_FPR="build/virt-plic.s build/virt-clint.s $HAL/virt/rawunit.c"
+make -s -f "$HAL/virt/virt.mk" FPRC="$FPRISC_ROOT/fpr" BUILD=build VIRT_HAL="$HAL" build/virt-clint.s
+make -s -f hal/virt/qos-virt.mk FPRC="$FPRISC_ROOT/fpr" BUILD=build QOS_HAL=hal build/qos-plic.s
+VIRT_FPR="build/virt-clint.s $HAL/virt/rawunit.c build/qos-plic.s hal/virt/plic.c hal/virt/net.c hal/virt/blk.c hal/virt/pins.c hal/virt/devices.c"
 
-RT="$VIRT_FPR $QOS/native/proc_entry.c $HAL/virt/ctx.S $HAL/virt/ctx_fab.c $HAL/core/runtime.c $HAL/virt/hal.c $HAL/virt/plic.c $HAL/virt/net.c $HAL/virt/blk.c $HAL/virt/memshim.c $HAL/core/actors.c $HAL/core/buddy.c $HAL/core/mod.c $HAL/core/bits.c $HAL/core/vec.c $HAL/core/sstr.c"
+RT="$VIRT_FPR $QOS/native/proc_entry.c $HAL/virt/ctx.S $HAL/virt/ctx_fab.c $HAL/core/runtime.c $HAL/virt/hal.c $HAL/virt/memshim.c $HAL/core/actors.c $HAL/core/buddy.c $HAL/core/mod.c $HAL/core/bits.c $HAL/core/vec.c $HAL/core/sstr.c"
 riscv64-unknown-elf-gcc $ARCHFLAGS -DFPR_NHARTS=1 -ffreestanding -nostdlib -nostartfiles -O2 \
   -Wl,--defsym=PROC_SLOT_BASE=$SLOT_BASE \
   -Wl,--defsym=_heap_start=_proc_image_end \

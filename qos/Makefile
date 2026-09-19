@@ -111,7 +111,7 @@ portable-a64: $(QOSP_SRC) appside/qos_abi.h $(FPRISC_ROOT)/compiler/Codegen.hs
 RT_CORE = $(FHAL)/core/runtime.c $(FHAL)/core/actors.c $(FHAL)/core/bits.c \
           $(FHAL)/core/vec.c $(FHAL)/core/sstr.c $(FHAL)/core/mod.c $(FHAL)/core/buddy.c
 RT_VIRT = $(FHAL)/virt/crt0.S $(FHAL)/virt/ctx.S $(FHAL)/virt/ctx_fab.c \
-          $(FHAL)/virt/hal.c $(FHAL)/virt/plic.c $(FHAL)/virt/net.c $(FHAL)/virt/blk.c $(FHAL)/virt/memshim.c
+          $(FHAL)/virt/hal.c $(FHAL)/virt/memshim.c
 ARCHFLAGS = -march=rv64imafdc_zicsr -mabi=lp64 -mcmodel=medany
 CFLAGS = $(ARCHFLAGS) -DFPR_NHARTS=$(HARTS) \
          -ffreestanding -nostdlib -nostartfiles -O2 -Wall -Wextra \
@@ -131,14 +131,16 @@ $(BUILD)/system.s: $(FPRC) $(FPR)/programs/system.fpr $(FPRISC_ROOT)/core/prelud
 	LC_ALL=C.UTF-8 "$(FPRC)" --system=qos-native --prelude=$(FPRISC_ROOT)/core/prelude.fpr \
 	  $(FPR)/programs/system.fpr $@
 
-# the virt HAL's PLIC and CLINT drivers are FP-RISC raw library units; the
-# rules and the export lists are the compiler tree's (one copy)
+# the MACHINE LAYER is the compiler tree's (its CLINT unit is FP-RISC: virt.mk);
+# the DEVICES are this tree's (../hal/virt, qos-virt.mk).  One copy of each.
 VIRT_HAL := $(FHAL)
 include $(FHAL)/virt/virt.mk
+QOS_HAL := $(abspath $(HAL))
+include $(HAL)/virt/qos-virt.mk
 
-native: $(BUILD)/system.s $(BUILD)/apps_data.c $(RT_VIRT) $(VIRT_FPR) $(RT_CORE) $(FHAL)/virt/link.ld
+native: $(BUILD)/system.s $(BUILD)/apps_data.c $(RT_VIRT) $(VIRT_FPR) $(QOS_VIRT_HAL) $(RT_CORE) $(FHAL)/virt/link.ld
 	$(CROSS)gcc $(CFLAGS) -T $(FHAL)/virt/link.ld -I$(FHAL)/core -I$(FHAL)/virt \
-	  $(RT_VIRT) $(VIRT_FPR) $(BUILD)/system.s $$(cat $(BUILD)/system.s.units) $(RT_CORE) \
+	  $(RT_VIRT) $(VIRT_FPR) $(QOS_VIRT_HAL) $(BUILD)/system.s $$(cat $(BUILD)/system.s.units) $(RT_CORE) \
 	  $(HAL)/core/apps.c $(BUILD)/apps_data.c $(HAL)/core/qaimg.c $(HAL)/core/process.c \
 	  -o $(KERNEL)
 
