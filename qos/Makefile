@@ -112,7 +112,7 @@ $(BUILD)/apps_data.c: $(patsubst %,$(BUILD)/qa0/%.qa,$(QAPPS)) $(FPR)/tools/gena
 
 $(BUILD)/system.s: $(FPRC) $(FPR)/programs/system.fpr $(FPRISC_ROOT)/core/prelude.fpr FORCE
 	@mkdir -p $(BUILD)
-	LC_ALL=C.UTF-8 "$(FPRC)" --profile=qos-native --prelude=$(FPRISC_ROOT)/core/prelude.fpr \
+	LC_ALL=C.UTF-8 "$(FPRC)" --system=qos-native --prelude=$(FPRISC_ROOT)/core/prelude.fpr \
 	  $(FPR)/programs/system.fpr $@
 
 native: $(BUILD)/system.s $(BUILD)/apps_data.c $(RT_VIRT) $(RT_CORE) $(FHAL)/virt/link.ld

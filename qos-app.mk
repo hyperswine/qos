@@ -18,7 +18,7 @@ QOSAPP_RT = $(QOSAPP_RT_COMMON) $(FHAL)/unix/ctx_x64.S
 
 $(BUILD)/qosapp-prog.s: fprc $(SOURCE) $(FPRISC_ROOT)/core/prelude.fpr FORCE
 	@mkdir -p $(BUILD)
-	LC_ALL=C.UTF-8 "$(FPRC)" --profile=qos-portable --prelude=$(FPRISC_ROOT)/core/prelude.fpr $(SOURCE) $@
+	LC_ALL=C.UTF-8 "$(FPRC)" --system=qos-portable --prelude=$(FPRISC_ROOT)/core/prelude.fpr $(SOURCE) $@
 
 $(BUILD)/qosapp.elf: $(BUILD)/qosapp-prog.s $(QOSAPP_RT) $(QOS)/appside/link-qosapp.ld
 	gcc -O2 -Wall -Wextra -ffreestanding -nostdlib -nostartfiles -static \
