@@ -33,3 +33,5 @@ implement it fails at LINK time on the `fpr_g_` name.
 `qos/appside/hal.c` holds both an app image's machine layer and its device
 bindings. It is listed in `../fprisc/docs/HAL.md` as still to do. (The kernel's
 loaders were `hal/core/`; they are `loader/` now, since they are not a HAL.)
+
+Input (keyboards, pointers, terminals, the window) is described in [INPUT.md](INPUT.md).

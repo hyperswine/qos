@@ -9,18 +9,18 @@
 
 set -e
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
-cd "$HERE" && make -s qos-app PROG=tests/gfxsmoke.fpr >/dev/null 2>&1
-cd "$HERE/../qos" && make -s portable-gl >/dev/null
+cd "$HERE" && make -s qos-app PROG=tests/gfxsmoke.fpr QA_OUT=/tmp/ck-gfxsmoke.qa >/dev/null 2>&1
+cd "$HERE/qos" && make -s portable-gl >/dev/null
 rm -f /tmp/gfx-smoke.ppm
-timeout 30 xvfb-run -a ./qosp-gl --yes ../fp-risc/app.qa > /tmp/ck-gl.out 2>&1
+timeout 30 xvfb-run -a ./qosp-gl --yes /tmp/ck-gfxsmoke.qa > /tmp/ck-gl.out 2>&1
 grep -q "desktopgl. GLFW" /tmp/ck-gl.out
 grep -q "ppm rc=0" /tmp/ck-gl.out
 head -2 /tmp/gfx-smoke.ppm | grep -q "640 480"
-cd "$HERE" && make -s qos-app PROG=tests/gfxkeys.fpr >/dev/null 2>&1
-cd "$HERE/../qos"
+cd "$HERE" && make -s qos-app PROG=tests/gfxkeys.fpr QA_OUT=/tmp/ck-gfxkeys.qa >/dev/null 2>&1
+cd "$HERE/qos"
 cat > /tmp/ck-gl-drive.sh <<'DRV'
 #!/bin/bash
-./qosp-gl --yes ../fp-risc/app.qa > /tmp/ck-glkeys.out 2>&1 &
+./qosp-gl --yes /tmp/ck-gfxkeys.qa > /tmp/ck-glkeys.out 2>&1 &
 QPID=$!
 for i in $(seq 1 50); do
   WID=$(xdotool search --name "FPRISC Desktop GL" 2>/dev/null | head -1)

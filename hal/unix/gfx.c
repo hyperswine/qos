@@ -1503,7 +1503,6 @@ static int gfx_tty_restore_armed;
 static void gfx_tty_restore(void) {
   if (gfx_tty_restore_armed) tcsetattr(0, TCSANOW, &gfx_tty_orig);
 }
-static int mice_fd = -2; /* -2 = untried, -1 = unavailable */
 int gfx_input_poll(int64_t *kind_out, int64_t *a_out, int64_t *c_out) {
   /* evdev keyboard first (FPR_EVDEV -- a real event node, a simulated
    * device FIFO, or a pre-baked event file; evdev_raw.h): press AND
@@ -1540,21 +1539,9 @@ int gfx_input_poll(int64_t *kind_out, int64_t *a_out, int64_t *c_out) {
   int kind = 0; sw a = 0, c = 0;
   if (r == 1) { kind = 1; a = b; }
   else {
-    /* mouse: /dev/input/mice, the kernel's PS/2-style aggregate --
-     * works on a bare Linux console; simply absent under ssh/containers */
-    if (mice_fd == -2) {
-      mice_fd = open("/dev/input/mice", O_RDONLY | O_NONBLOCK);
-      if (mice_fd < 0)
-        qos_hostlog("[input] no mouse at /dev/input/mice: %s", strerror(errno));
-    }
-    if (mice_fd >= 0) {
-      unsigned char pkt[3];
-      if (read(mice_fd, pkt, 3) == 3) {
-        signed char dx = (signed char)pkt[1], dy = (signed char)pkt[2];
-        if (dx || dy) { kind = 2; a = dx; c = dy; }
-        else { kind = 3; a = pkt[0] & 7; }
-      }
-    }
+    /* mouse: the shared tier (mice_raw.c) -- /dev/input/mice */
+    int64_t mk = 0, ma = 0, mc = 0;
+    if (qos_mice_poll(&mk, &ma, &mc)) { kind = (int)mk; a = (sw)ma; c = (sw)mc; }
   }
   *kind_out = kind; *a_out = a; *c_out = c;
   return kind != 0;

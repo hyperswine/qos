@@ -56,7 +56,7 @@ DESKTOP_GL_CFLAGS := $(shell pkg-config --cflags glfw3 2>/dev/null)
 QOSP_SRC = portable/host.c portable/sha256.c portable/haltab.c portable/store.c \
            portable/compile.c \
            $(HAL)/unix/net_raw.c $(HAL)/unix/blk_raw.c $(HAL)/unix/hostlog.c \
-           $(HAL)/unix/tty_raw.c $(HAL)/unix/evdev_raw.c $(HAL)/unix/snd_raw.c \
+           $(HAL)/unix/tty_raw.c $(HAL)/unix/evdev_raw.c $(HAL)/unix/mice_raw.c $(HAL)/unix/snd_raw.c \
            ../loader/qaimg.c
 
 # the shell's half of the ABI stamp is DERIVED from the authoritative

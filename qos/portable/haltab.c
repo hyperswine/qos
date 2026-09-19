@@ -23,8 +23,7 @@
  * + evdev_raw.c, compiled with QOSP_HOST).  Input is its own
  * capability -- a terminal app should not need a window to read
  * keys. */
-int qos_tty_poll(int64_t *kind, int64_t *a, int64_t *c);
-int qos_evdev_poll(int64_t *kind, int64_t *a, int64_t *c);
+int qos_headless_poll(int64_t *kind, int64_t *a, int64_t *c); /* the source policy */
 #endif
 
 #include <stdio.h>
@@ -47,8 +46,7 @@ static int t_input_poll(int64_t *kind, int64_t *a, int64_t *c) {
     *kind = 5; *a = size_hook_c; *c = size_hook_r;
     return 1;
   }
-  if (getenv("FPR_EVDEV")) return qos_evdev_poll(kind, a, c);
-  return qos_tty_poll(kind, a, c);
+  return qos_headless_poll(kind, a, c);
 }
 #endif
 

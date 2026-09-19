@@ -78,8 +78,15 @@ static struct { unsigned short code; int value; } inj_ring[INJ_CAP];
 static unsigned inj_r, inj_w;
 static int inj_enabled = -1;
 
+/* the EXPLICIT source FPR_EVDEV names, or 0: unset and `auto` both mean
+ * "discover" */
+static const char *explicit_source(void) {
+  const char *path = getenv("FPR_EVDEV");
+  return (path && *path && strcmp(path, "auto")) ? path : 0;
+}
+
 int qos_evdev_inject(unsigned code, int value) {
-  if (inj_enabled < 0) inj_enabled = getenv("FPR_EVDEV") ? 0 : 1;
+  if (inj_enabled < 0) inj_enabled = explicit_source() ? 0 : 1;
   if (!inj_enabled) return 0;
   unsigned next = (inj_w + 1) % INJ_CAP;
   if (next == inj_r) inj_r = (inj_r + 1) % INJ_CAP; /* oldest drops */
@@ -114,8 +121,8 @@ static int is_keyboard(int fd) {
 static void ev_open(void) {
   if (ev_tried) return;
   ev_tried = 1;
-  const char *path = getenv("FPR_EVDEV");
-  if (path && *path) {
+  const char *path = explicit_source();
+  if (path) {
     /* O_NONBLOCK also makes a writer-less FIFO open succeed immediately */
     int fd = open(path, O_RDONLY | O_NONBLOCK);
     if (fd >= 0) {
@@ -148,6 +155,11 @@ static void ev_open(void) {
                 ? "[input] no readable keyboards (add the user to the `input` group)"
                 : "[input] no keyboards discovered (evdev falls back to stdin)");
 #endif
+}
+
+int qos_evdev_sources(void) {
+  ev_open();
+  return ev_nfds;
 }
 
 /* the modifier machine: ONE decoder for device records and injected
