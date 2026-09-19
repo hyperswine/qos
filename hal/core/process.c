@@ -1,8 +1,9 @@
 /* process.c -- System.qa's side of dynamic loading: the growth
  * callback handed to a running process, and the FPRISC-facing
- * Sys.loadElf primitive that ties buddy.c + elfload.c + proc_entry
+ * Sys.loadImageAt primitive that ties buddy.c + qaimg.c + proc_entry
  * together. docs/PROCESS-LOADING.md has the full design; this file is
- * the last mile that makes it callable from FPRISC.
+ * the last mile that makes it callable from FPRISC.  (The ELF loader it
+ * first used, elfload.c, was retired by qaimg's flat image and is gone.)
  *
  * ONE arena, buddy_init'd once from fpr_rt_init's caller (see the hook
  * below); ONE concurrent process slot this pass (stated in the docs).
@@ -163,23 +164,14 @@ static V mktup2v(V a, V b) {
   return (V)t;
 }
 
-/* Sys.loadElfAt : String -> Int -> Int -> (Int, String)
- * Takes the ARCHIVE bytes plus an (offset, length) slice -- reading
- * the ELF payload straight out of the .qa string's own backing bytes,
- * NOT a pre-sliced copy. This matters: the FPRISC-level `substr` helper
- * (system.fpr) builds strings one strcat'd character at a time, which
- * is fine for a ~200-byte manifest and O(n^2)-catastrophic for a
- * multi-KB ELF payload (a 49 KB slice allocated over a billion
- * transient bytes before this fix). Section offsets are cheap to
- * compute in FPRISC (system.fpr already does, for MANIFEST); the
- * PAYLOAD BYTES should never round-trip through FPRISC-level string
- * building at all. fst = 1 success / 0 failure; snd = the process's
- * rendered result on success, or a human-readable failure reason.
- * Argument-type errors still panic, matching every other HAL
- * primitive's convention; a malformed ELF PAYLOAD is reported through
- * the tuple instead, so a caller (System.qa's launcher) can keep
- * running and show the user what went wrong -- the same way "No such
- * app" and "Bad .qa" already do in system.fpr. */
+/* Sys.loadImageAt : String -> Int -> Int -> Int -> Int -> caps -> (Int, String)
+ * The ARCHIVE bytes plus the (offset, length) of its LOAD and of its IMAGE
+ * section: the payload is read straight out of the .qa String's own bytes,
+ * never as a pre-sliced copy.  fst = 1 success / 0 failure / 2 "queued under
+ * this pid"; snd = the rendered result, the pid, or a human-readable reason.
+ * Argument-type errors panic, like every HAL primitive; a malformed PAYLOAD
+ * is reported through the tuple, so the launcher keeps running and says what
+ * went wrong, the way "No such app" and "Bad .qa" do in system.fpr. */
 /* QAR2: the launcher hands over the LOAD and IMAGE section extents of
  * the archive string -- never materialized as separate FPRISC Strings
  * (the O(n^2)-slice hazard PROCESS-LOADING.md records applies to the
