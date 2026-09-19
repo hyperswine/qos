@@ -84,11 +84,10 @@ def package_plugin(slot, plugid, source):
     src = os.path.join(bdir, "fprd-src", plugid + ".fpr")
     with open(src, "wb") as f:
         f.write(source)
-    mac = sys.platform == "darwin" and platform.machine() == "arm64"
-    target = "plugin-qa-macos" if mac else "plugin-qa"
+    target = "plugin-qa"  # qos-app.mk picks the image this host's qosp runs
     env = dict(os.environ, LC_ALL="C.UTF-8")
     r = subprocess.run(
-        ["make", "-s", "plugsyms-macos" if mac else "plugsyms"],
+        ["make", "-s", "plugsyms"],
         capture_output=True, env=env, timeout=60)
     if r.returncode != 0:
         return b"err\n" + ((r.stderr + r.stdout).strip() or b"plugsyms failed")

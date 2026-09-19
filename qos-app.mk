@@ -51,7 +51,7 @@ qos-app-x64: $(BUILD)/qosapp.elf tools/mkqa.py
 	python3 tools/mkqa.py $$MF $(BUILD)/qosapp.elf -o $(QA_OUT)
 	@echo "$(QA_OUT) built — run with: (make -C qos portable && qos/qosp --yes $(QA_OUT))"
 
-# ---- QOS app for macOS (Apple Silicon) -----------------------------------
+# ---- QOS app for an AArch64 host: Apple Silicon, arm64 Linux (a Pi 4) --------
 # qosp's in-process loader consumes fixed-slot ELF on every host.  Apple
 # Clang + lld can cross-link that AArch64 ELF without a Linux sysroot because
 # the app and runtime are freestanding.  The code still executes under Darwin,
@@ -73,7 +73,7 @@ $(BUILD)/qosapp-a64.elf: $(BUILD)/qosapp-a64.s $(QOSAPP_RT_COMMON) $(FMACHINE)/u
 	  $(BUILD)/qosapp-a64.s $$(cat $(BUILD)/qosapp-a64.s.units) \
 	  $(QOSAPP_RT_COMMON) $(FMACHINE)/unix/ctx_a64.S -o $@
 
-qos-app-macos: $(BUILD)/qosapp-a64.elf tools/mkqa.py
+qos-app-a64: $(BUILD)/qosapp-a64.elf tools/mkqa.py
 	@MF=$(BUILD)/qosapp-a64-gen.toml; ID=$$(basename $(SOURCE) .fpr); \
 	ABIV=$$(grep -m1 'define QOS_ABI_VERSION' $(QOS)/appside/qos_abi.h | grep -o '[0-9]\+' | head -1); \
 	REV=$$(cat $(BUILD)/qosapp-a64.s.abirev 2>/dev/null || echo 0); \
@@ -93,7 +93,7 @@ qos-app-macos: $(BUILD)/qosapp-a64.elf tools/mkqa.py
 # TWO LAWS, both previously paid for in blood:
 #   1. plugin targets DELIBERATELY do not depend on the app elf -- a
 #      silent shell rebuild would desync every PROVIDE address
-#      (SIGSEGV pc=0).  After ANY shell rebuild: make plugsyms[-macos],
+#      (SIGSEGV pc=0).  After ANY shell rebuild: make plugsyms[-a64],
 #      then rebuild EVERY plugin, then reinstall the whole set.
 #   2. qosp + app.qa + all plugin .qa's install as a matched set.
 PLUGSLOT ?= 0
@@ -107,8 +107,8 @@ plugsyms-x64:
 	  awk '$$2 ~ /^[A-Z]$$/ && $$3 != "" && $$3 !~ /^\$$/ { printf "PROVIDE(%s = 0x%s);\n", $$3, $$1 }' > $(BUILD)/plugsyms-x64.ld
 	@echo "plugsyms-x64.ld: $$(wc -l < $(BUILD)/plugsyms-x64.ld) shell symbols"
 
-plugsyms-macos:
-	@test -f $(BUILD)/qosapp-a64.elf || { echo "build the shell first: make qos-app-macos PROG=<shell>"; exit 1; }
+plugsyms-a64:
+	@test -f $(BUILD)/qosapp-a64.elf || { echo "build the shell first: make qos-app-a64 PROG=<shell>"; exit 1; }
 	nm --defined-only $(BUILD)/qosapp-a64.elf | \
 	  awk '$$2 ~ /^[A-Z]$$/ && $$3 != "" && $$3 !~ /^\$$/ { printf "PROVIDE(%s = 0x%s);\n", $$3, $$1 }' > $(BUILD)/plugsyms-a64.ld
 	@echo "plugsyms-a64.ld: $$(wc -l < $(BUILD)/plugsyms-a64.ld) shell symbols"
@@ -128,8 +128,8 @@ plugin-qa-x64: fprc $(FPRISC_ROOT)/core/prelude.fpr
 	python3 tools/mkqa.py $$MF $(BUILD)/plug-$(PLUGID).elf -o $(PLUG_OUT) --shell-of $(QA_OUT)
 	@echo "$(PLUG_OUT) built at sub-slot $(PLUGSLOT) ($(PLUGBASE)) -- install: make -C ../qos disk-seed QAS=..."
 
-plugin-qa-macos: fprc $(FPRISC_ROOT)/core/prelude.fpr
-	@test -f $(BUILD)/plugsyms-a64.ld || { echo "no plugsyms: make plugsyms-macos first (after the shell build)"; exit 1; }
+plugin-qa-a64: fprc $(FPRISC_ROOT)/core/prelude.fpr
+	@test -f $(BUILD)/plugsyms-a64.ld || { echo "no plugsyms: make plugsyms-a64 first (after the shell build)"; exit 1; }
 	@mkdir -p $(BUILD)
 	LC_ALL=C.UTF-8 "$(FPRC)" --target=qa64 --plugin --prelude=$(FPRISC_ROOT)/core/prelude.fpr $(SOURCE) $(BUILD)/plug-$(PLUGID)-a64.s
 	clang --target=aarch64-none-elf -fuse-ld=lld -O2 -Wall -Wextra \
@@ -144,11 +144,11 @@ plugin-qa-macos: fprc $(FPRISC_ROOT)/core/prelude.fpr
 	python3 tools/mkqa.py $$MF $(BUILD)/plug-$(PLUGID)-a64.elf -o $(PLUG_OUT) --shell-of $(QA_OUT)
 	@echo "$(PLUG_OUT) built at sub-slot $(PLUGSLOT) ($(PLUGBASE)) -- install: make -C ../qos disk-seed QAS=..."
 
-qos-app-macos-run: qos-app-macos
+qos-app-a64-run: qos-app-a64
 	$(MAKE) -C $(QOS) portable
 	$(QOS)/qosp --yes $(QA_OUT)
 
-qos-app-macos-object: fprc $(SOURCE) $(FPRISC_ROOT)/core/prelude.fpr
+qos-app-mac-object: fprc $(SOURCE) $(FPRISC_ROOT)/core/prelude.fpr
 	@mkdir -p $(BUILD)
 	LC_ALL=C.UTF-8 "$(FPRC)" --target=qa64mac --prelude=$(FPRISC_ROOT)/core/prelude.fpr $(SOURCE) $(BUILD)/qosapp-mac.s
 	clang --target=arm64-apple-macos11 -c $(BUILD)/qosapp-mac.s -o $(BUILD)/qosapp-mac.o
@@ -159,12 +159,17 @@ qos-app-macos-object: fprc $(SOURCE) $(FPRISC_ROOT)/core/prelude.fpr
 # qos/tests-host scripts said `make qos-app`, so every one of them failed
 # there.  The choice lives here now; both say `qos-app`, `plugsyms`,
 # `plugin-qa` and get the image this machine's qosp can run.
-ifeq ($(shell uname -s)-$(shell uname -m),Darwin-arm64)
-APP_HOST = macos
+# by ARCHITECTURE, not by OS: the a64 rules build a freestanding AArch64 ELF with
+# clang + lld, which is what qosp loads on Apple Silicon AND on arm64 Linux (a
+# Pi 4).  They were named -macos and chosen only on Darwin, so on arm64 Linux
+# `make qos-app` built an x86-64 image.  Only the arena BASE is macOS's own
+# (QOS_SLOT_BASE, above).
+ifneq ($(filter arm64 aarch64,$(shell uname -m)),)
+APP_HOST = a64
 else
 APP_HOST = x64
 endif
 qos-app: qos-app-$(APP_HOST)
 plugsyms: plugsyms-$(APP_HOST)
 plugin-qa: plugin-qa-$(APP_HOST)
-.PHONY: qos-app plugsyms plugin-qa qos-app-x64 plugsyms-x64 plugin-qa-x64 qos-app-macos plugsyms-macos plugin-qa-macos
+.PHONY: qos-app plugsyms plugin-qa qos-app-x64 plugsyms-x64 plugin-qa-x64 qos-app-a64 plugsyms-a64 plugin-qa-a64
