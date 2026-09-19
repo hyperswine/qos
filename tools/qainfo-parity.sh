@@ -21,9 +21,7 @@ trap 'rm -rf "$WORK"' EXIT HUP INT TERM
 "$FPRISC/fpr" build tools/qainfo.fpr -o "$WORK/qainfo" >/dev/null
 ./qos.py run tests/capsecho.fpr >/dev/null 2>&1 </dev/null
 ELF=$(ls .qos/build/qosapp-a64.elf .qos/build/qosapp.elf 2>/dev/null | head -1)
-# the core runtime's print writes CRLF on every system (a serial-console
-# habit; docs/BOUNDS.md "found along the way"), so every read strips CR
-ABI=$("$WORK/qainfo" .qos/capsecho.qa | tr -d '\r' | sed -n 's/^abi = //p')
+ABI=$("$WORK/qainfo" .qos/capsecho.qa | sed -n 's/^abi = //p')
 
 mkdir "$WORK/gen"
 python3 - "$WORK/gen/big.toml" <<'PY'
@@ -41,8 +39,8 @@ for toml in apps/*.toml "$WORK/gen/big.toml"; do
   { grep -v '^abi\|^loadMode' "$toml" | awk -v abi="$ABI" 'NR==1{print "abi = \"" abi "\"\nloadMode = \"process\""} {print}'; } > "$WORK/$name.toml"
   python3 tools/mkqa.py "$WORK/$name.toml" "$ELF" -o "$WORK/$name.qa" >/dev/null
   (cd "$WORK" && "$ROOT/qos/qosp" --yes "$name.qa" 2>/dev/null </dev/null) \
-    | tr -d '\r' | sed -n '/^CAPS-BEGIN$/,/^CAPS-END$/p' | sed '1d;$d' > "$WORK/$name.host"
-  "$WORK/qainfo" "$WORK/$name.qa" --caps | tr -d '\r' > "$WORK/$name.fpr"
+    | sed -n '/^CAPS-BEGIN$/,/^CAPS-END$/p' | sed '1d;$d' > "$WORK/$name.host"
+  "$WORK/qainfo" "$WORK/$name.qa" --caps > "$WORK/$name.fpr"
   if cmp -s "$WORK/$name.host" "$WORK/$name.fpr" && [ -s "$WORK/$name.fpr" ]; then
     echo "  ok   $name: $(($(wc -l < "$WORK/$name.fpr") - 2)) grants, $(wc -c < "$WORK/$name.fpr" | tr -d ' ') bytes"
   else
