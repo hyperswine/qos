@@ -12,7 +12,7 @@ HERE = Path(__file__).resolve().parents[1]
 
 
 def checkout(where):
-    for name in ("Makefile", "compiler/Main.hs", "hal/core/runtime.c", "core/prelude.fpr"):
+    for name in ("Makefile", "compiler/Main.hs", "runtime/runtime.c", "core/prelude.fpr"):
         p = where / name
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text("source")

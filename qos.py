@@ -101,7 +101,7 @@ INSTALLED = (ROOT / ".installed").is_file()
 # directly) and to the compiler as FPR_PATH, its module search root.
 FPRISC_FILE = ROOT / "fprisc.path"
 FPRISC_LOCK = ROOT / "fprisc.lock.json"
-FPRISC_MARKS = ("Makefile", "compiler/Main.hs", "hal/core/runtime.c", "core/prelude.fpr")
+FPRISC_MARKS = ("Makefile", "compiler/Main.hs", "runtime/runtime.c", "core/prelude.fpr")
 
 
 def is_fprisc(path):
@@ -1014,7 +1014,7 @@ def tree_pins():
     pins = []
     for p in sorted(ROOT.rglob("*.fpr")):
         rel = p.relative_to(ROOT)
-        if rel.parts[0].startswith(".") or rel.parts[0] in ("build", "dist", "toolchain", "qos", "hal", "docs"):
+        if rel.parts[0].startswith(".") or rel.parts[0] in ("build", "dist", "toolchain", "qos", "hal", "loader", "docs"):
             continue
         try:
             src = p.read_text(errors="replace")
@@ -1302,7 +1302,7 @@ def cmd_clean(a):
 INSTALL_TREE = [
     "qos.py", "dependency.mk", "release.toml", "README.md", "docs", "fprisc.lock.json",
     "Makefile", "qos-app.mk", "std", "programs", "tools", "models", "targets",
-    "apps", "tests", ".fpr", "fpr.lock", "hal",
+    "apps", "tests", ".fpr", "fpr.lock", "hal", "loader",
     "qos/Makefile", "qos/native", "qos/appside", "qos/portable", "qos/tests-host", "qos/qosp", "qos/qosp-gl",
 ]
 INSTALL_SKIP = shutil.ignore_patterns("*.o", "*.hi", "*.qa", "*.disk", "*.img", "build", "dist-newstyle",
@@ -1333,7 +1333,7 @@ def cmd_install(a):
         else:
             shutil.copy2(src, dst)
     # Ship a distinct compiler tree, never a symlink overlay in the QOS tree.
-    for item in ("fpr", "Makefile", "compiler", "core", "std", "sol", "tests", "tools", "hal", "docs"):
+    for item in ("fpr", "Makefile", "compiler", "core", "std", "sol", "tests", "tools", "runtime", "machine", "docs"):
         src, dst = TOOLCHAIN / item, lib / "toolchain" / item
         dst.parent.mkdir(parents=True, exist_ok=True)
         if src.is_dir():

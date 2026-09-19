@@ -17,7 +17,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 export FPR_HOME="$ROOT"
 export FPR_PATH="$FPRISC_ROOT"
-HAL="$FPRISC_ROOT/hal"
+RUNTIME="$FPRISC_ROOT/runtime"
+MACHINE="$FPRISC_ROOT/machine"
 QOS=qos   # relative to the repository root (it was ../qos from fp-risc/tools/, before the programs moved up)
 KERNEL=$QOS/qos-native.elf
 
@@ -42,16 +43,16 @@ LC_ALL=C.UTF-8 "$FPRISC_ROOT/fpr" --target="$TARGET" --prelude="$FPRISC_ROOT/cor
 
 # the virt HAL's PLIC and CLINT drivers are FP-RISC raw library units; the
 # compiler tree's make fragment owns their rules and export lists
-make -s -f "$HAL/virt/virt.mk" FPRC="$FPRISC_ROOT/fpr" BUILD=build VIRT_HAL="$HAL" build/virt-clint.s
+make -s -f "$MACHINE/virt/virt.mk" FPRC="$FPRISC_ROOT/fpr" BUILD=build VIRT_MACHINE="$MACHINE" build/virt-clint.s
 make -s -f hal/virt/qos-virt.mk FPRC="$FPRISC_ROOT/fpr" BUILD=build QOS_HAL=hal build/qos-plic.s
-VIRT_FPR="build/virt-clint.s $HAL/virt/rawunit.c build/qos-plic.s hal/virt/plic.c hal/virt/net.c hal/virt/blk.c hal/virt/pins.c hal/virt/devices.c"
+VIRT_FPR="build/virt-clint.s $MACHINE/virt/rawunit.c build/qos-plic.s hal/virt/plic.c hal/virt/net.c hal/virt/blk.c hal/virt/pins.c hal/virt/devices.c"
 
-RT="$VIRT_FPR $QOS/native/proc_entry.c $HAL/virt/ctx.S $HAL/virt/ctx_fab.c $HAL/core/runtime.c $HAL/virt/hal.c $HAL/virt/memshim.c $HAL/core/actors.c $HAL/core/buddy.c $HAL/core/mod.c $HAL/core/bits.c $HAL/core/vec.c $HAL/core/sstr.c"
+RT="$VIRT_FPR $QOS/native/proc_entry.c $MACHINE/virt/ctx.S $MACHINE/virt/ctx_fab.c $RUNTIME/runtime.c $MACHINE/virt/hal.c $MACHINE/virt/memshim.c $RUNTIME/actors.c $RUNTIME/buddy.c $RUNTIME/mod.c $RUNTIME/bits.c $RUNTIME/vec.c $RUNTIME/sstr.c"
 riscv64-unknown-elf-gcc $ARCHFLAGS -DFPR_NHARTS=1 -ffreestanding -nostdlib -nostartfiles -O2 \
   -Wl,--defsym=PROC_SLOT_BASE=$SLOT_BASE \
   -Wl,--defsym=_heap_start=_proc_image_end \
   -Wl,--defsym=_heap_end=_proc_image_end -Wl,--defsym=_proc_arena_end=0x84000000 \
-  -T $HAL/virt/link-app.ld -I$HAL/core -I$HAL/virt $RT "build/${BASE}.s" $(cat "build/${BASE}.s.units") -o "build/${BASE}.elf"
+  -T $MACHINE/virt/link-app.ld -I$RUNTIME -I$MACHINE/virt $RT "build/${BASE}.s" $(cat "build/${BASE}.s.units") -o "build/${BASE}.elf"
 
 python3 tools/mkqa.py "$MANIFEST" "build/${BASE}.elf" -o "$OUT_QA"
 echo "wrote $OUT_QA (loadMode=process; seed it with tools/mkdisk.py for a disk boot)"

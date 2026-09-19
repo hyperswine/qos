@@ -19,4 +19,7 @@ export FPRISC_ROOT
 export FPR_HOME := $(QOS_ROOT)
 export FPR_PATH := $(FPRISC_ROOT)
 FPRC := $(FPRISC_ROOT)/fpr
-FHAL := $(FPRISC_ROOT)/hal
+# the compiler tree's RUNTIME and MACHINE LAYER (../fprisc/docs/HAL.md); `hal/`
+# in THIS tree is the QOS HAL
+FRUNTIME := $(FPRISC_ROOT)/runtime
+FMACHINE := $(FPRISC_ROOT)/machine

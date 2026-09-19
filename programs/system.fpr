@@ -584,7 +584,7 @@ keepGranted perms bs =
       | False -> keepGranted pr br.
 
 # runEntry: the load seam. loadMode="process" -> QAR2 flat-image
-# loading (Sys.placeImageAt, hal/core/qaimg.c) -- one copy, one
+# loading (Sys.placeImageAt, loader/qaimg.c) -- one copy, one
 # zero-fill, no header walking. Anything else keeps the co-compiled
 # name-dispatch path (Apps.entry/Apps.run), which is what every app
 # shipped as rodata in this build actually uses.
@@ -622,7 +622,7 @@ runBuiltin con entry caps =
 # which also refuses an inconsistent one by name.  IMAGE is the payload: it
 # goes to the placer by (offset, length) ONLY, never as a sliced String.
 #
-# The placer is this file's own foreign primitive (hal/core/process.c): the
+# The placer is this file's own foreign primitive (loader/process.c): the
 # archive, IMAGE's extent, LOAD's numbers [base, entry, execsz, rwoff, memsz]
 # and the capability blob.
 Sys.placeImageAt : String -> Int -> Int -> List Int -> String -> (Int, String) .

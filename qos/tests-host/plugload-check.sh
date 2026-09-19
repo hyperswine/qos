@@ -37,14 +37,14 @@ python3 ../../tools/mkqa.py $B/plugstub.toml $B/plugstub.elf -o $B/plugstub.qa
 
 # ---- the harness: qosp's own objects, main renamed away --------------
 gcc -O2 -Wall -Wextra -DFPR_POSIX -DFPR_NHARTS=8 \
-    -I"$FPRISC_ROOT/hal/core" -I../../hal/unix -I../appside \
+    -I"$FPRISC_ROOT/runtime" -I../../hal/unix -I../appside \
     -Dmain=qosp_real_main -c ../portable/main.c -o $B/main.o
 gcc -O2 -Wall -Wextra -DFPR_POSIX -DFPR_NHARTS=8 \
-    -I"$FPRISC_ROOT/hal/core" -I../../hal/unix -I../appside \
+    -I"$FPRISC_ROOT/runtime" -I../../hal/unix -I../appside \
     plugload_check.c $B/main.o \
     ../portable/qa.c ../portable/haltab.c ../portable/store.c \
     ../../hal/unix/net_raw.c ../../hal/unix/blk_raw.c ../../hal/unix/hostlog.c \
-    "$FPRISC_ROOT/hal/core/buddy.c" ../../hal/core/qaimg.c \
+    "$FPRISC_ROOT/runtime/buddy.c" ../../loader/qaimg.c \
     -o $B/plugload_check -lpthread
 
 $B/plugload_check $B/plugstub.qa "$TAB" "$PROBE"

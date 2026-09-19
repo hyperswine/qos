@@ -562,7 +562,7 @@ int fpr_gpu_vec_axpb(uw *col, uw len, sw av, sw bv) {
   return 1;
 }
 
-/* mirrors hal/core/vec.c col_t: cap at 0, base (contiguous) at W */
+/* mirrors runtime/vec.c col_t: cap at 0, base (contiguous) at W */
 typedef struct {
   uw cap;
   uw *base;

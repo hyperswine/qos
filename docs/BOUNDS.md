@@ -13,7 +13,7 @@ until memory is the bound; and reaching a limit must never be silent.
 | `qa_perm_t.url[96]`, `.mode[16]` | A longer url was cut to fit. For a capability path that is a different, possibly broader, grant. | Owned strings of whatever length the manifest gave. |
 | `static char caps[4096]` + `qa_caps_serialize` (`qos/portable/main.c`, `qa.c`) | The serializer returned early when the buffer filled, so granted permissions never reached the app. Co-designed with the 32 cap (32 x ~114 B), which is why it never showed. | Sized exactly to the grants. |
 | `copy_tok` on `name`, `id`, `loadMode`, `abi`, `shell` | Cut to fit. The `id` keys the app's store, so two ids sharing a 63-byte prefix would have shared it. | Still fixed-width, but an overlong value is refused: `qa: manifest: id is too long`. |
-| `MAX_GRANTS 64` (`hal/core/process.c`) | A 64-entry ledger of growth grants, commented "reclaimed on exit", that nothing ever read: grants are shared-buddy slabs reaped with their acbs. | Removed. |
+| `MAX_GRANTS 64` (`loader/process.c`) | A 64-entry ledger of growth grants, commented "reclaimed on exit", that nothing ever read: grants are shared-buddy slabs reaped with their acbs. | Removed. |
 
 The same day the manifest's interpretation became ONE FP-RISC module,
 `programs/mods/manifest.fpr` (lists, no capacity), used by the kernel and by a
@@ -52,7 +52,7 @@ that:
 | the image, `LENGTH = 16M` | `qos/appside/link-qosapp.ld`, `link-qosapp-a64.ld` |
 | eight plugin sub-slots of 4 MiB at base + 128 MiB: `QOS_PLUG_SIZE`, `PLUG_MAX 8`, `PLUGSLOT`, and `MOD_MAXATTACH 8` in the runtime | `qos_abi.h`, `qos/portable/main.c`, `qos-app.mk` |
 | the base address itself | `qos_abi.h`, `qos-app.mk` |
-| one process in the native slot, "image larger than the process slot" | `hal/core/process.c` |
+| one process in the native slot, "image larger than the process slot" | `loader/process.c` |
 
 Two steps, the first small:
 

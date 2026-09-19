@@ -27,7 +27,7 @@ commit in `fprisc.lock.json` for releases.
 - `qos/`: the portable host, native entry, application-side HAL and host checks.
 - `hal/virt/`: the QOS HAL on the virt board -- the PLIC, virtio net and block, the pin bus.
 - `hal/unix/`: the QOS HAL over a Unix host -- graphics, audio, input, net, block, tty.
-- `hal/core/`: QOS application, process and image loaders.
+- `loader/`: QOS application, process and image loaders (the kernel's side of launching).
   The HAL is QOS's; the compiler tree keeps only a machine layer: [docs/HAL.md](docs/HAL.md).
 - `Makefile` + `qos-app.mk`: how a program becomes a `.qa`; `qos/Makefile`: the hosts.
 - `qos.py`: build, run, disk, bundle, install and release commands.

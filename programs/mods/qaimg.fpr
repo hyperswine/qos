@@ -5,7 +5,7 @@
 # `sha <64 hex>` naming the IMAGE's sha-256 (docs/QA-FORMAT.md).  This module
 # reads it and refuses an inconsistent one.
 #
-# It used to be C (hal/core/qaimg.c: a hand-rolled key/decimal scanner and
+# It used to be C (loader/qaimg.c: a hand-rolled key/decimal scanner and
 # five refusals), reached by three callers -- the portable host loading an
 # app, the portable host loading a plugin, the native kernel loading a
 # process -- while qosp.fpr scanned the same section a second time for the

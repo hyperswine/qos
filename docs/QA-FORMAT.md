@@ -62,7 +62,7 @@ The flat memory image: every PT_LOAD's file bytes laid out at
     protect r-x over the execsz prefix (hosts with mprotect)
     enter   base + entry
 
-That is `hal/core/qaimg.c` in its entirety, shared by qosp's slot
+That is `loader/qaimg.c` in its entirety, shared by qosp's slot
 loader, qosp's plugin loader, and the native kernel's process loader
 (`Sys.loadImageAt`).  `elfload.c` is retired from every load path.
 

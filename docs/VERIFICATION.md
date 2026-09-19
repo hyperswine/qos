@@ -13,11 +13,11 @@ is the runnable slice.
 
 | tree | lines | what | verification-relevant traits |
 | --- | --- | --- | --- |
-| `hal/core/runtime.c` | 2162 | allocator (per-actor pools, buckets, bigfree), generic apply, core prims, panic | 20 atomics, 6 unions, 5 inline asm, 30 named panics |
-| `hal/core/actors.c` | 1456 | multi-hart actor runtime: ACBs, per-sender SPSC channels, epoch limbo, wake/IPI, fuel | **63 atomics**, 13 volatile, 35 named panics -- the concurrency core |
-| `hal/core/vec.c` | 760 | linear SoA vectors, SIMD zips, compaction | pure loops over columns, 24 panics |
-| `hal/core/buddy.c` | 284 | power-of-two buddy over a reserved arena (alloc / realloc / free) | sequential under one lock; the cleanest target |
-| `hal/core/process.c`, `elfload.c`, `qaimg.c`, `apps.c`, `mod.c`, `sstr.c`, `bits.c` | ~900 | loading, image parsing, module table, small strings | parsers with explicit bounds checks; `qaimg.c` is a 103-line pure parser |
+| `runtime/runtime.c` | 2162 | allocator (per-actor pools, buckets, bigfree), generic apply, core prims, panic | 20 atomics, 6 unions, 5 inline asm, 30 named panics |
+| `runtime/actors.c` | 1456 | multi-hart actor runtime: ACBs, per-sender SPSC channels, epoch limbo, wake/IPI, fuel | **63 atomics**, 13 volatile, 35 named panics -- the concurrency core |
+| `runtime/vec.c` | 760 | linear SoA vectors, SIMD zips, compaction | pure loops over columns, 24 panics |
+| `runtime/buddy.c` | 284 | power-of-two buddy over a reserved arena (alloc / realloc / free) | sequential under one lock; the cleanest target |
+| `loader/process.c`, `elfload.c`, `qaimg.c`, `apps.c`, `mod.c`, `sstr.c`, `bits.c` | ~900 | loading, image parsing, module table, small strings | parsers with explicit bounds checks; `qaimg.c` is a 103-line pure parser |
 | `hal/virt/*` | ~1200 | bare-metal: CLINT/PLIC, blk/net virtio, context switch (`.S`) | MMIO through `volatile`, 2 inline asm files -- model, don't prove |
 | `hal/unix/*`, `qos/portable/*` | ~3000 | the Linux host: tty/evdev/drm/net raw shims, gfx, hostlog, the qosp loader and QAR2 reader with SHA-256 | libc + pthreads; `qa.c` (275 lines) is another pure parser |
 

@@ -199,7 +199,7 @@ static uint64_t qosp_tls_off(void) {
 static pthread_t hart_threads[QOSP_MAXHARTS];
 static unsigned hart_nthreads;
 struct hart_arg { uint64_t idx; void (*fn)(uint64_t); };
-void hal_fault_altstack(void); /* fprisc/hal/posix/hal.c: this thread's alternate signal stack */
+void hal_fault_altstack(void); /* fprisc/machine/posix/hal.c: this thread's alternate signal stack */
 static void *hart_tramp(void *p) {
   struct hart_arg a = *(struct hart_arg *)p;
   free(p);
@@ -239,7 +239,7 @@ static uint64_t resolve_nharts(void) {
   return (uint64_t)n;
 }
 
-/* fprisc/hal/posix/hal.c, linked here: the guard's check and its last words */
+/* fprisc/machine/posix/hal.c, linked here: the guard's check and its last words */
 int hal_stack_guard_hit(void *lo, uint64_t size, void *addr);
 void hal_stack_overflow_die(uint64_t id, uint64_t size);
 extern void *(*qosp_app_stack_query)(uint64_t *id, uint64_t *size); /* haltab.c */

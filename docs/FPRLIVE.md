@@ -166,7 +166,7 @@ Fixing what it turned up shaped the final module:
 
 Moving to an actor per connection then exercised the actor runtime
 harder than anything before it, and turned up five things in
-`hal/core/actors.c` and the host tier:
+`runtime/actors.c` and the host tier:
 
 - **Eight senders per actor was a hard ceiling.** Every actor had seven
   dedicated per-sender channels plus one, and a ninth distinct sender

@@ -19,8 +19,8 @@ drivers, for all three places that link them: a bare-metal image built from this
 tree (`make bare-metal`, which hands them to the compiler's Makefile as
 `EXTRA_RT`), the native kernel (`qos/Makefile`), and `tools/build-process-app.sh`.
 
-## Not a HAL, despite the directory
+## Still mixed
 
-`hal/core/` holds the kernel's loaders (`process.c`, `qaimg.c`, `apps.c`), and
-`qos/appside/hal.c` mixes an app image's machine layer with its device
-bindings. Both are listed in `../fprisc/docs/HAL.md` as still to do.
+`qos/appside/hal.c` holds both an app image's machine layer and its device
+bindings. It is listed in `../fprisc/docs/HAL.md` as still to do. (The kernel's
+loaders were `hal/core/`; they are `loader/` now, since they are not a HAL.)

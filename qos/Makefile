@@ -57,7 +57,7 @@ QOSP_SRC = portable/host.c portable/sha256.c portable/haltab.c portable/store.c 
            portable/compile.c \
            $(HAL)/unix/net_raw.c $(HAL)/unix/blk_raw.c $(HAL)/unix/hostlog.c \
            $(HAL)/unix/tty_raw.c $(HAL)/unix/evdev_raw.c $(HAL)/unix/snd_raw.c \
-           $(HAL)/core/qaimg.c
+           ../loader/qaimg.c
 
 # the shell's half of the ABI stamp is DERIVED from the authoritative
 # source (Codegen.hs codegenRev), not hardcoded -- the first stamped
@@ -105,13 +105,13 @@ portable-gl: $(QOSP_GL_SRC) $(QOSP_FPR) appside/qos_abi.h $(FPRISC_ROOT)/compile
 # ---- QOS Portable, aarch64 cross (verifies the x28 hart discipline
 portable-a64: $(QOSP_SRC) appside/qos_abi.h $(FPRISC_ROOT)/compiler/Codegen.hs
 	aarch64-linux-gnu-gcc -static -O2 -Wall -Wextra -DFPR_POSIX -DQOSP_HOST -DFPR_NHARTS=$(QOSHARTS) -DQOS_ARENA_SIZE="($(ARENA_MB)ul << 20)" $(REV_FLAG) \
-	  -I$(FHAL)/core -I$(HAL)/unix -Iappside $(QOSP_SRC) -o qosp-a64 -lpthread -lm
+	  -I$(FRUNTIME) -I$(HAL)/unix -Iappside $(QOSP_SRC) -o qosp-a64 -lpthread -lm
 
 # ---- QOS Native: the kernel --------------------------------------------
-RT_CORE = $(FHAL)/core/runtime.c $(FHAL)/core/actors.c $(FHAL)/core/bits.c \
-          $(FHAL)/core/vec.c $(FHAL)/core/sstr.c $(FHAL)/core/mod.c $(FHAL)/core/buddy.c
-RT_VIRT = $(FHAL)/virt/crt0.S $(FHAL)/virt/ctx.S $(FHAL)/virt/ctx_fab.c \
-          $(FHAL)/virt/hal.c $(FHAL)/virt/memshim.c
+RT_CORE = $(FRUNTIME)/runtime.c $(FRUNTIME)/actors.c $(FRUNTIME)/bits.c \
+          $(FRUNTIME)/vec.c $(FRUNTIME)/sstr.c $(FRUNTIME)/mod.c $(FRUNTIME)/buddy.c
+RT_VIRT = $(FMACHINE)/virt/crt0.S $(FMACHINE)/virt/ctx.S $(FMACHINE)/virt/ctx_fab.c \
+          $(FMACHINE)/virt/hal.c $(FMACHINE)/virt/memshim.c
 ARCHFLAGS = -march=rv64imafdc_zicsr -mabi=lp64 -mcmodel=medany
 CFLAGS = $(ARCHFLAGS) -DFPR_NHARTS=$(HARTS) \
          -ffreestanding -nostdlib -nostartfiles -O2 -Wall -Wextra \
@@ -133,15 +133,15 @@ $(BUILD)/system.s: $(FPRC) $(FPR)/programs/system.fpr $(FPRISC_ROOT)/core/prelud
 
 # the MACHINE LAYER is the compiler tree's (its CLINT unit is FP-RISC: virt.mk);
 # the DEVICES are this tree's (../hal/virt, qos-virt.mk).  One copy of each.
-VIRT_HAL := $(FHAL)
-include $(FHAL)/virt/virt.mk
+VIRT_MACHINE := $(FMACHINE)
+include $(FMACHINE)/virt/virt.mk
 QOS_HAL := $(abspath $(HAL))
 include $(HAL)/virt/qos-virt.mk
 
-native: $(BUILD)/system.s $(BUILD)/apps_data.c $(RT_VIRT) $(VIRT_FPR) $(QOS_VIRT_HAL) $(RT_CORE) $(FHAL)/virt/link.ld
-	$(CROSS)gcc $(CFLAGS) -T $(FHAL)/virt/link.ld -I$(FHAL)/core -I$(FHAL)/virt \
+native: $(BUILD)/system.s $(BUILD)/apps_data.c $(RT_VIRT) $(VIRT_FPR) $(QOS_VIRT_HAL) $(RT_CORE) $(FMACHINE)/virt/link.ld
+	$(CROSS)gcc $(CFLAGS) -T $(FMACHINE)/virt/link.ld -I$(FRUNTIME) -I$(FMACHINE)/virt \
 	  $(RT_VIRT) $(VIRT_FPR) $(QOS_VIRT_HAL) $(BUILD)/system.s $$(cat $(BUILD)/system.s.units) $(RT_CORE) \
-	  $(HAL)/core/apps.c $(BUILD)/apps_data.c $(HAL)/core/qaimg.c $(HAL)/core/process.c \
+	  ../loader/apps.c $(BUILD)/apps_data.c ../loader/qaimg.c ../loader/process.c \
 	  -o $(KERNEL)
 
 $(DISK): $(FPR)/tools/mkdisk.py

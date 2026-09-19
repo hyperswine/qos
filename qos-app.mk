@@ -21,10 +21,10 @@ ARENA_MB ?= 2048
 PROC_ARENA_END := $(shell printf '0x%x' $$(( $(QOS_SLOT_BASE) + $(ARENA_MB) * 1048576 )))
 QOSHARTS ?= 8
 QOSAPP_RT_COMMON = $(QOS)/appside/entry.c $(QOS)/appside/hal.c $(QOS)/appside/support.c \
-				   $(FHAL)/core/runtime.c $(FHAL)/core/actors.c $(FHAL)/core/bits.c \
-				   $(FHAL)/core/vec.c $(FHAL)/core/sstr.c $(FHAL)/core/mod.c \
-				   $(FHAL)/core/buddy.c
-QOSAPP_RT = $(QOSAPP_RT_COMMON) $(FHAL)/unix/ctx_x64.S
+				   $(FRUNTIME)/runtime.c $(FRUNTIME)/actors.c $(FRUNTIME)/bits.c \
+				   $(FRUNTIME)/vec.c $(FRUNTIME)/sstr.c $(FRUNTIME)/mod.c \
+				   $(FRUNTIME)/buddy.c
+QOSAPP_RT = $(QOSAPP_RT_COMMON) $(FMACHINE)/unix/ctx_x64.S
 
 $(BUILD)/qosapp-prog.s: fprc $(SOURCE) $(FPRISC_ROOT)/core/prelude.fpr FORCE
 	@mkdir -p $(BUILD)
@@ -36,7 +36,7 @@ $(BUILD)/qosapp.elf: $(BUILD)/qosapp-prog.s $(QOSAPP_RT) $(QOS)/appside/link-qos
 	gcc -O2 -Wall -Wextra -ffreestanding -nostdlib -nostartfiles -static \
 	  -fno-stack-protector -fno-asynchronous-unwind-tables -fno-pic -mcmodel=large \
 	  -DFPR_POSIX -DFPR_QOSAPP -DFPR_NHARTS=$(QOSHARTS) -DFPR_SLAB_SZ=$(QOSSLAB) -DFPR_STACK_SZ=$(QOSSTACK) $(QOSCFLAGS_EXTRA) \
-	  -I$(FHAL)/core -I$(QOS)/appside \
+	  -I$(FRUNTIME) -I$(QOS)/appside \
 	  -T $(QOS)/appside/link-qosapp.ld -Wl,--defsym=QOS_SLOT_BASE=$(QOS_SLOT_BASE) \
 	  -Wl,--defsym=_heap_start=_proc_image_end -Wl,--defsym=_heap_end=_proc_image_end \
 	  -Wl,--defsym=_proc_arena_end=$(PROC_ARENA_END) \
@@ -61,17 +61,17 @@ $(BUILD)/qosapp-a64.s: fprc $(SOURCE) $(FPRISC_ROOT)/core/prelude.fpr FORCE
 	@mkdir -p $(BUILD)
 	LC_ALL=C.UTF-8 "$(FPRC)" --target=qa64 --prelude=$(FPRISC_ROOT)/core/prelude.fpr $(SOURCE) $@
 
-$(BUILD)/qosapp-a64.elf: $(BUILD)/qosapp-a64.s $(QOSAPP_RT_COMMON) $(FHAL)/unix/ctx_a64.S $(QOS)/appside/link-qosapp-a64.ld FORCE
+$(BUILD)/qosapp-a64.elf: $(BUILD)/qosapp-a64.s $(QOSAPP_RT_COMMON) $(FMACHINE)/unix/ctx_a64.S $(QOS)/appside/link-qosapp-a64.ld FORCE
 	clang --target=aarch64-none-elf -fuse-ld=lld -O2 -Wall -Wextra \
 	  -ffreestanding -nostdlib -nostartfiles -fno-stack-protector \
 	  -fno-asynchronous-unwind-tables -fno-pic -ffixed-x18 -ffixed-x28 \
 	  -DFPR_POSIX -DFPR_QOSAPP $(QOS_BASE_FLAG) -DFPR_NHARTS=$(QOSHARTS) -DFPR_SLAB_SZ=$(QOSSLAB) -DFPR_STACK_SZ=$(QOSSTACK) $(QOSCFLAGS_EXTRA) \
-	  -I$(FHAL)/core -I$(QOS)/appside \
+	  -I$(FRUNTIME) -I$(QOS)/appside \
 	  -T $(QOS)/appside/link-qosapp-a64.ld -Wl,--defsym=QOS_SLOT_BASE=$(QOS_SLOT_BASE) \
 	  -Wl,--defsym=_heap_start=_proc_image_end -Wl,--defsym=_heap_end=_proc_image_end \
 	  -Wl,--defsym=_proc_arena_end=$(PROC_ARENA_END) \
 	  $(BUILD)/qosapp-a64.s $$(cat $(BUILD)/qosapp-a64.s.units) \
-	  $(QOSAPP_RT_COMMON) $(FHAL)/unix/ctx_a64.S -o $@
+	  $(QOSAPP_RT_COMMON) $(FMACHINE)/unix/ctx_a64.S -o $@
 
 qos-app-macos: $(BUILD)/qosapp-a64.elf tools/mkqa.py
 	@MF=$(BUILD)/qosapp-a64-gen.toml; ID=$$(basename $(SOURCE) .fpr); \
@@ -119,7 +119,7 @@ plugin-qa-x64: fprc $(FPRISC_ROOT)/core/prelude.fpr
 	LC_ALL=C.UTF-8 "$(FPRC)" --target=qx64 --plugin --prelude=$(FPRISC_ROOT)/core/prelude.fpr $(SOURCE) $(BUILD)/plug-$(PLUGID).s
 	gcc -O2 -Wall -Wextra -ffreestanding -nostdlib -nostartfiles -static \
 	  -fno-stack-protector -fno-asynchronous-unwind-tables -fno-pic -mcmodel=large \
-	  -DFPR_POSIX -DFPR_QOSAPP -DFPR_NHARTS=$(QOSHARTS) -DFPR_SLAB_SZ=$(QOSSLAB) -DFPR_STACK_SZ=$(QOSSTACK) $(QOSCFLAGS_EXTRA) -I$(FHAL)/core -I$(QOS)/appside \
+	  -DFPR_POSIX -DFPR_QOSAPP -DFPR_NHARTS=$(QOSHARTS) -DFPR_SLAB_SZ=$(QOSSLAB) -DFPR_STACK_SZ=$(QOSSTACK) $(QOSCFLAGS_EXTRA) -I$(FRUNTIME) -I$(QOS)/appside \
 	  -T $(QOS)/appside/link-qosplug.ld -T $(BUILD)/plugsyms-x64.ld \
 	  -Wl,--defsym=PLUG_BASE=$(PLUGBASE) -Wl,--build-id=none -Wl,-z,noexecstack \
 	  $(BUILD)/plug-$(PLUGID).s $$(cat $(BUILD)/plug-$(PLUGID).s.units) -o $(BUILD)/plug-$(PLUGID).elf
@@ -135,7 +135,7 @@ plugin-qa-macos: fprc $(FPRISC_ROOT)/core/prelude.fpr
 	clang --target=aarch64-none-elf -fuse-ld=lld -O2 -Wall -Wextra \
 	  -ffreestanding -nostdlib -nostartfiles -fno-stack-protector \
 	  -fno-asynchronous-unwind-tables -fno-pic -ffixed-x28 \
-	  -DFPR_POSIX -DFPR_QOSAPP $(QOS_BASE_FLAG) -DFPR_NHARTS=$(QOSHARTS) -DFPR_SLAB_SZ=$(QOSSLAB) -DFPR_STACK_SZ=$(QOSSTACK) $(QOSCFLAGS_EXTRA) -I$(FHAL)/core -I$(QOS)/appside \
+	  -DFPR_POSIX -DFPR_QOSAPP $(QOS_BASE_FLAG) -DFPR_NHARTS=$(QOSHARTS) -DFPR_SLAB_SZ=$(QOSSLAB) -DFPR_STACK_SZ=$(QOSSTACK) $(QOSCFLAGS_EXTRA) -I$(FRUNTIME) -I$(QOS)/appside \
 	  -T $(QOS)/appside/link-qosplug.ld -T $(BUILD)/plugsyms-a64.ld \
 	  -Wl,--defsym=PLUG_BASE=$(PLUGBASE) \
 	  $(BUILD)/plug-$(PLUGID)-a64.s $$(cat $(BUILD)/plug-$(PLUGID)-a64.s.units) -o $(BUILD)/plug-$(PLUGID)-a64.elf

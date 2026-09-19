@@ -9,7 +9,7 @@ set -e
 cd "$(dirname "$0")"
 
 gcc -O2 -Wall -Wextra -DFPR_POSIX -DFPR_BUDDY_MIN=4096 \
-    -I"$FPRISC_ROOT/hal/core" "$FPRISC_ROOT/hal/core/buddy.c" buddy_check.c \
+    -I"$FPRISC_ROOT/runtime" "$FPRISC_ROOT/runtime/buddy.c" buddy_check.c \
     -o /tmp/buddy_check
 
 /tmp/buddy_check

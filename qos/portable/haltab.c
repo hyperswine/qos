@@ -90,7 +90,7 @@ static void t_mmio_write(uint64_t addr, uint64_t v, uint32_t width) {
 
 static int64_t qosp_clock_now(void) { return (int64_t)time(NULL); }
 /* the stack guard IS the posix HAL's (qosp is a posix FP-RISC program, so
- * fprisc/hal/posix/hal.c is linked here): one implementation, two callers */
+ * fprisc/machine/posix/hal.c is linked here): one implementation, two callers */
 void hal_stack_guard(void *lo, uint64_t size);
 void hal_stack_unguard(void *lo, uint64_t size);
 static void qosp_stack_guard(void *lo, uint64_t size) { hal_stack_guard(lo, size); }
