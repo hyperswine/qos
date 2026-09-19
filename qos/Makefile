@@ -131,9 +131,14 @@ $(BUILD)/system.s: $(FPRC) $(FPR)/programs/system.fpr $(FPRISC_ROOT)/core/prelud
 	LC_ALL=C.UTF-8 "$(FPRC)" --system=qos-native --prelude=$(FPRISC_ROOT)/core/prelude.fpr \
 	  $(FPR)/programs/system.fpr $@
 
-native: $(BUILD)/system.s $(BUILD)/apps_data.c $(RT_VIRT) $(RT_CORE) $(FHAL)/virt/link.ld
+# the virt HAL's PLIC and CLINT drivers are FP-RISC raw library units; the
+# rules and the export lists are the compiler tree's (one copy)
+VIRT_HAL := $(FHAL)
+include $(FHAL)/virt/virt.mk
+
+native: $(BUILD)/system.s $(BUILD)/apps_data.c $(RT_VIRT) $(VIRT_FPR) $(RT_CORE) $(FHAL)/virt/link.ld
 	$(CROSS)gcc $(CFLAGS) -T $(FHAL)/virt/link.ld -I$(FHAL)/core -I$(FHAL)/virt \
-	  $(RT_VIRT) $(BUILD)/system.s $$(cat $(BUILD)/system.s.units) $(RT_CORE) \
+	  $(RT_VIRT) $(VIRT_FPR) $(BUILD)/system.s $$(cat $(BUILD)/system.s.units) $(RT_CORE) \
 	  $(HAL)/core/apps.c $(BUILD)/apps_data.c $(HAL)/core/qaimg.c $(HAL)/core/process.c \
 	  -o $(KERNEL)
 
