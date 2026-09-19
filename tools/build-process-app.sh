@@ -7,8 +7,7 @@
 #
 # Usage: tools/build-process-app.sh <app.fpr> <manifest.toml> <out.qa> [rv32|rv64]
 #
-# Merged-tree layout: the kernel is ../qos/qos-native.elf (`make -C
-# ../qos native` first) -- its _proc_arena_start is the slot address
+# The kernel is qos/qos-native.elf (`make -C qos native` first) -- its _proc_arena_start is the slot address
 # this app gets linked against.  The ELF built here is a toolchain
 # intermediate: mkqa.py flattens it into the QAR2 IMAGE at the end.
 
@@ -19,10 +18,10 @@ cd "$ROOT"
 export FPR_HOME="$ROOT"
 export FPR_PATH="$FPRISC_ROOT"
 HAL="$FPRISC_ROOT/hal"
-QOS=../qos
+QOS=qos   # relative to the repository root (it was ../qos from fp-risc/tools/, before the programs moved up)
 KERNEL=$QOS/qos-native.elf
 
-[ -f "$KERNEL" ] || { echo "$KERNEL not found -- run 'make -C ../qos native' first" >&2; exit 1; }
+[ -f "$KERNEL" ] || { echo "$KERNEL not found -- run 'make -C qos native' first" >&2; exit 1; }
 
 if [ "$TARGET" = rv32 ]; then
   ARCHFLAGS="-march=rv32imac_zicsr -mabi=ilp32"; WORDSZ=4

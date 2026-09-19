@@ -139,7 +139,7 @@ int64_t qosp_load_plugin(const qos_plugin_t *pl, char *err, uint64_t errcap) {
     qosp_sha256(pl->img.p, pl->img.n, d);
     for (int i = 0; i < 32; i++) snprintf(hex + 2 * i, 3, "%02x", d[i]);
     if (strcmp(hex, claimed)) {
-      snprintf(err, errcap, "plugin %.*s: IMAGE does not match the sha its LOAD section claims", idn, id);
+      snprintf(err, errcap, "plugin %.*s: IMAGE sha256 mismatch (corrupt archive)", idn, id);
       return -1;
     }
   }

@@ -79,7 +79,7 @@ shaGate load img =
     True -> Unit
   | False -> case claimed == Host.sha256 img of
       True -> Unit
-    | False -> die "IMAGE does not match the sha its LOAD section claims (corrupt or tampered archive)".
+    | False -> die "IMAGE sha256 mismatch (corrupt archive)".   # the wording check-all.sh names
 
 # ---- the permission gate ----------------------------------------------------
 # every permission is asked (or granted, under --yes); a REQUIRED one denied

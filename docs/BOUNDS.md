@@ -97,3 +97,19 @@ Two steps, the first small:
   failed there -- the one red leg of `./qos.py test`. `qos-app.mk` owns the
   choice now (`qos-app`, `plugsyms`, `plugin-qa` dispatch on the host), and
   `qos.py` no longer makes it. `./qos.py test`: 11/11 on macOS.
+- `check-all.sh` on macOS, first run (2026-09-19): 103 legs, 96 pass.
+  Fixed on the way: the QAR2 integrity leg guarded only its python step with
+  `||`, so a miss in the check fell to `set -e` and ended the WHOLE sweep with
+  no `LEG FAILED` line (it fired when the FP-RISC host reworded the refusal;
+  the wording `IMAGE sha256 mismatch` is restored -- a refusal's text is
+  interface); `tools/build-process-app.sh` still said `QOS=../qos` from its
+  `fp-risc/tools/` days, so both native process-launch legs failed before
+  reaching a kernel; BSD `wc -l` pads its count, which four string comparisons
+  did not expect. The seven that remain, none from this work:
+  - four are the case-coverage pass refusing `base.removeAt`'s
+    guard-then-single-arm `case` (`nn`, `plotdemo`, `algebra`, `sol-scripts-check`);
+  - `both.sol` is compiled ahead-of-time for bare metal, which the profile
+    matrix now refuses ("profile sol runs on the posix system"): the leg and
+    the rule disagree;
+  - `mlpipe` wants GPU uniform captures, and the Darwin build links no GL;
+  - `RVV=1` times out under this QEMU, with the HAL as it was before today too.
