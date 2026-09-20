@@ -10,8 +10,8 @@
 # carry -- deltas for count/toast (same statics), a full re-render for
 # the theme flip (statics change: the reshape path, exercised on
 # purpose).
-G  = use "./mods/genview".
-Ma = use "./mods/ma".
+G  = use "std/view".
+Ma = use "std/ma".
 
 M = {count : Int, toastN : Int, night : Int}.
 

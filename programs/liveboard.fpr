@@ -31,9 +31,9 @@ List = use "std/list".
 String = use "std/string".
 Option = use "std/option".
 Result = use "std/result".
-G = use "./mods/genview".
-Ma = use "./mods/ma".
-LJ = use "./mods/fprlivejs".
+G = use "std/view".
+Ma = use "std/ma".
+LJ = use "std/livejs".
 
 # ---- the model -----------------------------------------------------------------------
 Model = Type (Model count notes visitors seconds running toast job).
