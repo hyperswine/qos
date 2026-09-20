@@ -15,6 +15,16 @@ extern const qos_hal_t *qos_hal; /* entry.c installs it first thing */
 
 /* ---- the hal_* obligations (actors.c / runtime.c contract) ---------- */
 void hal_putc(char c) { qos_hal->putc(c); }
+/* actors.c's stack guard: this image cannot protect memory, its host can */
+void hal_stack_guard(void *lo, uw size) { qos_hal->stack_guard(lo, size); }
+void hal_stack_unguard(void *lo, uw size) { qos_hal->stack_unguard(lo, size); }
+void hal_heap_release(void *p, uw bytes) { qos_hal->heap_release(p, bytes); }
+/* an app never boots a machine: its heap is the arena the boot record hands
+ * it (entry.c), so the runtime's own boot path is not reachable here */
+void hal_heap_span(char **lo, char **hi, char **span_hi) {
+  (void)lo; (void)hi; (void)span_hi;
+  fpr_cpanic("hal_heap_span: an app's heap comes from the boot record");
+}
 void hal_poweroff(int code) { qos_hal->poweroff(code); }
 void fpr_park(void) {
   for (;;) qos_hal->wfi();

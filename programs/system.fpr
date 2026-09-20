@@ -75,6 +75,8 @@ getcV me lsr dat v =
 TimeFmt = use "mods/timefmt#39dff276efd647a1".
 SVCM    = use "mods/svc".
 QAR     = use "mods/qar".
+Manifest = use "mods/manifest".
+QaImg   = use "mods/qaimg".
 Caps    = SVCM.Caps.
 Rpc     = SVCM.Rpc.
 Svc  = SVCM.Svc.
@@ -84,7 +86,7 @@ IInt = SVCM.IInt.
 IStr = SVCM.IStr.
 IFn  = SVCM.IFn.
 IErr = SVCM.IErr.
-QLog    = use "mods/qlog#71c5cbf3387af767".
+QLog    = use "mods/qlog#85a8f9619beebfcf".
 UartM   = use "mods/uart".
 TimerM  = use "mods/timer".
 MK      = use "mods/matrixkpd".
@@ -164,11 +166,6 @@ unquote s =
 # QAR owns container validation and section extents. This module interprets
 # the MANIFEST payload's minimal TOML subset and applies launch policy.
 
-# ---- manifest (line-oriented mini-TOML) ------------------------------------
-# We fold the manifest into: (id, entry, requiredPerms, optionalPerms)
-# where a perm is (url, mode). Section state is carried as an Int:
-#   0 = top level, 1 = [permissions.required], 2 = [permissions.optional]
-
 # split manifest text into lines (list of strings)
 lines : unsafe String -> List String .
 lines s = linesGo s 1 (strlen s) "" Nil.
@@ -182,84 +179,11 @@ linesGo s i n cur acc =
         True -> linesGo s (i + 1) n cur acc
       | False -> linesGo s (i + 1) n (strcat cur (chr (charAt s i))) acc.
 
-# classify one line under section state st; return (newState, action)
-# action: TopKV key val | PermKV url mode | Ignore, folded directly below.
-
-# is this line a [header]? return Ok headerText | Err
-asHeader : unsafe String -> Result String String .
-asHeader ln =
-  t = trim ln;
-  case and2 (strlen t >= 2) (and2 (byteAt t 1 == 91) (byteAt t (strlen t) == 93)) of
-    True -> Ok (slice t 2 (strlen t - 1))
-  | False -> Err "not header".
-
-# split "key = value" -> Ok (trimmed key, unquoted trimmed value) | Err
-asKV : unsafe String -> Result (String, String) String .
-asKV ln =
-  eq = findByte ln 61 1;                # '='
-  case eq == 0 of
-    True -> Err "no ="
-  | False -> Ok (unquote (trim (slice ln 1 (eq - 1))), unquote (trim (slice ln (eq + 1) (strlen ln)))).
-
-# blank or comment: guard charAt behind the length check (or2 is strict)
-isBlankOrComment t =
-  case strlen t == 0 of
-    True -> True
-  | False -> charAt t 1 == 35.
-
-# fold the manifest lines into a Manifest record. We accumulate:
-#   id, entry (strings, "" until seen)
-#   req, opt : lists of (url, mode) pairs (as Tup2 Strings)
-foldMan : unsafe List String -> Man .
-foldMan lns = fmGo lns 0 "" "" "" Nil Nil.
-fmGo : unsafe List String -> Int -> String -> String -> String -> List (String, String) -> List (String, String) -> Man .
-fmGo lns st id entry mode req opt =
-  case lns of
-    Nil -> mkManifest id entry (rev req) (rev opt) mode
-  | ln :: rest -> fmLine rest st id entry mode req opt (trim ln).
-fmLine : unsafe List String -> Int -> String -> String -> String -> List (String, String) -> List (String, String) -> String -> Man .
-fmLine rest st id entry mode req opt t =
-  case isBlankOrComment t of                              # blank or # comment
-    True -> fmGo rest st id entry mode req opt
-  | False -> case asHeader t of
-      Ok h -> fmGo rest (headerState h) id entry mode req opt
-    | Err _ -> case asKV t of
-        Err _ -> fmGo rest st id entry mode req opt
-      | Ok kv -> case kv of (k, v) ->
-          case st of
-            0 -> fmGo rest st (pickId id k v) (pickEntry entry k v) (pickMode mode k v) req opt
-          | 1 -> fmGo rest st id entry mode ((k, v) :: req) opt
-          | _ -> fmGo rest st id entry mode req ((k, v) :: opt).
-
-headerState : unsafe String -> Int .
-headerState h =
-  case strEq h "permissions.required" of
-    True -> 1
-  | False -> case strEq h "permissions.optional" of True -> 2 | False -> 0.
-
-pickId : unsafe o299 -> String -> o299 -> o299 .
-pickId cur k v = case strEq k "id" of True -> v | False -> cur.
-pickEntry : unsafe p299 -> String -> p299 -> p299 .
-pickEntry cur k v = case strEq k "entry" of True -> v | False -> cur.
-# loadMode = "process" opts an app into REAL dynamic ELF loading
-# (Sys.loadImageAt); anything else (or absent, the default) keeps the
-# co-compiled name-dispatch path (Apps.entry/Apps.run).
-pickMode : unsafe q299 -> String -> q299 -> q299 .
-pickMode cur k v = case strEq k "loadMode" of True -> v | False -> cur.
-
-# a friendlier constructor name used above
-# declared constructors, NOT wide tuples: the ABI has Tup2/Tup3 only
-Man = Type (Man id entry req opt mode).
+# The interpretation itself is mods/manifest.fpr: ONE implementation, shared
+# with the host tools (tools/qainfo.fpr) and held against the portable
+# host's C parser by tools/qainfo-parity.sh.  `lines` stays here for the
+# config reader below.
 Io4 = Type (Io4 con me clk st).
-
-mkManifest id entry req opt mode = Man id entry req opt mode.
-
-# parse a .qa string all the way to (id, entry, req, opt) | Err
-parseQa : unsafe String -> Result Man String .
-parseQa qa =
-  case QAR.manifestOf qa of
-    Err e -> Err e
-  | Ok man -> Ok (foldMan (lines man)).
 
 # ============================================================================
 # THE PERMISSION FLOW  (the compulsory static gate)
@@ -596,11 +520,11 @@ launch io id =
   qa = qaFor io id;
   case strlen qa == 0 of
     True -> putLn con (strcat "No such app: " id)
-  | False -> launchParsed io id qa (parseQa qa).
+  | False -> launchParsed io id qa (Manifest.parseQa qa).
 
 ioCon (Io4 c _ _ _) = c.
 
-launchParsed : unsafe Io4 -> String -> String -> Result Man String -> Unit .
+launchParsed : unsafe Io4 -> String -> String -> Result Manifest.Man String -> Unit .
 launchParsed io id qa pr =
   con = ioCon io;
   case pr of
@@ -608,7 +532,7 @@ launchParsed io id qa pr =
   | Ok m -> launchMan io qa m.
 
 # m = (aid, entry, req, opt, mode); ask required perms, gate, then run
-launchMan : unsafe Io4 -> String -> Man -> Unit .
+launchMan : unsafe Io4 -> String -> Manifest.Man -> Unit .
 launchMan io qa m =
   con = ioCon io;
   aid = manId m;
@@ -624,7 +548,7 @@ launchMan io qa m =
 # required granted: ask optionals, persist the decision set, assemble
 # caps, dispatch.  (Persisting only on this path means a stored set
 # always describes a launch that actually happened.)
-launchGranted : unsafe Io4 -> String -> Man -> String -> List Bool -> Unit .
+launchGranted : unsafe Io4 -> String -> Manifest.Man -> String -> List Bool -> Unit .
 launchGranted io qa m stored reqG =
   con = ioCon io;
   opt = manOpt m;
@@ -635,11 +559,11 @@ launchGranted io qa m stored reqG =
   caps = mkCaps con (ioMe io) (ioClk io) granted (manId m) (ioSt io);
   runEntry con qa m caps.
 
-manId (Man a _ _ _ _) = a.
-manEntry (Man _ e _ _ _) = e.
-manReq (Man _ _ r _ _) = r.
-manOpt (Man _ _ _ o _) = o.
-manMode (Man _ _ _ _ md) = md.
+manId m = Manifest.id m.
+manEntry m = Manifest.entry m.
+manReq m = Manifest.req m.
+manOpt m = Manifest.opt m.
+manMode m = Manifest.mode m.
 ioMe (Io4 _ me _ _) = me.
 ioClk (Io4 _ _ k _) = k.
 ioSt  (Io4 _ _ _ st) = st.
@@ -660,7 +584,7 @@ keepGranted perms bs =
       | False -> keepGranted pr br.
 
 # runEntry: the load seam. loadMode="process" -> QAR2 flat-image
-# loading (Sys.loadImageAt, hal/core/qaimg.c) -- one copy, one
+# loading (Sys.placeImageAt, loader/qaimg.c) -- one copy, one
 # zero-fill, no header walking. Anything else keeps the co-compiled
 # name-dispatch path (Apps.entry/Apps.run), which is what every app
 # shipped as rodata in this build actually uses.
@@ -671,22 +595,15 @@ keepGranted perms bs =
 # Sys.caps and enforces its own gate.  Same trust model as the
 # co-compiled path -- neither has an MMU behind it; both make the
 # grant the app's ONLY story about what it may touch.
-runEntry : unsafe (Int, Int) -> String -> Man -> Caps -> Unit .
+runEntry : unsafe (Int, Int) -> String -> Manifest.Man -> Caps -> Unit .
 runEntry con qa m caps =
   case strEq (manMode m) "process" of
     True -> Sys.bindApp (manId m) >> runProcess con qa (capsBlob caps)
   | False -> runBuiltin con (manEntry m) caps.
 
 # "appid\nurl mode\n" per grant
-capsBlob : unsafe Caps -> String .
-capsBlob caps =
-  strcat (capId caps) (strcat (chr 10) (grantLines (capGranted caps))).
-grantLines : unsafe List (String, String) -> String .
-grantLines g =
-  case g of
-    Nil -> ""
-  | p :: r -> case p of (u, m) ->
-      strcat u (strcat " " (strcat m (strcat (chr 10) (grantLines r)))).
+capsBlob : Caps -> String .
+capsBlob caps = Manifest.capsBlob (capId caps) (capGranted caps).
 
 # NAME-DISPATCH IS DEAD.  The only in-image app is the launcher --
 # System.qa's builtin shell, which cannot be a process while there is
@@ -699,24 +616,37 @@ runBuiltin con entry caps =
     True -> launcher_main caps
   | False -> putLn con (strcat entry ": not a builtin; ship it as loadMode = process").
 
-# QAR2: the container work stays HERE (the Loader does the dirty work;
-# C never parses the archive) -- find LOAD and IMAGE, pass both extents
-# to Sys.loadImageAt by (offset,length) ONLY, never as sliced Strings
-# (the O(n^2)-slice hazard applies to the image payload as it did to
-# the ELF one).
-runProcess : unsafe (Int, Int) -> String -> v300 -> Unit .
-runProcess con qa blob =
-  case QAR.extent qa "LOAD" of
-    Err e -> putLn con (strcat "No LOAD section in this .qa: " e)
-  | Ok l -> case QAR.extent qa "IMAGE" of
-      Err e -> putLn con (strcat "No IMAGE section in this .qa: " e)
-    | Ok r -> runProcessAt con qa l r blob.
+# QAR2: the container work stays HERE (the Loader does the dirty work; C
+# never parses the archive, nor -- any more -- the LOAD section inside it).
+# LOAD is a few lines of text: it is sliced out and read by mods/qaimg.fpr,
+# which also refuses an inconsistent one by name.  IMAGE is the payload: it
+# goes to the placer by (offset, length) ONLY, never as a sliced String.
+#
+# The placer is this file's own foreign primitive (loader/process.c): the
+# archive, IMAGE's extent, LOAD's numbers [base, entry, execsz, rwoff, memsz]
+# and the capability blob.
+Sys.placeImageAt : String -> Int -> Int -> List Int -> String -> (Int, String) .
 
-runProcessAt : unsafe (Int, Int) -> String -> (Int, Int) -> (Int, Int) -> d302 -> Unit .
-runProcessAt con qa l r blob =
-  (lpos, lln) = l;
+runProcess : unsafe (Int, Int) -> String -> String -> Unit .
+runProcess con qa blob =
+  case QAR.sectionBytes qa "LOAD" of
+    Err e -> putLn con (strcat "No LOAD section in this .qa: " e)
+  | Ok load -> case QAR.extent qa "IMAGE" of
+      Err e -> putLn con (strcat "No IMAGE section in this .qa: " e)
+    | Ok r -> runProcessAt con qa (QaImg.parse load) r blob.
+
+runProcessAt : unsafe (Int, Int) -> String -> Result QaImg.Img String -> (Int, Int) -> String -> Unit .
+runProcessAt con qa parsed r blob =
   (ipos, iln) = r;
-  runProcessLoaded con (Sys.loadImageAt qa (lpos - 1) lln (ipos - 1) iln blob).
+  case parsed of
+    Err e -> putLn con (strcat "process load failed: " e)
+  | Ok m -> runProcessChecked con qa (QaImg.check m iln) (ipos - 1) iln blob.
+
+runProcessChecked : unsafe (Int, Int) -> String -> Result QaImg.Img String -> Int -> Int -> String -> Unit .
+runProcessChecked con qa checked ioff iln blob =
+  case checked of
+    Err e -> putLn con (strcat "process load failed: " e)
+  | Ok m -> runProcessLoaded con (Sys.placeImageAt qa ioff iln (QaImg.nums m) blob).
 
 runProcessLoaded : unsafe (Int, Int) -> (Int, String) -> Unit .
 runProcessLoaded con res =
@@ -988,7 +918,7 @@ cfgGo : unsafe List String -> String -> String .
 cfgGo lns key =
   case lns of
     Nil -> ""
-  | ln :: rest -> case asKV (trim ln) of
+  | ln :: rest -> case Manifest.asKV (trim ln) of
       Ok kv -> (case kv of (k, v) -> (case strEq k key of True -> v | False -> cfgGo rest key))
     | Err _ -> cfgGo rest key.
 

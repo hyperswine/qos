@@ -19,7 +19,7 @@
 
 #include <stdint.h>
 
-#define QOS_ABI_VERSION 12u
+#define QOS_ABI_VERSION 14u /* v14: the arena is a reservation (its size arrives in the boot record); heap_release; the 1 GiB image and plugin windows */
 
 /* ---- the address plan (linux-x86-64) --------------------------------
  * The host is linked non-PIE (default 0x400000 text); the arena is a
@@ -31,11 +31,29 @@
  * the image is the APP'S OWN arena (v12): the host hands it over in
  * the boot record and the app runs the buddy -- behind its memory
  * actor (docs/MEMORY.md) -- itself; the host allocates nothing there. */
-#define QOS_ARENA_BASE 0x400000000ul /* 16 GiB (bumped for macOS arm64 mmap compatibility) */
-#ifndef QOS_ARENA_SIZE
-#define QOS_ARENA_SIZE (256ul << 20) /* the host build sets ARENA_MB (qos/Makefile) */
+/* 16 GiB everywhere but macOS, which reserves 0x180000000-0x7000000000 in
+ * every process (the dyld shared region, then a no-access block): a hint
+ * in there is never honoured, so the Darwin slot is 1 TiB.  App images for
+ * macOS are freestanding ELF (no __APPLE__), so qos-app.mk passes the base. */
+#ifndef QOS_ARENA_BASE
+#ifdef __APPLE__
+#define QOS_ARENA_BASE 0x10000000000ul
+#else
+#define QOS_ARENA_BASE 0x400000000ul
 #endif
-#define QOS_SLOT_SIZE (16ul << 20) /* matches link-app.ld's SLOT LENGTH */
+#endif
+/* The arena has no size of its own: the host RESERVES address space at the
+ * base -- the largest span it can get, from QOS_ARENA_MAX down -- and the OS
+ * commits pages as the app touches them.  The size arrives in the boot
+ * record; nothing is linked into the app (docs/BOUNDS.md).  QOS_ARENA_MIN is
+ * what the fixed windows below need. */
+#define QOS_ARENA_MAX (1ul << 40) /* the buddy's largest block */
+#define QOS_ARENA_MIN (4ul << 30)
+/* The image window.  Images are linked non-PIC at the base, and a plugin
+ * reaches the image's symbols with adrp (+-4 GiB on aarch64): the image and
+ * the plugin window are 1 GiB each so everything is in reach of everything.
+ * Relocatable images would retire both numbers. */
+#define QOS_SLOT_SIZE (1ul << 30) /* matches the SLOT LENGTH in link-qosapp*.ld */
 #define QOS_SLOT_BASE QOS_ARENA_BASE
 /* the PLUGIN slot: a second, smaller fixed-address window inside the
  * arena for DYNAMICALLY LOADED .qa libraries -- images linked at this
@@ -45,8 +63,8 @@
  * with the module registry, called through Mod.find PAPs.  The app
  * runtime EXCLUDES this range from fpr_in_heap (plugin rodata is
  * immortal literal data, not slab-backed heap). */
-#define QOS_PLUG_BASE (QOS_ARENA_BASE + (128ul << 20))
-#define QOS_PLUG_SIZE (32ul << 20) /* 8 sub-slots of 4 MiB */
+#define QOS_PLUG_BASE (QOS_ARENA_BASE + QOS_SLOT_SIZE)
+#define QOS_PLUG_SIZE (1ul << 30) /* any number of images, each at the base it was linked for */
 /* syscall channel tags (boot->syscall_fn): 2 kv-append, 3 kv-replay,
  * 4 load-plugin (payload = the .qa CONTAINER BYTES, read off the disk
  * by the app itself -- qlog over the blk tier; returns the module-
@@ -59,6 +77,19 @@
  * server on its unix socket -- portable/compile.c + tools/fprd.py --
  * and out gets the framed "ok\n<asm>" / "err\n<msg>" reply) */
 #define QOS_SYS_LOADQA 4
+/* tag 4's payload (v13).  The APP interprets the plugin's archive -- with
+ * mods/qar.fpr and mods/manifest.fpr, the code the kernel and the host
+ * launch with -- and hands over what it found, LOAD's numbers included; the
+ * host parses nothing, not even that section's text.
+ * Spans point into the app's own Strings: one address space, so a pointer
+ * pass, the same discipline gfx_render uses. */
+typedef struct { const unsigned char *p; uint64_t n; } qos_span_t;
+typedef struct {
+  qos_span_t id, abi, shell;
+  qos_span_t sha;  /* the sha-256 the LOAD section claims for IMAGE (64 hex), or empty */
+  qos_span_t img;
+  uint64_t base, entry, execsz, rwoff, memsz; /* LOAD's numbers, read by mods/qaimg.fpr */
+} qos_plugin_t;
 #define QOS_SYS_SLEEPUS 6
 #define QOS_SYS_COMPILE 7
 
@@ -184,6 +215,18 @@ typedef struct {
    * person will read back (a receipt's time).  0 where the host has no
    * clock; the monotonic mtime stays the timer. */
   int64_t (*clock_now)(void);
+  /* ---- v13 additions ------------------------------------------------
+   * the stack guard: the app's runtime carves actor stacks out of its own
+   * arena but cannot make memory inaccessible; the host can.  The app
+   * registers `current` so the host's fault handler can ask WHICH actor
+   * ran off its stack and say so by name (docs/BOUNDS.md). */
+  void (*stack_guard)(void *lo, uint64_t size);
+  void (*stack_unguard)(void *lo, uint64_t size);
+  void (*set_stack_query)(void *(*current)(uint64_t *id, uint64_t *size));
+  /* ---- v14 addition -------------------------------------------------
+   * the app's buddy frees a large block: give its pages back to the OS
+   * (the arena is a reservation; only the host can un-commit it) */
+  void (*heap_release)(void *p, uint64_t bytes);
 } qos_hal_t;
 
 /* ---- the memory-growth grant (RETIRED in v12) ----------------------

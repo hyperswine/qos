@@ -28,11 +28,11 @@ main =
   tsvc = spawn TM.actor;
   granted = ("/services/timer", "rw") :: Nil;
   caps = Caps con me clk granted "timerroute" { has = False, act = 0, uart = 0, timer = tsvc };
-  t0 = Mmio.read clk;
+  t0 = read clk;
   r = Svc.write caps "/services/timer" (IInt 30);
   wok = case r of IUnit -> "ok" | e -> "ERR";
   f = receiveFrom me tsvc;
-  d = Mmio.read clk - t0;
+  d = read clk - t0;
   fok = case f of
       TFire -> (case d >= 300000 of True -> "ok" | False -> "EARLY({d})")
     | o -> "WRONG";

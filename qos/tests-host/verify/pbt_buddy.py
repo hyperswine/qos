@@ -1,4 +1,4 @@
-"""Property-based test of hal/core/buddy.c through ctypes (Hypothesis).
+"""Property-based test of runtime/buddy.c through ctypes (Hypothesis).
 Model: a dict of live blocks {addr: (size, fill byte)}.  Invariants after
 every op: blocks inside the arena, usable >= request, no two live blocks
 overlap (headers included), payload bytes intact, and free_bytes ==

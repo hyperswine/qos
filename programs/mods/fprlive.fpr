@@ -45,8 +45,8 @@
 # ============================================================================
 
 MV = use "std/mvu".
-G  = use "genview".
-LJ = use "fprlivejs".
+G  = use "std/view".
+LJ = use "std/livejs".
 Core = use "coreutil".
 AC = use "std/actor".
 

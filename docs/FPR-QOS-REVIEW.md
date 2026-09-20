@@ -43,9 +43,9 @@ No source positions survive parsing — the AST carries no spans, so every type,
 
 Verified bugs (checked against source by hand)
 
-MEMORYSys.arena leaves bigfree uninitialized — hal/core/runtime.c:800–807
+MEMORYSys.arena leaves bigfree uninitialized — runtime/runtime.c:800–807
 g_arena builds its override pool on the stack and sets cur, allocated, buckets — never bigfree. Any allocation above the 8 KiB bucket ceiling inside an arena thunk reads stack garbage as a freelist head and walks it. Root cause is structural: fpr_pool_t has no constructor, so five creation sites each hand-initialize four fields, and the newest site forgot one. A ten-line pool_init() ends this class.
-MEMORYVec.filter skips copy-on-write — hal/core/vec.c:457–472
+MEMORYVec.filter skips copy-on-write — runtime/vec.c:457–472
 The CoW contract (vec.c:105–118) says "every WRITING op calls cow_wr first." fpr_vec_filter compacts rows in place and shrinks len without it — a dup'd or message-shared vector filtered by one holder silently mutates and truncates the other's view. Exactly the silent-corruption class CoW was added to kill. (The documented hole — specialized column loops not testing rc — is adjacent and should be closed at the same time.)
 SEMANTICSSol auto-tabling is unsound-by-spelling and ON by default — Sol/VM.hs:142, 180; Sol/Main.hs:212
 The purity gate treats any all-lowercase identifier as pure, so a helper that calls appendNow is "eligible"; IO makes the first call slow, which is precisely the keep-condition — after which repeated calls with equal args return cached results and silently skip the IO. A semantics-affecting experiment shipped on by default behind a spelling heuristic (plus chatty [table] diagnostics on stdout).
@@ -57,7 +57,7 @@ HOSTqosp crash diagnostics are dead on Linux — qos/portable/main.c:325–345
 bus_handler extracts the faulting PC only under #ifdef __APPLE__; on the stated Linux target, pc=0 and in_image is always false — the one thing the handler exists to report never is. And _exit(139) skips atexit, leaving the terminal raw/no-echo after any SIGSEGV.
 DURABILITYNo fsync anywhere in the storage path — qos/portable/store.c:81–88; hal/unix/blk_raw.c:103–111
 The kv store appends via buffered stdio and the block layer pwrites with no fsync/fdatasync, so the QLOG commit-flag ordering the .fpr layer carefully maintains is not actually ordered on the platter. DISK.txt's torn-write-rollback story is currently a design, not a property. Replay also silently truncates at a 256 KiB ceiling, and qa_load doesn't check malloc.
-RUNTIMEThe actor layer panics the machine where an OS must degrade — hal/core/actors.c:884, 1097; runtime.c:887
+RUNTIMEThe actor layer panics the machine where an OS must degrade — runtime/actors.c:884, 1097; runtime.c:887
 A full 64-slot per-sender ring, a ninth distinct sender, or a full 1024-entry ARC table each crash the whole machine. There is no backpressure primitive; any producer that outruns its consumer is a kernel panic. The ARC tombstone fix shows these limits get hit in practice.
 LEAKHardcoded matrix library inside type inference — Infer.hs:909–931
 inferBin pattern-matches operand records against the literal field lists ["w","x","y","z"] / m00..m33 and rewrites * into mulMM/mulMV globals that must happen to exist in the prelude — a library's naming convention baked into the HM engine, next door to the operator-site mechanism that shows how it should be expressed.

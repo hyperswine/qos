@@ -20,10 +20,8 @@ FPR    = ..
 
 HARTS ?= 2
 QOSHARTS ?= 8
-# the host arena the app's growth grants come from (mmap'd lazily: only
-# touched pages cost RSS).  Sessions, actors, and message slabs all live
-# here, so this is the "scale to memory" ceiling for a hosted server.
-ARENA_MB ?= 2048
+# (the host arena has no size: qosp reserves address space for it at run
+# time -- portable/host.c, docs/BOUNDS.md; QOSP_ARENA_MB caps a run)
 CROSS  = riscv64-unknown-elf-
 QEMU   = qemu-system-riscv64
 # outputs qos.py redirects into the project's .qos/ (an installed tree is
@@ -53,11 +51,11 @@ endif
 DESKTOP_GL_CFLAGS := $(shell pkg-config --cflags glfw3 2>/dev/null)
 
 # ---- QOS Portable: the qosp host ---------------------------------------
-QOSP_SRC = portable/main.c portable/qa.c portable/haltab.c portable/store.c \
+QOSP_SRC = portable/host.c portable/sha256.c portable/haltab.c portable/store.c \
            portable/compile.c \
            $(HAL)/unix/net_raw.c $(HAL)/unix/blk_raw.c $(HAL)/unix/hostlog.c \
-           $(HAL)/unix/tty_raw.c $(HAL)/unix/evdev_raw.c $(HAL)/unix/snd_raw.c \
-           $(HAL)/core/qaimg.c
+           $(HAL)/unix/tty_raw.c $(HAL)/unix/evdev_raw.c $(HAL)/unix/mice_raw.c $(HAL)/unix/snd_raw.c \
+           ../loader/qaimg.c
 
 # the shell's half of the ABI stamp is DERIVED from the authoritative
 # source (Codegen.hs codegenRev), not hardcoded -- the first stamped
@@ -66,9 +64,28 @@ QOSP_SRC = portable/main.c portable/qa.c portable/haltab.c portable/store.c \
 CODEGEN_REV := $(shell grep -m1 '^codegenRev = ' $(FPRISC_ROOT)/compiler/Codegen.hs 2>/dev/null | grep -o '[0-9]\+' | head -1)
 REV_FLAG := $(if $(CODEGEN_REV),-DQOSP_CODEGEN_REV=$(CODEGEN_REV),)
 
-portable: $(QOSP_SRC) appside/qos_abi.h portable/qa.h $(FPRISC_ROOT)/compiler/Codegen.hs
-	gcc $(HOST_LDFLAGS) -O2 -Wall -Wextra -DFPR_POSIX -DQOSP_HOST -DFPR_NHARTS=$(QOSHARTS) -DQOS_ARENA_SIZE="($(ARENA_MB)ul << 20)" $(REV_FLAG) $(SND_FLAGS) \
-	  -I$(FHAL)/core -I$(HAL)/unix -Iappside $(QOSP_SRC) -o qosp -lpthread -lm $(SND_LIBS)
+# qosp IS an FP-RISC program (portable/qosp.fpr, a Base program for the posix
+# system).  $(QOSP_SRC) is its HAL: the device tiers and the five primitives
+# in portable/host.c that qosp.fpr declares and does not define.  `fpr build
+# --with` links them beside the runtime; --harts 1 because the host's own
+# runtime only ever runs main (the APP's harts are pthreads host.c starts).
+# FPR_HOME names the compiler's checkout here: dependency.mk points it at QOS
+# for module resolution, and qosp.fpr's `use` lines are importer-relative.
+QOSP_FPR = portable/qosp.fpr ../programs/mods/qar.fpr ../programs/mods/manifest.fpr ../programs/mods/qaimg.fpr
+QOSP_DEFS = -DQOSP_HOST $(REV_FLAG)
+# on arm64 the app keeps its hart in x28; the host's C must never borrow it,
+# or its fault handler could not ask the app which actor was running
+ifneq ($(filter arm64 aarch64,$(shell uname -m)),)
+QOSP_DEFS += -ffixed-x28
+endif
+QOSP_INCS = -I$(HAL)/unix -Iappside -Iportable
+fpr_host = FPR_HOME="$(FPRISC_ROOT)" "$(FPRC)" build portable/qosp.fpr -o $(1) --harts 1 \
+	  $(foreach f,$(2),--with $(f)) \
+	  $(foreach f,$(QOSP_DEFS) $(QOSP_INCS) $(3),--cflag '$(f)') \
+	  $(foreach f,$(4),--link $(f))
+
+portable: $(QOSP_SRC) $(QOSP_FPR) appside/qos_abi.h $(FPRISC_ROOT)/compiler/Codegen.hs
+	$(call fpr_host,qosp,$(QOSP_SRC),$(SND_FLAGS),$(SND_LIBS))
 
 portable-run: portable
 	./qosp --yes $(FPR)/app.qa
@@ -80,22 +97,19 @@ portable-run: portable
 # untouched).  The same source builds on macOS (OpenGL/gl3.h declares
 # prototypes; Linux needs GL_GLEXT_PROTOTYPES, set in gfx.c).
 QOSP_GL_SRC = $(QOSP_SRC) $(HAL)/unix/gfx.c
-portable-gl: $(QOSP_GL_SRC) appside/qos_abi.h portable/qa.h $(FPRISC_ROOT)/compiler/Codegen.hs
-	gcc $(HOST_LDFLAGS) -O2 -Wall -Wextra -DFPR_POSIX -DQOSP_HOST -DFPR_NHARTS=$(QOSHARTS) -DQOS_ARENA_SIZE="($(ARENA_MB)ul << 20)" $(REV_FLAG) \
-	  -DQOSP_GFX -DFPR_DESKTOP_GL $(SND_FLAGS) \
-	  $(DESKTOP_GL_CFLAGS) -I$(FHAL)/core -I$(HAL)/unix -Iappside $(QOSP_GL_SRC) -o qosp-gl \
-	  $(DESKTOP_GL_LIBS) $(SND_LIBS)
+portable-gl: $(QOSP_GL_SRC) $(QOSP_FPR) appside/qos_abi.h $(FPRISC_ROOT)/compiler/Codegen.hs
+	$(call fpr_host,qosp-gl,$(QOSP_GL_SRC),-DQOSP_GFX -DFPR_DESKTOP_GL $(SND_FLAGS) $(DESKTOP_GL_CFLAGS),$(DESKTOP_GL_LIBS) $(SND_LIBS))
 
 # ---- QOS Portable, aarch64 cross (verifies the x28 hart discipline
-portable-a64: $(QOSP_SRC) appside/qos_abi.h portable/qa.h $(FPRISC_ROOT)/compiler/Codegen.hs
-	aarch64-linux-gnu-gcc -static -O2 -Wall -Wextra -DFPR_POSIX -DQOSP_HOST -DFPR_NHARTS=$(QOSHARTS) -DQOS_ARENA_SIZE="($(ARENA_MB)ul << 20)" $(REV_FLAG) \
-	  -I$(FHAL)/core -I$(HAL)/unix -Iappside $(QOSP_SRC) -o qosp-a64 -lpthread -lm
+portable-a64: $(QOSP_SRC) appside/qos_abi.h $(FPRISC_ROOT)/compiler/Codegen.hs
+	aarch64-linux-gnu-gcc -static -O2 -Wall -Wextra -DFPR_POSIX -DQOSP_HOST -DFPR_NHARTS=$(QOSHARTS) $(REV_FLAG) \
+	  -I$(FRUNTIME) -I$(HAL)/unix -Iappside $(QOSP_SRC) -o qosp-a64 -lpthread -lm
 
 # ---- QOS Native: the kernel --------------------------------------------
-RT_CORE = $(FHAL)/core/runtime.c $(FHAL)/core/actors.c $(FHAL)/core/bits.c \
-          $(FHAL)/core/vec.c $(FHAL)/core/sstr.c $(FHAL)/core/mod.c $(FHAL)/core/buddy.c
-RT_VIRT = $(FHAL)/virt/crt0.S $(FHAL)/virt/ctx.S $(FHAL)/virt/ctx_fab.c \
-          $(FHAL)/virt/hal.c $(FHAL)/virt/plic.c $(FHAL)/virt/net.c $(FHAL)/virt/blk.c $(FHAL)/virt/memshim.c
+RT_CORE = $(FRUNTIME)/runtime.c $(FRUNTIME)/actors.c $(FRUNTIME)/bits.c \
+          $(FRUNTIME)/vec.c $(FRUNTIME)/sstr.c $(FRUNTIME)/mod.c $(FRUNTIME)/buddy.c
+RT_VIRT = $(FMACHINE)/virt/crt0.S $(FMACHINE)/virt/ctx.S $(FMACHINE)/virt/ctx_fab.c \
+          $(FMACHINE)/virt/hal.c $(FMACHINE)/virt/memshim.c
 ARCHFLAGS = -march=rv64imafdc_zicsr -mabi=lp64 -mcmodel=medany
 CFLAGS = $(ARCHFLAGS) -DFPR_NHARTS=$(HARTS) \
          -ffreestanding -nostdlib -nostartfiles -O2 -Wall -Wextra \
@@ -115,10 +129,17 @@ $(BUILD)/system.s: $(FPRC) $(FPR)/programs/system.fpr $(FPRISC_ROOT)/core/prelud
 	LC_ALL=C.UTF-8 "$(FPRC)" --system=qos-native --prelude=$(FPRISC_ROOT)/core/prelude.fpr \
 	  $(FPR)/programs/system.fpr $@
 
-native: $(BUILD)/system.s $(BUILD)/apps_data.c $(RT_VIRT) $(RT_CORE) $(FHAL)/virt/link.ld
-	$(CROSS)gcc $(CFLAGS) -T $(FHAL)/virt/link.ld -I$(FHAL)/core -I$(FHAL)/virt \
-	  $(RT_VIRT) $(BUILD)/system.s $$(cat $(BUILD)/system.s.units) $(RT_CORE) \
-	  $(HAL)/core/apps.c $(BUILD)/apps_data.c $(HAL)/core/qaimg.c $(HAL)/core/process.c \
+# the MACHINE LAYER is the compiler tree's (its CLINT unit is FP-RISC: virt.mk);
+# the DEVICES are this tree's (../hal/virt, qos-virt.mk).  One copy of each.
+VIRT_MACHINE := $(FMACHINE)
+include $(FMACHINE)/virt/virt.mk
+QOS_HAL := $(abspath $(HAL))
+include $(HAL)/virt/qos-virt.mk
+
+native: $(BUILD)/system.s $(BUILD)/apps_data.c $(RT_VIRT) $(VIRT_FPR) $(QOS_VIRT_HAL) $(RT_CORE) $(FMACHINE)/virt/link.ld
+	$(CROSS)gcc $(CFLAGS) -T $(FMACHINE)/virt/link.ld -I$(FRUNTIME) -I$(FMACHINE)/virt \
+	  $(RT_VIRT) $(VIRT_FPR) $(QOS_VIRT_HAL) $(BUILD)/system.s $$(cat $(BUILD)/system.s.units) $(RT_CORE) \
+	  ../loader/apps.c $(BUILD)/apps_data.c ../loader/qaimg.c ../loader/process.c \
 	  -o $(KERNEL)
 
 $(DISK): $(FPR)/tools/mkdisk.py

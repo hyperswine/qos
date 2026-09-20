@@ -20,7 +20,7 @@
 # requests AND the served page carries the 200 ms poll script.
 
 MV = use "std/mvu".
-G  = use "../programs/mods/genview".
+G  = use "std/view".
 LV = use "../programs/mods/liveview".
 
 App = MV.App.

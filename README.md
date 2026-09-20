@@ -25,8 +25,10 @@ commit in `fprisc.lock.json` for releases.
 - `apps/`, `models/`, `std/`, `tests/`, `tools/`: applications, meshes and
   music, QOS-side library modules, integration checks, packaging tools.
 - `qos/`: the portable host, native entry, application-side HAL and host checks.
-- `hal/unix/`: Unix devices and the graphics/audio/input backends.
-- `hal/core/`: QOS application, process and image loaders.
+- `hal/virt/`: the QOS HAL on the virt board -- the PLIC, virtio net and block, the pin bus.
+- `hal/unix/`: the QOS HAL over a Unix host -- graphics, audio, input, net, block, tty.
+- `loader/`: QOS application, process and image loaders (the kernel's side of launching).
+  The HAL is QOS's; the compiler tree keeps only a machine layer: [docs/HAL.md](docs/HAL.md).
 - `Makefile` + `qos-app.mk`: how a program becomes a `.qa`; `qos/Makefile`: the hosts.
 - `qos.py`: build, run, disk, bundle, install and release commands.
 - `.fpr/` + `fpr.lock`: the committed module versions this tree pins.

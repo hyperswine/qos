@@ -1,0 +1,162 @@
+# liveboard.fpr -- a LIVE app on a plain posix process: FP-RISC + ExtBase hosting
+# a real GUI the FPRLive way (../fprisc/docs/LIVE.md, docs/FPRLIVE.md).
+#
+#   ../fprisc/fpr run programs/liveboard.fpr [--port=8080] [--store=board.kvlog] [--dev]
+#
+# One shared board; every browser tab is a session (two actors) that renders
+# its OWN view of the one model.  What this file shows, top to bottom:
+#
+#   Ma            stacks, spacers, cards, text roles: every screen is primitives
+#   statics/dyn   G.Dyn values are the only thing that moves on the wire
+#   messages      `Msg` is a type; the view sends VALUES of it, `update` matches on
+#                 them, and the codec that carries them is minted from the type
+#   client state  the active tab and the draft text live in the BROWSER: a record,
+#                 its fields named by paths (a typo is a compile error)
+#   fields        `count` and `notes` are durable, each named by a path and with
+#                 its own policy; `seconds` and `visitors` are not, on purpose
+#   Cmd / Sub     a slow job runs in its own actor and comes back as an event;
+#                 a toast clears itself; the clock ticks only while it is on
+#   replay        every event is journaled: `--replay` rebuilds the model from
+#                 the log alone and checks it against the durable fields
+#   reload        --dev: edit this file, the server rebuilds and becomes the new
+#                 program, the browser reconnects, the board is still there
+unsafe base.
+
+Live = use "std/live".
+Config = use "std/config".
+Decode = use "std/decode".
+Json = use "std/json".
+Digest = use "std/digest".
+KvLog = use "std/kvlog".
+Program = use "std/program".
+List = use "std/list".
+String = use "std/string".
+Option = use "std/option".
+Result = use "std/result".
+G = use "std/view".
+Ma = use "std/ma".
+LJ = use "std/livejs".
+
+# ---- the model, the messages, the client's state: three declarations --------------------------
+Model = {count : Int, notes : List String, visitors : Int, seconds : Int, running : Bool, toast : String, job : String}.
+
+init = {count = 0, notes = Nil, visitors = 0, seconds = 0, running = False, toast = "", job = ""}.
+
+# every message the app understands.  `codec` is minted from this declaration
+# (the compiler's @Type literal): it is how a Msg crosses the page and the log.
+Msg = Type (Bump Int | Add String | Clear | Clock | Second | ClearToast | Hash | Digested String | Mem | MemIs String | Stop).
+codec = @Msg.
+
+# WHAT LIVES IN THE BROWSER: a record too, never sent unless a message carries it
+Client = {tab : String, draft : String}.
+
+# WHAT IS DURABLE, field by field, each named by a PATH (a field that does not
+# exist is a compile error) and each with its own policy.  The counter is written
+# on every change; the notes at most once a second (a burst of edits is one
+# write).  Everything else is deliberately not here.
+fields =
+     Live.int Live.Always @Model.count
+  :: Live.strings (Live.AtMostEvery 1000) @Model.notes
+  :: Nil.
+
+# ---- update: a pure function of the event ---------------------------------------------------
+update ev m = case ev of
+    Live.Joined _ -> ({m | visitors = m.visitors + 1}, Nil)
+  | Live.Left _ -> ({m | visitors = m.visitors - 1}, Nil)
+  | Live.Refused _ _ -> (m, Nil)
+  | Live.Msg _ msg -> (case msg of
+        Bump n -> ({m | count = m.count + n}, Nil)
+      | Add text -> (if strlen (String.trim text) == 0 then (m, Nil)
+                     else ({m | notes = List.append m.notes (String.trim text :: Nil), toast = "note added"}, Live.After 2000 ClearToast :: Nil))
+      | Clear -> ({m | notes = Nil}, Nil)
+      | Clock -> ({m | running = not m.running}, Nil)
+      | Second -> ({m | seconds = m.seconds + 1}, Nil)
+      | ClearToast -> ({m | toast = ""}, Nil)
+      | Hash -> ({m | toast = "working..."}, Live.Run (fn u -> Digested (Digest.sha256 (String.join "\n" m.notes))) :: Nil)
+      | Digested hex -> ({m | toast = "digest ready", job = hex}, Live.After 2000 ClearToast :: Nil)
+      | Mem -> (m, Live.Run (fn u -> MemIs (case Sys.memInfo 0 of arena :: free :: _ -> "heap in use {(arena - free) / 1024} MiB" | _ -> "?")) :: Nil)
+      | MemIs text -> ({m | toast = text}, Nil)
+      | Stop -> (m, Live.Quit :: Nil)).
+
+# the clock is a SUBSCRIPTION: it exists only while the model says so
+subs m = if m.running then Live.Every 1000 Second :: Nil else Nil.
+
+# ---- view: Ma primitives only ---------------------------------------------------------------
+view sid m =
+  Ma.page "day"
+    ( G.El "div" (G.locals @Client {tab = "1", draft = ""})
+        ( Ma.vstack 6
+            ( Ma.hstack 4
+                ( Ma.vstack 1 [Ma.display "Live board", Ma.caption "one model, many screens"]
+                  :: Ma.spacer
+                  :: Ma.chip "session {sid}"
+                  :: G.El "span" [G.Cls "chip t-label"] [G.Dyn "{m.visitors} online"]
+                  :: Nil )
+              :: Ma.hstack 2 [tab "1" "Board", tab "2" "Notes", tab "3" "Jobs"]
+              :: G.El "div" [G.showIf @Client.tab "1"]
+                   ( Ma.cardGrid
+                       ( Ma.gridCell
+                           ( Ma.heading "Shared counter" :: G.El "div" [G.Cls "t-display tx-1"] [G.Dyn "{m.count}"]
+                             :: Ma.hstack 2 [btn "+1" (Bump 1), btn "+10" (Bump 10)] :: Ma.meta "durable: written on every change" :: Nil )
+                         :: Ma.gridCell
+                           ( Ma.heading "Clock" :: G.El "div" [G.Cls "t-display tx-1"] [G.Dyn "{m.seconds} s"]
+                             :: btn (if m.running then "stop" else "start") Clock :: Ma.meta "a subscription: ticks only while on" :: Nil )
+                         :: Nil ) :: Nil )
+              :: G.El "div" [G.showIf @Client.tab "2"]
+                   ( Ma.card
+                       ( Ma.heading "Notes"
+                         :: Ma.hstack 2
+                              ( G.Inp [G.Cls "inp t-body grow", G.bind @Client.draft, G.enterWith codec (Add "") @Client.draft, G.Att "placeholder" "write a note, press enter"]
+                                :: G.El "button" [G.Cls "btn btn-primary t-label", G.sendWith codec (Add "") @Client.draft] [G.Txt "add"]
+                                :: btn "clear" Clear :: Nil )
+                         :: G.El "div" [G.Cls "t-body tx-1"] [G.Dyn (if List.isEmpty m.notes then "nothing yet" else String.join " | " m.notes)]
+                         :: Ma.meta "durable: at most one write a second" :: Nil ) :: Nil )
+              :: G.El "div" [G.showIf @Client.tab "3"]
+                   ( Ma.card
+                       ( Ma.heading "A slow job, off the register"
+                         :: btn "digest the notes" Hash
+                         :: G.El "div" [G.Cls "t-caption tx-2"] [G.Dyn (if strlen m.job == 0 then "no digest yet" else m.job)]
+                         :: Ma.meta "a command: runs in its own actor, returns as a message" :: Nil ) :: Nil )
+              :: G.El "div" [G.Cls "t-caption tx-3"] [G.Dyn m.toast]
+              :: Nil )
+          :: Nil )
+      :: Nil ).
+
+# a button that sends a MESSAGE (a value of Msg, not its name)
+btn : String -> Msg -> G.Node .
+btn label msg = G.El "button" [G.Cls "btn t-label", G.send codec msg] [G.Txt label].
+# a tab is client state: shown by it, set by it, no server involved
+tab value label = G.El "button" [G.Cls "btn navbtn t-label", G.setTo @Client.tab value] [G.Txt label].
+
+app = { init = init, update = update, subs = subs, fields = fields, codec = codec,
+        view = (fn sid m -> G.render (view sid m)), css = (fn m -> Ma.maCssFor (view 0 m)) }.
+
+# ---- settings, replay, main --------------------------------------------------------------------
+Settings = Type (Settings port store dev replay).
+settings = Decode.map4 Settings (Decode.field "port" Decode.int) (Decode.field "store" Decode.string)
+  (Decode.field "dev" Decode.bool) (Decode.field "replay" Decode.bool).
+
+# rebuild the model from the journal ALONE and compare its durable parts with what was saved
+checkReplay store = case Live.replay app store of
+    Err why -> Program.fail 1 "replay: {why}"
+  | Ok m ->
+      db = (case KvLog.open store of Ok d -> d | Err why -> Program.fail 1 why);
+      savedCount = Option.andThen Json.asInt (KvLog.get "model.count" db);
+      _ = print "replayed from the journal: count={m.count} notes={m.notes}";
+      _ = print "saved durable fields:      count={savedCount}";
+      (if Option.Some m.count == savedCount then 0 else 1).
+
+main = case Config.load { defaults = Json.object (("port", Json.Integer 8080) :: ("store", Json.Text "board.kvlog") :: ("dev", Json.Boolean False) :: ("replay", Json.Boolean False) :: Nil),
+                          file = Option.None, envPrefix = "BOARD_", args = Program.args Unit } |> Result.andThen (Decode.run settings) of
+    Err why -> Program.fail 2 "liveboard: {why}"
+  | Ok (Settings port store dev replay) ->
+      (if replay then checkReplay store
+       else
+         exe = "/tmp/liveboard-{port}.bin";
+         src = "programs/liveboard.fpr";
+         cfg = { address = "127.0.0.1", port = port, title = "Live board", store = store, journal = True, script = LJ.src 0,
+                 watch = (if dev then src :: "programs/mods/ma.fpr" :: Nil else Nil),
+                 rebuild = Program.envOr "../fprisc/fpr" "FPR" :: "build" :: src :: "-o" :: exe :: Nil,
+                 restart = exe :: "--port={port}" :: "--store={store}" :: "--dev" :: Nil };
+         _ = Live.serve cfg app;
+         0).

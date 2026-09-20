@@ -40,7 +40,7 @@ unsafe program.
 
 MV = use "std/mvu".
 FS = use "std/fs".
-G  = use "mods/genview".
+G  = use "std/view".
 FL = use "mods/fprlive".
 Core = use "mods/coreutil".
 

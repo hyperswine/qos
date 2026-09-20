@@ -46,6 +46,7 @@ if not FPRISC_ROOT:
 COMPILER = os.path.join(FPRISC_ROOT, "fpr")
 os.environ["FPR_HOME"] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 os.environ["FPR_PATH"] = FPRISC_ROOT
+os.environ["FPR_FOREIGN"] = os.path.join(os.environ["FPR_HOME"], "core", "foreign.fpr")
 
 PROFILES = {"qos-portable", "bare-metal"}
 PLUGIN_RE = re.compile(r"^plugin:([0-7]):([a-z][a-z0-9_]{0,15})$")
@@ -83,11 +84,10 @@ def package_plugin(slot, plugid, source):
     src = os.path.join(bdir, "fprd-src", plugid + ".fpr")
     with open(src, "wb") as f:
         f.write(source)
-    mac = sys.platform == "darwin" and platform.machine() == "arm64"
-    target = "plugin-qa-macos" if mac else "plugin-qa"
+    target = "plugin-qa"  # qos-app.mk picks the image this host's qosp runs
     env = dict(os.environ, LC_ALL="C.UTF-8")
     r = subprocess.run(
-        ["make", "-s", "plugsyms-macos" if mac else "plugsyms"],
+        ["make", "-s", "plugsyms"],
         capture_output=True, env=env, timeout=60)
     if r.returncode != 0:
         return b"err\n" + ((r.stderr + r.stdout).strip() or b"plugsyms failed")

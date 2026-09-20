@@ -14,3 +14,6 @@ coreutil v1.0 e40b6ecf8391aada
 timefmt v1.0 39dff276efd647a1
 tui v1.0 28388960a8f6aa26
 qlog v2.0 71c5cbf3387af767
+timer v1.1 41218a7e2c09a54a
+svc v1.4 d295d28a1c9679cb
+qlog v2.1 85a8f9619beebfcf

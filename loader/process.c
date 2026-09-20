@@ -1,8 +1,9 @@
 /* process.c -- System.qa's side of dynamic loading: the growth
  * callback handed to a running process, and the FPRISC-facing
- * Sys.loadElf primitive that ties buddy.c + elfload.c + proc_entry
+ * Sys.placeImageAt primitive that ties buddy.c + qaimg.c + proc_entry
  * together. docs/PROCESS-LOADING.md has the full design; this file is
- * the last mile that makes it callable from FPRISC.
+ * the last mile that makes it callable from FPRISC.  (The ELF loader it
+ * first used, elfload.c, was retired by qaimg's flat image and is gone.)
  *
  * ONE arena, buddy_init'd once from fpr_rt_init's caller (see the hook
  * below); ONE concurrent process slot this pass (stated in the docs).
@@ -141,17 +142,15 @@ sw qos_store_call(uw tag, const char *pay, uw plen, char *out, uw outcap) {
 }
 
 
-#define MAX_GRANTS 64
-static void *grants[MAX_GRANTS];
-static int ngrants;
-
+/* a growth grant is a shared-buddy slab: it is reaped with the acbs that
+ * own it, so the loader keeps no ledger of its own (it once kept a
+ * 64-entry one that nothing read) and a process may grow without count */
 static fpr_grant_t loader_grow_memory(uw want_bytes) {
   fpr_grant_t g = {0, 0};
   void *p = buddy_alloc(want_bytes);
   if (p) {
     g.ptr = p;
     g.size = buddy_block_usable_size(p);
-    if (ngrants < MAX_GRANTS) grants[ngrants++] = p; /* reclaimed on exit */
   }
   return g;
 }
@@ -165,41 +164,30 @@ static V mktup2v(V a, V b) {
   return (V)t;
 }
 
-/* Sys.loadElfAt : String -> Int -> Int -> (Int, String)
- * Takes the ARCHIVE bytes plus an (offset, length) slice -- reading
- * the ELF payload straight out of the .qa string's own backing bytes,
- * NOT a pre-sliced copy. This matters: the FPRISC-level `substr` helper
- * (system.fpr) builds strings one strcat'd character at a time, which
- * is fine for a ~200-byte manifest and O(n^2)-catastrophic for a
- * multi-KB ELF payload (a 49 KB slice allocated over a billion
- * transient bytes before this fix). Section offsets are cheap to
- * compute in FPRISC (system.fpr already does, for MANIFEST); the
- * PAYLOAD BYTES should never round-trip through FPRISC-level string
- * building at all. fst = 1 success / 0 failure; snd = the process's
- * rendered result on success, or a human-readable failure reason.
- * Argument-type errors still panic, matching every other HAL
- * primitive's convention; a malformed ELF PAYLOAD is reported through
- * the tuple instead, so a caller (System.qa's launcher) can keep
- * running and show the user what went wrong -- the same way "No such
- * app" and "Bad .qa" already do in system.fpr. */
-/* QAR2: the launcher hands over the LOAD and IMAGE section extents of
- * the archive string -- never materialized as separate FPRISC Strings
- * (the O(n^2)-slice hazard PROCESS-LOADING.md records applies to the
- * multi-KB image payload exactly as it did to the ELF one). */
-static V g_sys_load_image_at(V qastr, V loffv, V llenv, V ioffv, V ilenv, V capsv) {
+/* Sys.placeImageAt : String -> Int -> Int -> List Int -> String -> (Int, String)
+ * The ARCHIVE bytes, the (offset, length) of its IMAGE section, LOAD's
+ * numbers [base, entry, execsz, rwoff, memsz] as programs/mods/qaimg.fpr read
+ * them, and the capability blob.  The payload is read straight out of the
+ * .qa String's own bytes, never as a pre-sliced copy; the LOAD section's TEXT
+ * never reaches C at all.  fst = 1 success / 0 failure / 2 "queued under this
+ * pid"; snd = the rendered result, the pid, or a human-readable reason.
+ * Argument-type errors panic, like every HAL primitive; an image that does
+ * not fit its slot is reported through the tuple, so the launcher keeps
+ * running and says what went wrong. */
+static V g_sys_place_image_at(V qastr, V ioffv, V ilenv, V numsv, V capsv) {
   if (ISINT(capsv) || ((hdr_t *)capsv)->tid != T_STR)
-    fpr_cpanic("Sys.loadImageAt: caps must be a String (the serialized grant blob)");
+    fpr_cpanic("Sys.placeImageAt: caps must be a String (the serialized grant blob)");
   if (ISINT(qastr) || ((hdr_t *)qastr)->tid != T_STR)
-    fpr_cpanic("Sys.loadImageAt: first argument must be a String (the .qa archive bytes)");
-  if (!ISINT(loffv) || !ISINT(llenv) || !ISINT(ioffv) || !ISINT(ilenv))
-    fpr_cpanic("Sys.loadImageAt: section extents must be Ints");
+    fpr_cpanic("Sys.placeImageAt: first argument must be a String (the .qa archive bytes)");
+  if (!ISINT(ioffv) || !ISINT(ilenv))
+    fpr_cpanic("Sys.placeImageAt: the IMAGE extent must be Ints");
+  uw nums[5];
+  if (!fpr_list_ints(numsv, nums, 5))
+    fpr_cpanic("Sys.placeImageAt: nums must be [base, entry, execsz, rwoff, memsz]");
   str_t *qa = (str_t *)qastr;
-  sw loff = UNTAG(loffv), llen = UNTAG(llenv);
   sw ioff = UNTAG(ioffv), ilen = UNTAG(ilenv);
-  if (loff < 0 || llen < 0 || (uw)loff + (uw)llen > qa->len ||
-      ioff < 0 || ilen < 0 || (uw)ioff + (uw)ilen > qa->len)
-    fpr_cpanic("Sys.loadImageAt: section extents out of range for this archive");
-  const unsigned char *lbytes = qa->bytes + loff;
+  if (ioff < 0 || ilen < 0 || (uw)ioff + (uw)ilen > qa->len)
+    fpr_cpanic("Sys.placeImageAt: the IMAGE extent is out of range for this archive");
   const unsigned char *ibytes = qa->bytes + ioff;
   uw blen = (uw)ilen;
 
@@ -212,9 +200,9 @@ static V g_sys_load_image_at(V qastr, V loffv, V llenv, V ioffv, V ilenv, V caps
   if (blen + (64 * 1024) > slot_size)
     return mktup2v(TAG(0), (V)fpr_mkstr((const uint8_t *)"image larger than the process slot", 34));
 
-  ngrants = 0;
   fpr_static_lo = fpr_static_hi = 0; /* the outgoing image's window, if any */
-  fpr_elf_load_t r = fpr_qaimg_load(lbytes, (uw)llen, ibytes, blen, slot, slot_size);
+  fpr_qaimg_t q = {nums[0], nums[1], nums[2], nums[3], nums[4]};
+  fpr_elf_load_t r = fpr_qaimg_place(&q, ibytes, blen, slot, slot_size);
   if (!r.ok) {
     uw n = 0; while (r.err[n]) n++;
     return mktup2v(TAG(0), (V)fpr_mkstr((const uint8_t *)r.err, n));
@@ -268,7 +256,7 @@ static V g_sys_load_image_at(V qastr, V loffv, V llenv, V ioffv, V ilenv, V caps
   return mktup2v(TAG(2), (V)fpr_mkstr((const uint8_t *)pm, pn));
 }
 
-FPR_FN(fpr_g_Sys_x2eloadImageAt, g_sys_load_image_at, 6);
+FPR_FN(fpr_g_Sys_x2eplaceImageAt, g_sys_place_image_at, 5);
 
 /* Sys.init : Unit -> Unit -- must be called once, before the first
  * Sys.loadElf, by whichever image owns the process arena (System.qa's

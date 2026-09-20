@@ -1,7 +1,7 @@
 # mods/arcsvc.fpr — ARC.qa: Arc as a SERVICE, not ambient machinery.
 #
 # The model (docs/MEMORY.md): the incref/decref MECHANISM stays in the
-# HAL (hal/core/runtime.c) because it sits on the send/spawn hot path —
+# HAL (runtime/runtime.c) because it sits on the send/spawn hot path —
 # but the POLICY around Arc belongs to one actor, ARC.qa, registered at
 # /services/arc when loaded under QOS.  Everything watchful about Arc —
 # baselines, audits, leak verdicts, budgets — is a conversation with

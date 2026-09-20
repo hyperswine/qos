@@ -48,7 +48,7 @@
 # ============================================================================
 
 MV = use "std/mvu".
-G  = use "genview".
+G  = use "std/view".
 LJ = use "livejs".
 
 App = MV.App.

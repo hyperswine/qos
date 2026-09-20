@@ -1,0 +1,125 @@
+# qosp.fpr -- QOS Portable's host IS an FP-RISC program.
+#
+#   qosp [--yes] [--trace] <app.qa>
+#
+# It reads the archive, interprets the manifest, gates the abi, verifies the
+# image, asks for the permissions and builds the capability blob -- with the
+# SAME modules the native kernel launches with (mods/qar.fpr,
+# mods/manifest.fpr), so there is one implementation of each and none of
+# them has a capacity.  This used to be main() in C, with its own manifest
+# parser beside it (32 permissions, 95-byte urls, a 4 KiB blob, each
+# silently cut): docs/BOUNDS.md, ../fprisc/docs/C-REDUCTION.md.
+#
+# What stays in C is what only C on this OS can do, and it is declared here
+# as signatures with no definition -- this program's own HAL, linked with
+# `fpr build --with` (portable/host.c and the device tiers in hal/unix):
+unsafe base.
+
+QAR = use "../../programs/mods/qar".
+M   = use "../../programs/mods/manifest".
+QI  = use "../../programs/mods/qaimg".
+
+Host.init      : Bool -> Result String String .                       # fault reporting; the arena at its address
+Host.abi       : Unit -> String .                                     # "<abi>.<codegenRev>" this host was built for
+Host.sha256    : String -> String .                                   # lower-case hex
+Host.loadImage : String -> String -> String -> List Int -> Result String String . # path, sha, IMAGE, LOAD's numbers: place it, publish code r-x
+Host.run       : String -> String -> String -> Result String String . # id, name, caps: enter the image; main's result
+Host.log       : String -> Unit .                                     # one /logs/host line
+
+# ---- small things -----------------------------------------------------------
+or2 a b = case a of True -> True | False -> b.
+isSet name = case Sys.env name of Ok _ -> True | Err _ -> False.
+append xs ys = case xs of Nil -> ys | h :: t -> h :: append t ys.
+
+die msg = _ = Host.log (strcat "qosp: " msg); Sys.exit 1.
+
+# ---- the command line -------------------------------------------------------
+Opts = Type (Opts yes trace path).
+parseArgs args o = case args of
+    Nil -> o
+  | a :: r -> parseArgs r (argInto o a).
+argInto o a =
+  Opts yes trace path = o;
+  case a == "--yes" of
+    True -> Opts True trace path
+  | False -> case a == "--trace" of
+      True -> Opts yes True path
+    | False -> Opts yes trace a.
+
+# ---- the abi stamp ----------------------------------------------------------
+# fprc stamps `abi = "<QOS_ABI_VERSION>.<codegenRev>"` into every manifest at
+# pack time; a mismatch used to be an undiagnosable crash mid-run.  An
+# unstamped archive is a pre-stamp one: accepted, with a warning.
+abiGate man =
+  want = Host.abi Unit;
+  case M.abi man == "" of
+    True -> Sys.stderr "[qos] warning: {M.id man} carries no abi stamp (pre-stamp archive); shell expects {want} -- rebuild to silence\n"
+  | False -> case M.abi man == want of
+      True -> Unit
+    | False ->
+        _ = Sys.stderr "[qos] REFUSED: {M.id man} was built for abi {M.abi man} but this shell is {want} -- rebuild the app (and any plugins) against this shell\n";
+        Sys.exit 1.
+
+# ---- the image's integrity --------------------------------------------------
+# the LOAD section may carry `sha <hex>`: the sha-256 of IMAGE.  Absent =
+# nothing claimed, nothing to refuse (docs/QA-FORMAT.md).  mods/qaimg.fpr
+# reads the section; hashing is the host's one piece of arithmetic.
+shaGate m img = case QI.sha m == "" of
+    True -> Unit
+  | False -> case QI.sha m == Host.sha256 img of
+      True -> Unit
+    | False -> die "IMAGE sha256 mismatch (corrupt archive)".   # the wording check-all.sh names
+
+# ---- the permission gate ----------------------------------------------------
+# every permission is asked (or granted, under --yes); a REQUIRED one denied
+# ends the launch.  The answer is the first byte of a line of stdin.
+saidYes u = case Sys.readLine Unit of
+    Err _ -> False
+  | Ok ln -> case strlen ln == 0 of
+      True -> False
+    | False -> or2 (charAt ln 1 == 121) (charAt ln 1 == 89).
+
+askPerm man kind p =
+  (url, mode) = p;
+  who = case M.name man == "" of True -> M.id man | False -> M.name man;
+  _ = Sys.stderr "{who} \"{M.id man}\" requests {mode} {url} ({kind}) -- allow? [y/n] ";
+  saidYes Unit.
+
+# the granted subset of `ps`, in manifest order; a denied required one exits
+gate man yes kind ps = case ps of
+    Nil -> Nil
+  | p :: r -> gateOne man yes kind p r (case yes of True -> True | False -> askPerm man kind p).
+gateOne man yes kind p r granted =
+  case granted of
+    True -> p :: gate man yes kind r
+  | False -> case kind == "required" of
+      True -> _ = Sys.stderr "Cannot Run Application without all required compulsory Permissions\n"; Sys.exit 1
+    | False -> gate man yes kind r.
+
+# ---- the launch -------------------------------------------------------------
+section qa name = case QAR.sectionBytes qa name of
+    Ok b -> b
+  | Err e -> die "{name}: {e}".
+
+launch o =
+  Opts yes0 trace path = o;
+  yes = or2 yes0 (isSet "QOSP_YES");
+  _ = case Host.init trace of Ok _ -> Unit | Err e -> die e;
+  qa = fileRead path;
+  man = case M.parseQa qa of Ok m -> m | Err e -> die "{path}: {e}";
+  _ = case or2 (M.mode man == "") (M.mode man == "process") of
+      True -> Unit
+    | False -> die "loadMode \"{M.mode man}\" is a name-dispatch archive; qosp runs loadMode = \"process\" images";
+  _ = abiGate man;
+  img = section qa "IMAGE";
+  m = case QI.load (section qa "LOAD") img of Ok x -> x | Err e -> die "image load failed: {e}";
+  _ = shaGate m img;
+  granted = append (gate man yes "required" (M.req man)) (gate man yes "optional" (M.opt man));
+  _ = case Host.loadImage path (QI.sha m) img (QI.nums m) of Ok _ -> Unit | Err e -> die "image load failed: {e}";
+  case Host.run (M.id man) (M.name man) (M.capsBlob (M.id man) granted) of
+    Err e -> die e
+  | Ok result -> print "\n[qos] {M.id man} => {result}".
+
+main = case parseArgs (Sys.args Unit) (Opts False False "") of
+    Opts _ _ "" -> _ = Sys.stderr "usage: qosp [--yes] [--trace] <app.qa>\n"; Sys.exit 2
+  | o -> launch o.

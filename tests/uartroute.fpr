@@ -41,7 +41,7 @@ main =
   caps = Caps con me clk granted "uartroute" { has = True, act = 0, uart = usvc, timer = 0 };
   r1 = Svc.write caps "/services/uart" (IStr "ROUTED-UART-TX\n");
   n = case r1 of IInt k -> k | e -> 0 - 1;
-  rx = waitR caps clk (Mmio.read clk + 30000000);
+  rx = waitR caps clk (read clk + 30000000);
   "uartroute: wrote {n}B via /services/uart; rx=\"{rx}\"".
 
 # poll the routed read until bytes arrive (stdin feeds the host tty)
@@ -51,6 +51,6 @@ waitR caps clk dl =
   rx = case r2 of IStr s -> s | e2 -> "(err)";
   case strlen rx > 0 of
     True -> rx
-  | False -> case Mmio.read clk > dl of
+  | False -> case read clk > dl of
       True -> ""
     | False -> waitR caps clk dl.

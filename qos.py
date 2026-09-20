@@ -101,7 +101,7 @@ INSTALLED = (ROOT / ".installed").is_file()
 # directly) and to the compiler as FPR_PATH, its module search root.
 FPRISC_FILE = ROOT / "fprisc.path"
 FPRISC_LOCK = ROOT / "fprisc.lock.json"
-FPRISC_MARKS = ("Makefile", "compiler/Main.hs", "hal/core/runtime.c", "core/prelude.fpr")
+FPRISC_MARKS = ("Makefile", "compiler/Main.hs", "runtime/runtime.c", "core/prelude.fpr")
 
 
 def is_fprisc(path):
@@ -138,6 +138,7 @@ if TOOLCHAIN:
     os.environ["FPRISC_ROOT"] = str(TOOLCHAIN)
     os.environ["FPR_HOME"] = str(ROOT)
     os.environ["FPR_PATH"] = str(TOOLCHAIN)
+    os.environ["FPR_FOREIGN"] = str(ROOT / "core" / "foreign.fpr")  # the primitives QOS implements, declared by QOS
 
 
 class Workspace:
@@ -311,7 +312,7 @@ def build_native():
 def build_app(prog, harts=None):
     qa = WS.mk().qa(prog)
     say(f"qos-app {prog} -> {rel(qa)}")
-    target = "qos-app-macos" if sys.platform == "darwin" and os.uname().machine == "arm64" else "qos-app"
+    target = "qos-app"  # qos-app.mk picks the image this host's qosp runs
     cmd = ["make", "-s", target, f"PROG={prog}", f"QA_OUT={qa}"] + WS.make_vars()
     if harts:
         cmd.append(f"HARTS={harts}")
@@ -324,14 +325,13 @@ def build_plugins(prog, plugins, size_mb=8):
     fresh QLOG image named after the program, return its path.  Mirrors
     the livereload harness: plugsyms after the shell build, then one
     plugin-qa per module, then mkdisk."""
-    mac = sys.platform == "darwin" and os.uname().machine == "arm64"
-    sh(["make", "-s", "plugsyms-macos" if mac else "plugsyms"] + WS.make_vars(), cwd=ROOT, quiet=True)
+    sh(["make", "-s", "plugsyms"] + WS.make_vars(), cwd=ROOT, quiet=True)
     qas = []
     for slot, p in enumerate(plugins):
         r = resolve_prog(p)
         out = WS.build / f"{Path(r).stem}.qa"
         say(f"plugin-qa {r} (sub-slot {slot})")
-        sh(["make", "-s", "plugin-qa-macos" if mac else "plugin-qa",
+        sh(["make", "-s", "plugin-qa",
             f"PROG={r}", f"PLUGSLOT={slot}", f"PLUG_OUT={out}", f"QA_OUT={WS.qa(prog)}"] + WS.make_vars(),
            cwd=ROOT, quiet=True)
         qas.append(str(out))
@@ -1015,7 +1015,7 @@ def tree_pins():
     pins = []
     for p in sorted(ROOT.rglob("*.fpr")):
         rel = p.relative_to(ROOT)
-        if rel.parts[0].startswith(".") or rel.parts[0] in ("build", "dist", "toolchain", "qos", "hal", "docs"):
+        if rel.parts[0].startswith(".") or rel.parts[0] in ("build", "dist", "toolchain", "qos", "hal", "loader", "docs"):
             continue
         try:
             src = p.read_text(errors="replace")
@@ -1303,7 +1303,7 @@ def cmd_clean(a):
 INSTALL_TREE = [
     "qos.py", "dependency.mk", "release.toml", "README.md", "docs", "fprisc.lock.json",
     "Makefile", "qos-app.mk", "std", "programs", "tools", "models", "targets",
-    "apps", "tests", ".fpr", "fpr.lock", "hal",
+    "apps", "tests", ".fpr", "fpr.lock", "hal", "loader", "core",
     "qos/Makefile", "qos/native", "qos/appside", "qos/portable", "qos/tests-host", "qos/qosp", "qos/qosp-gl",
 ]
 INSTALL_SKIP = shutil.ignore_patterns("*.o", "*.hi", "*.qa", "*.disk", "*.img", "build", "dist-newstyle",
@@ -1334,7 +1334,7 @@ def cmd_install(a):
         else:
             shutil.copy2(src, dst)
     # Ship a distinct compiler tree, never a symlink overlay in the QOS tree.
-    for item in ("fpr", "Makefile", "compiler", "core", "std", "sol", "tests", "tools", "hal", "docs"):
+    for item in ("fpr", "Makefile", "compiler", "core", "std", "sol", "tests", "tools", "runtime", "machine", "docs"):
         src, dst = TOOLCHAIN / item, lib / "toolchain" / item
         dst.parent.mkdir(parents=True, exist_ok=True)
         if src.is_dir():

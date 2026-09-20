@@ -1,0 +1,5 @@
+# a live heap past the 2 GiB the arena used to be
+unsafe program.
+build n acc = case n == 0 of True -> acc | False -> build (n - 1) (n :: acc).
+sum xs acc = case xs of Nil -> acc | h :: t -> sum t (acc + h).
+main = xs = build 100000000 Nil; "bigarena: {sum xs 0}".

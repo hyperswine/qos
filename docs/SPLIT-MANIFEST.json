@@ -2152,24 +2152,24 @@
       "path": "tools/wcet-ratchet.sh"
     },
     {
-      "source": "hal/core/actors.c",
+      "source": "runtime/actors.c",
       "repository": "fprisc",
-      "path": "hal/core/actors.c"
+      "path": "runtime/actors.c"
     },
     {
-      "source": "hal/core/apps.c",
+      "source": "loader/apps.c",
       "repository": "qos",
-      "path": "hal/core/apps.c"
+      "path": "loader/apps.c"
     },
     {
-      "source": "hal/core/bits.c",
+      "source": "runtime/bits.c",
       "repository": "fprisc",
-      "path": "hal/core/bits.c"
+      "path": "runtime/bits.c"
     },
     {
-      "source": "hal/core/buddy.c",
+      "source": "runtime/buddy.c",
       "repository": "fprisc",
-      "path": "hal/core/buddy.c"
+      "path": "runtime/buddy.c"
     },
     {
       "source": "hal/core/elfload.c",
@@ -2177,44 +2177,44 @@
       "path": "hal/core/elfload.c"
     },
     {
-      "source": "hal/core/fpr.h",
+      "source": "runtime/fpr.h",
       "repository": "fprisc",
-      "path": "hal/core/fpr.h"
+      "path": "runtime/fpr.h"
     },
     {
-      "source": "hal/core/mod.c",
+      "source": "runtime/mod.c",
       "repository": "fprisc",
-      "path": "hal/core/mod.c"
+      "path": "runtime/mod.c"
     },
     {
-      "source": "hal/core/process.c",
+      "source": "loader/process.c",
       "repository": "qos",
-      "path": "hal/core/process.c"
+      "path": "loader/process.c"
     },
     {
-      "source": "hal/core/qaimg.c",
+      "source": "loader/qaimg.c",
       "repository": "qos",
-      "path": "hal/core/qaimg.c"
+      "path": "loader/qaimg.c"
     },
     {
-      "source": "hal/core/runtime.c",
+      "source": "runtime/runtime.c",
       "repository": "fprisc",
-      "path": "hal/core/runtime.c"
+      "path": "runtime/runtime.c"
     },
     {
-      "source": "hal/core/sstr.c",
+      "source": "runtime/sstr.c",
       "repository": "fprisc",
-      "path": "hal/core/sstr.c"
+      "path": "runtime/sstr.c"
     },
     {
-      "source": "hal/core/vec.c",
+      "source": "runtime/vec.c",
       "repository": "fprisc",
-      "path": "hal/core/vec.c"
+      "path": "runtime/vec.c"
     },
     {
-      "source": "hal/core/vec_layout.h",
+      "source": "runtime/vec_layout.h",
       "repository": "fprisc",
-      "path": "hal/core/vec_layout.h"
+      "path": "runtime/vec_layout.h"
     },
     {
       "source": "hal/unix/blk_raw.c",

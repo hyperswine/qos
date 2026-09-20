@@ -19,7 +19,7 @@
 #                       `fpr commit` is what minted them as versions,
 #                       carrying the STATIC row-polymorphic signature
 #                       compatibility check)
-#   Sys.attachQa        load the .qa bytes into a plugin sub-slot of
+#   Plug.attach        load the .qa bytes into a plugin sub-slot of
 #                       the running image and register its module
 #                       table -- the new version sits ALONGSIDE the
 #                       old (no W^X, no GOT: a resolve is a table
@@ -75,6 +75,7 @@
 # ============================================================================
 
 QL = use "../programs/mods/qlog".
+Plug = use "../programs/mods/plug".
 
 LRMsg = Type (LiveReload url).
 
@@ -94,7 +95,7 @@ load dsk head id =
   | Ok b -> loadAttach before b.
 loadAttach : unsafe Int -> String -> Result Int String .
 loadAttach before b =
-  r = Sys.attachQa b;
+  r = Plug.attach b;
   case r of
     Err e -> Err e
   | Ok u -> loadGate before.

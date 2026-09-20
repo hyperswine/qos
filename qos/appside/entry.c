@@ -66,27 +66,39 @@ int fpr_hal_sleep_us(uintptr_t us) {
 }
 static char g_sysout[256 * 1024];
 
-/* Sys.attachQa <bytes> -> Ok "" | Err reason: hand the host the .qa
- * CONTAINER BYTES (read off qosp.disk with mods/qlog -- name->bytes
- * resolution is the FPRISC side's job) to load into the plugin window
- * (syscall tag 4), then register its module table (mod.c) so
- * Mod.findAt resolves its exports.  The whole dance app-side so
- * callers get one Result. */
+/* Sys.attachImage <id> <abi> <shell> <sha> <IMAGE> <nums> -> Ok "" | Err reason:
+ * load a plugin into the plugin window (syscall tag 4) and register its
+ * module table (mod.c) so Mod.findAt resolves its exports.  Everything here
+ * is what mods/plug.fpr found in the archive -- nums is mods/qaimg.fpr's
+ * [base, entry, execsz, rwoff, memsz]; programs call Plug.attach with the .qa
+ * bytes (read off qosp.disk with mods/qlog -- name->bytes resolution is the
+ * FPRISC side's job too). */
 int fpr_mod_attach(const uw *tab);
-static V h_sys_attach_qa(V bytesv) {
-  if (ISINT(bytesv) || ((hdr_t *)bytesv)->tid != T_STR)
-    fpr_cpanic("Sys.attachQa: payload must be a String (the .qa bytes)");
+static qos_span_t span_of(V v, const char *who) {
+  if (ISINT(v) || ((hdr_t *)v)->tid != T_STR) fpr_cpanic(who);
+  str_t *s = (str_t *)v;
+  return (qos_span_t){s->bytes, s->len};
+}
+static V h_sys_attach_image(V idv, V abiv, V shellv, V shav, V imgv, V numsv) {
   if (!g_syscall) return fpr_mkresult(1, "no syscall channel (standalone run)");
-  str_t *s = (str_t *)bytesv;
+  uw n[5];
+  if (!fpr_list_ints(numsv, n, 5)) fpr_cpanic("Sys.attachImage: nums must be [base, entry, execsz, rwoff, memsz]");
+  qos_plugin_t pl = {
+      span_of(idv, "Sys.attachImage: id must be a String"),
+      span_of(abiv, "Sys.attachImage: abi must be a String"),
+      span_of(shellv, "Sys.attachImage: shell must be a String"),
+      span_of(shav, "Sys.attachImage: sha must be a String"),
+      span_of(imgv, "Sys.attachImage: IMAGE must be a String"),
+      n[0], n[1], n[2], n[3], n[4],
+  };
   g_sysout[0] = 0;
-  int64_t r = g_syscall(4, (const char *)s->bytes, s->len, g_sysout,
-                        sizeof g_sysout);
+  int64_t r = g_syscall(QOS_SYS_LOADQA, (const char *)&pl, sizeof pl, g_sysout, sizeof g_sysout);
   if (r <= 0) return fpr_mkresult(1, g_sysout[0] ? g_sysout : "plugin load failed");
   if (fpr_mod_attach((const uw *)(uintptr_t)r))
     return fpr_mkresult(1, "module registry full");
   return fpr_mkresult(0, "");
 }
-FPR_FN(fpr_g_Sys_x2eattachQa, h_sys_attach_qa, 1);
+FPR_FN(fpr_g_Sys_x2eattachImage, h_sys_attach_image, 6);
 
 /* Sys.compile <profile> <source> -> Ok asm | Err reason: the host-
  * side fpr compiler server, reached over the syscall channel (tag 7,
@@ -175,6 +187,8 @@ int64_t qos_app_entry(const qos_boot_t *boot, char *result_out,
 
   if (!boot || boot->abi_version != QOS_ABI_VERSION) return -1;
   qos_hal = boot->hal; /* first: panics from here on can reach putc */
+  /* the host's fault handler asks this which actor ran off its stack */
+  qos_hal->set_stack_query((void *(*)(uint64_t *, uint64_t *))fpr_current_stack);
   if (!qos_hal || qos_hal->version != QOS_ABI_VERSION) return -1;
 #if !defined(FPR_QOSAPP_SINGLE) && !defined(__aarch64__)
   fpr_g_tlsoff = boot->tls_off; /* before ANY tp read: fpr_set_tp below
@@ -199,6 +213,8 @@ int64_t qos_app_entry(const qos_boot_t *boot, char *result_out,
     uw hi = (uw)boot->arena_base + boot->arena_size;
     if (!boot->arena_size || hi <= lo + 4 * minb) return -1;
     buddy_init((void *)lo, hi - lo);
+    fpr_heap_lo = (char *)boot->arena_base; /* fpr_in_heap's span: run-time, from the */
+    fpr_heap_hi = (char *)hi;               /* boot record -- never linked in (v14) */
     if (QOS_PLUG_BASE >= lo && QOS_PLUG_BASE + QOS_PLUG_SIZE <= hi &&
         !buddy_reserve_range((void *)QOS_PLUG_BASE, QOS_PLUG_SIZE))
       return -1;

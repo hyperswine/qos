@@ -28,10 +28,11 @@ void qosp_store_bind(const char *app_id) {
 #include <pthread.h>
 #include <errno.h>
 #include <time.h>
+#include "qos_abi.h" /* tag 4 carries a qos_plugin_t */
 static pthread_mutex_t store_mu = PTHREAD_MUTEX_INITIALIZER;
 static int64_t store_call_locked(uint64_t tag, const char *pay,
                                  uint64_t plen, char *out, uint64_t outcap);
-int64_t qosp_load_plugin_bytes(const char *bytes, uint64_t len, char *err,
+int64_t qosp_load_plugin(const qos_plugin_t *pl, char *err,
                                uint64_t errcap);
 
 int64_t qosp_store_call(uint64_t tag, const char *pay, uint64_t plen,
@@ -44,7 +45,8 @@ int64_t qosp_store_call(uint64_t tag, const char *pay, uint64_t plen,
                    * shared address space makes this a pointer pass,
                    * the same discipline gfx_render uses. */
     pthread_mutex_lock(&store_mu);
-    int64_t r = qosp_load_plugin_bytes(pay, plen, out, outcap);
+    if (plen != sizeof(qos_plugin_t)) { snprintf(out, outcap, "tag 4 takes a qos_plugin_t (abi v13)"); return -1; }
+    int64_t r = qosp_load_plugin((const qos_plugin_t *)pay, out, outcap);
     pthread_mutex_unlock(&store_mu);
     return r;
   }

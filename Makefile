@@ -19,8 +19,12 @@ else
 	@test -x "$(FPRC)"
 endif
 fprc: fpr
-bare-metal bare-metal-run: fpr
-	$(MAKE) -C "$(FPRISC_ROOT)" $@ PROG="$(abspath $(SOURCE))" BUILD="$(abspath $(BUILD))" IMAGE="$(abspath $(if $(IMAGE),$(IMAGE),image.elf))" $(if $(HARTS),HARTS=$(HARTS)) $(if $(RVV),RVV=$(RVV))
+# a bare-metal image built FROM THIS TREE is the compiler's machine layer plus
+# QOS Native's devices (hal/virt); the compiler tree alone has no drivers
+QOS_HAL := $(abspath hal)
+include hal/virt/qos-virt.mk
+bare-metal bare-metal-run: fpr $(QOS_VIRT_HAL)
+	$(MAKE) -C "$(FPRISC_ROOT)" $@ EXTRA_RT="$(abspath $(QOS_VIRT_HAL))" PROG="$(abspath $(SOURCE))" BUILD="$(abspath $(BUILD))" IMAGE="$(abspath $(if $(IMAGE),$(IMAGE),image.elf))" $(if $(HARTS),HARTS=$(HARTS)) $(if $(RVV),RVV=$(RVV))
 stdcheck: fpr
 	"$(FPRC)" stdcheck "$(if $(FILE),$(FILE),$(FPRISC_ROOT)/std/checkdemo.fpr)"
 sol: fpr

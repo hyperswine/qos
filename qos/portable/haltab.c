@@ -23,8 +23,7 @@
  * + evdev_raw.c, compiled with QOSP_HOST).  Input is its own
  * capability -- a terminal app should not need a window to read
  * keys. */
-int qos_tty_poll(int64_t *kind, int64_t *a, int64_t *c);
-int qos_evdev_poll(int64_t *kind, int64_t *a, int64_t *c);
+int qos_headless_poll(int64_t *kind, int64_t *a, int64_t *c); /* the source policy */
 #endif
 
 #include <stdio.h>
@@ -47,8 +46,7 @@ static int t_input_poll(int64_t *kind, int64_t *a, int64_t *c) {
     *kind = 5; *a = size_hook_c; *c = size_hook_r;
     return 1;
   }
-  if (getenv("FPR_EVDEV")) return qos_evdev_poll(kind, a, c);
-  return qos_tty_poll(kind, a, c);
+  return qos_headless_poll(kind, a, c);
 }
 #endif
 
@@ -89,6 +87,16 @@ static void t_mmio_write(uint64_t addr, uint64_t v, uint32_t width) {
 }
 
 static int64_t qosp_clock_now(void) { return (int64_t)time(NULL); }
+/* the stack guard IS the posix HAL's (qosp is a posix FP-RISC program, so
+ * fprisc/machine/posix/hal.c is linked here): one implementation, two callers */
+void hal_stack_guard(void *lo, uint64_t size);
+void hal_stack_unguard(void *lo, uint64_t size);
+static void qosp_stack_guard(void *lo, uint64_t size) { hal_stack_guard(lo, size); }
+static void qosp_stack_unguard(void *lo, uint64_t size) { hal_stack_unguard(lo, size); }
+void hal_heap_release(void *p, uint64_t bytes); /* machine/posix: madvise */
+static void qosp_heap_release(void *p, uint64_t bytes) { hal_heap_release(p, bytes); }
+void *(*qosp_app_stack_query)(uint64_t *id, uint64_t *size); /* host.c's fault handler asks it */
+static void qosp_set_stack_query(void *(*q)(uint64_t *, uint64_t *)) { qosp_app_stack_query = q; }
 
 static qos_hal_t the_table = {
     .version = QOS_ABI_VERSION,
@@ -141,6 +149,10 @@ static qos_hal_t the_table = {
 #endif
     /* v11: the wall clock */
     .clock_now = qosp_clock_now,
+    .stack_guard = qosp_stack_guard,
+    .stack_unguard = qosp_stack_unguard,
+    .set_stack_query = qosp_set_stack_query,
+    .heap_release = qosp_heap_release,
 };
 
 const qos_hal_t *qosp_hal_table(void) { return &the_table; }

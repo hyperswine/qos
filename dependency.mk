@@ -18,5 +18,11 @@ endif
 export FPRISC_ROOT
 export FPR_HOME := $(QOS_ROOT)
 export FPR_PATH := $(FPRISC_ROOT)
+# the primitives QOS implements, declared by QOS (core/foreign.fpr): the
+# compiler types the language, its runtime and its machine layer, not an OS
+export FPR_FOREIGN := $(QOS_ROOT)/core/foreign.fpr
 FPRC := $(FPRISC_ROOT)/fpr
-FHAL := $(FPRISC_ROOT)/hal
+# the compiler tree's RUNTIME and MACHINE LAYER (../fprisc/docs/HAL.md); `hal/`
+# in THIS tree is the QOS HAL
+FRUNTIME := $(FPRISC_ROOT)/runtime
+FMACHINE := $(FPRISC_ROOT)/machine

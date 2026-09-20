@@ -21,7 +21,7 @@
 #                       a walk to the owner; create-on-write in the
 #                       file namespaces (/home/, /tmp/)
 #   attachAll           DISK ENUMERATION: read apps/index, then per id
-#                       read apps/<id>.qa and Sys.attachQa the bytes --
+#                       read apps/<id>.qa and Plug.attach the bytes --
 #                       installing an app is appending records, no
 #                       shell rebuild
 #   qaManifest          minimal QAR2 manifest reader (id, name): app
@@ -42,6 +42,7 @@ QL  = use "qlog".
 SVC = use "svc".
 Core = use "coreutil".
 QAR = use "qar".
+Plug = use "plug".
 
 Rpc     = SVC.Rpc.
 Read    = AK.Read.
@@ -370,7 +371,7 @@ attachGo : unsafe Int -> Int -> List String -> String -> String -> List App .
 attachGo me st r id bytes =
   ti = Mod.plugs 0;
   (aid, anm) = qaManifest bytes;
-  a = Sys.attachQa bytes;
+  a = Plug.attach bytes;
   case a of
     Err e -> attachErr me st r id e
   | Ok u -> attachOk me st r id aid anm ti.
