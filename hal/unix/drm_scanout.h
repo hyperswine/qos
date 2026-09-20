@@ -39,6 +39,8 @@ typedef struct {
   uint32_t mw, mh;    /* mode size */
   unsigned char *rd;  /* RGBA readback scratch, gw*gh*4 */
   int gw, gh;         /* the GL FBO size */
+  uint32_t fb_id;     /* the framebuffer, for DIRTYFB */
+  int dirty;          /* this driver wants to be told what changed */
   int on;
 } drm_out_t;
 
@@ -60,6 +62,23 @@ static int drm_try_card(drm_out_t *o, const char *path, int gw, int gh) {
   res.count_fbs = res.count_encoders = 0;
   res.fb_id_ptr = res.encoder_id_ptr = 0;
   if (ioctl(fd, DRM_IOCTL_MODE_GETRESOURCES, &res) < 0) {
+    close(fd);
+    return 0;
+  }
+
+  /* Only the DRM MASTER may modeset.  A process is master automatically
+   * only when it is the first to open the primary node, which we are not:
+   * on a console image the kernel's fbdev emulation has already opened it
+   * (that is what puts a text console on the screen).  Without this the
+   * probe gets all the way to SetCrtc and fails there with EACCES, which
+   * reads as a permissions problem and is not one.
+   *
+   * It legitimately fails when something else IS master -- a compositor,
+   * or another qosp -- and then this card is simply not ours: say so and
+   * let the caller try the next one, or render offscreen. */
+  if (ioctl(fd, DRM_IOCTL_SET_MASTER, 0) < 0) {
+    qos_hostlog("[gfx] %s: not DRM master (%s) -- another process holds the "
+                "display", path, strerror(errno));
     close(fd);
     return 0;
   }
@@ -152,7 +171,7 @@ static int drm_try_card(drm_out_t *o, const char *path, int gw, int gh) {
   crtc.mode = mode;
   crtc.mode_valid = 1;
   if (ioctl(fd, DRM_IOCTL_MODE_SETCRTC, &crtc) < 0) {
-    /* almost always: not DRM master (a desktop session owns the card) */
+    /* we are master by here, so this is the mode or the CRTC, not access */
     qos_hostlog("[gfx] %s: SetCrtc failed (%s) -- rendering offscreen",
                 path, strerror(errno));
     munmap(map, cd.size);
@@ -162,6 +181,8 @@ static int drm_try_card(drm_out_t *o, const char *path, int gw, int gh) {
 
   o->fd = fd;
   o->map = (uint32_t *)map;
+  o->fb_id = fb.fb_id;
+  o->dirty = 1; /* until a driver says it does not want to be told */
   o->pitch = cd.pitch;
   o->mw = mode.hdisplay;
   o->mh = mode.vdisplay;
@@ -200,6 +221,26 @@ static void drm_scanout_present(drm_out_t *o) {
       dst[x] = ((uint32_t)src[x * 4 + 0] << 16) |
                ((uint32_t)src[x * 4 + 1] << 8) | src[x * 4 + 2];
     }
+  }
+
+  /* A PARAVIRTUAL display does not scan out of this mapping.  virtio-gpu
+   * keeps the real pixels on the host and only copies what it is told has
+   * changed, so without this the buffer fills up perfectly and the screen
+   * stays black -- which is exactly what it did.  Scanout hardware (vc4 on
+   * a Pi) reads the memory directly and has no dirty ioctl at all, so the
+   * first call there fails harmlessly and we stop asking. */
+  if (o->dirty) {
+    struct drm_clip_rect clip;
+    clip.x1 = (unsigned short)x0;
+    clip.y1 = (unsigned short)y0;
+    clip.x2 = (unsigned short)(x0 + (uint32_t)w);
+    clip.y2 = (unsigned short)(y0 + (uint32_t)h);
+    struct drm_mode_fb_dirty_cmd d;
+    memset(&d, 0, sizeof d);
+    d.fb_id = o->fb_id;
+    d.num_clips = 1;
+    d.clips_ptr = (uintptr_t)&clip;
+    if (ioctl(o->fd, DRM_IOCTL_MODE_DIRTYFB, &d) < 0) o->dirty = 0;
   }
 }
 

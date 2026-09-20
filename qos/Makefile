@@ -2,6 +2,9 @@
 #
 #   make portable          # qosp: the QOS Portable host (unix)
 #   make portable-run      # qosp running ../app.qa
+#   make portable-gl       # qosp-gl: the same, in a GLFW window (a desktop)
+#   make portable-es       # qosp-es: the same, on EGL/GLES + KMS, no window
+#                          #   system at all (a Pi; see tools/buildroot)
 #   make native            # qos-native.elf: the kernel (system.fpr) for QEMU virt
 #   make native-run        # boot it as a kernel with a seeded disk
 #
@@ -74,18 +77,25 @@ REV_FLAG := $(if $(CODEGEN_REV),-DQOSP_CODEGEN_REV=$(CODEGEN_REV),)
 QOSP_FPR = portable/qosp.fpr ../programs/mods/qar.fpr ../programs/mods/manifest.fpr ../programs/mods/qaimg.fpr
 QOSP_DEFS = -DQOSP_HOST $(REV_FLAG)
 # on arm64 the app keeps its hart in x28; the host's C must never borrow it,
-# or its fault handler could not ask the app which actor was running
-ifneq ($(filter arm64 aarch64,$(shell uname -m)),)
+# or its fault handler could not ask the app which actor was running.
+# QOSP_ARCH is the TARGET's arch -- the host's own, unless a cross build
+# (tools/buildroot) names another.
+QOSP_ARCH ?= $(shell uname -m)
+ifneq ($(filter arm64 aarch64,$(QOSP_ARCH)),)
 QOSP_DEFS += -ffixed-x28
 endif
 QOSP_INCS = -I$(HAL)/unix -Iappside -Iportable
+# FPRBUILD_EXTRA is how a cross build hands `fpr build` its --cc, so that
+# one source list serves the host build and the image (tools/buildroot)
 fpr_host = FPR_HOME="$(FPRISC_ROOT)" "$(FPRC)" build portable/qosp.fpr -o $(1) --harts 1 \
+	  $(FPRBUILD_EXTRA) \
 	  $(foreach f,$(2),--with $(f)) \
 	  $(foreach f,$(QOSP_DEFS) $(QOSP_INCS) $(3),--cflag '$(f)') \
 	  $(foreach f,$(4),--link $(f))
 
+QOSP_OUT ?= qosp
 portable: $(QOSP_SRC) $(QOSP_FPR) appside/qos_abi.h $(FPRISC_ROOT)/compiler/Codegen.hs
-	$(call fpr_host,qosp,$(QOSP_SRC),$(SND_FLAGS),$(SND_LIBS))
+	$(call fpr_host,$(QOSP_OUT),$(QOSP_SRC),$(SND_FLAGS),$(SND_LIBS))
 
 portable-run: portable
 	./qosp --yes $(FPR)/app.qa
@@ -99,6 +109,19 @@ portable-run: portable
 QOSP_GL_SRC = $(QOSP_SRC) $(HAL)/unix/gfx.c
 portable-gl: $(QOSP_GL_SRC) $(QOSP_FPR) appside/qos_abi.h $(FPRISC_ROOT)/compiler/Codegen.hs
 	$(call fpr_host,qosp-gl,$(QOSP_GL_SRC),-DQOSP_GFX -DFPR_DESKTOP_GL $(SND_FLAGS) $(DESKTOP_GL_CFLAGS),$(DESKTOP_GL_LIBS) $(SND_LIBS))
+
+# ---- QOS Portable with the EGL/GLES gfx tier (no window system) --------
+# The tier gfx.c was WRITTEN for and the one a Pi runs: surfaceless EGL,
+# an offscreen ES 3.1 FBO, and drm_scanout.h putting each frame on the
+# monitor through a KMS dumb buffer.  No GLFW, no X, no Wayland -- the
+# only libraries are Mesa's EGL and GLESv2, so this is what goes in a
+# Buildroot image (tools/buildroot).  Keys and the mouse come from the
+# real evdev/mice tiers rather than GLFW's synthetic ones.  Linux only:
+# macOS has no EGL, and `portable-gl` is its full-screen answer.
+ES_GL_LIBS ?= -lEGL -lGLESv2 -lpthread -lm
+QOSP_ES_OUT ?= qosp-es
+portable-es: $(QOSP_GL_SRC) $(QOSP_FPR) appside/qos_abi.h $(FPRISC_ROOT)/compiler/Codegen.hs
+	$(call fpr_host,$(QOSP_ES_OUT),$(QOSP_GL_SRC),-DQOSP_GFX $(SND_FLAGS),$(ES_GL_LIBS) $(SND_LIBS))
 
 # ---- QOS Portable, aarch64 cross (verifies the x28 hart discipline
 portable-a64: $(QOSP_SRC) appside/qos_abi.h $(FPRISC_ROOT)/compiler/Codegen.hs
@@ -161,7 +184,7 @@ native-run: native $(DISK)
 	  -drive file=$(DISK),if=none,format=raw,id=hd0 -device virtio-blk-device,drive=hd0
 
 clean:
-	rm -rf build qosp qos-native.elf disk.img
+	rm -rf build qosp qosp-gl qosp-es qos-native.elf disk.img
 
 FORCE:
-.PHONY: portable portable-run native native-run clean FORCE
+.PHONY: portable portable-run portable-gl portable-es portable-a64 native native-run clean FORCE

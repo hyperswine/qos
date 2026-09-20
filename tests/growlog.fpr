@@ -5,11 +5,12 @@
 # ordinary code.  Spawning an actor forces stack/acb grants under a
 # loaded process, so the ring must name a big-block or stack site.
 child self = receive.
-lgNth : unsafe a -> Int -> String .
+# `a` promised any type at all for something these walk as a list
+lgNth : unsafe List String -> Int -> String .
 lgNth Nil i = "".
 lgNth (v :: r) 0 = v.
 lgNth (v :: r) i = lgNth r (i - 1).
-lgLen : unsafe a -> Int .
+lgLen : unsafe List String -> Int .
 lgLen Nil = 0.
 lgLen (v :: r) = 1 + lgLen r.
 main =
