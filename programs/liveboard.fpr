@@ -27,6 +27,7 @@ Config = use "std/config".
 Decode = use "std/decode".
 Json = use "std/json".
 Digest = use "std/digest".
+Encoding = use "std/encoding".
 KvLog = use "std/kvlog".
 Program = use "std/program".
 List = use "std/list".
@@ -38,13 +39,17 @@ Ma = use "std/ma".
 LJ = use "std/livejs".
 
 # ---- the model, the messages, the client's state: three declarations --------------------------
-Model = {count : Int, notes : List String, visitors : Int, seconds : Int, running : Bool, toast : String, job : String}.
+# a note remembers which session wrote it: a durable field that is a LIST OF RECORDS,
+# with no encoder written for it (the path literal carries one)
+Note = {text : String, by : Int}.
+Model = {count : Int, notes : List Note, visitors : Int, seconds : Int, running : Bool, toast : String, job : String}.
 
 init = {count = 0, notes = Nil, visitors = 0, seconds = 0, running = False, toast = "", job = ""}.
 
 # every message the app understands.  `codec` is minted from this declaration
 # (the compiler's @Type literal): it is how a Msg crosses the page and the log.
-Msg = Type (Bump Int | Add String | Clear | Clock | Second | ClearToast | Hash | Digested String | Mem | MemIs String | Stop).
+Msg = Type (Bump Int | Add String | Clear | Clock | Second | ClearToast | Hash | Digested String | Mem | MemIs String | Stop
+           | Fetch String | Fetched String | Home | Ping | Uploaded String).
 codec = @Msg.
 
 # WHAT LIVES IN THE BROWSER: a record too, never sent unless a message carries it
@@ -55,8 +60,8 @@ Client = {tab : String, draft : String}.
 # on every change; the notes at most once a second (a burst of edits is one
 # write).  Everything else is deliberately not here.
 fields =
-     Live.int Live.Always @Model.count
-  :: Live.strings (Live.AtMostEvery 1000) @Model.notes
+     Live.field Live.Always @Model.count
+  :: Live.field (Live.AtMostEvery 1000) @Model.notes
   :: Nil.
 
 # ---- update: a pure function of the event ---------------------------------------------------
@@ -64,19 +69,33 @@ update ev m = case ev of
     Live.Joined _ -> ({m | visitors = m.visitors + 1}, Nil)
   | Live.Left _ -> ({m | visitors = m.visitors - 1}, Nil)
   | Live.Refused _ _ -> (m, Nil)
-  | Live.Msg _ msg -> (case msg of
+  | Live.Msg sid msg -> (case msg of
         Bump n -> ({m | count = m.count + n}, Nil)
       | Add text -> (if strlen (String.trim text) == 0 then (m, Nil)
-                     else ({m | notes = List.append m.notes (String.trim text :: Nil), toast = "note added"}, Live.After 2000 ClearToast :: Nil))
+                     else ({m | notes = List.append m.notes ({text = String.trim text, by = sid} :: Nil), toast = "note added"}, Live.After 2000 ClearToast :: Nil))
       | Clear -> ({m | notes = Nil}, Nil)
       | Clock -> ({m | running = not m.running}, Nil)
       | Second -> ({m | seconds = m.seconds + 1}, Nil)
       | ClearToast -> ({m | toast = ""}, Nil)
-      | Hash -> ({m | toast = "working..."}, Live.Run (fn u -> Digested (Digest.sha256 (String.join "\n" m.notes))) :: Nil)
+      | Hash -> ({m | toast = "working..."}, Live.Run (fn u -> Digested (Digest.sha256 (String.join "\n" (List.map (fn n -> n.text) m.notes)))) :: Nil)
       | Digested hex -> ({m | toast = "digest ready", job = hex}, Live.After 2000 ClearToast :: Nil)
       | Mem -> (m, Live.Run (fn u -> MemIs (case Sys.memInfo 0 of arena :: free :: _ -> "heap in use {(arena - free) / 1024} MiB" | _ -> "?")) :: Nil)
       | MemIs text -> ({m | toast = text}, Nil)
-      | Stop -> (m, Live.Quit :: Nil)).
+      | Stop -> (m, Live.Quit :: Nil)
+      # the rest of the commands: an HTTP request whose reply is a message, sending
+      # THIS session's browser somewhere, an event for the page's own script, a file
+      | Fetch url -> ({m | toast = "fetching..."}, Live.http {method = "GET", url = url, headers = Nil, body = ""}
+            (fn r -> Fetched (case r of Ok resp -> "{resp.status}: {strlen resp.body} bytes" | Err why -> "failed: {why}")) :: Nil)
+      | Fetched what -> ({m | toast = what}, Nil)
+      | Home -> (m, Live.Navigate sid "/" :: Nil)
+      | Ping -> (m, Live.Emit 0 "ping" "from session {sid}" :: Nil)
+      | Uploaded file -> ({m | toast = uploadInfo file}, Nil)).
+
+uploadInfo file = case String.indexOf ":" file of
+    Option.None -> "not a file"
+  | Option.Some at -> (case Encoding.fromBase64 (String.dropLeft at file) of
+        Ok bytes -> "{String.left (at - 1) file}: {strlen bytes} bytes, sha256 {String.left 12 (Digest.sha256 bytes)}"
+      | Err why -> "bad upload: {why}").
 
 # the clock is a SUBSCRIPTION: it exists only while the model says so
 subs m = if m.running then Live.Every 1000 Second :: Nil else Nil.
@@ -109,12 +128,13 @@ view sid m =
                               ( G.Inp [G.Cls "inp t-body grow", G.bind @Client.draft, G.enterWith codec (Add "") @Client.draft, G.Att "placeholder" "write a note, press enter"]
                                 :: G.El "button" [G.Cls "btn btn-primary t-label", G.sendWith codec (Add "") @Client.draft] [G.Txt "add"]
                                 :: btn "clear" Clear :: Nil )
-                         :: G.El "div" [G.Cls "t-body tx-1"] [G.Dyn (if List.isEmpty m.notes then "nothing yet" else String.join " | " m.notes)]
+                         :: G.El "div" [G.Cls "t-body tx-1"] [G.Dyn (if List.isEmpty m.notes then "nothing yet" else String.join " | " (List.map (fn n -> "{n.text} (s{n.by})") m.notes))]
                          :: Ma.meta "durable: at most one write a second" :: Nil ) :: Nil )
               :: G.El "div" [G.showIf @Client.tab "3"]
                    ( Ma.card
                        ( Ma.heading "A slow job, off the register"
                          :: btn "digest the notes" Hash
+                         :: Ma.hstack 2 [btn "go home" Home, btn "ping the page" Ping, G.Inp [G.Cls "inp t-body", G.uploadWith codec (Uploaded "")]]
                          :: G.El "div" [G.Cls "t-caption tx-2"] [G.Dyn (if strlen m.job == 0 then "no digest yet" else m.job)]
                          :: Ma.meta "a command: runs in its own actor, returns as a message" :: Nil ) :: Nil )
               :: G.El "div" [G.Cls "t-caption tx-3"] [G.Dyn m.toast]
