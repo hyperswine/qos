@@ -26,7 +26,8 @@ class Ws:
         wire = raw if raw is not None else ('+' if arg is not None else '=') + json.dumps([name, *map(str, fields)])
         p = json.dumps({'msg': wire, 'arg': arg or ''}).encode()
         mask = os.urandom(4)
-        hdr = bytes([0x81, 0x80 | len(p)]) if len(p) < 126 else bytes([0x81, 0x80 | 126]) + struct.pack('>H', len(p))
+        hdr = (bytes([0x81, 0x80 | len(p)]) if len(p) < 126 else bytes([0x81, 0x80 | 126]) + struct.pack('>H', len(p)) if len(p) < 65536
+               else bytes([0x81, 0x80 | 127]) + struct.pack('>Q', len(p)))
         self.s.sendall(hdr + mask + bytes(b ^ mask[i % 4] for i, b in enumerate(p)))
     def need(self, n):
         while len(self.buf) < n:
@@ -92,6 +93,16 @@ with tempfile.TemporaryDirectory() as t:
         a.send('Hash'); a.until(lambda m: has(m, 'working')); a.until(lambda m: has(m, 'digest ready'))
         a.until(lambda m: isinstance(m, dict) and '' in m.get('d', {}).values(), timeout=6)
         print('commands: a job in its own actor returns as an event; a toast clears itself two seconds later: PASS')
+        a.send('Fetch', f'http://127.0.0.1:{port}/'); a.until(lambda m: has(m, 'fetching')); a.until(lambda m: has(m, '200: '))
+        a.send('Fetch', 'http://127.0.0.1:1/'); a.until(lambda m: has(m, 'failed: '))
+        a.send('Home'); nav = a.until(lambda m: isinstance(m, dict) and 'nav' in m); assert nav == {'nav': '/'}, nav
+        a.send('Ping'); ea = a.until(lambda m: isinstance(m, dict) and 'emit' in m); eb = b.until(lambda m: isinstance(m, dict) and 'emit' in m)
+        assert ea == eb == {'emit': 'ping', 'detail': 'from session 1'}, (ea, eb)
+        import hashlib
+        blob = os.urandom(200000)
+        a.send('Uploaded', arg='blob.bin:' + base64.b64encode(blob).decode())
+        a.until(lambda m: has(m, f'blob.bin: 200000 bytes, sha256 {hashlib.sha256(blob).hexdigest()[:12]}'), timeout=60)
+        print('more commands: an HTTP request whose reply (or failure) is a message, Navigate for one session, Emit to the page\'s script for all, a 200 KB upload whose digest matches: PASS')
         t0 = time.time()
         crowd = [Ws(port) for _ in range(many)]
         for c in crowd: c.recv()

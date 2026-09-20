@@ -27,6 +27,7 @@ Config = use "std/config".
 Decode = use "std/decode".
 Json = use "std/json".
 Digest = use "std/digest".
+Encoding = use "std/encoding".
 KvLog = use "std/kvlog".
 Program = use "std/program".
 List = use "std/list".
@@ -47,7 +48,8 @@ init = {count = 0, notes = Nil, visitors = 0, seconds = 0, running = False, toas
 
 # every message the app understands.  `codec` is minted from this declaration
 # (the compiler's @Type literal): it is how a Msg crosses the page and the log.
-Msg = Type (Bump Int | Add String | Clear | Clock | Second | ClearToast | Hash | Digested String | Mem | MemIs String | Stop).
+Msg = Type (Bump Int | Add String | Clear | Clock | Second | ClearToast | Hash | Digested String | Mem | MemIs String | Stop
+           | Fetch String | Fetched String | Home | Ping | Uploaded String).
 codec = @Msg.
 
 # WHAT LIVES IN THE BROWSER: a record too, never sent unless a message carries it
@@ -79,7 +81,21 @@ update ev m = case ev of
       | Digested hex -> ({m | toast = "digest ready", job = hex}, Live.After 2000 ClearToast :: Nil)
       | Mem -> (m, Live.Run (fn u -> MemIs (case Sys.memInfo 0 of arena :: free :: _ -> "heap in use {(arena - free) / 1024} MiB" | _ -> "?")) :: Nil)
       | MemIs text -> ({m | toast = text}, Nil)
-      | Stop -> (m, Live.Quit :: Nil)).
+      | Stop -> (m, Live.Quit :: Nil)
+      # the rest of the commands: an HTTP request whose reply is a message, sending
+      # THIS session's browser somewhere, an event for the page's own script, a file
+      | Fetch url -> ({m | toast = "fetching..."}, Live.http {method = "GET", url = url, headers = Nil, body = ""}
+            (fn r -> Fetched (case r of Ok resp -> "{resp.status}: {strlen resp.body} bytes" | Err why -> "failed: {why}")) :: Nil)
+      | Fetched what -> ({m | toast = what}, Nil)
+      | Home -> (m, Live.Navigate sid "/" :: Nil)
+      | Ping -> (m, Live.Emit 0 "ping" "from session {sid}" :: Nil)
+      | Uploaded file -> ({m | toast = uploadInfo file}, Nil)).
+
+uploadInfo file = case String.indexOf ":" file of
+    Option.None -> "not a file"
+  | Option.Some at -> (case Encoding.fromBase64 (String.dropLeft at file) of
+        Ok bytes -> "{String.left (at - 1) file}: {strlen bytes} bytes, sha256 {String.left 12 (Digest.sha256 bytes)}"
+      | Err why -> "bad upload: {why}").
 
 # the clock is a SUBSCRIPTION: it exists only while the model says so
 subs m = if m.running then Live.Every 1000 Second :: Nil else Nil.
@@ -118,6 +134,7 @@ view sid m =
                    ( Ma.card
                        ( Ma.heading "A slow job, off the register"
                          :: btn "digest the notes" Hash
+                         :: Ma.hstack 2 [btn "go home" Home, btn "ping the page" Ping, G.Inp [G.Cls "inp t-body", G.uploadWith codec (Uploaded "")]]
                          :: G.El "div" [G.Cls "t-caption tx-2"] [G.Dyn (if strlen m.job == 0 then "no digest yet" else m.job)]
                          :: Ma.meta "a command: runs in its own actor, returns as a message" :: Nil ) :: Nil )
               :: G.El "div" [G.Cls "t-caption tx-3"] [G.Dyn m.toast]
