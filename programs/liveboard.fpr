@@ -38,7 +38,10 @@ Ma = use "std/ma".
 LJ = use "std/livejs".
 
 # ---- the model, the messages, the client's state: three declarations --------------------------
-Model = {count : Int, notes : List String, visitors : Int, seconds : Int, running : Bool, toast : String, job : String}.
+# a note remembers which session wrote it: a durable field that is a LIST OF RECORDS,
+# with no encoder written for it (the path literal carries one)
+Note = {text : String, by : Int}.
+Model = {count : Int, notes : List Note, visitors : Int, seconds : Int, running : Bool, toast : String, job : String}.
 
 init = {count = 0, notes = Nil, visitors = 0, seconds = 0, running = False, toast = "", job = ""}.
 
@@ -55,8 +58,8 @@ Client = {tab : String, draft : String}.
 # on every change; the notes at most once a second (a burst of edits is one
 # write).  Everything else is deliberately not here.
 fields =
-     Live.int Live.Always @Model.count
-  :: Live.strings (Live.AtMostEvery 1000) @Model.notes
+     Live.field Live.Always @Model.count
+  :: Live.field (Live.AtMostEvery 1000) @Model.notes
   :: Nil.
 
 # ---- update: a pure function of the event ---------------------------------------------------
@@ -64,15 +67,15 @@ update ev m = case ev of
     Live.Joined _ -> ({m | visitors = m.visitors + 1}, Nil)
   | Live.Left _ -> ({m | visitors = m.visitors - 1}, Nil)
   | Live.Refused _ _ -> (m, Nil)
-  | Live.Msg _ msg -> (case msg of
+  | Live.Msg sid msg -> (case msg of
         Bump n -> ({m | count = m.count + n}, Nil)
       | Add text -> (if strlen (String.trim text) == 0 then (m, Nil)
-                     else ({m | notes = List.append m.notes (String.trim text :: Nil), toast = "note added"}, Live.After 2000 ClearToast :: Nil))
+                     else ({m | notes = List.append m.notes ({text = String.trim text, by = sid} :: Nil), toast = "note added"}, Live.After 2000 ClearToast :: Nil))
       | Clear -> ({m | notes = Nil}, Nil)
       | Clock -> ({m | running = not m.running}, Nil)
       | Second -> ({m | seconds = m.seconds + 1}, Nil)
       | ClearToast -> ({m | toast = ""}, Nil)
-      | Hash -> ({m | toast = "working..."}, Live.Run (fn u -> Digested (Digest.sha256 (String.join "\n" m.notes))) :: Nil)
+      | Hash -> ({m | toast = "working..."}, Live.Run (fn u -> Digested (Digest.sha256 (String.join "\n" (List.map (fn n -> n.text) m.notes)))) :: Nil)
       | Digested hex -> ({m | toast = "digest ready", job = hex}, Live.After 2000 ClearToast :: Nil)
       | Mem -> (m, Live.Run (fn u -> MemIs (case Sys.memInfo 0 of arena :: free :: _ -> "heap in use {(arena - free) / 1024} MiB" | _ -> "?")) :: Nil)
       | MemIs text -> ({m | toast = text}, Nil)
@@ -109,7 +112,7 @@ view sid m =
                               ( G.Inp [G.Cls "inp t-body grow", G.bind @Client.draft, G.enterWith codec (Add "") @Client.draft, G.Att "placeholder" "write a note, press enter"]
                                 :: G.El "button" [G.Cls "btn btn-primary t-label", G.sendWith codec (Add "") @Client.draft] [G.Txt "add"]
                                 :: btn "clear" Clear :: Nil )
-                         :: G.El "div" [G.Cls "t-body tx-1"] [G.Dyn (if List.isEmpty m.notes then "nothing yet" else String.join " | " m.notes)]
+                         :: G.El "div" [G.Cls "t-body tx-1"] [G.Dyn (if List.isEmpty m.notes then "nothing yet" else String.join " | " (List.map (fn n -> "{n.text} (s{n.by})") m.notes))]
                          :: Ma.meta "durable: at most one write a second" :: Nil ) :: Nil )
               :: G.El "div" [G.showIf @Client.tab "3"]
                    ( Ma.card
