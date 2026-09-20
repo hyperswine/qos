@@ -117,6 +117,14 @@ with tempfile.TemporaryDirectory() as t:
         time.sleep(0.5)
         a.send('Stop')
         assert srv.wait(timeout=20) == 0, srv.stderr.read()
+    except Exception:
+        # say what the SERVER said: a panic goes to its stdout, a driver message to stderr
+        code = srv.poll()
+        if code is None: srv.kill()
+        out, err = srv.communicate(timeout=10)
+        lines = [l for l in (out + err).splitlines() if l.strip() and not l.startswith(('dl:', '   trace'))]
+        print(f'-- server exit code {code}; it said:\n   ' + '\n   '.join(lines[-8:]), file=sys.stderr)
+        raise
     finally:
         if srv.poll() is None: srv.kill()
     srv = start(port, store)
