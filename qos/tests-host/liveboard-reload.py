@@ -12,10 +12,10 @@ srv = subprocess.Popen([sys.argv[1], f'--port={port}', f'--store={store}', '--de
 try:
     assert srv.stdout.readline().startswith('ready')
     a = Ws(port); f = a.recv(); assert 'Live board' in ''.join(f['s'])
-    a.send('bump', 7); a.until(lambda m: has(m, '"7"'))
+    a.send('Bump', 7); a.until(lambda m: has(m, '"7"'))
     # 1. a change that does NOT compile: the old program must keep serving
     open(app, 'w').write(backup.replace('Ma.display "Live board"', 'Ma.display ("Live board"'))
-    time.sleep(4); a.send('bump', 1); a.until(lambda m: has(m, '"8"'))
+    time.sleep(4); a.send('Bump', 1); a.until(lambda m: has(m, '"8"'))
     print('a rebuild that FAILS is reported and the old program keeps serving: PASS')
     # 2. a real edit: new heading
     open(app, 'w').write(backup.replace('Ma.display "Live board"', 'Ma.display "Live board, reloaded"'))
@@ -37,7 +37,7 @@ try:
         time.sleep(0.3)
     assert has(f, '"8"'), f
     print(f'an edit to the source: rebuilt, restarted into the new program in {time.time() - t0:.1f} s, the new view is served and the counter is still 8: PASS')
-    b.send('quit')
+    b.send('Stop')
 finally:
     open(app, 'w').write(backup)
     time.sleep(1); subprocess.run(['pkill', '-f', f'liveboard-{port}.bin']); 

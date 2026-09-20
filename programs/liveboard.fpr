@@ -8,10 +8,12 @@
 #
 #   Ma            stacks, spacers, cards, text roles: every screen is primitives
 #   statics/dyn   G.Dyn values are the only thing that moves on the wire
-#   client state  the active tab and the draft text live in the BROWSER
-#                 (declared once, below, the way durable fields are)
-#   fields        `count` and `notes` are durable, each with its own policy;
-#                 `seconds` and `visitors` are not, on purpose
+#   messages      `Msg` is a type; the view sends VALUES of it, `update` matches on
+#                 them, and the codec that carries them is minted from the type
+#   client state  the active tab and the draft text live in the BROWSER: a record,
+#                 its fields named by paths (a typo is a compile error)
+#   fields        `count` and `notes` are durable, each named by a path and with
+#                 its own policy; `seconds` and `visitors` are not, on purpose
 #   Cmd / Sub     a slow job runs in its own actor and comes back as an event;
 #                 a toast clears itself; the clock ticks only while it is on
 #   replay        every event is journaled: `--replay` rebuilds the model from
@@ -35,94 +37,98 @@ G = use "std/view".
 Ma = use "std/ma".
 LJ = use "std/livejs".
 
-# ---- the model -----------------------------------------------------------------------
-Model = Type (Model count notes visitors seconds running toast job).
+# ---- the model, the messages, the client's state: three declarations --------------------------
+Model = {count : Int, notes : List String, visitors : Int, seconds : Int, running : Bool, toast : String, job : String}.
 
-init = Model 0 Nil 0 0 False "" "".
+init = {count = 0, notes = Nil, visitors = 0, seconds = 0, running = False, toast = "", job = ""}.
 
-count m = case m of Model c _ _ _ _ _ _ -> c.
-notes m = case m of Model _ n _ _ _ _ _ -> n.
+# every message the app understands.  `codec` is minted from this declaration
+# (the compiler's @Type literal): it is how a Msg crosses the page and the log.
+Msg = Type (Bump Int | Add String | Clear | Clock | Second | ClearToast | Hash | Digested String | Mem | MemIs String | Stop).
+codec = @Msg.
 
-# WHAT IS DURABLE, field by field, each with its own policy.  The counter is
-# written on every change; the notes at most once a second (a burst of edits is
-# one write).  Everything else is deliberately not here.
+# WHAT LIVES IN THE BROWSER: a record too, never sent unless a message carries it
+Client = {tab : String, draft : String}.
+
+# WHAT IS DURABLE, field by field, each named by a PATH (a field that does not
+# exist is a compile error) and each with its own policy.  The counter is written
+# on every change; the notes at most once a second (a burst of edits is one
+# write).  Everything else is deliberately not here.
 fields =
-     Live.intField "board/count" Live.Always count (fn c m -> case m of Model _ n v s r t j -> Model c n v s r t j)
-  :: Live.stringsField "board/notes" (Live.AtMostEvery 1000) notes (fn n m -> case m of Model c _ v s r t j -> Model c n v s r t j)
+     Live.int Live.Always @Model.count
+  :: Live.strings (Live.AtMostEvery 1000) @Model.notes
   :: Nil.
 
-# WHAT LIVES IN THE BROWSER: declared the same way, never sent unless an event
-# carries it.  (name, initial value)
-clientState = ("tab", "1") :: ("draft", "") :: Nil.
-
 # ---- update: a pure function of the event ---------------------------------------------------
-update ev m = case m of Model c n v s r t j ->
-  (case ev of
-      Live.Joined _ -> (Model c n (v + 1) s r t j, Nil)
-    | Live.Left _ -> (Model c n (v - 1) s r t j, Nil)
-    | Live.Tick _ -> (Model c n v (s + 1) r t j, Nil)
-    | Live.Done "digest" result -> (Model c n v s r "digest ready" result, Live.After 2000 "clearToast" "" :: Nil)
-    | Live.Done "mem" result -> (Model c n v s r result j, Nil)
-    | Live.Done _ _ -> (m, Nil)
-    | Live.Msg _ name arg -> (case name of
-          "bump" -> (Model (c + Result.withDefault 0 (String.toInt arg)) n v s r t j, Nil)
-        | "add" -> (if strlen (String.trim arg) == 0 then (m, Nil)
-                    else (Model c (List.append n (String.trim arg :: Nil)) v s r "note added" j, Live.After 2000 "clearToast" "" :: Nil))
-        | "clear" -> (Model c Nil v s r t j, Nil)
-        | "clock" -> (Model c n v s (not r) t j, Nil)
-        | "clearToast" -> (Model c n v s r "" j, Nil)
-        | "digest" -> (Model c n v s r "working..." j, Live.Run "digest" (fn u -> Digest.sha256 (String.join "\n" n)) :: Nil)
-        | "mem" -> (m, Live.Run "mem" (fn u -> case Sys.memInfo 0 of arena :: free :: _ -> "heap in use {(arena - free) / 1024} MiB" | _ -> "?") :: Nil)
-        | "quit" -> (m, Live.Quit :: Nil)
-        | _ -> (m, Nil))).
+update ev m = case ev of
+    Live.Joined _ -> ({m | visitors = m.visitors + 1}, Nil)
+  | Live.Left _ -> ({m | visitors = m.visitors - 1}, Nil)
+  | Live.Refused _ _ -> (m, Nil)
+  | Live.Msg _ msg -> (case msg of
+        Bump n -> ({m | count = m.count + n}, Nil)
+      | Add text -> (if strlen (String.trim text) == 0 then (m, Nil)
+                     else ({m | notes = List.append m.notes (String.trim text :: Nil), toast = "note added"}, Live.After 2000 ClearToast :: Nil))
+      | Clear -> ({m | notes = Nil}, Nil)
+      | Clock -> ({m | running = not m.running}, Nil)
+      | Second -> ({m | seconds = m.seconds + 1}, Nil)
+      | ClearToast -> ({m | toast = ""}, Nil)
+      | Hash -> ({m | toast = "working..."}, Live.Run (fn u -> Digested (Digest.sha256 (String.join "\n" m.notes))) :: Nil)
+      | Digested hex -> ({m | toast = "digest ready", job = hex}, Live.After 2000 ClearToast :: Nil)
+      | Mem -> (m, Live.Run (fn u -> MemIs (case Sys.memInfo 0 of arena :: free :: _ -> "heap in use {(arena - free) / 1024} MiB" | _ -> "?")) :: Nil)
+      | MemIs text -> ({m | toast = text}, Nil)
+      | Stop -> (m, Live.Quit :: Nil)).
 
 # the clock is a SUBSCRIPTION: it exists only while the model says so
-subs m = case m of Model _ _ _ _ running _ _ -> (if running then Live.Every 1000 "second" :: Nil else Nil).
+subs m = if m.running then Live.Every 1000 Second :: Nil else Nil.
 
 # ---- view: Ma primitives only ---------------------------------------------------------------
-view sid m = case m of Model c n v s r t j ->
+view sid m =
   Ma.page "day"
-    ( G.El "div" (List.map (fn kv -> case kv of (k, init0) -> G.Local k init0) clientState)
+    ( G.El "div" (G.locals @Client {tab = "1", draft = ""})
         ( Ma.vstack 6
             ( Ma.hstack 4
                 ( Ma.vstack 1 [Ma.display "Live board", Ma.caption "one model, many screens"]
                   :: Ma.spacer
                   :: Ma.chip "session {sid}"
-                  :: G.El "span" [G.Cls "chip t-label"] [G.Dyn "{v} online"]
+                  :: G.El "span" [G.Cls "chip t-label"] [G.Dyn "{m.visitors} online"]
                   :: Nil )
-              :: Ma.navBar "tab" [Ma.navTab "tab" "1" "Board", Ma.navTab "tab" "2" "Notes", Ma.navTab "tab" "3" "Jobs"]
-              :: G.El "div" [G.ShowIf "tab:1"]
+              :: Ma.hstack 2 [tab "1" "Board", tab "2" "Notes", tab "3" "Jobs"]
+              :: G.El "div" [G.showIf @Client.tab "1"]
                    ( Ma.cardGrid
                        ( Ma.gridCell
-                           ( Ma.heading "Shared counter" :: G.El "div" [G.Cls "t-display tx-1"] [G.Dyn "{c}"]
-                             :: Ma.hstack 2 [sendBtn "+1" "bump" "1", sendBtn "+10" "bump" "10"] :: Ma.meta "durable: written on every change" :: Nil )
+                           ( Ma.heading "Shared counter" :: G.El "div" [G.Cls "t-display tx-1"] [G.Dyn "{m.count}"]
+                             :: Ma.hstack 2 [btn "+1" (Bump 1), btn "+10" (Bump 10)] :: Ma.meta "durable: written on every change" :: Nil )
                          :: Ma.gridCell
-                           ( Ma.heading "Clock" :: G.El "div" [G.Cls "t-display tx-1"] [G.Dyn "{s} s"]
-                             :: sendBtn (if r then "stop" else "start") "clock" "" :: Ma.meta "a subscription: ticks only while on" :: Nil )
+                           ( Ma.heading "Clock" :: G.El "div" [G.Cls "t-display tx-1"] [G.Dyn "{m.seconds} s"]
+                             :: btn (if m.running then "stop" else "start") Clock :: Ma.meta "a subscription: ticks only while on" :: Nil )
                          :: Nil ) :: Nil )
-              :: G.El "div" [G.ShowIf "tab:2"]
+              :: G.El "div" [G.showIf @Client.tab "2"]
                    ( Ma.card
                        ( Ma.heading "Notes"
                          :: Ma.hstack 2
-                              ( G.Inp [G.Cls "inp t-body grow", G.Input "draft", G.OnEnter "add" "draft", G.Att "placeholder" "write a note, press enter"]
-                                :: G.El "button" [G.Cls "btn btn-primary t-label", G.OnClick "add" "draft"] [G.Txt "add"]
-                                :: sendBtn "clear" "clear" "" :: Nil )
-                         :: G.El "div" [G.Cls "t-body tx-1"] [G.Dyn (if List.isEmpty n then "nothing yet" else String.join " | " n)]
+                              ( G.Inp [G.Cls "inp t-body grow", G.bind @Client.draft, G.enterWith codec (Add "") @Client.draft, G.Att "placeholder" "write a note, press enter"]
+                                :: G.El "button" [G.Cls "btn btn-primary t-label", G.sendWith codec (Add "") @Client.draft] [G.Txt "add"]
+                                :: btn "clear" Clear :: Nil )
+                         :: G.El "div" [G.Cls "t-body tx-1"] [G.Dyn (if List.isEmpty m.notes then "nothing yet" else String.join " | " m.notes)]
                          :: Ma.meta "durable: at most one write a second" :: Nil ) :: Nil )
-              :: G.El "div" [G.ShowIf "tab:3"]
+              :: G.El "div" [G.showIf @Client.tab "3"]
                    ( Ma.card
                        ( Ma.heading "A slow job, off the register"
-                         :: sendBtn "digest the notes" "digest" ""
-                         :: G.El "div" [G.Cls "t-caption tx-2"] [G.Dyn (if strlen j == 0 then "no digest yet" else j)]
-                         :: Ma.meta "a command: runs in its own actor, returns as an event" :: Nil ) :: Nil )
-              :: G.El "div" [G.Cls "t-caption tx-3"] [G.Dyn t]
+                         :: btn "digest the notes" Hash
+                         :: G.El "div" [G.Cls "t-caption tx-2"] [G.Dyn (if strlen m.job == 0 then "no digest yet" else m.job)]
+                         :: Ma.meta "a command: runs in its own actor, returns as a message" :: Nil ) :: Nil )
+              :: G.El "div" [G.Cls "t-caption tx-3"] [G.Dyn m.toast]
               :: Nil )
           :: Nil )
       :: Nil ).
 
-sendBtn label msg lit = G.El "button" [G.Cls "btn t-label", G.OnSend msg lit] [G.Txt label].
+# a button that sends a MESSAGE (a value of Msg, not its name)
+btn : String -> Msg -> G.Node .
+btn label msg = G.El "button" [G.Cls "btn t-label", G.send codec msg] [G.Txt label].
+# a tab is client state: shown by it, set by it, no server involved
+tab value label = G.El "button" [G.Cls "btn navbtn t-label", G.setTo @Client.tab value] [G.Txt label].
 
-app = { init = init, update = update, subs = subs, fields = fields,
+app = { init = init, update = update, subs = subs, fields = fields, codec = codec,
         view = (fn sid m -> G.render (view sid m)), css = (fn m -> Ma.maCssFor (view 0 m)) }.
 
 # ---- settings, replay, main --------------------------------------------------------------------
@@ -135,10 +141,10 @@ checkReplay store = case Live.replay app store of
     Err why -> Program.fail 1 "replay: {why}"
   | Ok m ->
       db = (case KvLog.open store of Ok d -> d | Err why -> Program.fail 1 why);
-      savedCount = Option.andThen Json.asInt (KvLog.get "board/count" db);
-      _ = print "replayed from the journal: count={count m} notes={notes m}";
+      savedCount = Option.andThen Json.asInt (KvLog.get "model.count" db);
+      _ = print "replayed from the journal: count={m.count} notes={m.notes}";
       _ = print "saved durable fields:      count={savedCount}";
-      (if Option.Some (count m) == savedCount then 0 else 1).
+      (if Option.Some m.count == savedCount then 0 else 1).
 
 main = case Config.load { defaults = Json.object (("port", Json.Integer 8080) :: ("store", Json.Text "board.kvlog") :: ("dev", Json.Boolean False) :: ("replay", Json.Boolean False) :: Nil),
                           file = Option.None, envPrefix = "BOARD_", args = Program.args Unit } |> Result.andThen (Decode.run settings) of
