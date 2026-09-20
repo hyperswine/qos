@@ -1,0 +1,23 @@
+#!/bin/sh
+# freebsd-cc -- clang, aimed at FreeBSD/arm64, as one word.
+#
+# `fpr build --cc CC` takes a single token, so the cross settings live here
+# rather than in a flag soup at every call site.  Everything the target
+# needs comes out of a sysroot copied from the running guest
+# (`vm.sh sysroot DIR`), so the headers and libraries are that exact
+# release's and not an approximation of it.
+#
+#   QOS_BSD_SYSROOT   the sysroot (required)
+#   QOS_BSD_CLANG     which clang to drive (default: clang)
+#   QOS_BSD_TRIPLE    the target triple (default: aarch64-unknown-freebsd14.5)
+#
+# This crosses the OS, not the architecture: the build machine must already
+# be aarch64, because fpr picks the context switch and -ffixed-x28 from the
+# machine it runs on (fprisc/docs/BOUNDS.md).
+set -e
+: "${QOS_BSD_SYSROOT:?set QOS_BSD_SYSROOT -- make one with 'vm.sh sysroot DIR'}"
+exec "${QOS_BSD_CLANG:-clang}" \
+	--target="${QOS_BSD_TRIPLE:-aarch64-unknown-freebsd14.5}" \
+	--sysroot="$QOS_BSD_SYSROOT" \
+	-fuse-ld=lld \
+	"$@"

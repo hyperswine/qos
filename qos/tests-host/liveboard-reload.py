@@ -7,10 +7,11 @@ src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'liveboard-c
 exec(src.replace("binary = sys.argv[1]", "binary = sys.argv[1]").replace("many = int(sys.argv[2]) if len(sys.argv) > 2 else 100", "many = 0"))
 t = tempfile.mkdtemp(); port = free_port(); store = f'{t}/b.kvlog'
 app = 'programs/liveboard.fpr'; backup = open(app).read()
-err = open(f'{t}/err', 'w')
-srv = subprocess.Popen([sys.argv[1], f'--port={port}', f'--store={store}', '--dev'], stdout=subprocess.PIPE, stderr=err, text=True)
+# the same lifecycle liveboard-check.py uses (exec'd above): its own process
+# group, signal handlers, a swept pidfile, and output to a FILE -- an undrained
+# pipe deadlocks a server that logs through a long reload
+srv = start(port, store, '--dev')
 try:
-    assert srv.stdout.readline().startswith('ready')
     a = Ws(port); f = a.recv(); assert 'Live board' in ''.join(f['s'])
     a.send('Bump', 7); a.until(lambda m: has(m, '"7"'))
     # 1. a change that does NOT compile: the old program must keep serving
@@ -33,13 +34,13 @@ try:
             try:
                 w = Ws(port); fr = w.recv(timeout=5); diag += '\nWS first frame statics: ' + ''.join(fr.get('s', []))[:400]
             except Exception as e: diag += '\nWS failed: ' + repr(e)
-            raise AssertionError('no reload in 40 s\n' + diag + '\n' + subprocess.run('pgrep -fl liveboard', shell=True, capture_output=True, text=True).stdout + open(f'{t}/err').read()[-600:])
+            raise AssertionError('no reload in 40 s\n' + diag + '\n' + subprocess.run('pgrep -fl liveboard', shell=True, capture_output=True, text=True).stdout + said(srv))
         time.sleep(0.3)
     assert has(f, '"8"'), f
     print(f'an edit to the source: rebuilt, restarted into the new program in {time.time() - t0:.1f} s, the new view is served and the counter is still 8: PASS')
     b.send('Stop')
 finally:
     open(app, 'w').write(backup)
-    time.sleep(1); subprocess.run(['pkill', '-f', f'liveboard-{port}.bin']); 
-    if srv.poll() is None: srv.kill()
-print(''.join(l for l in open(f'{t}/err') if l.startswith('live:'))[-700:])
+    time.sleep(1); subprocess.run(['pkill', '-f', f'liveboard-{port}.bin'])
+    stop(srv)
+print(''.join(l for l in open(srv.log) if l.startswith('live:'))[-700:])

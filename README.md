@@ -33,6 +33,16 @@ commit in `fprisc.lock.json` for releases.
 - `qos.py`: build, run, disk, bundle, install and release commands.
 - `.fpr/` + `fpr.lock`: the committed module versions this tree pins.
 
+QOS Portable is not a Linux program: it builds and runs on FreeBSD/arm64 with
+nothing installed in the guest -- see
+[tools/freebsd-vm/](tools/freebsd-vm/README.md).
+
+To ship QOS Portable as its own bootable Linux rather than as a program on
+somebody else's, see [docs/IMAGE.md](docs/IMAGE.md) and
+[tools/buildroot/](tools/buildroot/README.md): a Buildroot image with a
+kernel, Mesa, ssh, wifi and `qosp` and nothing else, so a Raspberry Pi 4
+powers on into a full-screen FP-RISC application with no window system.
+
 See [the split guide](docs/REPOSITORY-SPLIT.md) for the ownership map and the
 release transition.  The previous combined README and tag workflow are kept
 under `docs/history/` for reference.

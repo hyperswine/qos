@@ -34,7 +34,10 @@ create)
   cd "$DIR"
   [ -f "$IMG" ] || { echo "no $IMG in $DIR: run '$0 fetch' first" >&2; exit 1; }
   [ -f id_vm ] || ssh-keygen -q -t ed25519 -N "" -C qos-arm64-vm -f id_vm
-  qemu-img create -q -f qcow2 -F qcow2 -b "$IMG" disk.qcow2 "${QOS_VM_DISK:-24G}"
+  # 72G because a Buildroot target (tools/buildroot) is ~12G of build tree
+  # each, and having the QEMU test loop and the Pi image at once is the
+  # point; qcow2 is sparse, so this costs what it uses
+  qemu-img create -q -f qcow2 -F qcow2 -b "$IMG" disk.qcow2 "${QOS_VM_DISK:-72G}"
   FW=$(dirname "$(command -v qemu-system-aarch64)")/../share/qemu/edk2-aarch64-code.fd
   dd if=/dev/zero of=code.fd bs=1m count=64 2>/dev/null; dd if="$FW" of=code.fd conv=notrunc 2>/dev/null
   dd if=/dev/zero of=vars.fd bs=1m count=64 2>/dev/null
@@ -101,7 +104,7 @@ sync)
   for r in fprisc qos; do
     rsync -a --delete -e "ssh $SSHO" \
       --exclude .git --exclude dist-newstyle --exclude '/build' --exclude '/.qos' --exclude '/dist' --exclude '/fpr' --exclude '/fprc' \
-      --exclude '*.elf' --exclude '*.qa' --exclude '*.o' --exclude '*.hi' --exclude '/qos/qosp' --exclude '/qos/qosp-gl' --exclude '/qos/qosp-a64' --exclude '/qos/build' \
+      --exclude '*.elf' --exclude '*.qa' --exclude '*.o' --exclude '*.hi' --exclude '/qos/qosp' --exclude '/qos/qosp-gl' --exclude '/qos/qosp-es' --exclude '/qos/qosp-a64' --exclude '/qos/build' \
       --exclude cabal.project.local --exclude __pycache__ --exclude .DS_Store \
       "$QOS/../$r/" dev@127.0.0.1:$r/
   done

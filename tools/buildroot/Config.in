@@ -1,0 +1,1 @@
+source "$BR2_EXTERNAL_QOSP_PATH/package/qosp/Config.in"

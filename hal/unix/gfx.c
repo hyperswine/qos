@@ -678,29 +678,37 @@ void gfx_init(int w, int h) { /* raw export: gfx_raw.h */
   qos_hostlog("[desktopgl] GLFW  OpenGL %s  %s",
               glGetString(GL_VERSION), glGetString(GL_RENDERER));
 #else
-  /* AUTO RESOLUTION: w or h of 0 means "the display's own mode" --
-   * probe the scanout FIRST so the FBO is created at exactly the
-   * monitor's resolution (1:1 blit, whole screen, no scaling).  With
-   * no display (or FPR_DRM=0) the classic 640x480 stands, so headless
-   * runs and replay checks are unchanged. */
-  if (w <= 0 || h <= 0) {
-    drm_scanout_init(&G.drm, 0, 0);
-    if (G.drm.on) {
-      w = (int)G.drm.mw;
-      h = (int)G.drm.mh;
-      G.drm.gw = w;
-      G.drm.gh = h;
-      G.drm.rd = (unsigned char *)malloc((size_t)w * h * 4);
-      if (!G.drm.rd) G.drm.on = 0;
-    } else {
-      /* headless: FPR_GFX_SIZE=WxH forces a size (development aid for
-       * exercising the wide-layout path without a display) */
-      const char *e = getenv("FPR_GFX_SIZE");
-      w = 640;
-      h = 480;
-      if (e && sscanf(e, "%dx%d", &w, &h) != 2) { w = 640; h = 480; }
-      if (w < 64 || h < 64 || w > 8192 || h > 8192) { w = 640; h = 480; }
-    }
+  /* THE MONITOR LINK GOES FIRST, always -- before EGL.
+   *
+   * Only the DRM master may modeset, and the master is whoever opened the
+   * primary node first.  Initialising EGL opens it: Mesa's loader probes
+   * /dev/dri/card* to find a driver for it.  So an EGL-first order hands
+   * Mesa the master and leaves the scanout with EBUSY and nowhere to put
+   * a frame -- on a Pi exactly as much as under QEMU.
+   *
+   * AUTO RESOLUTION: w or h of 0 means "the display's own mode", so the
+   * FBO is created at exactly the monitor's resolution (1:1 blit, whole
+   * screen, no scaling).  An explicit size is kept and blitted centred.
+   * With no display (or FPR_DRM=0) the classic 640x480 stands, so
+   * headless runs and replay checks are unchanged. */
+  int autoSize = (w <= 0 || h <= 0);
+  drm_scanout_init(&G.drm, autoSize ? 0 : w, autoSize ? 0 : h);
+  if (G.drm.on && autoSize) {
+    w = (int)G.drm.mw;
+    h = (int)G.drm.mh;
+    G.drm.gw = w;
+    G.drm.gh = h;
+    G.drm.rd = (unsigned char *)malloc((size_t)w * h * 4);
+    if (!G.drm.rd) G.drm.on = 0;
+  }
+  if (!G.drm.on && autoSize) {
+    /* headless: FPR_GFX_SIZE=WxH forces a size (development aid for
+     * exercising the wide-layout path without a display) */
+    const char *e = getenv("FPR_GFX_SIZE");
+    w = 640;
+    h = 480;
+    if (e && sscanf(e, "%dx%d", &w, &h) != 2) { w = 640; h = 480; }
+    if (w < 64 || h < 64 || w > 8192 || h > 8192) { w = 640; h = 480; }
   }
   const char *how = "?";
   G.dpy = egl_display(&how);
@@ -793,10 +801,6 @@ void gfx_init(int w, int h) { /* raw export: gfx_raw.h */
   if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
     fpr_cpanic("gfx: offscreen framebuffer incomplete");
   G.inited = 1;
-#ifndef FPR_DESKTOP_GL
-  /* the monitor link (explicit-size path; the auto path probed above) */
-  if (!G.drm.on && !G.drm.fd) drm_scanout_init(&G.drm, w, h);
-#endif
 }
 
 void gfx_dims(int *w, int *h) { /* raw export: gfx_raw.h */

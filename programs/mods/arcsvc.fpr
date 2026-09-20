@@ -11,9 +11,11 @@
 # discipline returns to zero.
 #
 # Protocol (one message type per mailbox):
-#   (replyTo, 1, 0)  Stats     -> (live)
-#   (replyTo, 2, 0)  Baseline  -> (live)   captures live as the baseline
-#   (replyTo, 3, 0)  Audit     -> (delta)  live - baseline; 0 = clean
+#   (replyTo, 1, 0)  Stats     -> (live,  0)
+#   (replyTo, 2, 0)  Baseline  -> (live,  0)  captures live as the baseline
+#   (replyTo, 3, 0)  Audit     -> (delta, 0)  live - baseline; 0 = clean
+#   (replyTo, n, 0)  anything else -> (0, 1)  the second slot is a status,
+#                    which the three known ops always answer as 0
 #
 # Under QOS the registration is System.qa's job (the same walk-to-the-
 # owner resolution every /services/* uses); standalone, spawn it and
@@ -51,3 +53,8 @@ arcStep me base replyTo 2 =
   _ = send replyTo (lv, 0);
   arcLoop me lv .
 arcStep me base replyTo 3 = send replyTo (arcLive 0 - base, 0) >> arcLoop me base .
+# an op this service does not know.  Without this clause the value fell
+# through to a runtime "no matching clause" that takes the whole service
+# with it -- a dispatcher over Int codes can never be complete, so the
+# refusal has to be part of the protocol.
+arcStep me base replyTo op = send replyTo (0, 1) >> arcLoop me base .

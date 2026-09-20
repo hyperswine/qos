@@ -3,10 +3,120 @@
 process) as real websocket clients: two sessions, deltas, client/server state,
 commands and subscriptions, many sessions fanned out, durable fields across a
 restart, and the journal replayed.   usage: liveboard-check.py <binary> [sessions]"""
-import base64, json, os, socket, struct, subprocess, sys, tempfile, time, urllib.request
+import atexit, base64, json, os, signal, socket, struct, subprocess, sys, tempfile, time, urllib.request
+from pathlib import Path
 
 binary = sys.argv[1]
 many = int(sys.argv[2]) if len(sys.argv) > 2 else 100
+
+# ---- the server under test, and being sure it dies --------------------------
+#
+# A server started here must not outlive the harness.  It used to be a bare
+# `finally: kill`, which does not survive the HARNESS being killed -- and this
+# check is routinely killed: by the outer `timeout` in check-all.sh, and by
+# anyone who gives up watching a 1000-session run.  Every abandoned run left a
+# liveboard holding a port forever.  Three things close that:
+#
+#   * its own process GROUP, so one signal reaches the server however it forked;
+#   * SIGTERM/SIGINT/SIGHUP handlers and an atexit hook, so every ordinary way
+#     this process dies runs the same cleanup;
+#   * a pidfile swept on startup, for the one way those cannot cover (SIGKILL).
+#
+# Output goes to a FILE rather than a pipe.  A pipe is 64 KiB and nobody was
+# draining it while the check ran, so a server that logged enough during a long
+# run would block in write() and never answer again -- indistinguishable from
+# the flake this check exists to hunt.
+PIDFILE = Path(tempfile.gettempdir()) / 'liveboard-check.pids'
+LIVE = []
+
+
+def _looks_like_ours(pid):
+    """Never signal a pid we cannot confirm: pids are reused."""
+    r = subprocess.run(['ps', '-o', 'command=', '-p', str(pid)], capture_output=True, text=True)
+    return 'liveboard' in r.stdout
+
+
+def _sweep():
+    if not PIDFILE.exists():
+        return
+    killed = 0
+    for tok in PIDFILE.read_text().split():
+        if not tok.isdigit():
+            continue
+        pid = int(tok)
+        if _looks_like_ours(pid):
+            try:
+                os.killpg(os.getpgid(pid), signal.SIGKILL)
+                killed += 1
+            except OSError:
+                pass
+    PIDFILE.unlink(missing_ok=True)
+    if killed:
+        print(f'(swept {killed} server(s) an earlier run left behind)', file=sys.stderr)
+
+
+def _remember():
+    PIDFILE.write_text(' '.join(str(p.pid) for p in LIVE if p.poll() is None))
+
+
+def said(p):
+    """Everything the server printed -- its own log, not a half-read pipe."""
+    try:
+        lines = [l for l in Path(p.log).read_text().splitlines()
+                 if l.strip() and not l.startswith(('dl:', '   trace'))]
+    except OSError:
+        return '(no output)'
+    return '\n   '.join(lines[-12:])
+
+
+def start(port, store, *extra, ready_within=30):
+    log = tempfile.NamedTemporaryFile(prefix='liveboard-', suffix='.log', delete=False)
+    p = subprocess.Popen([binary, f'--port={port}', f'--store={store}', *extra],
+                         stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+    p.log = log.name
+    LIVE.append(p)
+    _remember()
+    # a bounded wait: a server that never says `ready` is a failure to report,
+    # not a readline() that hangs until something outside kills us
+    end = time.time() + ready_within
+    while time.time() < end:
+        if p.poll() is not None:
+            raise AssertionError(f'server exited {p.returncode} before it was ready:\n   {said(p)}')
+        if any(l.startswith('ready') for l in Path(p.log).read_text().splitlines()):
+            return p
+        time.sleep(0.05)
+    stop(p)
+    raise AssertionError(f'server never said `ready` within {ready_within} s:\n   {said(p)}')
+
+
+def stop(p):
+    if p.poll() is None:
+        try:
+            os.killpg(os.getpgid(p.pid), signal.SIGKILL)
+        except OSError:
+            p.kill()
+    try:
+        p.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        pass
+    if p in LIVE:
+        LIVE.remove(p)
+    _remember()
+
+
+def _cleanup():
+    for p in list(LIVE):
+        try:
+            stop(p)
+        except Exception:
+            pass
+    PIDFILE.unlink(missing_ok=True)
+
+
+atexit.register(_cleanup)
+for _sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+    signal.signal(_sig, lambda s, _f: (_cleanup(), os._exit(128 + s)))
+_sweep()
 
 class Ws:
     def __init__(self, port, timeout=20):
@@ -50,12 +160,6 @@ class Ws:
             m = self.recv(max(0.1, end - time.time()))
             if pred(m): return m
         raise TimeoutError
-
-def start(port, store, *extra):
-    p = subprocess.Popen([binary, f'--port={port}', f'--store={store}', *extra], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    line = p.stdout.readline()
-    assert line.startswith('ready'), line + p.stderr.read()
-    return p
 
 def free_port():
     s = socket.socket(); s.bind(('127.0.0.1', 0)); port = s.getsockname()[1]; s.close(); return port
@@ -116,25 +220,23 @@ with tempfile.TemporaryDirectory() as t:
         for c in crowd: c.s.close()
         time.sleep(0.5)
         a.send('Stop')
-        assert srv.wait(timeout=20) == 0, srv.stderr.read()
+        assert srv.wait(timeout=20) == 0, said(srv)
     except Exception:
-        # say what the SERVER said: a panic goes to its stdout, a driver message to stderr
-        code = srv.poll()
-        if code is None: srv.kill()
-        out, err = srv.communicate(timeout=10)
-        lines = [l for l in (out + err).splitlines() if l.strip() and not l.startswith(('dl:', '   trace'))]
-        print(f'-- server exit code {code}; it said:\n   ' + '\n   '.join(lines[-8:]), file=sys.stderr)
+        print(f'-- server exit code {srv.poll()}; it said:\n   {said(srv)}', file=sys.stderr)
         raise
     finally:
-        if srv.poll() is None: srv.kill()
+        stop(srv)
     srv = start(port, store)
     try:
         c = Ws(port); f = c.recv()
         assert has(f, '111') and has(f, 'first note'), f
         c.send('Stop'); srv.wait(timeout=20)
         print('durable FIELDS survive a restart (count and notes back; clock, visitors and toast, deliberately, not): PASS')
+    except Exception:
+        print(f'-- server exit code {srv.poll()}; it said:\n   {said(srv)}', file=sys.stderr)
+        raise
     finally:
-        if srv.poll() is None: srv.kill()
+        stop(srv)
     r = subprocess.run([binary, f'--store={store}', '--replay'], capture_output=True, text=True, timeout=60)
     assert r.returncode == 0 and 'count=111' in r.stdout, r.stdout + r.stderr
     hist = [json.loads(l) for l in open(store) if l.strip()]

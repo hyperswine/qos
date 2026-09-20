@@ -4,6 +4,8 @@
 qosp
 *.disk
 qosp-gl
+qosp-es
+qosp-a64
 hal/.DS_Store
 *.project.local
 ROUNDS.md
