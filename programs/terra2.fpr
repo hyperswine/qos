@@ -41,7 +41,7 @@
 # ============================================================================
 #: host gl
 #: expect game over
-#: music ../models/music/Sunrise_Over_The_Spire.mp3
+#: music ../models/music/Skyward_Little_World.mp3
 
 unsafe program.
 
@@ -977,7 +977,8 @@ ageFx ((x, y, z, t) :: r) dt acc = ageFx r dt ((x, y, z, t + dt) :: acc).
 
 # the track beside the .qa (`#: music` above: run points FPR_ASSETS at it,
 # pack copies it into the bundle); M toggles it
-musicFile = "Sunrise_Over_The_Spire.mp3".
+# Original NeoMusic score; source and rebuild notes: models/music/README.md.
+musicFile = "Skyward_Little_World.mp3".
 musicVol = 450.
 
 # ---- keys: the selection state machine ---------------------------------------------------

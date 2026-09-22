@@ -37,7 +37,7 @@ grep -aq "destroyed" /tmp/terra2-check.log || fail "a death"
 grep -aq "you: MechInf called to forward 4" /tmp/terra2-check.log || fail "the tank's call"
 grep -aq "you: MechInf attacks the HQ" /tmp/terra2-check.log || fail "the tank's shot"
 grep -aq "HQ hit for 3: 10 left" /tmp/terra2-check.log || fail "the shell's damage"
-grep -aq "music Sunrise_Over_The_Spire.mp3: muted by FPR_SND_MUSIC=0" /tmp/terra2-check.log || fail "the music call"
+grep -aq "music Skyward_Little_World.mp3: muted by FPR_SND_MUSIC=0" /tmp/terra2-check.log || fail "the music call"
 grep -aq "\[gfx\] mesh tank_hull: 172 triangles" /tmp/terra2-check.log || fail "the hull mesh"
 grep -aq "\[gfx\] mesh tank_turret: 124 triangles" /tmp/terra2-check.log || fail "the turret mesh"
 for m in infantry infantry_kit infantry_rifle truck truck_kit truck_canvas hq hq_fence hq_dish; do

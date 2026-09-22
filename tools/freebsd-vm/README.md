@@ -97,3 +97,22 @@ this tree builds `make portable` rather than `portable-es`.
 A native toolchain. GHC is packaged for FreeBSD/arm64 (`ghc-9.10`), so
 building `fpr` in the guest and dropping the cross-compilation entirely is
 possible — it just is not lean, which was the brief.
+
+## What it costs in memory
+
+Measured 2026-09-21 on FreeBSD 14.5/arm64 (4 CPUs, 2 GiB, UFS, nothing
+installed), a minute after boot:
+
+| | FreeBSD guest |
+| --- | --- |
+| in use, of 2 GiB (realmem − free) | ~181 MiB |
+| of which wired (kernel) | 89 MiB |
+| active + inactive (userspace) | 9 MiB |
+| processes | 31 |
+| `qosp` hosting `mvuweb.qa` | 10 MiB RSS |
+| `liveboard` (idle) | 3 MiB RSS |
+
+For comparison, on the same RAM and CPUs: the Buildroot image uses about 97 MiB
+and Ubuntu 24.04 about 257 MiB (`docs/IMAGE.md`). An `mvuweb.qa` built before
+the `buddy_reserve_range` fix was 76 MiB here: the 1 GiB plugin window's
+16,384 per-unit writes cost one 4 KiB page each (64 MiB).

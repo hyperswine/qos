@@ -60,7 +60,7 @@ bundle.  `FPR_SND_MUSIC=0` mutes the channel, which is how the scripted
 game's WAV assertions (bursts over silence) still hold; `tests/music.fpr`
 plays three seconds of the track into a dump the check reads back, so the
 decoder is proven on its own.  Terra II starts
-models/music/Sunrise_Over_The_Spire.mp3 with the game and M toggles it.
+models/music/Skyward_Little_World.mp3 with the game and M toggles it.
 
 ## Cues as data: mods/sfx.fpr
 
