@@ -58,6 +58,8 @@ not development symlinks; the installed toolchain does not depend on either chec
 This does not remove QOS target support from the compiler, redesign the existing
 runtime profiles, settle Actor/Vector language membership, or create a POSIX
 backend. Those can now be developed against an explicit ownership boundary.
+(The POSIX backend has since been built on the FP-RISC side: `--system=posix`,
+fprisc/docs/PROFILES.md.)
 
 ## Git and releases
 

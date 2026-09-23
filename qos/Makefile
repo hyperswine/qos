@@ -82,7 +82,7 @@ QOSP_DEFS = -DQOSP_HOST $(REV_FLAG)
 # (tools/buildroot) names another.
 QOSP_ARCH ?= $(shell uname -m)
 ifneq ($(filter arm64 aarch64,$(QOSP_ARCH)),)
-QOSP_DEFS += -ffixed-x28
+QOSP_DEFS += -ffixed-x27 -ffixed-x28 -DFPR_HART_X28
 endif
 QOSP_INCS = -I$(HAL)/unix -Iappside -Iportable
 # FPRBUILD_EXTRA is how a cross build hands `fpr build` its --cc, so that

@@ -60,7 +60,7 @@ $(BUILD)/qosapp-a64.s: fprc $(SOURCE) $(FPRISC_ROOT)/core/prelude.fpr FORCE
 $(BUILD)/qosapp-a64.elf: $(BUILD)/qosapp-a64.s $(QOSAPP_RT_COMMON) $(FMACHINE)/unix/ctx_a64.S $(QOS)/appside/link-qosapp-a64.ld FORCE
 	clang --target=aarch64-none-elf -fuse-ld=lld -O2 -Wall -Wextra \
 	  -ffreestanding -nostdlib -nostartfiles -fno-stack-protector \
-	  -fno-asynchronous-unwind-tables -fno-pic -ffixed-x18 -ffixed-x28 \
+	  -fno-asynchronous-unwind-tables -fno-pic -ffixed-x18 -ffixed-x27 -ffixed-x28 \
 	  -DFPR_POSIX -DFPR_QOSAPP $(QOS_BASE_FLAG) -DFPR_NHARTS=$(QOSHARTS) -DFPR_SLAB_SZ=$(QOSSLAB) -DFPR_STACK_SZ=$(QOSSTACK) $(QOSCFLAGS_EXTRA) \
 	  -I$(FRUNTIME) -I$(QOS)/appside \
 	  -T $(QOS)/appside/link-qosapp-a64.ld -Wl,--defsym=QOS_SLOT_BASE=$(QOS_SLOT_BASE) \
@@ -129,7 +129,7 @@ plugin-qa-a64: fprc $(FPRISC_ROOT)/core/prelude.fpr
 	LC_ALL=C.UTF-8 "$(FPRC)" --target=qa64 --plugin --prelude=$(FPRISC_ROOT)/core/prelude.fpr $(SOURCE) $(BUILD)/plug-$(PLUGID)-a64.s
 	clang --target=aarch64-none-elf -fuse-ld=lld -O2 -Wall -Wextra \
 	  -ffreestanding -nostdlib -nostartfiles -fno-stack-protector \
-	  -fno-asynchronous-unwind-tables -fno-pic -ffixed-x28 \
+	  -fno-asynchronous-unwind-tables -fno-pic -ffixed-x27 -ffixed-x28 \
 	  -DFPR_POSIX -DFPR_QOSAPP $(QOS_BASE_FLAG) -DFPR_NHARTS=$(QOSHARTS) -DFPR_SLAB_SZ=$(QOSSLAB) -DFPR_STACK_SZ=$(QOSSTACK) $(QOSCFLAGS_EXTRA) -I$(FRUNTIME) -I$(QOS)/appside \
 	  -T $(QOS)/appside/link-qosplug.ld -T $(BUILD)/plugsyms-a64.ld \
 	  -Wl,--defsym=PLUG_BASE=$(PLUGBASE) \
