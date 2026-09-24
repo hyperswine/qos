@@ -51,3 +51,5 @@ dist/
 
 # where the fprisc checkout is on THIS machine (`./qos.py fprisc DIR`)
 fprisc.path
+
+NOTES.txt
