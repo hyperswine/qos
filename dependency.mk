@@ -22,7 +22,7 @@ export FPR_PATH := $(FPRISC_ROOT)
 # compiler types the language, its runtime and its machine layer, not an OS
 export FPR_FOREIGN := $(QOS_ROOT)/core/foreign.fpr
 FPRC := $(FPRISC_ROOT)/fpr
-# the compiler tree's RUNTIME and MACHINE LAYER (../fprisc/docs/HAL.md); `hal/`
+# the compiler tree's RUNTIME and MACHINE LAYER (../fprisc/docs/2026-09-19-HAL.md); `hal/`
 # in THIS tree is the QOS HAL
 FRUNTIME := $(FPRISC_ROOT)/runtime
 FMACHINE := $(FPRISC_ROOT)/machine

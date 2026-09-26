@@ -18,6 +18,7 @@
 #
 # programs/dungeon.fpr is the shell: MVU wiring, the 3D scene, the HUD.
 # ============================================================================
+
 unsafe module.
 
 # ---- the world's vocabulary -------------------------------------------------------------
@@ -552,4 +553,3 @@ key m k = m.
 restartKey m k | k == 19 = start m.
 restartKey m k = m.
 start m = { initModel | screen = scPlay, snap = m.snap, ms = m.ms, keys = m.keys }.
-
