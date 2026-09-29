@@ -1,3 +1,7 @@
+Kind: Working notes. Began: 2026-08-25. Last recorded source update: 2026-09-09 bdd5b84.
+Date basis: first-added history (2026-08-25 4707a87); later edits remain identified separately.
+Organized 2026-09-29; historical claims and checks below were not revalidated.
+
 make qos for macos
 then make portable
 then make plugin for the app to get .qa, and put on disk

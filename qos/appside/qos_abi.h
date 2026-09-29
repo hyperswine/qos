@@ -45,7 +45,7 @@
 /* The arena has no size of its own: the host RESERVES address space at the
  * base -- the largest span it can get, from QOS_ARENA_MAX down -- and the OS
  * commits pages as the app touches them.  The size arrives in the boot
- * record; nothing is linked into the app (docs/BOUNDS.md).  QOS_ARENA_MIN is
+ * record; nothing is linked into the app (docs/2026-09-19-BOUNDS.md).  QOS_ARENA_MIN is
  * what the fixed windows below need. */
 #define QOS_ARENA_MAX (1ul << 40) /* the buddy's largest block */
 #define QOS_ARENA_MIN (4ul << 30)
@@ -219,7 +219,7 @@ typedef struct {
    * the stack guard: the app's runtime carves actor stacks out of its own
    * arena but cannot make memory inaccessible; the host can.  The app
    * registers `current` so the host's fault handler can ask WHICH actor
-   * ran off its stack and say so by name (docs/BOUNDS.md). */
+   * ran off its stack and say so by name (docs/2026-09-19-BOUNDS.md). */
   void (*stack_guard)(void *lo, uint64_t size);
   void (*stack_unguard)(void *lo, uint64_t size);
   void (*set_stack_query)(void *(*current)(uint64_t *id, uint64_t *size));
@@ -242,7 +242,7 @@ typedef struct {
  * Everything the Loader stage hands the app, in one versioned struct
  * (the ABI can grow by appending fields; abi_version gates readers).
  * caps is System.qa's serialized grant format unchanged:
- * "appid\nurl mode\n" lines (docs/QA-FORMAT.md) -- the FPRISC side
+ * "appid\nurl mode\n" lines (docs/2026-07-19-QA-FORMAT.md) -- the FPRISC side
  * reads it via Sys.caps and enforces its own gate, equal strength to
  * the bare-metal process model since neither has hardware behind it. */
 typedef struct {

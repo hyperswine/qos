@@ -10,7 +10,7 @@
 # that system.fpr computed with QAR.  This is the same shape: the app reads
 # the archive with the modules the kernel and the host launch with, and
 # hands the host the five things it needs.  The host parses nothing, and
-# that was the last C archive parser.  (../fprisc/docs/C-REDUCTION.md)
+# that was the last C archive parser.  (../fprisc/docs/2026-09-19-C-REDUCTION.md)
 
 QAR = use "qar".
 M   = use "manifest".

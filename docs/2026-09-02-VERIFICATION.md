@@ -1,5 +1,9 @@
 # VERIFICATION.md — verifying the C under QOS (a study, with three probes)
 
+Kind: Study. Began: 2026-09-02. Last recorded source update: 2026-09-19 b942485.
+Date basis: first-added history (2026-09-02 35ce6ac); later edits remain identified separately.
+Organized 2026-09-29; historical claims and checks below were not revalidated.
+
 The question: the whole language side is checked by types, linearity,
 proofs (`std`) and transactions, but the floor under it is ~11k lines of C
 (the HAL runtime, the portable host) that is tested only by example legs
@@ -26,7 +30,7 @@ Things that make it easier than "generic C": no recursion to speak of, no
 except the HAL table and scheduler plane, fixed-size arenas and rings,
 every invariant already spelled as a `fpr_cpanic` (120+ of them), and
 every subsystem documented as laws (`docs/MEMORY.md` "The laws", the
-allocator contract; `docs/QA-FORMAT.md` "the entire loader contract, as
+allocator contract; `docs/2026-07-19-QA-FORMAT.md` "the entire loader contract, as
 text").  Things that make it harder: 63 atomics with explicit
 acquire/release in `actors.c`, epoch-based reclamation (`chblk` limbo),
 and MMIO.

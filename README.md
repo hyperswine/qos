@@ -28,7 +28,7 @@ commit in `fprisc.lock.json` for releases.
 - `hal/virt/`: the QOS HAL on the virt board -- the PLIC, virtio net and block, the pin bus.
 - `hal/unix/`: the QOS HAL over a Unix host -- graphics, audio, input, net, block, tty.
 - `loader/`: QOS application, process and image loaders (the kernel's side of launching).
-  The HAL is QOS's; the compiler tree keeps only a machine layer: [docs/HAL.md](docs/HAL.md).
+  The HAL is QOS's; the compiler tree keeps only a machine layer: [docs/2026-09-19-HAL.md](docs/2026-09-19-HAL.md).
 - `Makefile` + `qos-app.mk`: how a program becomes a `.qa`; `qos/Makefile`: the hosts.
 - `qos.py`: build, run, disk, bundle, install and release commands.
 - `.fpr/` + `fpr.lock`: the committed module versions this tree pins.
@@ -38,11 +38,14 @@ nothing installed in the guest -- see
 [tools/freebsd-vm/](tools/freebsd-vm/README.md).
 
 To ship QOS Portable as its own bootable Linux rather than as a program on
-somebody else's, see [docs/IMAGE.md](docs/IMAGE.md) and
+somebody else's, see [docs/2026-09-21-IMAGE.md](docs/2026-09-21-IMAGE.md) and
 [tools/buildroot/](tools/buildroot/README.md): a Buildroot image with a
 kernel, Mesa, ssh, wifi and `qosp` and nothing else, so a Raspberry Pi 4
 powers on into a full-screen FP-RISC application with no window system.
 
-See [the split guide](docs/REPOSITORY-SPLIT.md) for the ownership map and the
+The [chronological documentation index](docs/README.md) separates dated designs,
+implementation records, references and later updates.
+
+See [the split guide](docs/2026-09-18-REPOSITORY-SPLIT.md) for the ownership map and the
 release transition.  The previous combined README and tag workflow are kept
 under `docs/history/` for reference.

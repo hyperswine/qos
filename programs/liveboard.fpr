@@ -1,5 +1,5 @@
 # liveboard.fpr -- a LIVE app on a plain posix process: FP-RISC + ExtBase hosting
-# a real GUI the FPRLive way (../fprisc/docs/LIVE.md, docs/FPRLIVE.md).
+# a real GUI the FPRLive way (../fprisc/docs/2026-09-20-LIVE.md, docs/2026-09-02-FPRLIVE.md).
 #
 #   ../fprisc/fpr run programs/liveboard.fpr [--port=8080] [--store=board.kvlog] [--dev]
 #

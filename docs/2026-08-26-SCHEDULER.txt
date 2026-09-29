@@ -1,3 +1,7 @@
+Kind: Design and implementation notes. Began: 2026-08-26. Last recorded source update: 2026-09-07 1b46127.
+Date basis: first-added history (2026-08-26 0b1ee17); later edits remain identified separately.
+Organized 2026-09-29; historical claims and checks below were not revalidated.
+
 Generate an index of the ready slots
 Ready slots and backlog and runqueue
 

@@ -1,4 +1,4 @@
-# qdisk2.fpr -- stage 2 of qosp.disk: the docs/DISK.txt format, tested
+# qdisk2.fpr -- stage 2 of qosp.disk: the docs/2026-08-26-DISK.txt format, tested
 # end to end on QOS Portable over hal/unix/blk_raw.c.
 #
 #   make qos-app PROG=tests/qdisk2.fpr && (cd qos && make portable \

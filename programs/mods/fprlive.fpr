@@ -24,7 +24,7 @@
 # broadcasts a new model.  A slow or hostile peer stalls only its own
 # actor; sessions scale with memory, not with a table.
 #
-# The wire (docs/FPRLIVE.md):
+# The wire (docs/2026-09-02-FPRLIVE.md):
 #   GET /            the page: generated CSS, <div id=lv-root>, the client
 #   GET /ws          RFC 6455 upgrade (Sec-WebSocket-Accept = base64(sha1
 #                    (key ++ GUID)), both implemented here in FPRISC)

@@ -2,7 +2,7 @@
 # qlog.fpr -- the append-only page log, as a separately compiled module,
 #             plus the STORAGE ACTOR System.qa spawns to own it.
 #
-# The on-disk layout is docs/DISK.txt made concrete:
+# The on-disk layout is docs/2026-08-26-DISK.txt made concrete:
 #
 #   [ METADATA | DATA | SWAP ]
 #

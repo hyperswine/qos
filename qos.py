@@ -954,7 +954,7 @@ def cmd_commit(a):
     return sh([str(COMPILER), "commit"] + (["--major"] if a.major else []) + [mod], cwd=ROOT, check=False)
 
 # ---- versions: pins, the lock, releases -------------------------------------
-# Three layers, each answering one question (docs/VERSIONING.md):
+# Three layers, each answering one question (docs/2026-08-25-VERSIONING.md):
 #   module   `fpr commit`  -> .fpr/versions.db + .fpr/store   what code is "qlog v2.0"?
 #   tree     fpr.lock      -> every `use "x#hash"` pin, named   what does THIS tree pin?
 #   release  release.toml  -> git tag vX.Y.Z + dist bundles     what did we ship?
@@ -1076,7 +1076,7 @@ def restamp_qa(path, stamps):
     """Rewrite a .qa's MANIFEST with release identity (version, release,
     git, built).  QAR2's integrity sha covers the IMAGE only, so the
     manifest can carry provenance without touching what the loader
-    verifies (docs/QA-FORMAT.md)."""
+    verifies (docs/2026-07-19-QA-FORMAT.md)."""
     b = path.read_bytes()
     if b[:5] != b"QAR2\n":
         die(f"{path}: not a QAR2 archive")

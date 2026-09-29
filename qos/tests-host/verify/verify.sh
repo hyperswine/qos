@@ -1,7 +1,7 @@
 #!/bin/sh
 : "${FPRISC_ROOT:?Set FPRISC_ROOT to the fprisc checkout}"
 # verify.sh -- the verification slice for the QOS C backend
-# (docs/VERIFICATION.md).  Three tools, three targets, each skipped
+# (docs/2026-09-02-VERIFICATION.md).  Three tools, three targets, each skipped
 # with a message when its tool is absent:
 #
 #   pbt    Hypothesis drives runtime/buddy.c through ctypes: random

@@ -1,7 +1,7 @@
 /* sha256.c -- SHA-256, the host's one piece of arithmetic.  Whether a digest
  * is ACCEPTABLE is decided by whoever asked: qosp.fpr for the app's image,
  * host.c's plugin loader for a plugin's.  (Moved out of qa.c, the C archive
- * parser, when that was deleted: ../fprisc/docs/C-REDUCTION.md.) */
+ * parser, when that was deleted: ../fprisc/docs/2026-09-19-C-REDUCTION.md.) */
 #include <stdint.h>
 #include <string.h>
 

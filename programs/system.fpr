@@ -1,7 +1,7 @@
 # ============================================================================
 # system.fpr -- System.qa: the QOS bootstrap process, the .qa launcher with
 #               static permission flow, and the shipped apps, all co-compiled
-#               into one image (the name-dispatch era -- docs/QA-FORMAT.md).
+#               into one image (the name-dispatch era -- docs/2026-07-19-QA-FORMAT.md).
 #
 # Boot flow (mirrors the request):
 #   crt0 -> fpr_rt_init sets up the clean HAL -> fpr_fn_main (this file's

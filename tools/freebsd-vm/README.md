@@ -56,7 +56,7 @@ token. The same line builds any FP-RISC program — a plain server needs no
 
 **The build machine must already be aarch64.** `fpr` picks the context switch
 and `-ffixed-x28` from the machine it runs on, so this crosses the operating
-system and the libc, not the instruction set (`fprisc/docs/BOUNDS.md`).
+system and the libc, not the instruction set (`fprisc/docs/2026-09-19-BOUNDS.md`).
 
 `fpr`'s runtime object cache is keyed by `--cc`, so the FreeBSD objects and
 the Linux ones do not collide.
@@ -86,7 +86,7 @@ in its own actor, N concurrent sessions all seeing the next update, and the
 append-only store written on disk in the guest.
 
 At 1000 concurrent sessions it has run clean repeatedly, which is worth
-noting against the Linux figures in `fprisc/docs/LIVE.md`.
+noting against the Linux figures in `fprisc/docs/2026-09-20-LIVE.md`.
 
 ## Not done here
 
@@ -113,6 +113,6 @@ installed), a minute after boot:
 | `liveboard` (idle) | 3 MiB RSS |
 
 For comparison, on the same RAM and CPUs: the Buildroot image uses about 97 MiB
-and Ubuntu 24.04 about 257 MiB (`docs/IMAGE.md`). An `mvuweb.qa` built before
+and Ubuntu 24.04 about 257 MiB (`docs/2026-09-21-IMAGE.md`). An `mvuweb.qa` built before
 the `buddy_reserve_range` fix was 76 MiB here: the 1 GiB plugin window's
 16,384 per-unit writes cost one 4 KiB page each (64 MiB).

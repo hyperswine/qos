@@ -15,7 +15,7 @@ endif
 QOS_BASE_FLAG  = -DQOS_ARENA_BASE=$(QOS_SLOT_BASE)ul
 # the app's notion of "the heap" (fpr_in_heap) comes from the boot record at
 # run time.  It used to be linked in here as ARENA_MB and had to agree with
-# the host's (found as random corruption past ~220 sessions): docs/BOUNDS.md
+# the host's (found as random corruption past ~220 sessions): docs/2026-09-19-BOUNDS.md
 QOSHARTS ?= 8
 QOSAPP_RT_COMMON = $(QOS)/appside/entry.c $(QOS)/appside/hal.c $(QOS)/appside/support.c \
 				   $(FRUNTIME)/runtime.c $(FRUNTIME)/actors.c $(FRUNTIME)/bits.c \

@@ -2,7 +2,7 @@
 # input-check.sh -- does QOS Portable capture a terminal, a real /dev/input
 # keyboard and a mouse on arm64 Linux?  Needs the guest up, provisioned and
 # synced (vm.sh), with fpr and qosp built in it.  The keys are pressed from
-# OUTSIDE the guest, through QEMU's USB keyboard and mouse.  docs/INPUT.md.
+# OUTSIDE the guest, through QEMU's USB keyboard and mouse.  docs/2026-09-19-INPUT.md.
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
 vm() { "$HERE/vm.sh" ssh "$@"; }

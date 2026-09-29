@@ -2,7 +2,7 @@
 #
 # A .qa's LOAD section is text: six `key <decimal>` lines (base, entry,
 # execsz, rwoff, imagesz, memsz), in any order, plus an optional
-# `sha <64 hex>` naming the IMAGE's sha-256 (docs/QA-FORMAT.md).  This module
+# `sha <64 hex>` naming the IMAGE's sha-256 (docs/2026-07-19-QA-FORMAT.md).  This module
 # reads it and refuses an inconsistent one.
 #
 # It used to be C (loader/qaimg.c: a hand-rolled key/decimal scanner and
@@ -12,7 +12,7 @@
 # sha line.  Every one of those callers has FP-RISC on its side of the call
 # now, so the text is read here and the C keeps only what C must do: check
 # the image lies in the window it was given, copy it there, and zero its
-# tail (fpr_qaimg_place).  ../fprisc/docs/C-REDUCTION.md.
+# tail (fpr_qaimg_place).  ../fprisc/docs/2026-09-19-C-REDUCTION.md.
 #
 # Pure: strings in, values out.
 

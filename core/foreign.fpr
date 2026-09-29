@@ -9,7 +9,7 @@
 # They USED to be builtins: the compiler's own type environment named one
 # operating system's HAL -- glRender, blkRead, Pin.*, Sys.caps, Apps.* -- so
 # a language implementation could not be read without QOS in it.  The line
-# is now where the implementation is (../fprisc/docs/HAL.md): what the
+# is now where the implementation is (../fprisc/docs/2026-09-19-HAL.md): what the
 # runtime or the machine layer implements, the compiler declares (actors,
 # Mod.*, the logs, Sys.irqBind, register access); what QOS implements, QOS
 # declares -- here.

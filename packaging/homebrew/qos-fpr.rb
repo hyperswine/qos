@@ -11,7 +11,7 @@
 #
 # What lands: bin/fpr (the compiler + the sol VM), bin/sol (fpr sol),
 # bin/qos (qos.py), and libexec/qos-fpr/ with the std, the HAL, the
-# QOS host sources and the prebuilt qosp[-gl] -- see docs/INSTALL.md.
+# QOS host sources and the prebuilt qosp[-gl] -- see docs/2026-09-10-INSTALL.md.
 class QosFpr < Formula
   desc "FP-RISC: the compiler, the Sol VM, and QOS Portable, as one toolchain"
   homepage "https://github.com/hyperswine/qos-fpr"

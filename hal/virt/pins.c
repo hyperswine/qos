@@ -3,7 +3,7 @@
  * Was part of the compiler tree's hal/virt/hal.c.  A pin bus is a DEVICE, and
  * devices are the QOS HAL's: the machine layer under the language keeps only
  * what the runtime itself needs (boot, context switch, a console byte, the
- * doorbell and the timer, register access).  ../../docs/HAL.md. */
+ * doorbell and the timer, register access).  ../../docs/2026-09-19-HAL.md. */
 #include "fpr.h"
 
 /* ---- GPIO pins (the C HAL tier; docs/PINS.md) -----------------------

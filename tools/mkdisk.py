@@ -8,7 +8,7 @@ off the disk ON DEMAND at launch -- the same storage protocols the kv
 streams use, just different urls.  The rodata registry remains only as
 the diskless fallback.
 
-Format (mods/qlog.fpr, docs/DISK.txt -- the v2 grammar; a v1 reader
+Format (mods/qlog.fpr, docs/2026-08-26-DISK.txt -- the v2 grammar; a v1 reader
 still finds head as the second word and the url as the fourth):
   page 0:  "QLOG <head> v2 w0 c1 d<dataEnd> s<dataEnd> m0\n"
            (METADATA: head, version, write/commit flags, the DATA

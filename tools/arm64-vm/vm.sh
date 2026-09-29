@@ -12,7 +12,7 @@
 #   vm.sh ssh [cmd]  a shell, or one command
 #
 # State lives in $QOS_VM_DIR (default ~/.cache/qos-arm64-vm).  Needs qemu
-# (`brew install qemu`), rsync, ssh, hdiutil or genisoimage.  docs/INPUT.md.
+# (`brew install qemu`), rsync, ssh, hdiutil or genisoimage.  docs/2026-09-19-INPUT.md.
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
 QOS=$(cd "$HERE/../.." && pwd)

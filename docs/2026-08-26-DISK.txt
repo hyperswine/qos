@@ -1,3 +1,7 @@
+Kind: Design notes. Began: 2026-08-26. Last recorded source update: 2026-08-25 6592866.
+Date follows the first-added commit 2026-08-26 0b1ee17; imported commit dates are not monotonic.
+Organized 2026-09-29; historical claims and checks below were not revalidated.
+
 The disk is meant to be very simple
 
 [METADATA | DATA | SWAP ]

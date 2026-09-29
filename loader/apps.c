@@ -5,7 +5,7 @@
  * table that lets the launcher run a co-compiled app once its manifest
  * permissions are granted. A disk-backed /apps (diskfs) overrides these
  * by Id at the System.qa VFS layer -- rodata is the fallback, disk is
- * the install target (docs/QA-FORMAT.md).
+ * the install target (docs/2026-07-19-QA-FORMAT.md).
  *
  * Two tables, both generated into apps_data.c by tools/genapps.py:
  *   fpr_qa_blobs[]   : { id, bytes, len }   the .qa archives

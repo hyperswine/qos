@@ -1,5 +1,9 @@
 # QOS / FP-RISC repository split
 
+Kind: Migration record. Began: 2026-09-18. Last recorded source update: 2026-09-23 8be26a6.
+Date basis: first-added history (2026-09-18 ae18b84); later edits remain identified separately.
+Organized 2026-09-29; historical claims and checks below were not revalidated.
+
 This is a structural separation from monorepo commit
 `8936d1967e654304ff12755219e7e380583763f1`. The original `qos-fpr` checkout remains
 untouched. The obsolete, separately backed-up `FP-RISC` checkout was removed at the
@@ -59,7 +63,7 @@ This does not remove QOS target support from the compiler, redesign the existing
 runtime profiles, settle Actor/Vector language membership, or create a POSIX
 backend. Those can now be developed against an explicit ownership boundary.
 (The POSIX backend has since been built on the FP-RISC side: `--system=posix`,
-fprisc/docs/PROFILES.md.)
+fprisc/docs/2026-09-19-PROFILES.md.)
 
 ## Git and releases
 

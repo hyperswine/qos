@@ -17,7 +17,7 @@
  *   Stage 2, Loader -- read the .qa (the app owns the arena past its
  *     image, abi v12: no host allocator over it),
  *     parse the manifest, run the permission gate (required perms are
- *     compulsory: any denial refuses the launch, docs/QA-FORMAT.md);
+ *     compulsory: any denial refuses the launch, docs/2026-07-19-QA-FORMAT.md);
  *     reserve the image slot; elfload the QOS-x86_64 ELF into it;
  *     assemble the boot record (HAL table, heap grant, growth
  *     callback, serialized caps, storage syscall).
@@ -482,7 +482,7 @@ static V h_run(V idv, V namev, V capsv) {
               resolve_nharts(), (unsigned)QOS_ABI_VERSION);
   TRACE("stage 3: entering the app (arena %#" PRIx64 " +%" PRIu64 " MiB, tls_off %" PRId64 ")\n",
         arena_base, arena_size >> 20, (int64_t)boot.tls_off);
-  static char result[64 * 1024]; /* the entry ABI's buffer (docs/BOUNDS.md) */
+  static char result[64 * 1024]; /* the entry ABI's buffer (docs/2026-09-19-BOUNDS.md) */
   fflush(stdout);
   g_in_app = 1;
   int64_t rc = enter_app((qos_app_entry_t)g_ld.entry, &boot, result, sizeof result);

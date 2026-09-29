@@ -98,7 +98,7 @@ sleepChild me ms =
   Unit.
 # unlike the loops above this one RETURNS -- `send` answers a Result, so
 # that is its type.  `a` would have promised the caller any type it liked
-# out of a value that is always a Result (fprisc/docs/SAFETY.md).
+# out of a value that is always a Result (fprisc/docs/2026-08-25-SAFETY.md).
 sleeper : unsafe Int -> Int -> Int -> Result Unit String .
 sleeper t ms me2 =
   _ = Sys.sleepUs (ms * 1000);

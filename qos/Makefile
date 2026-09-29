@@ -24,7 +24,7 @@ FPR    = ..
 HARTS ?= 2
 QOSHARTS ?= 8
 # (the host arena has no size: qosp reserves address space for it at run
-# time -- portable/host.c, docs/BOUNDS.md; QOSP_ARENA_MB caps a run)
+# time -- portable/host.c, docs/2026-09-19-BOUNDS.md; QOSP_ARENA_MB caps a run)
 CROSS  = riscv64-unknown-elf-
 QEMU   = qemu-system-riscv64
 # outputs qos.py redirects into the project's .qos/ (an installed tree is

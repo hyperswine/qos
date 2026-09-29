@@ -1,7 +1,7 @@
 # inputcap.fpr -- print every input event for ~8 s: what does this host capture?
 # Driven by tools/arm64-vm/input-check.sh (a terminal, a real /dev/input
 # keyboard, a mouse); also handy by hand on a Pi:
-#   FPR_EVDEV=auto ./qos/qosp --yes inputcap.qa        docs/INPUT.md
+#   FPR_EVDEV=auto ./qos/qosp --yes inputcap.qa        docs/2026-09-19-INPUT.md
 unsafe program.
 show k a c = print "event {k} {a} {c}".
 loop left n = case left == 0 of

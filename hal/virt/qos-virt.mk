@@ -4,7 +4,7 @@
 # switch, a console byte, the doorbell and timer, register access).  These are
 # the DEVICES a program sees, and devices are QOS's: the PLIC (irq routing to
 # the actor that bound a source), virtio net (with its TCP stack) and block,
-# the pin bus, and the table that names them.  docs/HAL.md.
+# the pin bus, and the table that names them.  docs/2026-09-19-HAL.md.
 #
 # Include AFTER defining FPRC, BUILD and QOS_HAL (this tree's hal/ directory);
 # add $(QOS_VIRT_HAL) to the link's inputs and prerequisites.  The PLIC driver

@@ -1,3 +1,7 @@
+Kind: Historical review. Began: 2026-08-29. Last recorded source update: 2026-09-19 b942485.
+The title supplies the review date; first added to Git on 2026-09-04 c8eb64c.
+Organized 2026-09-29; historical claims and checks below were not revalidated.
+
 DESIGN & CODE REVIEW · 2026-08-29 · REPO @ 614A9E9
 The qos-fpr Review
 FP-RISC, Sol, and QOS measured against their own ethos — simple elegant code over premature optimization; linear vectors, refcounting, lambda lifting; no closures, no GC — plus an honest read on day-one usability and Linux-appliance readiness.

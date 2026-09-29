@@ -79,7 +79,7 @@ crosses to another *libc*, not to another *arch*: `Build.hs` still picks the
 context switch, `-ffixed-x28` and `-no-pie` from the machine it runs on. An
 aarch64 Linux box building an aarch64 image — which is what `tools/arm64-vm`
 gives you — is sound; an x86_64 box would build the wrong thing, quietly.
-This is written down in `fprisc/docs/BOUNDS.md`.
+This is written down in `fprisc/docs/2026-09-19-BOUNDS.md`.
 
 ## Booting the QEMU image
 

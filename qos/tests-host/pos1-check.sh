@@ -2,7 +2,7 @@
 
 # pos1-check.sh -- POS v1 (programs/pos1.fpr) under qosp's socket
 # tier, driven by pos1-check.py as websocket registers: the design's
-# example and its adversarial legs (docs/POS1-DESIGN.md S9 and S10).
+# example and its adversarial legs (docs/2026-09-07-POS1-DESIGN.md S9 and S10).
 
 set -e
 cd "$(dirname "$0")"

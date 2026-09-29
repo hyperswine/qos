@@ -8,7 +8,7 @@
 # mods/manifest.fpr), so there is one implementation of each and none of
 # them has a capacity.  This used to be main() in C, with its own manifest
 # parser beside it (32 permissions, 95-byte urls, a 4 KiB blob, each
-# silently cut): docs/BOUNDS.md, ../fprisc/docs/C-REDUCTION.md.
+# silently cut): docs/2026-09-19-BOUNDS.md, ../fprisc/docs/2026-09-19-C-REDUCTION.md.
 #
 # What stays in C is what only C on this OS can do, and it is declared here
 # as signatures with no definition -- this program's own HAL, linked with
@@ -62,7 +62,7 @@ abiGate man =
 
 # ---- the image's integrity --------------------------------------------------
 # the LOAD section may carry `sha <hex>`: the sha-256 of IMAGE.  Absent =
-# nothing claimed, nothing to refuse (docs/QA-FORMAT.md).  mods/qaimg.fpr
+# nothing claimed, nothing to refuse (docs/2026-07-19-QA-FORMAT.md).  mods/qaimg.fpr
 # reads the section; hashing is the host's one piece of arithmetic.
 shaGate m img = case QI.sha m == "" of
     True -> Unit

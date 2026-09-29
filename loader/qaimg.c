@@ -1,4 +1,4 @@
-/* qaimg.c -- placing a QAR2 flat image (docs/QA-FORMAT.md).
+/* qaimg.c -- placing a QAR2 flat image (docs/2026-07-19-QA-FORMAT.md).
  *
  * The load path used to live here whole: a hand-rolled `key <decimal>`
  * scanner over the LOAD section's text and five consistency refusals, then

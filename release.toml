@@ -1,5 +1,5 @@
 # release.toml -- what a QOS FPR release IS.  Read by `./qos.py lock` and
-# `./qos.py release` (docs/VERSIONING.md, "Three layers").
+# `./qos.py release` (docs/2026-08-25-VERSIONING.md, "Three layers").
 #
 #   version   the next tag: `./qos.py release` mints v<version>; passing a
 #             version on the command line rewrites this line first
@@ -14,8 +14,8 @@ apps = [
   "tests/pos.fpr",      # POS v2 over FPRLive: the LiveView app, an actor per session
   "tests/hello.fpr",    # the smallest hosted .qa
   "programs/terra2.fpr", # Terra II on the GL host (`#: host gl` -> qosp-gl in the bundle)
-  "programs/pos1.fpr",   # POS v1: the shop as one log, registers over FPRLive (docs/POS1.md)
-  "programs/dungeon.fpr", # the dungeon crawler on the GL host (docs/DUNGEON.md)
+  "programs/pos1.fpr",   # POS v1: the shop as one log, registers over FPRLive (docs/2026-09-07-POS1.md)
+  "programs/dungeon.fpr", # the dungeon crawler on the GL host (docs/2026-09-08-DUNGEON.md)
 ]
 
 modules = [

@@ -2,7 +2,7 @@
 
     tools/mkqa.py <manifest.toml> <app.elf> -o out.qa
 
-QAR2 (docs/QA-FORMAT.md): the ELF is consumed HERE, once, at build
+QAR2 (docs/2026-07-19-QA-FORMAT.md): the ELF is consumed HERE, once, at build
 time.  Its PT_LOADs are flattened into one image blob; what ships is
 
     QAR2\n MANIFEST/LOAD/IMAGE table \n\n  payloads

@@ -3,7 +3,7 @@
 
 # build-process-app.sh -- build a dynamically-loadable QOS process app
 # and wrap it in a QAR2 .qa with loadMode = "process" set.
-# (docs/QA-FORMAT.md; docs/PROCESS-LOADING.md has the original design.)
+# (docs/2026-07-19-QA-FORMAT.md; docs/PROCESS-LOADING.md has the original design.)
 #
 # Usage: tools/build-process-app.sh <app.fpr> <manifest.toml> <out.qa> [rv32|rv64]
 #

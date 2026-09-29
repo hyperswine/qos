@@ -1,5 +1,10 @@
 # FP-RISC and QOS
 
+Kind: Archived snapshot. Began: 2026-09-18. Last recorded source update: 2026-09-18 ae18b84.
+Archived on the split date; original README history begins 2026-07-19 3264918.
+Original snapshot paths and claims are retained as historical evidence.
+Organized 2026-09-29; historical claims and checks below were not revalidated.
+
 ONE language, ONE frontend, FOUR execution profiles, and a provable std.
 
 ## One entry point

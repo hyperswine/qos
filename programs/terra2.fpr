@@ -1,5 +1,5 @@
 # ============================================================================
-# terra2.fpr -- Terra II, the card game (docs/TERRA2.md), in FP-RISC on QOS.
+# terra2.fpr -- Terra II, the card game (docs/2026-09-04-TERRA2.md), in FP-RISC on QOS.
 #
 # The V1 rules cut down to what proves the POSITIONAL economy on a screen:
 # two zones x five slots a side, supply earned from rear units and drained

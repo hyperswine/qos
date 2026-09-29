@@ -1,5 +1,9 @@
 # Versioning: `fpr commit`, the .fpr store, fpr.lock, and releases
 
+Kind: Historical reference. Began: 2026-08-25. Last recorded source update: 2026-09-18 4e33d20.
+Date basis: first-added history (2026-08-25 4707a87); later edits remain identified separately.
+Organized 2026-09-29; historical claims and checks below were not revalidated.
+
 ## Three layers
 
 Each layer answers one question, and each is built from the one below:
