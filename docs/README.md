@@ -75,3 +75,4 @@ Source-adjacent READMEs under `tools/` stay beside the tools they explain.
 | 2026-09-19 | [INPUT.md](2026-09-19-INPUT.md) | Portable input from terminals and evdev |
 | 2026-09-21 | [IMAGE.md](2026-09-21-IMAGE.md) | Bootable QOS Portable with Buildroot |
 | 2026-09-22 | [IMAGE-MEASUREMENTS.md](2026-09-22-IMAGE-MEASUREMENTS.md) | QOS Portable image: memory and speed measurements |
+| 2026-09-29 | [QOS-ARCHITECTURE-AUDIT.md](2026-09-29-QOS-ARCHITECTURE-AUDIT.md) | Source audit against the minimalist actor OS ideal, with selected Portable checks; September 30 memory/image-slot and C migration follow-ups |
