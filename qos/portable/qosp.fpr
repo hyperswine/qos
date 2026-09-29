@@ -27,8 +27,12 @@ Host.run       : String -> String -> String -> Result String String . # id, name
 Host.log       : String -> Unit .                                     # one /logs/host line
 
 # ---- small things -----------------------------------------------------------
+
+# ideally this should be a builtin
 or2 a b = case a of True -> True | False -> b.
+# whether an environment variable is set
 isSet name = case Sys.env name of Ok _ -> True | Err _ -> False.
+# append two lists. Note this is not tail recursive
 append xs ys = case xs of Nil -> ys | h :: t -> h :: append t ys.
 
 die msg = _ = Host.log (strcat "qosp: " msg); Sys.exit 1.
