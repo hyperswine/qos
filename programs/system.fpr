@@ -86,7 +86,7 @@ IInt = SVCM.IInt.
 IStr = SVCM.IStr.
 IFn  = SVCM.IFn.
 IErr = SVCM.IErr.
-QLog    = use "mods/qlog#c8efd70b461d0dd2".
+QLog    = use "mods/qlog#40c524a7bd2900c1".
 UartM   = use "mods/uart".
 TimerM  = use "mods/timer".
 MK      = use "mods/matrixkpd".
@@ -414,10 +414,7 @@ svcKvReplay caps = kvRes (Svc.read caps "/services/storage/kv").
 kvRes r = case r of IStr s -> Ok s | IErr e -> Err e | _ -> Err "storage: bad shape".
 
 storeRpc caps tag url pay = storeRpc1 (capMe caps) (capSt caps) tag url pay.
-storeRpc1 me st tag url pay =
-  case stHas st of
-    True -> send (stAct st) (Rpc me tag url pay) >> receiveRes me
-  | False -> Err "no disk".
+storeRpc1 me st tag url pay = SVCM.storeRpcAt me st tag url pay.
 
 # /pins/<n>: the raw GPIO tier as capability-gated URLs.  Direction,
 # level, read -- dynamically reconfigurable while running, which is

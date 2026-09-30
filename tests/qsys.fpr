@@ -42,7 +42,10 @@ run me vfs log apps =
   ping = callAt apps "plugmini" "plugPing" 0;
   hi = callAt apps "plughello" "helloTitle" 0;
   dbl = callIAt apps "plughello" "helloDouble" 21;
-  _ = AK.vfsWrite me vfs "/tmp/note.txt" "hi ";
+  wrote = AK.vfsWrite me vfs "/tmp/note.txt" "hi ";
+  _ = case QS.strEq wrote "wrote 3 bytes to /tmp/note.txt" of
+    True -> Unit
+  | False -> error "qsys write: {wrote}";
   body = AK.vfsRead me vfs "/tmp/note.txt";
   boots = strlen body / 3;
   paths = QS.lenL (AK.vfsList me vfs);

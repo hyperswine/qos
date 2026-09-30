@@ -1,0 +1,26 @@
+# Explicit transitional trust for QOS library schemes and service plumbing.
+# These source entries are not proof certificates. New entries need review.
+../programs/mods/appkit.fpr
+../programs/mods/arcsvc.fpr
+../programs/mods/cliapp.fpr
+../programs/mods/coreutil.fpr
+../programs/mods/fontm.fpr
+../programs/mods/fprlive.fpr
+../programs/mods/glsvc.fpr
+../programs/mods/manifest.fpr
+../programs/mods/matrixkpd.fpr
+../programs/mods/qaimg.fpr
+../programs/mods/qar.fpr
+../programs/mods/qlog.fpr
+../programs/mods/qsys.fpr
+../programs/mods/svc.fpr
+../programs/mods/timefmt.fpr
+../programs/mods/timer.fpr
+../programs/mods/tui.fpr
+../programs/mods/uart.fpr
+../std/compile.fpr
+../std/fs.fpr
+../std/livereload.fpr
+../std/loader.fpr
+../std/timer.fpr
+../std/uart.fpr

@@ -1,0 +1,29 @@
+# Mixed traffic stays queued; storage send refusal and death are results.
+S = use "../programs/mods/svc".
+Rpc = S.Rpc.
+store me = case receive me of Rpc ret tag url pay -> send ret (Ok "storage reply").
+event target me = send target (Err "unrelated event").
+gone me = Unit.
+stuck me = _ = Sys.sleepUs 3000000; Unit.
+fill : unsafe Int -> Int -> Unit.
+fill a n = case n == 0 of True -> Unit | False -> send a n >> fill a (n - 1).
+isErr r want = case r of Err e -> S.strEq e want | Ok _ -> False.
+main =
+  me = myself 0;
+  other = spawn (event me);
+  _ = Sys.sleepUs 20000;
+  st = spawn store;
+  caps = S.Caps 0 me 0 Nil "test" {has = True, act = st, uart = 0, timer = 0};
+  reply = S.storeRpc caps 3 "test" "";
+  queued = receiveFrom me other;
+  good = case reply of Ok s -> S.strEq s "storage reply" | Err _ -> False;
+  dead = spawn gone;
+  _ = Sys.sleepUs 20000;
+  no = S.storeRpcAt me {has = True, act = dead} 3 "test" "";
+  full = spawnCap 0 1 stuck;
+  _ = fill full 8;
+  refused = S.storeRpcAt me {has = True, act = full} 3 "test" "";
+  missing = S.storeRpcAt me {has = False, act = 0} 3 "test" "";
+  case good and isErr queued "unrelated event" and isErr no "dead actor" and isErr refused "mailbox full" and isErr missing "no disk" of
+    True -> "storerpc: HOLDS"
+  | False -> error "storerpc: FAILED".
