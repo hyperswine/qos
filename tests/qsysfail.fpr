@@ -1,0 +1,101 @@
+# qsysfail.fpr -- the failure paths of mods/qsys and mods/appkit's calls,
+# against fake services (no disk): every outcome is an honest answer.
+#
+#   1. a write that storage refuses (Err) is reported, and the cached
+#      body is unchanged: a read after it returns what the disk holds
+#   2. storage that has ENDED: the write says so, the body is unchanged
+#   3. a file actor whose first replay failed says "read failed", never
+#      serves "" as the file, and refuses writes until it can read
+#   4. a service that ended is Err "dead actor" (not a caller parked for
+#      ever); a vfs relay to an ended owner answers in text
+#   5. a full mailbox is Err "mailbox full" (the request never queued)
+#   6. an unrelated message queued by another actor is not read as the
+#      reply, and is still there afterwards
+#
+#   ./qos.py run tests/qsysfail.fpr
+#: expect qsysfail: HOLDS
+
+QS = use "../programs/mods/qsys".
+AK = use "../programs/mods/appkit".
+AC = use "std/actor".
+SVC = use "../programs/mods/svc".
+Rpc = SVC.Rpc.
+
+# storage whose replay answers `body` and whose append answers `ap`
+store : unsafe String -> Result String String -> Int -> a .
+store body ap me =
+  m = receive me;
+  case m of Rpc replyTo tag url pay ->
+    (case tag == 3 of
+       True -> send replyTo (Ok body) >> store body ap me
+     | False -> send replyTo ap >> store body ap me).
+
+# answers one replay, then ends
+storeOnce me = case receive me of Rpc replyTo tag url pay -> send replyTo (Ok "abc").
+
+# ends at once
+gone me = Unit.
+
+# never reads its mailbox while the test runs
+stuck me = _ = Sys.sleepUs 3000000; Unit.
+
+pinger target me = send target "tick".
+
+fill : unsafe Int -> Int -> Unit .
+fill k n = case n == 0 of
+    True -> Unit
+  | False -> send k n >> fill k (n - 1).
+
+expect : String -> String -> String -> Bool .
+expect what got want = case QS.strEq got want of
+    True -> True
+  | False -> _ = print "qsysfail: {what}: got [{got}] wanted [{want}]"; False.
+
+main =
+  me = myself 0;
+  # 1. a refused append
+  st1 = spawn (store "abc" (Err "data partition full"));
+  f1 = spawn (QS.fileActor st1 "/tmp/a");
+  w1 = AK.vfsWrite me f1 "/tmp/a" "X";
+  r1 = AK.vfsRead me f1 "/tmp/a";
+  ok1 = expect "refused write" w1 "write failed: data partition full"
+    and expect "body after refused write" r1 "abc";
+  # 2. storage that ended after the replay
+  st2 = spawn storeOnce;
+  f2 = spawn (QS.fileActor st2 "/tmp/b");
+  w2 = AK.vfsWrite me f2 "/tmp/b" "X";
+  r2 = AK.vfsRead me f2 "/tmp/b";
+  ok2 = expect "write to ended storage" w2 "write failed: storage service: dead actor"
+    and expect "body after ended storage" r2 "abc";
+  # 3. a file actor that never could read its body
+  st3 = spawn gone;
+  _ = Sys.sleepUs 20000;
+  f3 = spawn (QS.fileActor st3 "/tmp/c");
+  r3 = AK.vfsRead me f3 "/tmp/c";
+  w3 = AK.vfsWrite me f3 "/tmp/c" "X";
+  ok3 = expect "unreadable file" r3 "read failed: /tmp/c (storage service: dead actor)"
+    and expect "write to unreadable file" w3 "write failed: /tmp/c could not be read (storage service: dead actor)";
+  # 4. an ended service, directly and through the vfs relay
+  g = spawn gone;
+  _ = Sys.sleepUs 20000;
+  c4 = QS.call me g (AK.Read "/x");
+  vfs = spawn (QS.vfsActor (("/tmp/d", 2, g) :: Nil));
+  r4 = AK.vfsRead me vfs "/tmp/d";
+  ok4 = expect "call to ended service" "{c4}" "Err dead actor"
+    and expect "relay to ended owner" r4 "unavailable: the service for this path dead actor";
+  # 5. a full mailbox
+  k = AC.spawnWith (AC.Static 8) stuck;
+  _ = fill k 8;
+  c5 = QS.call me k (AK.Read "/x");
+  ok5 = expect "full mailbox" "{c5}" "Err mailbox full";
+  # 6. an event from someone else, queued before the call
+  st6 = spawn (store "note" (Ok "1"));
+  f6 = spawn (QS.fileActor st6 "/tmp/e");
+  _ = spawn (pinger me);
+  _ = Sys.sleepUs 20000;
+  r6 = AK.vfsRead me f6 "/tmp/e";
+  ev = receive me;
+  ok6 = expect "reply with an event queued" r6 "note" and expect "the event" ev "tick";
+  case ok1 and ok2 and ok3 and ok4 and ok5 and ok6 of
+    True -> "qsysfail: HOLDS"
+  | False -> "qsysfail: FAILED".

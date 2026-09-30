@@ -1,0 +1,8 @@
+# slowproc.fpr -- a process that is still running when a second placement is
+# attempted (tests/nativeslot.fpr): some work, then a result that shows its
+# code and data survived.
+sumTo : unsafe Int -> Int -> Int .
+sumTo n acc = case n == 0 of
+    True -> acc
+  | False -> sumTo (n - 1) (acc + n).
+main = "slowproc: intact {sumTo 3000000 0}".

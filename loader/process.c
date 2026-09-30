@@ -101,6 +101,14 @@ static int g_sched_ready;
 static uw g_next_pid = 1;
 static volatile int g_shared_live;
 static void shared_on_exit(void) { g_shared_live = 0; }
+/* the slot's occupant: the pid of the image placed there last (0 = the
+ * slot has never held one).  The slot is reusable only when none of that
+ * pid's actors can still run its code (fpr_pid_live == 0) -- root exit
+ * alone is not enough, a child the root spawned may still be running.
+ * g_slot_claim serializes placements: taken before anything is written,
+ * released when the launch is done or refused. */
+static uw g_slot_pid;
+static int g_slot_claim;
 
 sw qos_store_call(uw tag, const char *pay, uw plen, char *out, uw outcap) {
   if (!g_store_actor || !g_app_id) return -2; /* no disk / no app bound */
@@ -200,10 +208,33 @@ static V g_sys_place_image_at(V qastr, V ioffv, V ilenv, V numsv, V capsv) {
   if (blen + (64 * 1024) > slot_size)
     return mktup2v(TAG(0), (V)fpr_mkstr((const uint8_t *)"image larger than the process slot", 34));
 
+  /* OCCUPANCY BEFORE ANY WRITE: claim the slot, then refuse while the
+   * previous image may still run -- clearing the static window and
+   * copying/zeroing the image below would overwrite a live process */
+  if (__atomic_exchange_n(&g_slot_claim, 1, __ATOMIC_ACQ_REL))
+    return mktup2v(TAG(0), (V)fpr_mkstr((const uint8_t *)"another placement is in progress", 32));
+  if (g_slot_pid) {
+    uw live = fpr_pid_live(g_slot_pid);
+    if (live) {
+      __atomic_store_n(&g_slot_claim, 0, __ATOMIC_RELEASE);
+      char why[80];
+      const char *pre = "a process is still running in the slot (";
+      uw n = 0;
+      for (const char *c = pre; *c; c++) why[n++] = *c;
+      char d[24]; int k = 0;
+      do { d[k++] = (char)('0' + live % 10); live /= 10; } while (live);
+      while (k) why[n++] = d[--k];
+      const char *post = " actors live)";
+      for (const char *c = post; *c; c++) why[n++] = *c;
+      return mktup2v(TAG(0), (V)fpr_mkstr((const uint8_t *)why, n));
+    }
+  }
+
   fpr_static_lo = fpr_static_hi = 0; /* the outgoing image's window, if any */
   fpr_qaimg_t q = {nums[0], nums[1], nums[2], nums[3], nums[4]};
   fpr_elf_load_t r = fpr_qaimg_place(&q, ibytes, blen, slot, slot_size);
   if (!r.ok) {
+    __atomic_store_n(&g_slot_claim, 0, __ATOMIC_RELEASE);
     uw n = 0; while (r.err[n]) n++;
     return mktup2v(TAG(0), (V)fpr_mkstr((const uint8_t *)r.err, n));
   }
@@ -219,9 +250,6 @@ static V g_sys_place_image_at(V qastr, V ioffv, V ilenv, V numsv, V capsv) {
   /* the process's OWN fpr_process_entry returns its result directly --
    * see the note in proc_entry.c about why this must not be fetched
    * via a same-named function call from THIS (System.qa's) image. */
-  if (g_shared_live)
-    return mktup2v(TAG(0), (V)fpr_mkstr(
-        (const uint8_t *)"a process is still running in the slot", 39));
   str_t *cs = (str_t *)capsv;
   V (*entry)(void *, uw, fpr_grant_t (*)(uw), const unsigned char *, uw,
              sw (*)(uw, const char *, uw, char *, uw), void *) =
@@ -237,8 +265,10 @@ static V g_sys_place_image_at(V qastr, V ioffv, V ilenv, V numsv, V capsv) {
   sb.pid = g_next_pid++;
   sb.on_exit = shared_on_exit;
   g_shared_live = 1;
+  g_slot_pid = sb.pid;
   entry(heap_base, heap_size, loader_grow_memory, cs->bytes, cs->len,
         qos_store_call, &sb);
+  __atomic_store_n(&g_slot_claim, 0, __ATOMIC_RELEASE);
   /* the root ACB is queued with our pid; ok=2 tells the launcher to
    * receiveRes for main's result.  Growth grants are shared-buddy
    * slabs reaped with the acbs, so nothing to free here. */

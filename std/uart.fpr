@@ -34,6 +34,7 @@
 # ============================================================================
 
 UM = use "../programs/mods/uart".
+AC = use "std/actor".
 
 UOpen = UM.UOpen.
 UParams = UM.UParams.
@@ -57,15 +58,18 @@ cfgSvc h = case h of UartCfg svc -> svc.
 uSvc h = case h of Uart svc -> svc.
 
 # one RPC round trip to the service actor
+# The send is checked and the wait answers (std/actor sendAwait): a UART
+# service that refused the request or has ended is a named panic here,
+# never a caller parked for ever.  The reply comes back kept (copied out
+# of the message, which sendAwait releases), so there is no manual drop
+# anywhere in this module.
 rpc svc msg =
   me = myself 0;
-  _ = send svc (me, msg);
-  receiveFrom me svc.
+  case AC.sendAwait me svc (me, msg) of
+    Ok r -> r
+  | Err e -> error "uart: the UART service {e}".
 
-# one checked round trip: rpc is a transitive receive-origin, so
-# AUTODROP v2 discharges the reply's release here -- no manual drop
-# anywhere in this module (the leak this client once shipped is now
-# impossible to write)
+# one checked round trip
 okCall what svc msg =
   r = rpc svc msg;
   case r of

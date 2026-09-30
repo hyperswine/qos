@@ -52,18 +52,26 @@ serve fs = AC.spawnWith (AC.Dynamic 64) (loader fs).
 
 # ---- the client side --------------------------------------------------------
 
+# std/actor's correlated request/reply: a loader that refused the request
+# or has ended is an Err, like any refusal of the loader's own
 load : unsafe Int -> Int -> String -> Result Int String .
-load me ld id = _ = send ld (me, LLoad id); receiveFrom me ld.
+load me ld id = flat (AC.call me ld (LLoad id)).
 
 replay : unsafe Int -> Int -> Result Int String .
-replay me ld = _ = send ld (me, LReplay 0); receiveFrom me ld.
+replay me ld = flat (AC.call me ld (LReplay 0)).
 
 list : unsafe Int -> Int -> String .
-list me ld = _ = send ld (me, LList 0); receiveFrom me ld.
+list me ld = case AC.call me ld (LList 0) of
+    Ok s -> s
+  | Err e -> "(loader unavailable: {e})".
 
 # run an app image from the disk under its own pid: Ok <its root actor>
 launch : unsafe Int -> Int -> String -> Result Int String .
-launch me ld id = _ = send ld (me, LLaunch id); receiveFrom me ld.
+launch me ld id = flat (AC.call me ld (LLaunch id)).
+
+flat r = case r of
+    Ok inner -> inner
+  | Err e -> Err "loader unavailable: {e}".
 
 # newest attached export wins; a miss is loud (the loader gated every load)
 bind : String -> _ .
@@ -82,135 +90,149 @@ loader fs me = lLoop fs me Nil.
 lLoop : unsafe Int -> Int -> List String -> a .
 lLoop fs me chain =
   m = receive me;
-  case m of
-    (from, q) -> lServe fs me chain from q
-  | u -> lLoop fs me chain.
+  (from, rid, q) = m;
+  lServe fs me chain (from, rid) q.
 
-lServe : unsafe Int -> Int -> List String -> Int -> LMsg -> a .
+lServe : unsafe Int -> Int -> List String -> (Int, Int) -> LMsg -> a .
 lServe fs me chain from q = case q of
     LLoad id -> lLoad fs me chain from id 1
-  | LList u -> send from (lRender chain "") >> lLoop fs me chain
+  | LList u -> AC.reply from (lRender chain "") >> lLoop fs me chain
   | LReplay u -> lReplay fs me chain from
   | LLaunch id -> lLaunch fs me chain from id.
 
 # one launch: record -> the host gate -> its `app` export -> a fresh pid
-lLaunch : unsafe Int -> Int -> List String -> Int -> String -> a .
+lLaunch : unsafe Int -> Int -> List String -> (Int, Int) -> String -> a .
 lLaunch fs me chain from id =
   r = FS.readLatest me fs "apps/{id}.qa";
   case r of
-    Err e -> send from (Err "launch {id}: {e}") >> lLoop fs me chain
+    Err e -> AC.reply from (Err "launch {id}: {e}") >> lLoop fs me chain
   | Ok qa -> lLaunch2 fs me chain from id r qa.
-lLaunch2 : unsafe Int -> Int -> List String -> Int -> String -> _ -> String -> a .
+lLaunch2 : unsafe Int -> Int -> List String -> (Int, Int) -> String -> _ -> String -> a .
 lLaunch2 fs me chain from id r qa =
   ar = Plug.attach qa;
   _ = drop r;                        # the image is in its window now
   case ar of
-    Err e -> send from (Err "launch {id}: {e}") >> lLoop fs me chain
+    Err e -> AC.reply from (Err "launch {id}: {e}") >> lLoop fs me chain
   | Ok n -> lStart fs me chain from id.
-lStart : unsafe Int -> Int -> List String -> Int -> String -> a .
+lStart : unsafe Int -> Int -> List String -> (Int, Int) -> String -> a .
 lStart fs me chain from id =
   (ok, f) = Mod.findAt (Mod.plugs 0 - 1) "app";
   _ = Mod.detachLast Unit;           # the registry is the module chain; the
                                      # app's code stays in its window
   case ok == 1 of
     True -> lRun fs me chain from id f
-  | False -> send from (Err "launch {id}: no `app` export") >> lLoop fs me chain.
-lRun : unsafe Int -> Int -> List String -> Int -> String -> _ -> a .
+  | False -> AC.reply from (Err "launch {id}: no `app` export") >> lLoop fs me chain.
+lRun : unsafe Int -> Int -> List String -> (Int, Int) -> String -> _ -> a .
 lRun fs me chain from id f =
   h = Sys.spawnApp f;
-  _ = AC.sendOrDie h from;           # its first message: who launched it
-  _ = send from (Ok h);
+  _ = AC.sendOrDie h (retActor from); # its first message: who launched it
+  _ = AC.reply from (Ok h);
   lLoop fs me chain.
 
 # one load: record -> gates -> attach -> the new chain -> sys/live
-lLoad : unsafe Int -> Int -> List String -> Int -> String -> Int -> a .
+lLoad : unsafe Int -> Int -> List String -> (Int, Int) -> String -> Int -> a .
 lLoad fs me chain from id wm =
   r = FS.readLatest me fs "apps/{id}.qa";
   case r of
-    Err e -> send from (Err "loader {id}: {e}") >> lLoop fs me chain
+    Err e -> AC.reply from (Err "loader {id}: {e}") >> lLoop fs me chain
   | Ok qa -> lAttach fs me chain from id 1 r qa wm.
-lAttach : unsafe Int -> Int -> List String -> Int -> String -> Int -> _ -> String -> Int -> a .
+lAttach : unsafe Int -> Int -> List String -> (Int, Int) -> String -> Int -> _ -> String -> Int -> a .
 lAttach fs me chain from id u r qa wm =
   before = Mod.plugs 0;
   ar = Plug.attach qa;
   _ = drop r;                        # the record's bytes are in the window now
   case ar of
-    Err e -> send from (Err "loader {id}: {e}") >> lLoop fs me chain
+    Err e -> AC.reply from (Err "loader {id}: {e}") >> lLoop fs me chain
   | Ok n -> lGate fs me chain from id before wm.
-lGate : unsafe Int -> Int -> List String -> Int -> String -> Int -> Int -> a .
+lGate : unsafe Int -> Int -> List String -> (Int, Int) -> String -> Int -> Int -> a .
 lGate fs me chain from id before wm =
   case before == 0 of
     True -> lLive fs me chain from id wm      # first attachment: nothing to gate
   | False -> lGate2 fs me chain from id before wm.
-lGate2 : unsafe Int -> Int -> List String -> Int -> String -> Int -> Int -> a .
+lGate2 : unsafe Int -> Int -> List String -> (Int, Int) -> String -> Int -> Int -> a .
 lGate2 fs me chain from id before wm =
   (ok, why) = Mod.compatAt (before - 1) before;
   case ok == 1 of
     True -> lLive fs me chain from id wm
   | False -> lRefuse fs me chain from id why.
-lRefuse : unsafe Int -> Int -> List String -> Int -> String -> String -> a .
+lRefuse : unsafe Int -> Int -> List String -> (Int, Int) -> String -> String -> a .
 lRefuse fs me chain from id why =
   # a refused version must leave every binding as it was: detach the
   # just-attached table, do NOT touch sys/live
   _ = Mod.detachLast Unit;
-  _ = send from (Err "loader {id}: incompatible, refused: {why}");
+  _ = AC.reply from (Err "loader {id}: incompatible, refused: {why}");
   lLoop fs me chain.
-lLive : unsafe Int -> Int -> List String -> Int -> String -> Int -> a .
+# The load is live only once sys/live says so: the reply and the new chain
+# follow the record.  An append that fails is a failed load -- the table is
+# detached, the chain stays as it was, and the caller hears why -- so the
+# log and the running set never disagree (a reboot replays exactly this).
+lLive : unsafe Int -> Int -> List String -> (Int, Int) -> String -> Int -> a .
 lLive fs me chain from id wm =
   chain2 = id :: chain;
-  _ = case wm of
-    1 -> lManifest me fs chain2
-  | w -> 0;
-  _ = send from (Ok (Mod.plugs 0 - 1));
+  case wm of
+    1 -> lRecorded fs me chain from id chain2 (lManifest me fs chain2)
+  | w -> lAdopt fs me from chain2.
+lRecorded : unsafe Int -> Int -> List String -> (Int, Int) -> String -> List String -> Result String String -> a .
+lRecorded fs me chain from id chain2 h = case h of
+    Ok u -> lAdopt fs me from chain2
+  | Err e -> lUnrecorded fs me chain from id e.
+lAdopt : unsafe Int -> Int -> (Int, Int) -> List String -> a .
+lAdopt fs me from chain2 =
+  _ = AC.reply from (Ok (Mod.plugs 0 - 1));
   lLoop fs me chain2.
-lManifest : unsafe Int -> Int -> List String -> Int .
-lManifest me fs chain2 =
-  h = FS.append me fs "sys/live" (lRenderNl (lRev chain2 Nil) "");
-  _ = drop h;
-  0.
+lUnrecorded : unsafe Int -> Int -> List String -> (Int, Int) -> String -> String -> a .
+lUnrecorded fs me chain from id e =
+  _ = Mod.detachLast Unit;
+  _ = AC.reply from (Err "loader {id}: sys/live not recorded ({e}); the load was rolled back");
+  lLoop fs me chain.
+lManifest : unsafe Int -> Int -> List String -> Result String String .
+lManifest me fs chain2 = FS.append me fs "sys/live" (lRenderNl (lRev chain2 Nil) "").
 
 # boot: read sys/live, re-attach the chain in order (each load passes
 # the same gates again -- replay is not a bypass)
-lReplay : unsafe Int -> Int -> List String -> Int -> a .
+lReplay : unsafe Int -> Int -> List String -> (Int, Int) -> a .
 lReplay fs me chain from =
   r = FS.readLatest me fs "sys/live";
   case r of
-    Err e -> send from (Ok 0) >> lLoop fs me chain    # empty disk: nothing live
+    Err e -> AC.reply from (Ok 0) >> lLoop fs me chain    # empty disk: nothing live
   | Ok mf -> lRep fs me chain from (splitNl mf 1 1 Nil) 0.
-lRep : unsafe Int -> Int -> List String -> Int -> List String -> Int -> a .
+lRep : unsafe Int -> Int -> List String -> (Int, Int) -> List String -> Int -> a .
 lRep fs me chain from ids n = case ids of
-    Nil -> send from (Ok n) >> lLoop fs me chain
+    Nil -> AC.reply from (Ok n) >> lLoop fs me chain
   | id :: rest -> lRep1 fs me chain from rest n id.
-lRep1 : unsafe Int -> Int -> List String -> Int -> List String -> Int -> String -> a .
+lRep1 : unsafe Int -> Int -> List String -> (Int, Int) -> List String -> Int -> String -> a .
 lRep1 fs me chain from rest n id =
   r = FS.readLatest me fs "apps/{id}.qa";
   case r of
-    Err e -> send from (Err "replay {id}: {e}") >> lLoop fs me chain
+    Err e -> AC.reply from (Err "replay {id}: {e}") >> lLoop fs me chain
   | Ok qa -> lRepAtt fs me chain from rest n id r qa.
-lRepAtt : unsafe Int -> Int -> List String -> Int -> List String -> Int -> String -> _ -> String -> a .
+lRepAtt : unsafe Int -> Int -> List String -> (Int, Int) -> List String -> Int -> String -> _ -> String -> a .
 lRepAtt fs me chain from rest n id r qa =
   before = Mod.plugs 0;
   ar = Plug.attach qa;
   _ = drop r;
   case ar of
-    Err e -> send from (Err "replay {id}: {e}") >> lLoop fs me chain
+    Err e -> AC.reply from (Err "replay {id}: {e}") >> lLoop fs me chain
   | Ok u -> lRepGate fs me chain from rest n id before.
-lRepGate : unsafe Int -> Int -> List String -> Int -> List String -> Int -> String -> Int -> a .
+lRepGate : unsafe Int -> Int -> List String -> (Int, Int) -> List String -> Int -> String -> Int -> a .
 lRepGate fs me chain from rest n id before =
   case before == 0 of
     True -> lRep fs me (id :: chain) from rest (n + 1)
   | False -> lRepGate2 fs me chain from rest n id before.
-lRepGate2 : unsafe Int -> Int -> List String -> Int -> List String -> Int -> String -> Int -> a .
+lRepGate2 : unsafe Int -> Int -> List String -> (Int, Int) -> List String -> Int -> String -> Int -> a .
 lRepGate2 fs me chain from rest n id before =
   (ok, why) = Mod.compatAt (before - 1) before;
   case ok == 1 of
     True -> lRep fs me (id :: chain) from rest (n + 1)
   | False -> lRepBad fs me chain from id why.
-lRepBad : unsafe Int -> Int -> List String -> Int -> String -> String -> a .
+lRepBad : unsafe Int -> Int -> List String -> (Int, Int) -> String -> String -> a .
 lRepBad fs me chain from id why =
   _ = Mod.detachLast Unit;
-  _ = send from (Err "replay {id}: incompatible, refused: {why}");
+  _ = AC.reply from (Err "replay {id}: incompatible, refused: {why}");
   lLoop fs me chain.
+
+# the caller in a request's return address (from, id)
+retActor from = case from of (a, i) -> a.
 
 # ---- small string helpers ---------------------------------------------------
 

@@ -28,10 +28,14 @@ AC = use "std/actor".
 # handle IS the filesystem from here on
 serve dev = AC.spawnWith (AC.Dynamic 64) (QL.actor dev).
 
+# the send is checked, and a Files service that refused the request or has
+# ended is an Err like any other storage failure -- never a caller left
+# waiting (std/actor sendAwait: the storage actor sends its callers nothing
+# but replies, so the next message from it IS the answer)
 rpc : unsafe Int -> Int -> Int -> String -> String -> Result String String .
-rpc me fs tag url pay =
-  _ = send fs (SVC.Rpc me tag url pay);
-  receiveFrom me fs.
+rpc me fs tag url pay = case AC.sendAwait me fs (SVC.Rpc me tag url pay) of
+    Ok r -> r
+  | Err e -> Err "storage service: {e}".
 
 readLatest : unsafe Int -> Int -> String -> Result String String .
 readLatest me fs url = rpc me fs 1 url "".

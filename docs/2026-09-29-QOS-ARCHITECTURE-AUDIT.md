@@ -491,3 +491,12 @@ compact runtime/HAL, and migrate one ownership boundary at a time with equivalen
 behavior and failure-path checks. Bootstrap storage, atomic access, hardware
 completion and executable-code lifetime remain necessary mechanisms in either
 language. No C replacement was implemented or benchmarked in this follow-up.
+
+## 2026-09-30: the concrete correctness findings are fixed
+
+All five rows of [Concrete correctness findings](#concrete-correctness-findings)
+are fixed, each with a failure-path test: RPC refusal, death and
+correlation; `fileWr`; `lManifest`; placement before the live-slot check;
+root-exit quiescence. See [FAILURE-HONESTY](2026-09-30-FAILURE-HONESTY.md).
+That page also records what remains: `svc.storeRpc`'s `receiveRes`, and
+references into an old image that outlive its actors.

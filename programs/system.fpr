@@ -977,11 +977,16 @@ spawnUart me =
   r2 = uartCall me a (UartM.UBuf 8192);
   r3 = uartCall me a UartM.UShare;
   a.
+# the send is checked and the wait answers: a UART service that refused
+# its configuration or ended is a named panic at boot, not a hang
 uartCall : Int -> Int -> _ -> Unit .
-uartCall me a msg =
-  _ = send a (me, msg);
-  r = receiveFrom me a;
-  drop r.
+uartCall me a msg = case send a (me, msg) of
+    Err e -> error "system: the UART service refused its configuration ({e})"
+  | Ok u -> uartAwait me a.
+uartAwait : Int -> Int -> Unit .
+uartAwait me a = case receiveFromRes me a of
+    Ok r -> drop r
+  | Err e -> error "system: the UART service {e} before answering".
 
 # Timer.qa: the time service.  ALL the CLINT/interrupt work lives in
 # this one actor (the deadline interrupt itself is serviced by the

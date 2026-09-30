@@ -21,7 +21,7 @@ export FPR_FOREIGN="$ROOT/core/foreign.fpr"
 RUNTIME="$FPRISC_ROOT/runtime"
 MACHINE="$FPRISC_ROOT/machine"
 QOS=qos   # relative to the repository root (it was ../qos from fp-risc/tools/, before the programs moved up)
-KERNEL=$QOS/qos-native.elf
+KERNEL=${KERNEL:-$QOS/qos-native.elf}   # the kernel the image is linked against
 
 [ -f "$KERNEL" ] || { echo "$KERNEL not found -- run 'make -C qos native' first" >&2; exit 1; }
 

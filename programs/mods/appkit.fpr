@@ -43,11 +43,19 @@ Ak = Type (LogAdd sev line | LogSnap sev | VfsList u | Read path
          | Write path text).
 
 # ---- service call (one request, one reply) ---------------------------------
-call me a q = _ = send a (me, q); receive me.
+# std/actor's correlated protocol, the one the shell's services answer --
+# (me, id, q) out, (id, r) back.  Ok r, or Err when the request was
+# refused or the service ended before answering; never an unrelated
+# message read as the reply.
+AC = use "std/actor".
+call : unsafe Int -> Int -> q -> Result r String .
+call me a q = AC.call me a q.
 
-# capability-routed logging (through /services -- an app actor's print)
-logAdd me log line = call me log (LogAdd 0 line).
-logAddAt me log sev line = call me log (LogAdd sev line).
+# capability-routed logging (through /services -- an app actor's print):
+# 0 when the line was logged, -1 when the log service could not take it
+logAdd me log line = logRes (call me log (LogAdd 0 line)).
+logAddAt me log sev line = logRes (call me log (LogAdd sev line)).
+logRes r = case r of Ok n -> n | Err e -> 0 - 1.
 
 # env = (log, mt, (titles, vfs)): the log capability, the mtime handle,
 # the launcher's app-title list (attach order == sub-slot order by
@@ -64,9 +72,18 @@ envVfs (log, mt, rest) =
   vfs.
 
 # the root namespace, through the resolver capability
-vfsList me vfs = call me vfs (VfsList 0).
-vfsRead me vfs path = call me vfs (Read path).
-vfsWrite me vfs path text = call me vfs (Write path text).
+# The namespace verbs answer in the text protocol's own terms: a vfs that
+# refused or ended is reported as text, the way "no such path" already
+# is, rather than as an empty answer.
+vfsList me vfs = case call me vfs (VfsList 0) of
+    Ok ents -> ents
+  | Err e -> ("(vfs unavailable: {e})", 1) :: Nil.
+vfsRead me vfs path = case call me vfs (Read path) of
+    Ok text -> text
+  | Err e -> "vfs unavailable: {e}".
+vfsWrite me vfs path text = case call me vfs (Write path text) of
+    Ok r -> r
+  | Err e -> "write failed: vfs unavailable: {e}".
 
 # the plugin window: sub-slot attribution for entry-code addresses
 plugBase u = 17314086912.            # 0x408000000

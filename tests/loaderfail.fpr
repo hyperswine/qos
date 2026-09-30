@@ -1,0 +1,48 @@
+# loaderfail.fpr -- a load whose sys/live record cannot be written is a
+# FAILED load: the loader detaches the table, keeps its chain, and says
+# why, so the running set never differs from what a reboot would replay.
+# The Files service is a proxy over the real one that refuses exactly the
+# sys/live append; the module record itself reads normally.
+#
+#   ./qos.py run tests/loaderfail.fpr
+#: plugins tests/sysed1.fpr
+#: expect loaderfail: refused=rolled back live=[] bound=no replay=0 HOLDS
+
+FS = use "std/fs".
+LD = use "std/loader".
+SVC = use "../programs/mods/svc".
+Rpc = SVC.Rpc.
+
+# forwards every request to `fs`, except an append to sys/live
+proxy : unsafe Int -> Int -> a .
+proxy fs me =
+  m = receive me;
+  case m of Rpc replyTo tag url pay -> proxy2 fs me replyTo tag url pay.
+proxy2 : unsafe Int -> Int -> Int -> Int -> String -> String -> a .
+proxy2 fs me replyTo tag url pay =
+  case tag == 2 and url == "sys/live" of
+    True -> send replyTo (Err "data partition full") >> proxy fs me
+  | False -> send replyTo (FS.rpc me fs tag url pay) >> proxy fs me.
+
+has s sub = strIndexOf sub s > 0.
+
+main =
+  me = myself 0;
+  fs = FS.serve (device "blk");
+  px = spawn (proxy fs);
+  ld = LD.serve px;
+  r = LD.load me ld "sysed1";
+  refused = case r of
+      Ok n -> "ACCEPTED?!"
+    | Err e -> (case has e "sys/live not recorded" and has e "rolled back" of
+        True -> "rolled back"
+      | False -> "wrong reason: {e}");
+  (ok, f) = Mod.find "editLine";
+  bound = case ok == 1 of True -> "YES?!" | False -> "no";
+  live = LD.list me ld;
+  ld2 = LD.serve fs;
+  n = case LD.replay me ld2 of Ok k -> k | Err e -> 0 - 1;
+  verdict = case strCmp refused "rolled back" == 0 and strlen live == 0 and ok != 1 and n == 0 of
+      True -> "HOLDS"
+    | False -> "FAILED";
+  "loaderfail: refused={refused} live=[{live}] bound={bound} replay={n} {verdict}".

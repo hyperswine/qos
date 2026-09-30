@@ -19,6 +19,7 @@
 # ============================================================================
 
 TM = use "../programs/mods/timer".
+AC = use "std/actor".
 
 TAfter = TM.TAfter.
 TPing = TM.TPing.
@@ -32,21 +33,27 @@ after svc ms =
   _ = send svc (me, TAfter ms);   # a full service ring drops the tick: the
   Unit.                           # caller's sleep loop re-checks anyway
 
-# blocking sleep: schedule the fire, then wait for it
+# blocking sleep: schedule the fire, then wait for it.  The request waits
+# for room rather than being dropped, and a timer service that has ended
+# is a named panic, never a sleep that lasts for ever.
 sleep : Int -> Int -> Unit .
 sleep svc ms =
   me = myself 0;
-  _ = send svc (me, TAfter ms);
-  f = receiveFrom me svc;
-  Unit.
-  # ^ f's release is autodrop's (unused receive: dropped at once)
+  case AC.sendSure me svc (me, TAfter ms) of
+    False -> error "timer sleep: the timer service has ended"
+  | True -> sleepWait me svc.
+sleepWait : Int -> Int -> Unit .
+sleepWait me svc = case AC.awaitFrom me svc of
+    Ok f -> Unit
+  | Err e -> error "timer sleep: the timer service {e}".
 
-# liveness probe; answers 1 iff the hardware CLINT bridge is live
+# liveness probe; answers 1 iff the hardware CLINT bridge is live (0 when
+# the timer service itself has ended or refused the probe)
 ping : Int -> Int .
 ping svc =
   me = myself 0;
-  _ = send svc (me, TPing);
-  r = receiveFrom me svc;
-  case r of
-    TOkI n -> n
-  | o -> error "timer ping: protocol reply mismatch".
+  case AC.sendAwait me svc (me, TPing) of
+    Err e -> 0
+  | Ok r -> (case r of
+      TOkI n -> n
+    | o -> error "timer ping: protocol reply mismatch").

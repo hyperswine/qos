@@ -43,6 +43,7 @@ SVC = use "svc".
 Core = use "coreutil".
 QAR = use "qar".
 Plug = use "plug".
+AC = use "std/actor".
 
 Rpc     = SVC.Rpc.
 Read    = AK.Read.
@@ -68,11 +69,20 @@ strEq a b = Core.strEq a b.
 okOr r alt = case r of Ok s -> s | Err e -> alt.
 emptyAs s alt = case strlen s == 0 of True -> alt | False -> s.
 
-# one request, one reply -- the (me, q) tuple protocol every service
-# actor here answers
-call me a q = _ = send a (me, q); receive me.
-# the storage actor's protocol (svc's Rpc; reply is a bare Result)
-rpc me st tag url pay = _ = send st (Rpc me tag url pay); receiveFrom me st.
+# one request, one reply -- std/actor's correlated protocol, which every
+# service actor here answers: the request is (me, id, q), the reply
+# (id, r).  `call` is Ok r, or Err when the request was refused or the
+# service ended before answering -- never a caller left waiting, and
+# never an unrelated message read as the reply.
+call : unsafe Int -> Int -> q -> Result r String .
+call me a q = AC.call me a q.
+# the storage actor's protocol (svc's Rpc; reply is a bare Result, and the
+# storage actor sends its callers nothing else): the send is checked and
+# a storage actor that has ended is an Err, like any storage failure
+rpc : unsafe Int -> Int -> Int -> String -> String -> Result String String .
+rpc me st tag url pay = case AC.sendAwait me st (Rpc me tag url pay) of
+    Ok r -> r
+  | Err e -> Err "storage service: {e}".
 
 hasPrefix s pre = case strlen s < strlen pre of
     True -> False
@@ -145,14 +155,15 @@ sysActor me = sysLoop me Nil.
 sysLoop : unsafe Int -> List (String, Int) -> a .
 sysLoop me reg0 =
   m = receive me;
-  (replyTo, q) = m;
-  sysMsg me reg0 replyTo q.
-sysMsg : unsafe Int -> List (String, Int) -> Int -> Sq -> a .
-sysMsg me reg0 replyTo q = case q of
-    Lookup url -> send replyTo (findSvc reg0 url) >> sysLoop me reg0
-  | Reg reg -> send replyTo 1 >> sysLoop me (cat reg reg0).
+  (replyTo, id, q) = m;
+  sysMsg me reg0 (replyTo, id) q.
+sysMsg : unsafe Int -> List (String, Int) -> (Int, Int) -> Sq -> a .
+sysMsg me reg0 ret q = case q of
+    Lookup url -> AC.reply ret (findSvc reg0 url) >> sysLoop me reg0
+  | Reg reg -> AC.reply ret 1 >> sysLoop me (cat reg reg0).
 
-svcLookup me sys url = call me sys (Lookup url).
+# the actor registered at url; 0 when none is, or the registry is gone
+svcLookup me sys url = case call me sys (Lookup url) of Ok a -> a | Err e -> 0.
 
 # ---- the log service: /logs, a stateless facade over the C rings ------------
 sevOfPath p = case strEq p "/logs/warns" of
@@ -166,44 +177,56 @@ joinGo acc l = case l of Nil -> acc | x :: r -> joinGo "{acc}\n{x}" r.
 logActor : unsafe Int -> a .
 logActor me =
   m = receive me;
-  (replyTo, q) = m;
-  logMsg me replyTo q.
-logMsg : unsafe Int -> Int -> b -> a .
-logMsg me replyTo q = case q of
-    LogAdd sev line -> logDo me replyTo sev line
-  | LogSnap sev -> send replyTo (Sys.logSnap sev) >> logActor me
-  | Read path -> send replyTo (joinNl (Sys.logSnap (sevOfPath path))) >> logActor me
+  (replyTo, id, q) = m;
+  logMsg me (replyTo, id) q.
+logMsg : unsafe Int -> (Int, Int) -> AK.Ak -> a .
+logMsg me ret q = case q of
+    LogAdd sev line -> logDo me ret sev line
+  | LogSnap sev -> AC.reply ret (Sys.logSnap sev) >> logActor me
+  | Read path -> AC.reply ret (joinNl (Sys.logSnap (sevOfPath path))) >> logActor me
   | _ -> error "qsys log: unexpected message".
-logDo : unsafe Int -> Int -> Int -> String -> a .
-logDo me replyTo sev line =
+logDo : unsafe Int -> (Int, Int) -> Int -> String -> a .
+logDo me ret sev line =
   _ = Sys.logAt sev line;
-  send replyTo 0 >> logActor me.
+  AC.reply ret 0 >> logActor me.
 
 # ---- files: one actor per real file, url-native over the qlog ---------------
 # The file IS the replay of its url's records; a write is one appended
 # record.  The storage actor stays the single writer -- the file actor
 # routes its append through Rpc rather than touching the device.
 
+# The cached body is the replay of the url's records, and it only ever
+# changes the way the disk did: a write that storage refused leaves it as
+# it was.  Until a replay has succeeded the body is unknown (Err), and the
+# actor says so instead of serving "" as the file.
 fileActor st path me =
-  fileServe st path me (okOr (rpc me st 3 path "") "").
-fileServe : unsafe Int -> String -> Int -> String -> a .
+  fileServe st path me (rpc me st 3 path "").
+fileServe : unsafe Int -> String -> Int -> Result String String -> a .
 fileServe st path me body =
   m = receive me;
-  (replyTo, q) = m;
-  fileMsg st path me body replyTo q.
-fileMsg : unsafe Int -> String -> Int -> String -> Int -> b -> a .
-fileMsg st path me body replyTo q = case q of
-    Read p -> send replyTo (emptyAs body "(empty file)") >> fileServe st path me body
-  | Write p text -> fileWr st path me body replyTo text
+  (replyTo, id, q) = m;
+  fileMsg st path me (fileLoaded st path me body) (replyTo, id) q.
+# not loaded yet (storage was unreachable): try again on this request
+fileLoaded : unsafe Int -> String -> Int -> Result String String -> Result String String .
+fileLoaded st path me body = case body of
+    Ok b -> body
+  | Err e -> rpc me st 3 path "".
+fileMsg : unsafe Int -> String -> Int -> Result String String -> (Int, Int) -> AK.Ak -> a .
+fileMsg st path me body ret q = case q of
+    Read p -> AC.reply ret (fileText path body) >> fileServe st path me body
+  | Write p text -> fileWr st path me body ret text
   | _ -> error "qsys file: unexpected message".
-fileWr : unsafe Int -> String -> Int -> String -> Int -> String -> a .
-fileWr st path me body replyTo text =
-  r = rpc me st 2 path text;
-  _ = send replyTo (fileWrMsg path text r);
-  fileServe st path me (strcat body text).
-fileWrMsg path text r = case r of
-    Ok u -> "wrote {strlen text} bytes to {path}"
-  | Err e -> "write failed: {e}".
+fileText path body = case body of
+    Ok b -> emptyAs b "(empty file)"
+  | Err e -> "read failed: {path} ({e})".
+fileWr : unsafe Int -> String -> Int -> Result String String -> (Int, Int) -> String -> a .
+fileWr st path me body ret text = case body of
+    Err e -> AC.reply ret "write failed: {path} could not be read ({e})" >> fileServe st path me body
+  | Ok b -> fileWr2 st path me b ret text (rpc me st 2 path text).
+fileWr2 : unsafe Int -> String -> Int -> String -> (Int, Int) -> String -> Result String String -> a .
+fileWr2 st path me b ret text r = case r of
+    Ok u -> AC.reply ret "wrote {strlen text} bytes to {path}" >> fileServe st path me (Ok (strcat b text))
+  | Err e -> AC.reply ret "write failed: {e}" >> fileServe st path me (Ok b).
 
 # the manager: [(path, actor)], find-or-spawn (the lazy part is visible
 # in /logs: "system: opening <path>")
@@ -211,19 +234,17 @@ filesActor st me = filesServe st me Nil.
 filesServe : unsafe Int -> Int -> List (String, Int) -> a .
 filesServe st me act =
   m = receive me;
-  (replyTo, q) = m;
-  filesMsg st me act replyTo q.
-filesMsg : unsafe Int -> Int -> List (String, Int) -> Int -> b -> a .
-filesMsg st me act replyTo q = case q of
-    Read path -> filesFwd st me act replyTo (Read path) path
-  | Write path text -> filesFwd st me act replyTo (Write path text) path
+  (replyTo, id, q) = m;
+  filesMsg st me act (replyTo, id) q.
+filesMsg : unsafe Int -> Int -> List (String, Int) -> (Int, Int) -> AK.Ak -> a .
+filesMsg st me act ret q = case q of
+    Read path -> filesFwd st me act ret (Read path) path
+  | Write path text -> filesFwd st me act ret (Write path text) path
   | _ -> error "qsys files: unexpected message".
-filesFwd : unsafe Int -> Int -> List (String, Int) -> Int -> b -> String -> a .
-filesFwd st me act replyTo q path =
+filesFwd : unsafe Int -> Int -> List (String, Int) -> (Int, Int) -> AK.Ak -> String -> a .
+filesFwd st me act ret q path =
   (a, act2) = fileOf st me act path;
-  r = call me a q;
-  _ = send replyTo r;
-  _ = drop r;               # forward then release our ref (pshell law)
+  _ = relay me a ret q;
   filesServe st me act2.
 fileOf st me act path = fileOf2 st me act path (findSvc act path).
 fileOf2 st me act path a0 = case a0 == 0 of
@@ -239,8 +260,8 @@ fileSpawn st me act path =
 appsActor : unsafe List App -> Int -> a .
 appsActor apps me =
   m = receive me;
-  (replyTo, Read path) = m;
-  _ = send replyTo (appsText apps path);
+  (replyTo, id, Read path) = m;
+  _ = AC.reply (replyTo, id) (appsText apps path);
   appsActor apps me.
 appsText : unsafe List App -> String -> String .
 appsText apps path = case apps of
@@ -260,18 +281,18 @@ vfsActor ents me = vfsServe ents me.
 vfsServe : unsafe List (String, Int, Int) -> Int -> a .
 vfsServe ents me =
   m = receive me;
-  (replyTo, q) = m;
-  vfsMsg ents me replyTo q.
-vfsMsg : unsafe List (String, Int, Int) -> Int -> Int -> b -> a .
-vfsMsg ents me replyTo q = case q of
-    VfsList u -> send replyTo (listCopy ents) >> vfsServe ents me
-  | Read path -> vfsRead ents ents me replyTo path >> vfsServe ents me
-  | Write path text -> vfsWr ents me replyTo path text
+  (replyTo, id, q) = m;
+  vfsMsg ents me (replyTo, id) q.
+vfsMsg : unsafe List (String, Int, Int) -> Int -> (Int, Int) -> AK.Ak -> a .
+vfsMsg ents me ret q = case q of
+    VfsList u -> AC.reply ret (listCopy ents) >> vfsServe ents me
+  | Read path -> vfsRead ents ents me ret path >> vfsServe ents me
+  | Write path text -> vfsWr ents me ret path text
   | _ -> error "qsys vfs: unexpected message".
-vfsWr : unsafe List (String, Int, Int) -> Int -> Int -> String -> String -> a .
-vfsWr ents me replyTo path text =
+vfsWr : unsafe List (String, Int, Int) -> Int -> (Int, Int) -> String -> String -> a .
+vfsWr ents me ret path text =
   ents2 = vfsEnsure ents path;
-  _ = vfsWrite ents2 ents2 me replyTo path text;
+  _ = vfsWrite ents2 ents2 me ret path text;
   vfsServe ents2 me.
 
 listCopy : unsafe List (String, Int, Int) -> List (String, Int) .
@@ -312,34 +333,36 @@ vfsMk ents path =
   cat ents ((p2, 2, filesOf ents) :: Nil).
 
 # resolution = walk to the owner and relay
-vfsRead : unsafe List (String, Int, Int) -> List (String, Int, Int) -> Int -> Int -> String -> Unit .
-vfsRead ents all me replyTo path = case ents of
-    Nil -> send replyTo "no such path"
-  | e :: r -> vrStep r all me replyTo path e.
-vrStep : unsafe List (String, Int, Int) -> List (String, Int, Int) -> Int -> Int -> String -> (String, Int, Int) -> Unit .
-vrStep r all me replyTo path e = case e of (p, k, o) ->
+vfsRead : unsafe List (String, Int, Int) -> List (String, Int, Int) -> Int -> (Int, Int) -> String -> Unit .
+vfsRead ents all me ret path = case ents of
+    Nil -> AC.reply ret "no such path" >> Unit
+  | e :: r -> vrStep r all me ret path e.
+vrStep : unsafe List (String, Int, Int) -> List (String, Int, Int) -> Int -> (Int, Int) -> String -> (String, Int, Int) -> Unit .
+vrStep r all me ret path e = case e of (p, k, o) ->
   case strEq p path of
-    True -> vfsServeOne k o me replyTo path
-  | False -> vfsRead r all me replyTo path.
-vfsServeOne k o me replyTo path = case k == 0 of
-    True -> send replyTo "service endpoint (an actor)\nsend it a message; it has no bytes"
-  | False -> relay me o replyTo (Read path).
-vfsWrite : unsafe List (String, Int, Int) -> List (String, Int, Int) -> Int -> Int -> String -> String -> Unit .
-vfsWrite ents all me replyTo path text = case ents of
-    Nil -> send replyTo "no such path"
-  | e :: r -> vwStep r all me replyTo path text e.
-vwStep : unsafe List (String, Int, Int) -> List (String, Int, Int) -> Int -> Int -> String -> String -> (String, Int, Int) -> Unit .
-vwStep r all me replyTo path text e = case e of (p, k, o) ->
+    True -> vfsServeOne k o me ret path
+  | False -> vfsRead r all me ret path.
+vfsServeOne k o me ret path = case k == 0 of
+    True -> AC.reply ret "service endpoint (an actor)\nsend it a message; it has no bytes" >> Unit
+  | False -> relay me o ret (Read path).
+vfsWrite : unsafe List (String, Int, Int) -> List (String, Int, Int) -> Int -> (Int, Int) -> String -> String -> Unit .
+vfsWrite ents all me ret path text = case ents of
+    Nil -> AC.reply ret "no such path" >> Unit
+  | e :: r -> vwStep r all me ret path text e.
+vwStep : unsafe List (String, Int, Int) -> List (String, Int, Int) -> Int -> (Int, Int) -> String -> String -> (String, Int, Int) -> Unit .
+vwStep r all me ret path text e = case e of (p, k, o) ->
   case strEq p path of
-    True -> vfsWriteOne k o me replyTo path text
-  | False -> vfsWrite r all me replyTo path text.
-vfsWriteOne k o me replyTo path text = case k == 2 of
-    True -> relay me o replyTo (Write path text)
-  | False -> send replyTo "not writable (kind {k})".
-relay me a replyTo q =
-  r = call me a q;
-  _ = send replyTo r;
-  drop r.
+    True -> vfsWriteOne k o me ret path text
+  | False -> vfsWrite r all me ret path text.
+vfsWriteOne k o me ret path text = case k == 2 of
+    True -> relay me o ret (Write path text)
+  | False -> AC.reply ret "not writable (kind {k})" >> Unit.
+# forward a request to the owner and its answer to the caller; an owner
+# that refused or ended is an answer too, in the text protocol's own terms
+relay : unsafe Int -> Int -> (Int, Int) -> AK.Ak -> Unit .
+relay me a ret q = case call me a q of
+    Ok r -> AC.reply ret r >> Unit
+  | Err e -> AC.reply ret "unavailable: the service for this path {e}" >> Unit.
 
 # ---- disk enumeration: apps/index -> attach each ------------------------------
 # Installing an app = appending its records (mkdisk.py or, later, a
@@ -429,7 +452,9 @@ bootWire me st apps =
   reg = ("/services/vfs", vfs)
      :: ("/services/log", logA)
      :: ("/services/storage", st) :: Nil;
-  _ = call me sys (Reg reg);
+  _ = case call me sys (Reg reg) of
+      Ok u -> u
+    | Err e -> error "qsys boot: the registry refused the services ({e})";
   Qsys sys st vfs logA apps.
 bootFileEnts st = case st == 0 of
     True -> Nil

@@ -147,10 +147,13 @@ $(BUILD)/qa0/%.qa: $(FPR)/apps/%.toml $(FPR)/tools/mkqa.py
 $(BUILD)/apps_data.c: $(patsubst %,$(BUILD)/qa0/%.qa,$(QAPPS)) $(FPR)/tools/genapps.py
 	python3 $(FPR)/tools/genapps.py --entries --out $@ -- $(patsubst %,$(BUILD)/qa0/%.qa,$(QAPPS))
 
-$(BUILD)/system.s: $(FPRC) $(FPR)/programs/system.fpr $(FPRISC_ROOT)/core/prelude.fpr FORCE
+# SYSTEM: the kernel program (a test kernel, e.g. tests/nativeslot.fpr,
+# can stand in for it; pair it with KERNEL=<another elf>)
+SYSTEM ?= $(FPR)/programs/system.fpr
+$(BUILD)/system.s: $(FPRC) $(SYSTEM) $(FPRISC_ROOT)/core/prelude.fpr FORCE
 	@mkdir -p $(BUILD)
 	LC_ALL=C.UTF-8 "$(FPRC)" --system=qos-native --prelude=$(FPRISC_ROOT)/core/prelude.fpr \
-	  $(FPR)/programs/system.fpr $@
+	  $(SYSTEM) $@
 
 # the MACHINE LAYER is the compiler tree's (its CLINT unit is FP-RISC: virt.mk);
 # the DEVICES are this tree's (../hal/virt, qos-virt.mk).  One copy of each.
