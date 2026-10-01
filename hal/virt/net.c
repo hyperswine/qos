@@ -5,7 +5,8 @@
  *  1. virtio-net MMIO driver (both legacy v1 and modern v2 register
  *     layouts): probes the virt machine's 8 virtio-mmio slots, brings up
  *     RX/TX split virtqueues in static memory, moves Ethernet frames.
- *     Polled, no interrupts — same discipline as the UART console.
+ *     Polled, no interrupts; a transmit parks the sending actor until
+ *     the device completes it (never the hart), with a deadline.
  *
  *  2. A minimal transport so FPRISC can speak to the host: ARP responder,
  *     IPv4 (no fragments), and a small-table (NETCONN) TCP with no retransmit,
@@ -201,7 +202,69 @@ static int net_probe(void) {
   return 0;
 }
 
-/* send one frame already assembled at tx_buf+vhdr_len, length flen */
+/* ---- the transmit buffer: one owner, a parked wait for completion -------
+ * tx_buf holds one frame.  A sender takes it (tx_take), builds the frame,
+ * notifies the device and PARKS (fpr_actor_sleep_us) between checks of the
+ * used ring, so the hart serves other actors meanwhile; QEMU completes
+ * within microseconds, so a short bounded spin catches most frames before
+ * the first park.  Until 2026-10-02 this was a 4,000,000-iteration spin
+ * holding the hart on every netWrite (docs/2026-10-02-QOS-AUDIT.md).
+ *
+ * Failure follows the disk's rule (docs/2026-10-01-DISK-HARDENING.md): a
+ * frame the device does not complete within NET_DEADLINE takes the network
+ * OFFLINE -- the buffer may still be read by DMA, so it is never reused --
+ * and fail-stops the caller; every later send is refused the same way.  A
+ * sender killed while it owns the buffer leaves it an ORPHAN: the next
+ * sender reclaims it once the used ring shows that frame complete, or takes
+ * the network offline when it is past the deadline. */
+#ifndef NET_DEADLINE_TICKS
+#define NET_DEADLINE_TICKS 50000000ULL /* 5 s at the virt CLINT's 10 MHz */
+#endif
+#define NET_DEADLINE_PARKS (NET_DEADLINE_TICKS / 2000ULL) /* when mtime reads 0 */
+static unsigned tx_busy, tx_orphan, net_offline;
+static u16 tx_before;      /* the used index before the owner's frame */
+static uint64_t net_elapsed(uint64_t since) {
+  uint64_t now = hal_mtime();
+  return (since && now) ? now - since : 0;
+}
+static void tx_abandon(void *unused) { /* a killed owner: its frame may be in flight */
+  (void)unused;
+  __atomic_store_n(&tx_orphan, 1, __ATOMIC_RELEASE);
+}
+static void tx_take(void) {
+  uint64_t t0 = hal_mtime(), parks = 0;
+  for (;;) {
+    if (__atomic_load_n(&net_offline, __ATOMIC_ACQUIRE))
+      fpr_actor_fail("net: the device stalled on an earlier frame -- network offline, send refused");
+    unsigned free = 0;
+    if (__atomic_compare_exchange_n(&tx_busy, &free, 1, 0, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)) break;
+    if (__atomic_load_n(&tx_orphan, __ATOMIC_ACQUIRE)) {
+      FENCE();
+      if (QUSED(&q_tx)->idx != tx_before) { /* the orphan's frame went out */
+        q_tx.last_used = QUSED(&q_tx)->idx;
+        __atomic_store_n(&tx_orphan, 0, __ATOMIC_RELEASE);
+        __atomic_store_n(&tx_busy, 0, __ATOMIC_RELEASE);
+        continue;
+      }
+      if (t0 ? net_elapsed(t0) >= NET_DEADLINE_TICKS : parks >= NET_DEADLINE_PARKS) {
+        __atomic_store_n(&net_offline, 1, __ATOMIC_RELEASE);
+        fpr_actor_fail("net: the device stalled on an abandoned frame -- network offline");
+      }
+    } else if (t0 ? net_elapsed(t0) >= 3 * NET_DEADLINE_TICKS : parks >= 3 * NET_DEADLINE_PARKS) {
+      fpr_actor_fail("net: waited three deadlines for the transmit buffer -- send refused");
+    }
+    parks++;
+    fpr_actor_sleep_us(200);
+  }
+  fpr_actor_cleanup_set(tx_abandon, &tx_busy);
+}
+static void tx_release(void) {
+  fpr_actor_cleanup_clear(&tx_busy);
+  __atomic_store_n(&tx_busy, 0, __ATOMIC_RELEASE);
+}
+
+/* send one frame already assembled at tx_buf+vhdr_len, length flen; the
+ * caller owns tx_buf (tx_take) */
 static void nic_tx(u32 flen) {
   nset(tx_buf, 0, vhdr_len);              /* virtio-net hdr: no offloads */
   volatile vq_desc_t *d = &QDESC(&q_tx)[0];
@@ -211,15 +274,30 @@ static void nic_tx(u32 flen) {
   d->next = 0;
   volatile vq_avail_t *av = QAVAIL(&q_tx);
   u16 before = QUSED(&q_tx)->idx;
+  tx_before = before;
   av->ring[q_tx.avail_shadow % QSZ] = 0;
   FENCE();
   av->idx = ++q_tx.avail_shadow;
   FENCE();
   wr(R_QNOTIFY, 1);
-  for (u32 spin = 0; spin < 4000000; spin++) {   /* sync completion */
+  for (u32 spin = 0; spin < 2000; spin++) {   /* the usual case: done at once */
     FENCE();
-    if (QUSED(&q_tx)->idx != before) break;
+    if (QUSED(&q_tx)->idx != before) goto done;
   }
+  {
+    uint64_t start = hal_mtime(), parks = 0;
+    for (;;) {
+      FENCE();
+      if (QUSED(&q_tx)->idx != before) break;
+      if (start ? net_elapsed(start) >= NET_DEADLINE_TICKS : ++parks >= NET_DEADLINE_PARKS) {
+        __atomic_store_n(&net_offline, 1, __ATOMIC_RELEASE);
+        fpr_actor_cleanup_clear(&tx_busy); /* the buffer stays taken for good */
+        fpr_actor_fail("net: transmit timed out (the device stalled) -- network offline");
+      }
+      fpr_actor_sleep_us(200);
+    }
+  }
+done:
   q_tx.last_used = QUSED(&q_tx)->idx;
 }
 
@@ -272,6 +350,7 @@ static u16 csum16(const u8 *p, u32 n, u32 seed) {
 
 /* frame scratch layout inside tx_buf: [vhdr][eth 14][ip 20][tcp 20][payload] */
 static void tcp_send(conn_t *cn, u8 flags, const u8 *payload, u32 plen) {
+  tx_take();
   u8 *eth = tx_buf + vhdr_len;
   u8 *ip = eth + 14, *tcp = ip + 20;
   ncpy(eth, cn->pmac, 6);
@@ -316,6 +395,7 @@ static void tcp_send(conn_t *cn, u8 flags, const u8 *payload, u32 plen) {
   tcp[16] = tc >> 8; tcp[17] = tc & 0xff;
 
   nic_tx(14 + iplen);
+  tx_release();
   cn->snd_nxt += plen;
   if (flags & (TCP_SYN | TCP_FIN)) cn->snd_nxt += 1;
 }
@@ -327,6 +407,7 @@ static void handle_arp(const u8 *f, u32 len) {
   if (!neq(arp + 24, our_ip, 4)) return;            /* for us? */
   /* learn requester (the slirp gateway) */
   ncpy(gw_mac, arp + 8, 6);
+  tx_take();
   u8 *eth = tx_buf + vhdr_len;
   u8 *r = eth + 14;
   ncpy(eth, arp + 8, 6);
@@ -339,6 +420,7 @@ static void handle_arp(const u8 *f, u32 len) {
   ncpy(r + 18, arp + 8, 6);
   ncpy(r + 24, arp + 14, 4);
   nic_tx(42);
+  tx_release();
 }
 
 static void handle_tcp(const u8 *f, u32 len) {

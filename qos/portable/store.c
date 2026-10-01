@@ -50,6 +50,16 @@ int64_t qosp_store_call(uint64_t tag, const char *pay, uint64_t plen,
     pthread_mutex_unlock(&store_mu);
     return r;
   }
+  if (tag == 8) { /* unload-plugin (QOS_SYS_UNLOADQA): its process ended;
+                   * the code pages go back to r-w before the app frees
+                   * the block */
+    int64_t qosp_unload_plugin(const qos_unload_t *, char *, uint64_t);
+    if (plen != sizeof(qos_unload_t)) { snprintf(out, outcap, "tag 8 takes a qos_unload_t (abi v17)"); return -1; }
+    pthread_mutex_lock(&store_mu);
+    int64_t r = qosp_unload_plugin((const qos_unload_t *)pay, out, outcap);
+    pthread_mutex_unlock(&store_mu);
+    return r;
+  }
   if (tag == 7) { /* compile: bridge to the host fpr compiler server
                    * over its unix socket (compile.c).  No store lock:
                    * a compile can take seconds, and it touches no kv

@@ -19,29 +19,31 @@ FS = use "std/fs".
 QAR = use "../programs/mods/qar".
 QaImg = use "../programs/mods/qaimg".
 
-Sys.placeImageAt : String -> List Int -> List Int -> String -> (Int, String) .
+Sys.placeImageAt : String -> List Int -> List Int -> String -> (Int, String, Int) .
 Sys.images : Int -> Int .
 Sys.arenaFree : Int -> Int .
 
-# (ok, msg) of one placement of the archive, or (0, why) before placing
-place : String -> (Int, String) .
+# (ok, msg, root) of one placement of the archive -- root is the process's
+# root actor, whose result the test waits for by sender -- or (0, why, 0)
+# before placing
+place : String -> (Int, String, Int) .
 place qa = case QAR.sectionBytes qa "LOAD" of
-    Err e -> (0, "no LOAD: {e}")
+    Err e -> (0, "no LOAD: {e}", 0)
   | Ok load -> place2 qa load.
-place2 : String -> String -> (Int, String) .
+place2 : String -> String -> (Int, String, Int) .
 place2 qa load = case QAR.extent qa "IMAGE" of
-    Err e -> (0, "no IMAGE: {e}")
+    Err e -> (0, "no IMAGE: {e}", 0)
   | Ok r -> (case QAR.extent qa "RELOC" of
-      Err e -> (0, "no RELOC: {e}")
+      Err e -> (0, "no RELOC: {e}", 0)
     | Ok rel -> place3 qa load r rel).
-place3 : String -> String -> (Int, Int) -> (Int, Int) -> (Int, String) .
+place3 : String -> String -> (Int, Int) -> (Int, Int) -> (Int, String, Int) .
 place3 qa load r rel =
   (ipos, iln) = r;
   (rpos, rln) = rel;
   case QaImg.parse load of
-    Err e -> (0, "bad LOAD: {e}")
+    Err e -> (0, "bad LOAD: {e}", 0)
   | Ok m -> (case QaImg.check m iln of
-      Err e -> (0, "bad image: {e}")
+      Err e -> (0, "bad image: {e}", 0)
     | Ok m2 -> Sys.placeImageAt qa (ipos :: iln :: rpos :: rln :: Nil) (QaImg.nums m2) "CkSlow\n").
 
 main =
@@ -54,21 +56,25 @@ main =
     | Ok linger -> run me slow linger).
 
 intact s = strCmp s "slowproc: intact 4500001500000" == 0.
-result me = case receiveRes me of Ok s -> s | Err e -> "failed: {e}".
+# the result of ONE process: its root actor's own reply (receiveFromRes), so
+# two processes finishing in either order are told apart, and a root that
+# dies without answering is "failed: dead actor"
+result me root = case receiveFromRes me root of Ok m -> resultOf m | Err e -> "failed: {e}".
+resultOf m = case m of Ok s -> s | Err e -> "failed: {e}".
 
 run : unsafe Int -> String -> String -> String .
 run me slow linger =
   imgs0 = Sys.images 0;
   free0 = Sys.arenaFree 0;
-  (ok1, m1) = place slow;
-  (ok2, m2) = place slow;
+  (ok1, m1, r1) = place slow;
+  (ok2, m2, r2) = place slow;
   concurrent = case ok1 == 2 and ok2 == 2 of
       False -> "WRONG (placed {ok1} {m1}; {ok2} {m2})"
-    | True -> both (result me) (result me);
-  (okL, mL) = place linger;
+    | True -> both (result me r1) (result me r2);
+  (okL, mL, rL) = place linger;
   lingered = case okL == 2 of
       False -> "linger not placed ({mL})"
-    | True -> lingerCheck me imgs0;
+    | True -> lingerCheck me rL imgs0;
   _ = settle imgs0 400;
   imgs = Sys.images 0 - imgs0;
   free1 = Sys.arenaFree 0;
@@ -86,9 +92,9 @@ both a b = case intact a and intact b of
 
 # main has returned; its child still runs the image's code, so the image is
 # still there; once the child ends it goes
-lingerCheck : unsafe Int -> Int -> String .
-lingerCheck me imgs0 =
-  r = result me;
+lingerCheck : unsafe Int -> Int -> Int -> String .
+lingerCheck me root imgs0 =
+  r = result me root;
   held = Sys.images 0 - imgs0;
   case held == 1 of
     False -> "not held while the child ran ({held} images; main said {r})"

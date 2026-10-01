@@ -1,10 +1,12 @@
 /* hostlog.c -- see hostlog.h for the contract. */
 #include "hostlog.h"
 
+#include <poll.h>
 #include <pthread.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 
 /* pending lines from before the app registered its ring: replayed in
  * order at registration.  A rolling window -- if boot somehow emits
@@ -36,6 +38,29 @@ void qos_hostlog(const char *fmt, ...) {
   memcpy(pend[pend_seq % PEND_N], line, n + 1);
   pend_seq++;
   pthread_mutex_unlock(&hl_mu);
+}
+
+#ifndef QOS_CONSOLE_WAIT_MS
+#define QOS_CONSOLE_WAIT_MS 20
+#endif
+static int console_stalled;            /* the last byte found fd 1 unwritable */
+static unsigned long console_dropped;  /* bytes dropped since writing last resumed */
+void qos_console_putc(char c) {
+  struct pollfd p = {1, POLLOUT, 0};
+  int r = poll(&p, 1, console_stalled ? 0 : QOS_CONSOLE_WAIT_MS);
+  if (r > 0 && (p.revents & POLLOUT)) {
+    if (console_stalled) {
+      console_stalled = 0;
+      qos_hostlog("[qosp] console writable again: %lu byte(s) dropped while it was not", console_dropped);
+      console_dropped = 0;
+    }
+    ssize_t w = write(1, &c, 1);
+    (void)w; /* console loss is not an image error */
+    return;
+  }
+  if (!console_stalled) qos_hostlog("[qosp] console not writable within %d ms: dropping output until it is", QOS_CONSOLE_WAIT_MS);
+  console_stalled = 1;
+  console_dropped++;
 }
 
 void qos_hostlog_set_sink(void (*sink)(const char *line, uint64_t n)) {

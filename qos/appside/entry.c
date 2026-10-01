@@ -159,6 +159,41 @@ static const char *complete_imports(unsigned char *base, uw memsz, qos_span_t im
   return why;
 }
 
+/* An attached image's record sits at the head of its buddy block, before
+ * the 64 KiB-aligned image.  Its pid is 0 until Sys.spawnApp adopts the
+ * image its root function lives in (runtime.c fpr_image_adopt); from then
+ * on it ends with that process: the reap hook below frees the block once no
+ * actor of the pid is left, the native loader's rule (loader/process.c
+ * image_quiet).  An image that is only ever used as a module, never
+ * launched, stays pid 0 and immortal. */
+typedef struct {
+  fpr_image_t im;
+  uint64_t base, execsz; /* the pages the host made r-x: made r-w again before reuse */
+  int ending;
+} plug_image_t;
+static fpr_lock_t g_plug_lock; /* serializes teardown against reaps on other harts */
+static void plug_image_quiet(uw pid) {
+  fpr_lock(&g_plug_lock);
+  plug_image_t *pi = (plug_image_t *)fpr_image_of_pid(pid);
+  if (!pi || pi->ending || fpr_pid_live(pid)) { fpr_unlock(&g_plug_lock); return; }
+  pi->ending = 1;
+  fpr_image_remove(&pi->im);
+  fpr_unlock(&g_plug_lock);
+  if (g_syscall) {
+    char err[128];
+    qos_unload_t u = {pi->base, pi->execsz};
+    err[0] = 0;
+    if (g_syscall(QOS_SYS_UNLOADQA, (const char *)&u, sizeof u, err, sizeof err) < 0)
+      fpr_cpanic(err[0] ? err : "plugin unload refused by the host");
+  }
+  buddy_free(pi);
+}
+
+/* Sys.images : Int -> Int -- attached images now (a launched one goes when
+ * its process has ended; the native loader's Sys.images is the same count) */
+static V h_sys_images(V d) { (void)d; return TAG((sw)fpr_image_count()); }
+FPR_FN(fpr_g_Sys_x2eimages, h_sys_images, 1);
+
 /* Sys.attachImage <id> <abi> <sha> <nums> [IMAGE, RELOC, IMPORT] -> Ok "" | Err
  * reason: nums is mods/qaimg.fpr's [base, entry, execsz, rwoff, memsz] (base
  * 0: relocatable); programs call Plug.attach with the .qa bytes. */
@@ -173,9 +208,9 @@ static V h_sys_attach_image(V idv, V abiv, V shav, V numsv, V secsv) {
     return fpr_mkresult(1, "not a relocatable plugin (linked for a fixed slot): rebuild it");
   uw memsz = n[4];
   const uw align = 64u * 1024; /* the link script's W^X page: 4 K and 16 K hosts alike */
-  void *blk = buddy_alloc(sizeof(fpr_image_t) + align + memsz);
+  void *blk = buddy_alloc(sizeof(plug_image_t) + align + memsz);
   if (!blk) return fpr_mkresult(1, "no memory for the plugin");
-  unsigned char *base = (unsigned char *)(((uw)blk + sizeof(fpr_image_t) + align - 1) & ~(align - 1));
+  unsigned char *base = (unsigned char *)(((uw)blk + sizeof(plug_image_t) + align - 1) & ~(align - 1));
   fpr_qaimg_t q = {(uw)base, n[1], n[2], n[3], memsz};
   fpr_elf_load_t ld = fpr_qaimg_place(&q, img.p, img.n, base, memsz);
   const char *bad = ld.ok ? fpr_qaimg_relocate(base, img.n, rel.p, rel.n) : ld.err;
@@ -196,14 +231,18 @@ static V h_sys_attach_image(V idv, V abiv, V shav, V numsv, V secsv) {
     buddy_free(blk); /* refused before any page changed protection */
     return fpr_mkresult(1, g_sysout[0] ? g_sysout : "plugin load failed");
   }
-  /* the block's cells are statics now; a plugin is never unloaded, so it
-   * belongs to no process that could end (pid 0) */
-  fpr_image_t *im = (fpr_image_t *)blk;
-  im->lo = (char *)blk - sizeof(uw);
-  im->hi = (char *)blk + buddy_block_usable_size(blk);
-  im->pid = 0;
-  im->owner = 0;
-  fpr_image_add(im);
+  /* the block's cells are statics now, owned by no process until a launch
+   * adopts the image (pid 0) */
+  plug_image_t *pi = (plug_image_t *)blk;
+  pi->im.lo = (char *)blk - sizeof(uw);
+  pi->im.hi = (char *)blk + buddy_block_usable_size(blk);
+  pi->im.pid = 0;
+  pi->im.owner = pi;
+  pi->base = (uint64_t)(uintptr_t)base;
+  pi->execsz = n[2];
+  pi->ending = 0;
+  if (!fpr_pid_quiet) fpr_pid_quiet = plug_image_quiet;
+  fpr_image_add(&pi->im);
   if (fpr_mod_attach((const uw *)(uintptr_t)r))
     return fpr_mkresult(1, "module registry full");
   return fpr_mkresult(0, "");

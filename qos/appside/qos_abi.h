@@ -19,7 +19,7 @@
 
 #include <stdint.h>
 
-#define QOS_ABI_VERSION 16u /* v16: tag 4 publishes a plugin the app placed (no shell span); v15: copied worker disk requests */
+#define QOS_ABI_VERSION 17u /* v17: tag 8 unloads a plugin whose process ended; v16: tag 4 publishes a plugin the app placed (no shell span); v15: copied worker disk requests */
 
 /* ---- the address plan (linux-x86-64) --------------------------------
  * The host is linked non-PIE (default 0x400000 text); the arena is a
@@ -86,6 +86,12 @@ typedef struct {
 typedef struct { const char *name; uint64_t addr, size; } qos_export_t;
 #define QOS_SYS_SLEEPUS 6
 #define QOS_SYS_COMPILE 7
+/* v17: tag 8 unload-plugin (payload = a qos_unload_t).  The process a
+ * launched image belonged to has ended and the app is about to free its
+ * block (appside/entry.c plug_image_quiet): the host makes the code pages
+ * writable again, so the block can be reused as heap. */
+#define QOS_SYS_UNLOADQA 8
+typedef struct { uint64_t base, execsz; } qos_unload_t;
 
 /* ---- the HAL table --------------------------------------------------
  * The entries mirror the obligations runtime/posix's co-compiled HAL

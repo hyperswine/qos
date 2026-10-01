@@ -86,7 +86,7 @@ IInt = SVCM.IInt.
 IStr = SVCM.IStr.
 IFn  = SVCM.IFn.
 IErr = SVCM.IErr.
-QLog    = use "mods/qlog#7b69b12a610e0fef".
+QLog    = use "mods/qlog#93fcbf4747b85fee".
 UartM   = use "mods/uart".
 TimerM  = use "mods/timer".
 MK      = use "mods/matrixkpd".
@@ -624,7 +624,7 @@ runBuiltin con entry caps =
 # numbers [base, entry, execsz, rwoff, memsz] and the capability blob.  The image is relocatable (linked
 # at 0); the placer puts it in a block from the buddy and moves it there
 # (docs/2026-10-01-PROCESS-IMAGES.md).
-Sys.placeImageAt : String -> List Int -> List Int -> String -> (Int, String) .
+Sys.placeImageAt : String -> List Int -> List Int -> String -> (Int, String, Int) .
 
 runProcess : unsafe (Int, Int) -> String -> String -> Unit .
 runProcess con qa blob =
@@ -650,25 +650,33 @@ runProcessChecked con qa checked ioff iln rel blob =
     Err e -> putLn con (strcat "process load failed: " e)
   | Ok m -> runProcessLoaded con (Sys.placeImageAt qa (ioff :: iln :: rpos :: rln :: Nil) (QaImg.nums m) blob).
 
-runProcessLoaded : unsafe (Int, Int) -> (Int, String) -> Unit .
+runProcessLoaded : unsafe (Int, Int) -> (Int, String, Int) -> Unit .
 runProcessLoaded con res =
-  case res of (ok, msg) ->
+  case res of (ok, msg, root) ->
     case ok == 1 of
       True -> putLn con (strcat "process exited: " msg)
     | False -> case ok == 2 of
-        True -> runProcessShared con msg
+        True -> runProcessShared con msg root
       | False -> putLn con (strcat "process load failed: " msg).
 
 # ok=2: the TRANSPARENT-ACB launch -- the process's actors are queued
 # on the shared plane with their own pid; main's result arrives as a
-# T_RESULT message, so the launcher WAITS in an ordinary receive (its
-# hart serves other actors meanwhile -- including the process's).
-runProcessShared : unsafe (Int, Int) -> String -> Unit .
-runProcessShared con pidmsg =
+# T_RESULT message FROM ITS ROOT ACTOR, so the launcher waits for that
+# sender alone (receiveFromRes: no other Result in its mailbox can be
+# taken for the exit, and a root that dies without answering is
+# "process failed: dead actor").  Its hart serves other actors
+# meanwhile -- including the process's.
+runProcessShared : unsafe (Int, Int) -> String -> Int -> Unit .
+runProcessShared con pidmsg root =
   _ = putLn con (strcat "launched shared (" (strcat pidmsg ")"));
   me = myself 0;
-  r = receiveRes me;
-  case r of
+  case receiveFromRes me root of
+    Ok m -> processEnded con m
+  | Err e -> putLn con (strcat "process failed: " e).
+# the root's own message: main's result as Ok text (an Err would be the
+# process's own report)
+processEnded : unsafe (Int, Int) -> _ -> Unit .
+processEnded con m = case m of
     Ok s -> putLn con (strcat "process exited: " s)
   | Err e -> putLn con (strcat "process failed: " e).
 

@@ -26,10 +26,10 @@ void fpr_proc_arena_init(void) {
  * A loaded process lives in its own scheduler world: it cannot `send`
  * to System.qa's actors.  Instead System.qa passes ONE C function
  * through the entry ABI; the process-side svc helpers call it, and it
- * -- running System.qa's code -- publishes into the storage actor
- * (spawned on hart 1, so it makes progress while hart 0 is inside the
- * process) with the dormant syscall mailbox as replyTo, then spins for
- * the Result.  Capability scoping is enforced HERE, structurally: a
+ * -- running System.qa's code -- sends to the storage actor with the
+ * calling process ACB as replyTo and PARKS that actor for the reply
+ * (receiveFromRes: a refused send or a dead storage actor is an error
+ * to the process, never a wait).  Capability scoping is enforced HERE, structurally: a
  * process may only name the relative url "kv", which the trampoline
  * rewrites to apps/<id>/<id>.kv from the id System.qa bound at launch.
  * Tags: 2 append, 3 replay (the kv event-sourcing pair). */
@@ -64,14 +64,13 @@ FPR_FN(fpr_g_Sys_x2ebindApp, g_sys_bind_app, 1);
  * The old scheme here — a Tup2 header carrying 4 slots — was exactly
  * the silent-corruption ABI the compiler now rejects at compile time;
  * this was its last C-side survivor. */
-/* the storage actor's mailbox is Dynamic; a refusal here means the
- * machine is out of memory, and a syscall cannot proceed without it */
-static void send_or_die(uw key, V to, V msg) {
-  for (int t = 0; t < 1000; t++) {
-    if (fpr_sent(fpr_send_as(key, to, msg))) return;
-    __asm__ volatile("" ::: "memory");
-  }
-  fpr_cpanic("syscall: the storage actor's mailbox refused the request");
+/* a request that could not be made: the reason goes to the process in
+ * out (NUL-terminated when it fits) with -1, as a storage Err does */
+static sw store_refused(const char *why, char *out, uw outcap) {
+  uw k = 0;
+  while (why[k] && k < outcap) { out[k] = why[k]; k++; }
+  if (k < outcap) out[k] = 0;
+  return -1;
 }
 static V mkrpc(V a, V b, V c, V d) {
   if (!g_rpc_tid) fpr_cpanic("store call before bindStore prototype");
@@ -95,6 +94,7 @@ typedef struct {
   void *reply;
   uw pid;
   void (*on_exit)(void);
+  void *root;         /* set by the process entry: its root actor (the launcher's correlation) */
 } shared_boot_t;
 typedef struct {
   fpr_image_t im;     /* lo/hi: the whole buddy block; owner: this record */
@@ -154,13 +154,20 @@ sw qos_store_call(uw tag, const char *pay, uw plen, char *out, uw outcap) {
    * round trip (a blocking receive frees the hart) */
   void *me = fpr_hart()->current;
   V msg = mkrpc((V)me, TAG((sw)tag), urlv, payv);
-  send_or_die((uw)me, g_store_actor, msg);
-  V r = fpr_receive_res_c((V)me);
+  /* the storage actor's mailbox is Dynamic; a refusal is the machine out
+   * of memory, or the actor gone -- the PROCESS hears it, the kernel runs on */
+  if (!fpr_sent(fpr_send_as((uw)me, g_store_actor, msg)))
+    return store_refused("storage: the storage actor refused the request", out, outcap);
+  /* the reply is the storage actor's own: Ok <its Result>, or Err "dead
+   * actor" when it ended first (receiveFromRes wraps the message) */
+  V w = fpr_receive_from_res_c((V)me, g_store_actor);
+  V r = ((hdr_t *)w)->var == 0 ? *(V *)((char *)w + 8) : w;
   /* r = Ok s | Err s (builtin Result, variant 0/1), field at +8 */
   hdr_t *h = (hdr_t *)r;
   str_t *s = (str_t *)*(V *)((char *)h + 8);
   uw cp = s->len < outcap ? s->len : outcap;
   for (uw i = 0; i < cp; i++) out[i] = (char)s->bytes[i];
+  if (cp < outcap) out[cp] = 0;
   return h->var == 0 ? (sw)cp : -1;
 }
 
@@ -178,28 +185,31 @@ static fpr_grant_t loader_grow_memory(uw want_bytes) {
   return g;
 }
 
-static V mktup2v(V a, V b) {
-  hdr_t *t = (hdr_t *)fpr_alloc(8 + 2 * sizeof(uw));
-  t->tid = T_TUP2;
+static V mktup3v(V a, V b, V c) {
+  hdr_t *t = (hdr_t *)fpr_alloc(8 + 3 * sizeof(uw));
+  t->tid = T_TUP3;
   t->var = 0;
   *(V *)((char *)t + 8) = a;
   *(V *)((char *)t + 8 + sizeof(uw)) = b;
+  *(V *)((char *)t + 8 + 2 * sizeof(uw)) = c;
   return (V)t;
 }
 
 static V refuse(const char *why) {
   uw n = 0;
   while (why[n]) n++;
-  return mktup2v(TAG(0), (V)fpr_mkstr((const uint8_t *)why, n));
+  return mktup3v(TAG(0), (V)fpr_mkstr((const uint8_t *)why, n), TAG(0));
 }
 
-/* Sys.placeImageAt : String -> List Int -> List Int -> String -> (Int, String)
+/* Sys.placeImageAt : String -> List Int -> List Int -> String -> (Int, String, Int)
  * The ARCHIVE bytes; the extents [IMAGE offset, IMAGE length, RELOC offset,
  * RELOC length] of its sections; LOAD's numbers [base, entry, execsz, rwoff,
  * memsz] as programs/mods/qaimg.fpr read them; and the capability blob.  The
  * payloads are read straight out of the .qa String's own bytes, never as
  * pre-sliced copies.  fst = 2 "running under this pid" / 0 failure; snd =
- * the pid, or a human-readable reason.  Argument-type errors panic, like
+ * the pid, or a human-readable reason; thd = the process's ROOT actor (0 on
+ * failure), so the launcher waits for ITS result (receiveFromRes) and no
+ * other sender's.  Argument-type errors panic, like
  * every HAL primitive; anything about the image or memory is reported
  * through the tuple, so the launcher keeps running and says what went
  * wrong. */
@@ -257,6 +267,7 @@ static V g_sys_place_image_at(V qastr, V extv, V numsv, V capsv) {
   pi->sb.reply = fpr_hart()->current; /* the launcher actor gets the result */
   pi->sb.pid = pid;
   pi->sb.on_exit = shared_on_exit;
+  pi->sb.root = 0;
   if (!fpr_pid_quiet) fpr_pid_quiet = image_quiet;
   /* registered BEFORE the root is spawned: from here its cells are statics
    * to the kernel, and what leaves the process is decided against its pid */
@@ -271,7 +282,9 @@ static V g_sys_place_image_at(V qastr, V extv, V numsv, V capsv) {
       (V (*)(void *, uw, fpr_grant_t (*)(uw), const unsigned char *, uw,
              sw (*)(uw, const char *, uw, char *, uw), void *))r.entry;
   entry(r.image_end, 0, loader_grow_memory, cs->bytes, cs->len, qos_store_call, &pi->sb);
-  /* a process that started nothing, or has already ended, goes now */
+  /* the root actor, read before the record can go: a process that started
+   * nothing, or has already ended, is freed by the next line */
+  V root = pi->sb.root ? (V)pi->sb.root : TAG(0);
   image_quiet(pid);
 
   char pm[32];
@@ -285,7 +298,7 @@ static V g_sys_place_image_at(V qastr, V extv, V numsv, V capsv) {
       char t = pm[st + i]; pm[st + i] = pm[pn - 1 - i]; pm[pn - 1 - i] = t;
     }
   }
-  return mktup2v(TAG(2), (V)fpr_mkstr((const uint8_t *)pm, pn));
+  return mktup3v(TAG(2), (V)fpr_mkstr((const uint8_t *)pm, pn), root);
 }
 
 FPR_FN(fpr_g_Sys_x2eplaceImageAt, g_sys_place_image_at, 4);

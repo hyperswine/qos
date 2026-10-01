@@ -41,9 +41,11 @@ static V h_sys_store_req(V tagv, V payv) {
   if (ISINT(payv) || ((hdr_t *)payv)->tid != T_STR) fpr_cpanic("Sys.storeReq: payload must be a String");
   if (!g_syscall) return fpr_mkresult(1, "no syscall channel (standalone run)");
   str_t *s = (str_t *)payv;
+  g_sysout[0] = 0;
   sw r = g_syscall((uw)UNTAG(tagv), (const char *)s->bytes, s->len, g_sysout, sizeof g_sysout);
   if (r == -2) return fpr_mkresult(1, "no disk");
-  if (r < 0) return fpr_mkresult(1, "storage error");
+  if (r == -3) return fpr_mkresult(1, "storage: unknown request tag");
+  if (r < 0) return fpr_mkresult(1, g_sysout[0] ? g_sysout : "storage error"); /* the reason, as the kernel wrote it */
   return fpr_mkresultn(0, g_sysout, (uw)r);
 }
 FPR_FN(fpr_g_Sys_x2estoreReq, h_sys_store_req, 2);
@@ -57,6 +59,7 @@ typedef struct {
   void *reply;          /* the launcher's acb: main's result goes here */
   uw pid;
   void (*on_exit)(void);
+  void *root;           /* OUT: the root actor, so the launcher waits for its result alone */
 } fpr_shared_boot_t;
 
 static V g_reply;
@@ -148,7 +151,7 @@ V fpr_process_entry(void *heap_base, uw heap_size, fpr_grant_t (*grow)(uw want_b
     root->fn = (uw)proc_root;
     root->arity = 1;
     root->nargs = 0;
-    fpr_sched->spawn_pid((V)root, sb->pid);
+    sb->root = (void *)fpr_sched->spawn_pid((V)root, sb->pid);
     return (V)&fpr_unit; /* launched; the result arrives as a message */
   }
 

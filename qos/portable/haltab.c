@@ -50,10 +50,7 @@ static int t_input_poll(int64_t *kind, int64_t *a, int64_t *c) {
 }
 #endif
 
-static void t_putc(char c) {
-  ssize_t r = write(1, &c, 1);
-  (void)r; /* console loss is not an image error */
-}
+static void t_putc(char c) { qos_console_putc(c); } /* bounded: hostlog.h */
 
 static void t_poweroff(int code) { exit(code); }
 

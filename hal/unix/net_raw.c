@@ -269,9 +269,7 @@ int qos_mmioraw_write(uint64_t addr, uint64_t v) {
   switch (addr) {
     case UART_THR: {
       if (uart_lcr & 0x80) { uart_dll = (uint8_t)v; return 0; } /* DLAB: DLL */
-      char c = (char)v;
-      ssize_t r = write(1, &c, 1);
-      (void)r;
+      qos_console_putc((char)v); /* bounded wait, never holds the hart: hostlog.h */
       return 0;
     }
     /* the interrupt-era registers, modeled honestly for a host with

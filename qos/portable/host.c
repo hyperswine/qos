@@ -131,6 +131,28 @@ int64_t qosp_load_plugin(const qos_plugin_t *pl, char *err, uint64_t errcap) {
   return (int64_t)(lo + pl->entry);
 }
 
+/* syscall tag 8: the image's process ended and the app frees its block;
+ * undo the r-x so the buddy can hand the pages out as heap again.  The
+ * range is checked the way a publish is (inside the arena, page aligned);
+ * the host keeps no ledger of published ranges, the app's image map is it. */
+int64_t qosp_unload_plugin(const qos_unload_t *u, char *err, uint64_t errcap) {
+  uintptr_t pg = (uintptr_t)getpagesize();
+  uintptr_t lo = (uintptr_t)u->base;
+  uintptr_t xend = (lo + u->execsz + pg - 1) & ~(pg - 1);
+  uintptr_t alo = (uintptr_t)QOS_ARENA_BASE, ahi = alo + g_arena_size;
+  if (u->execsz == 0 || xend < lo || lo < alo || xend > ahi || (lo & (pg - 1))) {
+    snprintf(err, errcap, "unload: not a published plugin range");
+    return -1;
+  }
+  if (mprotect((void *)lo, xend - lo, PROT_READ | PROT_WRITE)) {
+    snprintf(err, errcap, "unload mprotect: %s", strerror(errno));
+    return -1;
+  }
+  qos_hostlog("[qosp] plugin at %#lx-%#lx: its process ended, pages writable again",
+              (unsigned long)lo, (unsigned long)xend);
+  return 0;
+}
+
 /* v12: no grow callback.  The app owns the arena past its image and
  * runs its own buddy behind its memory actor (docs/MEMORY.md); the
  * host's buddy, the grow mutex, and the grow trace went with it. */

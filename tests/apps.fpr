@@ -6,7 +6,11 @@
 # spawning its `app` export under a fresh pid -- the shell's actors are
 # pid 0, appa's are pid 1, appb's (helper included) pid 2.  Both report
 # back through the launcher handle they were handed as their first
-# message; when they exit, their memory goes home to the memory actor.
+# message; when they exit, their memory goes home to the memory actor:
+# the image each was relocated into is freed once no actor of its pid is
+# left (Sys.images counts them), and the free bytes come back to within
+# the actors' own retained blocks (ACB arena, recycled stacks) -- an
+# absolute bound, not the 97% of a 4 GiB arena this once accepted.
 #
 #   ./qos.py run tests/apps.fpr
 #: plugins tests/appa.fpr tests/appb.fpr
@@ -16,6 +20,8 @@ unsafe program.
 
 FS = use "std/fs".
 LD = use "std/loader".
+
+Sys.images : Int -> Int .
 
 expectOk what r = case r of
     Ok v -> v
@@ -42,18 +48,23 @@ main =
   ha = expectOk "launch appa" (LD.launch me ld "appa");
   hb = expectOk "launch appb" (LD.launch me ld "appb");
   ((pa, ha2, ra), (pb, hb2, rb)) = reports me 2 (0, 0, 0) (0, 0, 0);
-  _ = settle me 20;
+  _ = settle me 200;
+  imgs = Sys.images 0;
   free1 = nth 1 (Sys.memInfo 0);
-  pct = free1 * 100 / free0;
+  kept = free0 - free1;
   distinct = pa != pb and pa != 0 and pb != 0 and myPid 0 == 0;
   inherit = ha2 == pa and hb2 == pb;
-  verdict = case distinct and inherit and ra == 9006000 and rb == 42 and pct >= 97 of
+  verdict = case distinct and inherit and ra == 9006000 and rb == 42 and imgs == 0 and kept <= 524288 of
       True -> "APPS HOLD"
-    | False -> "APPS BROKEN (free {pct}%)";
+    | False -> "APPS BROKEN (images {imgs}, {kept} B not back)";
   "apps: appa pid {pa} ran (helper pid {ha2}) = {ra}; appb pid {pb} ran (helper pid {hb2}) = {rb}; shell pid {myPid 0}; {verdict}".
 
+# wait until both images are reaped (their last actor off every hart),
+# bounded: 200 turns of 2 ms
 settle me 0 = 0.
-settle me n =
+settle me n = settleStep me n (Sys.images 0).
+settleStep me n 0 = 0.
+settleStep me n k =
   _ = yield me;
   _ = Sys.sleepUs 2000;
   settle me (n - 1).
