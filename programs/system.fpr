@@ -781,17 +781,27 @@ lFrame caps ids sel page old =
   sec = secsOf (svcClock caps);
   new = TUI.frame (svcWrite caps) old (launcherW ids sel page sec) (80, 24);
   lWait caps ids sel page new sec.
+# Waiting for a key or the next clock second.  Every poll allocates a
+# little (the route's substring, the boxed reply) and the launcher's pool
+# is never reset, so the wait runs in an ARENA: its garbage goes when it
+# returns, and only the key code leaves.  It also parks 1 ms between empty
+# polls -- it used to spin, and a faster compiler exhausted the heap of an
+# idle launcher within seconds (2026-10-01).
 lWait : unsafe Caps -> List String -> Int -> Int -> List (List Int) -> Int -> Unit .
 lWait caps ids sel page buf sec =
+  k = Sys.arena (fn u -> lPoll caps sec);
+  case k == 0 of
+    True -> lFrame caps ids sel page buf
+  | False -> lKey caps ids sel page buf sec k.
+# a key (> 0), or 0 when the clock second changed
+lPoll : unsafe Caps -> Int -> Int .
+lPoll caps sec =
   k = svcPollKey caps;
   case k == 0 of
-    True -> lTick caps ids sel page buf sec
-  | False -> lKey caps ids sel page buf sec k.
-lTick : unsafe Caps -> List String -> Int -> Int -> List (List Int) -> Int -> Unit .
-lTick caps ids sel page buf sec =
-  case secsOf (svcClock caps) == sec of
-    True -> lWait caps ids sel page buf sec
-  | False -> lFrame caps ids sel page buf.
+    True -> (case secsOf (svcClock caps) == sec of
+        True -> Sys.sleepUs 1000 >> lPoll caps sec
+      | False -> 0)
+  | False -> k.
 lKey : unsafe Caps -> List String -> Int -> Int -> List (List Int) -> Int -> Int -> Unit .
 lKey caps ids sel page buf sec k =
   case k == 113 of                                        # q
