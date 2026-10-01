@@ -19,7 +19,7 @@
 
 #include <stdint.h>
 
-#define QOS_ABI_VERSION 14u /* v14: the arena is a reservation (its size arrives in the boot record); heap_release; the 1 GiB image and plugin windows */
+#define QOS_ABI_VERSION 15u /* v15: copied worker disk requests; earlier offsets unchanged */
 
 /* ---- the address plan (linux-x86-64) --------------------------------
  * The host is linked non-PIE (default 0x400000 text); the arena is a
@@ -227,6 +227,11 @@ typedef struct {
    * the app's buddy frees a large block: give its pages back to the OS
    * (the arena is a reservation; only the host can un-commit it) */
   void (*heap_release)(void *p, uint64_t bytes);
+  /* v15: worker-backed disk requests, with copied buffers. */
+  void *(*blk_submit)(uint64_t page, const char *src, uint64_t len, int write);
+  int (*blk_done)(void *job);
+  int64_t (*blk_result)(void *job, char *dst);
+  void (*blk_release)(void *job);
 } qos_hal_t;
 
 /* ---- the memory-growth grant (RETIRED in v12) ----------------------

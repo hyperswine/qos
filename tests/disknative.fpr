@@ -1,0 +1,19 @@
+# Concurrent page transfers must serialize the shared DMA buffer.
+rounds : unsafe Int -> Int -> String -> Bool .
+rounds n page text = if n == 0 then True else
+  d = device "blk";
+  _ = blkWrite d page text;
+  read = blkRead d page;
+  ok = substr read 1 (strlen text) == text;
+  if ok then rounds (n - 1) page text else False.
+worker : unsafe Int -> Int -> Unit .
+worker boss self = _ = send boss (rounds 30 2 "worker-two"); Unit.
+main : Unit .
+main =
+  me = myself 0;
+  w = spawn (worker me);
+  own = rounds 30 1 "root-one";
+  other = receiveFrom me w;
+  _ = print "native disk: {own} {other}";
+  _ = drop other;
+  Unit.

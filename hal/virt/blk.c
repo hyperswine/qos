@@ -22,7 +22,7 @@
  *   - same virtio-mmio probe as net.c (legacy v1 + modern v2), but
  *     DeviceID 2; the two probes scan the same 8 slots and claim
  *     different devices, so net + blk coexist.
- *   - one virtqueue, one outstanding request, synchronous poll for
+ *   - one virtqueue, one outstanding request, actor-parked timed poll for
  *     completion — the UART discipline again. A request is the standard
  *     3-descriptor chain: 16-byte header, 4 KiB data, 1 status byte.
  *   - no feature negotiation beyond VERSION_1 on modern: we need none
@@ -113,6 +113,34 @@ static struct {
 static struct { u32 type, reserved; u64 sector; } __attribute__((packed, aligned(16))) breq;
 static u8 bdata[PAGE_SZ] __attribute__((aligned(PAGE_SZ)));
 static u8 bstatus __attribute__((aligned(16)));
+static unsigned blk_busy, blk_orphan;
+static u16 blk_before;
+static void blk_abandon(void *unused) {
+  (void)unused;
+  __atomic_store_n(&blk_orphan, 1, __ATOMIC_RELEASE);
+}
+static void blk_lock(void) {
+  for (;;) {
+    unsigned free = 0;
+    if (__atomic_compare_exchange_n(&blk_busy, &free, 1, 0, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)) break;
+    /* A killed owner cannot release DMA storage before the device is done. */
+    if (__atomic_load_n(&blk_orphan, __ATOMIC_ACQUIRE)) {
+      FENCE();
+      unsigned abandoned = 1;
+      if (QUSED->idx != blk_before && __atomic_compare_exchange_n(&blk_orphan, &abandoned, 0, 0, __ATOMIC_ACQ_REL, __ATOMIC_RELAXED)) {
+        wr(R_INTACK, 3);
+        __atomic_store_n(&blk_orphan, 0, __ATOMIC_RELAXED);
+        __atomic_store_n(&blk_busy, 0, __ATOMIC_RELEASE);
+      }
+    }
+    fpr_actor_sleep_us(200);
+  }
+  fpr_actor_cleanup_set(blk_abandon, &blk_busy);
+}
+static void blk_unlock(void) {
+  fpr_actor_cleanup_clear(&blk_busy);
+  __atomic_store_n(&blk_busy, 0, __ATOMIC_RELEASE);
+}
 
 static void vq_setup(void) {
   for (u32 i = 0; i < sizeof(q.mem); i++) q.mem[i] = 0;
@@ -181,7 +209,7 @@ static int blk_probe(void) {
 /* one synchronous page transfer through the 3-descriptor chain */
 static void blk_rw(u64 page, int is_write) {
   if (!blk) fpr_cpanic("blk: no disk (boot QEMU with `make run-disk`)");
-  if ((page + 1) * SEC_PER_PAGE > blk_sectors) fpr_cpanic("blk: page out of range");
+  if (page >= blk_sectors / SEC_PER_PAGE) fpr_cpanic("blk: page out of range");
 
   breq.type = is_write ? BLK_T_OUT : BLK_T_IN;
   breq.reserved = 0;
@@ -195,16 +223,22 @@ static void blk_rw(u64 page, int is_write) {
 
   volatile vq_avail_t *av = QAVAIL;
   u16 before = QUSED->idx;
+  blk_before = before;
   av->ring[q.avail_shadow % QSZ] = 0;
   FENCE();
   av->idx = ++q.avail_shadow;
   FENCE();
   wr(R_QNOTIFY, 0);
-  for (u32 spin = 0; spin < 40000000; spin++) {   /* sync completion */
+  uint64_t start = hal_mtime();
+  u32 fallback = 0;
+  for (;;) {
     FENCE();
     if (QUSED->idx != before) break;
+    if (!start) start = hal_mtime();
+    if ((start && hal_mtime() - start >= 50000000ULL) || (!start && ++fallback >= 40000000))
+      fpr_cpanic("blk: request timed out");
+    fpr_actor_sleep_us(200);
   }
-  if (QUSED->idx == before) fpr_cpanic("blk: request timed out");
   q.last_used = QUSED->idx;
   wr(R_INTACK, 3);
   FENCE();
@@ -227,8 +261,12 @@ static V h_blkPages(V d) {
 static V h_blkRead(V d, V pv) {
   (void)d;
   if (!ISINT(pv)) fpr_cpanic("blkRead: page must be an Int");
+  if (!blk) fpr_cpanic("blk: no disk");
+  blk_lock();
   blk_rw((u64)UNTAG(pv), 0);
-  return (V)fpr_mkstr(bdata, PAGE_SZ);
+  V result = (V)fpr_mkstr(bdata, PAGE_SZ);
+  blk_unlock();
+  return result;
 }
 
 static V h_blkWrite(V d, V pv, V sv) {
@@ -237,8 +275,11 @@ static V h_blkWrite(V d, V pv, V sv) {
   if (ISINT(sv) || TID(sv) != T_STR) fpr_cpanic("blkWrite: payload must be a String");
   str_t *s = (str_t *)sv;
   if (s->len > PAGE_SZ) fpr_cpanic("blkWrite: payload exceeds one page");
+  if (!blk) fpr_cpanic("blk: no disk");
+  blk_lock();
   for (u64 i = 0; i < PAGE_SZ; i++) bdata[i] = i < s->len ? s->bytes[i] : 0;
   blk_rw((u64)UNTAG(pv), 1);
+  blk_unlock();
   return TAG((sw)s->len);
 }
 

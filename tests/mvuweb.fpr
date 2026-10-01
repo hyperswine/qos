@@ -79,4 +79,5 @@ wView m =
         , G.El "button" [G.Cls "btn round px-3 py-2", G.OnClick "theme" ""] [G.Txt "theme"]
         , G.El "button" [G.Cls "btn round px-3 py-2", G.OnClick "quit" ""] [G.Txt "quit"] ] ].
 
+main : unsafe String .
 main = LV.server (App wInit wUpdate wSubs wView).

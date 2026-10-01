@@ -200,6 +200,21 @@ FPR_FN(fpr_g_netClose, h_netClose, 1);
  * 0 when the host could not open its backing file, the graceful
  * no-disk state system.fpr gates on.  Out-of-range and oversize are
  * panics, byte-identical to virt's driver honesty. */
+static int64_t disk_wait(uint64_t page, const char *src, uint64_t len, int write, char *dst) {
+#ifdef QOS_DISK_TEST_SYNC
+  return write ? qos_hal->blk_write(page, src, len) : qos_hal->blk_read(page, dst);
+#endif
+  if (!qos_hal->blk_submit || !qos_hal->blk_done || !qos_hal->blk_result || !qos_hal->blk_release)
+    fpr_cpanic("blk: asynchronous disk capability not granted");
+  void *job = qos_hal->blk_submit(page, src, len, write);
+  if (!job) fpr_cpanic("blk: cannot submit disk request");
+  fpr_actor_cleanup_set(qos_hal->blk_release, job);
+  while (!qos_hal->blk_done(job)) fpr_actor_sleep_us(200);
+  int64_t result = qos_hal->blk_result(job, dst);
+  fpr_actor_cleanup_clear(job);
+  qos_hal->blk_release(job);
+  return result;
+}
 static V h_blkPages(V d) {
   (void)d;
   if (!qos_hal->blk_pages) return TAG(0); /* pre-v5 table: honest no-disk */
@@ -211,7 +226,7 @@ static V h_blkRead(V d, V pv) {
   if (!qos_hal->blk_read)
     fpr_cpanic("blk: capability not granted by this host's HAL table");
   char buf[4096];
-  if (qos_hal->blk_read((uint64_t)UNTAG(pv), buf) < 0)
+  if (disk_wait((uint64_t)UNTAG(pv), 0, 0, 0, buf) < 0)
     fpr_cpanic("blk: page out of range");
   return (V)fpr_mkstr((const uint8_t *)buf, 4096);
 }
@@ -223,7 +238,7 @@ static V h_blkWrite(V d, V pv, V sv) {
   if (s->len > 4096) fpr_cpanic("blkWrite: payload exceeds one page");
   if (!qos_hal->blk_write)
     fpr_cpanic("blk: capability not granted by this host's HAL table");
-  if (qos_hal->blk_write((uint64_t)UNTAG(pv), (const char *)s->bytes, s->len) < 0)
+  if (disk_wait((uint64_t)UNTAG(pv), (const char *)s->bytes, s->len, 1, 0) < 0)
     fpr_cpanic("blk: page out of range");
   return TAG((sw)s->len);
 }

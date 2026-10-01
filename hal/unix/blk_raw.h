@@ -37,4 +37,10 @@ int64_t qos_blkraw_read(uint64_t page, char *dst);
  * page; returns len accepted, or -1 out of range / oversize / error */
 int64_t qos_blkraw_write(uint64_t page, const char *src, uint64_t len);
 
+/* Worker-owned buffers; release abandons a pending job safely. */
+void *qos_blkraw_submit(uint64_t page, const char *src, uint64_t len, int write);
+int qos_blkraw_done(void *job);
+int64_t qos_blkraw_result(void *job, char *dst);
+void qos_blkraw_release(void *job);
+
 #endif /* QOS_BLK_RAW_H */

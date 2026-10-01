@@ -4,6 +4,7 @@
 # The same four functions that MVU.game runs against a render service
 # run here against a browser:
 #
+#   main : unsafe String .
 #   main = LV.server (MV.App init update subs view).
 #
 # view returns a gen_view tree (mods/genview.fpr); this module is the
@@ -65,6 +66,7 @@ lf = chr 10.
 crlf = strcat (chr 13) (chr 10).
 
 # index just PAST pat's first match at/after i; 0 = no match
+findSub : unsafe String -> String -> Int -> Int .
 findSub s pat i = fsGo s pat i (strlen s) (strlen pat).
 fsGo : unsafe String -> String -> Int -> Int -> Int -> Int .
 fsGo s pat i n pn | i + pn - 1 > n = 0.
@@ -88,30 +90,41 @@ until s i dl acc = until s (i + 1) dl (strcat acc (chr (charAt s i))).
 # ---- HTTP parsing -----------------------------------------------------------
 
 # body start (just past the blank line); 0 while the head is partial
+headEnd : unsafe String -> Int .
 headEnd req = findSub req "{cr}{lf}{cr}{lf}" 1.
 
+method : unsafe String -> String .
 method req = until req 1 32 "".
+path : unsafe String -> String .
 path req = until req (strlen (method req) + 2) 32 "".
 
+contentLen : unsafe String -> Int .
 contentLen req = clAt req (findSub req "Content-Length: " 1).
+clAt : unsafe String -> Int -> Int .
 clAt req 0 = 0.
 clAt req i = digits req i 0.
 
 # a request is complete when the head is in and, for POST, the body is
+complete : unsafe String -> Int .
 complete req = cDone req (headEnd req).
+cDone : unsafe String -> Int -> Int .
 cDone req 0 = 0.
 cDone req he | G.strEq (method req) "POST" = cBody req he.
 cDone req he = 1.
+cBody : unsafe String -> Int -> Int .
 cBody req he = case strlen req - he + 1 >= contentLen req of
     True -> 1
   | False -> 0.
 
+bodyOf : unsafe String -> String .
 bodyOf req = bAt req (headEnd req).
 bAt req 0 = "".
 bAt req he = substr req he (strlen req - he + 1).
 
 # {"msg":"x","arg":"y"} -> the named field (no unescaping: PoC wire)
+jStr : unsafe String -> String -> String .
 jStr s key = jAt s (findSub s "\"{key}\":\"" 1).
+jAt : unsafe String -> Int -> String .
 jAt s 0 = "".
 jAt s i = until s i 34 "".
 
@@ -121,7 +134,9 @@ httpRespC code ctype sid body =
   "HTTP/1.1 {code}{crlf}Content-Type: {ctype}{crlf}Content-Length: {strlen body}{crlf}Set-Cookie: lvsid={sid}; Path=/{crlf}Connection: close{crlf}{crlf}{body}".
 
 # the client's session id off the Cookie header (0 = none)
+cookieSid : unsafe String -> Int .
 cookieSid req = csAt req (findSub req "lvsid=" 1).
+csAt : unsafe String -> Int -> Int .
 csAt req 0 = 0.
 csAt req i = digits req i 0.
 
@@ -190,8 +205,10 @@ bufDel (e :: r) cid = e :: bufDel r cid.
 
 Sv = Type (Sv model sess nsid ltt bufs).
 
+server : unsafe App -> String .
 server app = serve { env = 0, css = G.cssFor } app.
 
+serve : unsafe _ -> App -> String .
 serve cfg app =
   App ini upd sbs vw = app;
   nic = device "net";              # brings the listener up (FPR_PORT / slirp)
@@ -312,6 +329,7 @@ srvNext : unsafe Int -> _ -> App -> Sv -> Int -> String .
 srvNext mt cfg app sv 1 = srvBye sv.
 srvNext mt cfg app sv q = srvLoop mt cfg app sv.
 
+srvBye : unsafe Sv -> String .
 srvBye sv =
   Sv model sess nsid ltt bufs = sv;
   "lv: server closed ({lvLen sess} client session(s))".

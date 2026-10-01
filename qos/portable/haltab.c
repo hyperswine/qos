@@ -130,6 +130,10 @@ static qos_hal_t the_table = {
     /* v5: the disk tier -- qosp.disk as policy-free 4 KiB pages
      * (blk_raw.c); the record/file policy above it is FPRISC
      * (mods/qlog.fpr), the same module native runs over virtio-blk */
+    .blk_submit = qos_blkraw_submit,
+    .blk_done = qos_blkraw_done,
+    .blk_result = qos_blkraw_result,
+    .blk_release = qos_blkraw_release,
     .blk_pages = qos_blkraw_pages,
     .blk_read = qos_blkraw_read,
     .blk_write = qos_blkraw_write,

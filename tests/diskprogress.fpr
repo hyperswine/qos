@@ -1,0 +1,13 @@
+# A one-hart disk wait must let another actor send before it completes.
+A = use "std/actor".
+ticker : Int -> Int -> Unit .
+ticker parent self = _ = A.sendSure self parent 77; Unit.
+main : Unit .
+main =
+  me = myself 0;
+  d = device "blk";
+  _ = spawn (ticker me);
+  page = blkRead d 0;
+  m = receiveNow me;
+  ok = case m of Ok 77 -> True | _ -> False;
+  print "diskprogress: {ok} bytes={strlen page}".

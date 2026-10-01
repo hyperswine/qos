@@ -78,3 +78,5 @@ Source-adjacent READMEs under `tools/` stay beside the tools they explain.
 | 2026-09-29 | [QOS-ARCHITECTURE-AUDIT.md](2026-09-29-QOS-ARCHITECTURE-AUDIT.md) | Source audit against the minimalist actor OS ideal, with selected Portable checks; September 30 memory/image-slot and C migration follow-ups |
 | 2026-09-30 | [FAILURE-HONESTY.md](2026-09-30-FAILURE-HONESTY.md) | The audit's first step: RPC refusal/death/correlation, honest `fileWr` and loader persistence, the native slot guard and root-exit quiescence |
 | 2026-10-01 | [LAUNCHER-IDLE.md](2026-10-01-LAUNCHER-IDLE.md) | The native launcher leaked while idle: an arena around the wait, and a 1 ms park |
+| 2026-10-01 | [QOS-BASELINE.md](2026-10-01-QOS-BASELINE.md) | Fixed actor-runtime pin, explicit LiveView safety, graphics-independent compile and dynamic-slot failure gates |
+| 2026-10-01 | [DISK-SUSPENSION.md](2026-10-01-DISK-SUSPENSION.md) | Native actor-parked completion, Portable copied worker requests, cancellation cleanup and single-hart progress regression |

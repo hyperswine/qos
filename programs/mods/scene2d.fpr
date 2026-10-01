@@ -506,6 +506,7 @@ dynGo c (Sl i x y sc col cap vp fs :: r) vals =
   case fs > 0 of
     True -> dynGo (addEnt c2 (textEnt vp s x y fs col 9)) r vals
   | False -> dynGo (emitText c2 s x y sc col 9) r vals.
+dynGo c (other :: r) vals = error "scene2d.dyns: expected Sl in dynamic slots".
 setVp (C2 es sl old) vp = C2 es sl vp.
 
 nth Nil i = "".
@@ -671,6 +672,7 @@ diGo fb (Sl i x y sc col cap vp fs :: r) vals n =
   s = clip (nth vals i) cap;
   (fb2, n2) = textInto fb s (x, y) vp (sc, col, 9) n;
   diGo fb2 r vals n2.
+diGo fb (other :: r) vals n = error "scene2d.dynsInto: expected Sl in dynamic slots".
 
 textInto fb t pos vp st n = tiGo fb t 1 (strlen t) pos vp st n.
 tiGo fb t i m pos vp st n | i > m = (fb, n).
