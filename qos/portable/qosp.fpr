@@ -81,7 +81,7 @@ saidYes u = case Sys.readLine Unit of
     Err _ -> False
   | Ok ln -> case strlen ln == 0 of
       True -> False
-    | False -> or2 (charAt ln 1 == 121) (charAt ln 1 == 89).
+    | False -> or2 (charAt ln 0 == 121) (charAt ln 0 == 89).
 
 askPerm man kind p =
   (url, mode) = p;

@@ -54,9 +54,9 @@ wTheme m =
   (M c t (1 - n), Nil).
 
 num : unsafe String -> Int .
-num s = numGo s 1 0.
+num s = numGo s 0 0.
 numGo : unsafe String -> Int -> Int -> Int .
-numGo s i acc | i > strlen s = acc.
+numGo s i acc | i >= strlen s = acc.
 numGo s i acc = numCh s i acc (charAt s i).
 numCh : unsafe String -> Int -> Int -> Int -> Int .
 numCh s i acc c | and2 (c >= 48) (c <= 57) = numGo s (i + 1) (acc * 10 + (c - 48)).

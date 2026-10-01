@@ -35,9 +35,9 @@ nums : Img -> List Int .
 nums m = base m :: entry m :: execsz m :: rwoff m :: memsz m :: Nil.
 
 # ---- one line ---------------------------------------------------------------
-# the index of the newline ending the line at i, or n + 1
+# the index of the newline ending the line at i, or n (0-based)
 lineStop : unsafe String -> Int -> Int -> Int .
-lineStop s i n = case i > n of True -> n + 1 | False -> case charAt s i == 10 of True -> i | False -> lineStop s (i + 1) n.
+lineStop s i n = case i >= n of True -> n | False -> case charAt s i == 10 of True -> i | False -> lineStop s (i + 1) n.
 
 # the first space in [i, e), or e
 spaceIn : unsafe String -> Int -> Int -> Int .
@@ -57,7 +57,7 @@ decimalAt s i e acc k c = case isDigit c of
 
 # ---- the fold ---------------------------------------------------------------
 go : unsafe String -> Int -> Int -> Img -> Img .
-go s i n m = case i > n of
+go s i n m = case i >= n of
     True -> m
   | False -> goLine s i n m (lineStop s i n).
 
@@ -108,7 +108,7 @@ complete m = and2 (base m >= 0) (and2 (entry m >= 0) (and2 (execsz m >= 0) (and2
 # the LOAD section's text -> Img, or why not
 parse : unsafe String -> Result Img String .
 parse load =
-  m = go load 1 (strlen load) (Img (0 - 1) (0 - 1) (0 - 1) (0 - 1) (0 - 1) (0 - 1) "");
+  m = go load 0 (strlen load) (Img (0 - 1) (0 - 1) (0 - 1) (0 - 1) (0 - 1) (0 - 1) "");
   case complete m of
     True -> Ok m
   | False -> Err "LOAD section missing a required field".

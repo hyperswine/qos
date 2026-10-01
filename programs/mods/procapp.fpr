@@ -16,19 +16,19 @@ or2 a b = case a of True -> True | False -> b.
 isOdd v = Int.mod v 2 == 1.
 
 # ---- capability blob: "appid\nurl mode\n..." --------------------------------
-hasGrant s url mode = hgGo s 1 (strlen s) (strcat url (strcat " " mode)).
+hasGrant s url mode = hgGo s 0 (strlen s) (strcat url (strcat " " mode)).
 hgGo s i n want =
-  case i > n of
+  case i >= n of
     True -> False
   | False -> hgLine s i n want (lineEnd s i n).
 hgLine s i n want e =
   case lineEq s i (e - 1) want of
     True -> True
   | False -> hgGo s (e + 1) n want.
-lineEnd s i n = case i > n of True -> n | False -> case charAt s i == 10 of True -> i | False -> lineEnd s (i + 1) n.
+lineEnd s i n = case i >= n of True -> n | False -> case charAt s i == 10 of True -> i | False -> lineEnd s (i + 1) n.
 lineEq s i j want =
   case (j - i + 1) == strlen want of
-    True -> leGo s i j want 1
+    True -> leGo s i j want 0
   | False -> False.
 leGo s i j want k =
   case i > j of
@@ -46,8 +46,8 @@ putc con c = pcW con c.
 pcW con c = case con of (lsr, dat) -> pcV lsr dat c (read lsr).
 pcV lsr dat c v = case isOdd (v / 32) of True -> write dat c | False -> pcV lsr dat c (read lsr).
 puts : unsafe (Int, Int) -> String -> Unit .
-puts con s = psGo con s 1 (strlen s).
-psGo con s i n = case i > n of True -> Unit | False -> putc con (charAt s i) >> psGo con s (i + 1) n.
+puts con s = psGo con s 0 (strlen s).
+psGo con s i n = case i >= n of True -> Unit | False -> putc con (charAt s i) >> psGo con s (i + 1) n.
 nl con = putc con 13 >> putc con 10.
 putLn con s = puts con s >> nl con.
 

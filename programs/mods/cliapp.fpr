@@ -34,7 +34,7 @@ appUpdate self env k st =
 clType inp k | strlen inp > 40 = inp.
 clType inp k = strcat inp (AK.keyChar k).
 clDropLast s | strlen s < 2 = "".
-clDropLast s = substr s 1 (strlen s - 1).
+clDropLast s = substr s 0 (strlen s - 1).
 
 banner u = "qsh -- try: help".
 
@@ -76,7 +76,7 @@ clKind 1 = "data".
 clKind 2 = "file".
 clStarts p pre | strlen pre == 0 = True.
 clStarts p pre | strlen p < strlen pre = False.
-clStarts p pre = strEqS (substr p 1 (strlen pre)) pre.
+clStarts p pre = strEqS (substr p 0 (strlen pre)) pre.
 
 clCat1 self env path | strlen path == 0 = "cat: need a path" :: Nil.
 clCat1 self env path =
@@ -100,25 +100,25 @@ clPs u =
 
 # ---- strings ---------------------------------------------------------------
 
-strEqS a b | strlen a == strlen b = strEqGo a b 1 (strlen a).
+strEqS a b | strlen a == strlen b = strEqGo a b 0 (strlen a).
 strEqS a b = False.
-strEqGo a b i n | i > n = True.
+strEqGo a b i n | i >= n = True.
 strEqGo a b i n | charAt a i == charAt b i = strEqGo a b (i + 1) n.
 strEqGo a b i n = False.
 strEq : unsafe String -> String -> Bool .
 strEq a b = strEqS a b.
 
-clWord s = clWordGo s 1.
-clWordGo s i | i > strlen s = s.
-clWordGo s i | charAt s i == 32 = substr s 1 (i - 1).
+clWord s = clWordGo s 0.
+clWordGo s i | i >= strlen s = s.
+clWordGo s i | charAt s i == 32 = substr s 0 i.
 clWordGo s i = clWordGo s (i + 1).
-clRest s = clRestGo s 1.
-clRestGo s i | i > strlen s = "".
-clRestGo s i | charAt s i == 32 = substr s (i + 1) (strlen s - i).
+clRest s = clRestGo s 0.
+clRestGo s i | i >= strlen s = "".
+clRestGo s i | charAt s i == 32 = substr s (i + 1) (strlen s - i - 1).
 clRestGo s i = clRestGo s (i + 1).
 
-clLines s = clSplit s 1 1 Nil.
-clSplit s i st acc | i > strlen s = clSeg s st i acc.
+clLines s = clSplit s 0 0 Nil.
+clSplit s i st acc | i >= strlen s = clSeg s st i acc.
 clSplit s i st acc | charAt s i == 10 = clSplit s (i + 1) (i + 1) (clSeg s st i acc).
 clSplit s i st acc = clSplit s (i + 1) st acc.
 clSeg s st i acc | i > st = substr s st (i - st) :: acc.

@@ -92,8 +92,8 @@ with open(mod, "w") as f:
         f.write("adv %d = %d.%s\n" % (32 + i, round(a * 1000), "" if 32 + i in (32, 92) else "   # %s" % chr(32 + i)))
     f.write("adv c = %d.\n\n" % round(adv[ord('?') - 32] * 1000))
     f.write("# width of a string in milli-em\n")
-    f.write("width s = wGo s 1 (strlen s) 0.\n")
-    f.write("wGo s i n acc | i > n = acc.\n")
+    f.write("width s = wGo s 0 (strlen s) 0.\n")
+    f.write("wGo s i n acc | i >= n = acc.\n")
     f.write("wGo s i n acc = wGo s (i + 1) n (acc + adv (charAt s i)).\n")
 
 # a preview for the eye

@@ -36,7 +36,7 @@ appTree vp =
         , dkRow 6, dkRow 7, dkRow 8, dkRow 9 ]
     , Lbl [Fg (560, 590, 650)] "APPEND-ONLY; STATE IS THE REPLAY   ESC BACK" ].
 
-dkSplit s i st acc | i > strlen s = dkRev acc Nil.
+dkSplit s i st acc | i >= strlen s = dkRev acc Nil.
 dkSplit s i st acc | charAt s i == 10 =
   case i > st of
     True -> dkSplit s (i + 1) (i + 1) (substr s st (i - st) :: acc)
@@ -57,7 +57,7 @@ dkTail (x :: r) n = dkTail r n.
 
 appVals self env st =
   idx = dkIndex 0;
-  recs = dkSplit idx 1 1 Nil;
+  recs = dkSplit idx 0 0 Nil;
   n = dkLen recs;
   "{n} RECORDS" :: dkPad (dkTail recs 9) 9.
 

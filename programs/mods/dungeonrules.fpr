@@ -88,10 +88,10 @@ goal0 = GAll (GAny (GAll (GTreasure :: GBoulders :: Nil) :: GEnemies :: Nil)
 charAtOf s i = charAt s i.
 
 rowsOf Nil y acc = acc.
-rowsOf (r :: rest) y acc = rowsOf rest (y + 1) (cellsOf r 1 y acc).
+rowsOf (r :: rest) y acc = rowsOf rest (y + 1) (cellsOf r 0 y acc).
 
-cellsOf r i y acc | i > strlen r = acc.
-cellsOf r i y acc = cellsOf r (i + 1) y (cellOf (charAt r i) (i - 1) y acc).
+cellsOf r i y acc | i >= strlen r = acc.
+cellsOf r i y acc = cellsOf r (i + 1) y (cellOf (charAt r i) i y acc).
 
 # acc = (obs, enemies, px, py, nextEnemyId)
 cellOf c x y acc =

@@ -112,7 +112,7 @@ run dsk np =
   sw1 = w1 == (np - 1);
   sw2 = w2 == d;
   swCur = mSwapHead (QL.metaOr dsk h7) == (d + 1);
-  swBack = QL.strEq (substr (QL.swapRead dsk d) 1 3) "two";
+  swBack = QL.strEq (substr (QL.swapRead dsk d) 0 3) "two";
 
   # ---- bounds: an append past dataEnd is refused ----------------------------
   mF = QL.metaOr dsk h7;

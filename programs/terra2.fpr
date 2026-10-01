@@ -366,7 +366,7 @@ profEmpty = { played = 0, won = 0, lost = 0, gone = 0, rounds = 0, best = 0, cal
 
 profFold p line =
   n = strlen line;
-  (w, i) = Core.wordAt line 1 n;
+  (w, i) = Core.wordAt line 0 n;
   case Core.strEq w "start" of
     True -> { p | played = p.played + 1, gone = p.gone + 1 }
   | False -> (case Core.strEq w "end" of
@@ -383,7 +383,7 @@ profEnd p line i n =
         rounds = p.rounds + rounds, best = best2,
         calls = p.calls + nth ws 3 0, losses = p.losses + nth ws 4 0,
         recent = (bi won, rounds, nth ws 1 0, nth ws 2 0, nth ws 3 0, nth ws 4 0, nth ws 5 0, nth ws 6 0) :: p.recent }.
-intsFrom line i n | i > n = Nil.
+intsFrom line i n | i >= n = Nil.
 intsFrom line i n =
   (w, j) = Core.wordAt line i n;
   case strlen w == 0 of
@@ -431,7 +431,7 @@ loadGame2 m ls =
 # a line's numbers after its one-letter tag
 lineInts line =
   n = strlen line;
-  (w, i) = Core.wordAt line 1 n;
+  (w, i) = Core.wordAt line 0 n;
   intsFrom line i n.
 sideOfLines sl dl hl fl rl =
   sv = lineInts sl;
@@ -1114,7 +1114,7 @@ termKey m k =
     True -> (m, Nil)
   | False -> ({ m | tin = m.tin + ch }, Nil).
 dropLast s | strlen s == 0 = s.
-dropLast s = substr s 1 (strlen s - 1).
+dropLast s = substr s 0 (strlen s - 1).
 keyChar k | k >= 2 and k <= 10 = chr (k + 47).
 keyChar 11 = "0".
 keyChar 57 = " ".
@@ -1124,7 +1124,7 @@ keyChar 13 = "=".
 keyChar 51 = ",".
 keyChar 53 = "/".
 keyChar k = letterOf k "qwertyuiop" 16 (letterOf k "asdfghjkl" 30 (letterOf k "zxcvbnm" 44 "")).
-letterOf k row base dflt | k >= base and k < base + strlen row = chr (charAt row (k - base + 1)).
+letterOf k row base dflt | k >= base and k < base + strlen row = chr (charAt row (k - base)).
 letterOf k row base dflt = dflt.
 
 runTerm m =
@@ -1133,8 +1133,8 @@ runTerm m =
   shown = ("> " + line) :: out;
   { m2 | tin = "", tout = takeN (rev out Nil + (("> " + line) :: m.tout)) 14,
          log = rev (shown |> List.map (fn s -> "term: " + s)) Nil + m2.log }.
-twords s = twGo s 1 (strlen s) Nil.
-twGo s i n acc | i > n = rev acc Nil.
+twords s = twGo s 0 (strlen s) Nil.
+twGo s i n acc | i >= n = rev acc Nil.
 twGo s i n acc =
   (w, j) = Core.wordAt s i n;
   case strlen w == 0 of True -> twGo s j n acc | False -> twGo s j n (w :: acc).
@@ -1163,8 +1163,8 @@ termHelp =
   "hit me|en N (the rules' HQ damage: victory and defeat apply)" :: Nil.
 sideNo s | eq s "en" = 1.
 sideNo s = 0.
-parts s = ptGo s 1 1 (strlen s) Nil.
-ptGo s st i n acc | i > n = rev (substr s st (i - st) :: acc) Nil.
+parts s = ptGo s 0 0 (strlen s) Nil.
+ptGo s st i n acc | i >= n = rev (substr s st (i - st) :: acc) Nil.
 ptGo s st i n acc | charAt s i == 46 = ptGo s (i + 1) (i + 1) n (substr s st (i - st) :: acc).
 ptGo s st i n acc = ptGo s st (i + 1) n acc.
 

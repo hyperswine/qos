@@ -62,11 +62,11 @@ revL acc l = case l of Nil -> acc | x :: r -> revL (x :: acc) r.
 joinBar : unsafe List String -> String -> String .
 joinBar l acc = case l of
     Nil -> acc
-  | s :: r -> joinBar r (joinOne acc (escLf s 1 "")).
+  | s :: r -> joinBar r (joinOne acc (escLf s 0 "")).
 joinOne acc s = case strlen acc == 0 of True -> s | False -> "{acc}|{s}".
 # newline -> visible "\n" so the summary stays one greppable line
 escLf : unsafe String -> Int -> String -> String .
-escLf s i acc = case i > strlen s of
+escLf s i acc = case i >= strlen s of
     True -> acc
   | False -> escLf s (i + 1) (escOne acc (charAt s i)).
 escOne acc c = case c == 10 of

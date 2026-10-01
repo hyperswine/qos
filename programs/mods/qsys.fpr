@@ -86,7 +86,7 @@ rpc me st tag url pay = case AC.sendAwait me st (Rpc me tag url pay) of
 
 hasPrefix s pre = case strlen s < strlen pre of
     True -> False
-  | False -> strEq (substr s 1 (strlen pre)) pre.
+  | False -> strEq (substr s 0 (strlen pre)) pre.
 
 # newline-split, used on apps/index ("id1\nid2\n")
 lines : unsafe String -> List String .
@@ -104,15 +104,15 @@ lenL l = Core.listLen l.
 
 # `key = "value"` line scan inside the manifest slice
 mfField : unsafe String -> String -> String .
-mfField man key = mfGo man (strcat key " = ") 1 (strlen man).
+mfField man key = mfGo man (strcat key " = ") 0 (strlen man).
 mfGo : unsafe String -> String -> Int -> Int -> String .
-mfGo man pre i n = case i > n of
+mfGo man pre i n = case i >= n of
     True -> ""
   | False -> mfTry man pre i n.
 mfTry : unsafe String -> String -> Int -> Int -> String .
 mfTry man pre i n =
   pl = strlen pre;
-  case i + pl > n of
+  case i + pl >= n of
     True -> ""
   | False -> case strEq (substr man i pl) pre of
       True -> mfVal man (i + pl) n
@@ -126,7 +126,7 @@ mfVal man i n = case charAt man i == 34 of
     True -> mfQ man (i + 1) n ""
   | False -> "".
 mfQ : unsafe String -> Int -> Int -> String -> String .
-mfQ man i n acc = case i > n of
+mfQ man i n acc = case i >= n of
     True -> acc
   | False -> case charAt man i == 34 of
       True -> acc

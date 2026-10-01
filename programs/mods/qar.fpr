@@ -2,15 +2,15 @@
 # Manifest interpretation and loading policy stay with their callers.
 
 strEq : unsafe String -> String -> Bool .
-strEq a b | strlen a == strlen b = eqGo a b 1 (strlen a).
+strEq a b | strlen a == strlen b = eqGo a b 0 (strlen a).
 strEq a b = False.
 eqGo : unsafe String -> String -> Int -> Int -> Bool .
-eqGo a b i n | i > n = True.
+eqGo a b i n | i >= n = True.
 eqGo a b i n | charAt a i == charAt b i = eqGo a b (i + 1) n.
 eqGo a b i n = False.
 
 tableEnd : unsafe String -> Int -> Int .
-tableEnd qa i | i + 1 > strlen qa = 0.
+tableEnd qa i | i + 1 >= strlen qa = 0 - 1.
 tableEnd qa i | charAt qa i == 10 = tableNl qa i (charAt qa (i + 1)).
 tableEnd qa i = tableEnd qa (i + 1).
 tableNl qa i c | c == 10 = i.
@@ -35,22 +35,22 @@ wordGo qa i limit acc = wordGo qa (i + 1) limit (strcat acc (chr (charAt qa i)))
 
 parseNat : unsafe String -> Result Int String .
 parseNat s | strlen s == 0 = Err "empty section number".
-parseNat s = natGo s 1 (strlen s) 0.
+parseNat s = natGo s 0 (strlen s) 0.
 natGo : unsafe String -> Int -> Int -> Int -> Result Int String .
-natGo s i n acc | i > n = Ok acc.
+natGo s i n acc | i >= n = Ok acc.
 natGo s i n acc = natCh s i n acc (charAt s i).
 natCh : unsafe String -> Int -> Int -> Int -> Int -> Result Int String .
 natCh s i n acc c | c < 48 = Err "invalid section number".
 natCh s i n acc c | c > 57 = Err "invalid section number".
 natCh s i n acc c = natGo s (i + 1) n (acc * 10 + (c - 48)).
 
-# Absolute 1-based payload position and byte length.
+# Absolute 0-based payload offset and byte length.
 extent : unsafe String -> String -> Result (Int, Int) String .
 extent qa name | strlen qa < 7 = Err "not a QAR2 archive".
-extent qa name | strEq (substr qa 1 5) "QAR2\n" = extentTable qa name (tableEnd qa 5).
+extent qa name | strEq (substr qa 0 5) "QAR2\n" = extentTable qa name (tableEnd qa 4).
 extent qa name = Err "not a QAR2 archive".
-extentTable qa name blank | blank == 0 = Err "unterminated QAR2 table".
-extentTable qa name blank = findSection qa name 6 blank (blank + 2).
+extentTable qa name blank | blank < 0 = Err "unterminated QAR2 table".
+extentTable qa name blank = findSection qa name 5 blank (blank + 2).
 
 findSection : unsafe String -> String -> Int -> Int -> Int -> Result (Int, Int) String .
 findSection qa name i blank payload0 | i >= blank = Err "no such section".
@@ -71,9 +71,9 @@ sectionNums qa payload0 offS lenS = case parseNat offS of
       Err e -> Err e
     | Ok len -> sectionBounds qa (payload0 + off) len.
 sectionBounds qa pos len | len == 0 = emptyBounds qa pos len.
-sectionBounds qa pos len | pos + len - 1 <= strlen qa = Ok (pos, len).
+sectionBounds qa pos len | pos + len <= strlen qa = Ok (pos, len).
 sectionBounds qa pos len = Err "section outside archive".
-emptyBounds qa pos len | pos <= strlen qa + 1 = Ok (pos, len).
+emptyBounds qa pos len | pos <= strlen qa = Ok (pos, len).
 emptyBounds qa pos len = Err "section outside archive".
 
 sectionBytes : unsafe String -> String -> Result String String .

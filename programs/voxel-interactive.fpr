@@ -247,9 +247,9 @@ wPush : unsafe Int -> (Vector Int) -> (Vector Int) .
 wPush c v | c >= wCells = v.
 wPush c v = wPush (c + 1) (Vec.push (genAt (c / 256) (imod (c / 16) 16) (imod c 16)) v).
 
-# 1-based get/set on the 0-based cell index
-wGet w c = Vec.get (c + 1) w.
-wSet w c b = Vec.set (c + 1) b w.
+# get/set on the 0-based cell index
+wGet w c = Vec.get c w.
+wSet w c b = Vec.set c b w.
 
 # solid = anything but air; glass still blocks (simplification: no
 # transparency in this PoC, glass is just a bright block)
@@ -360,23 +360,23 @@ marchHit w nx ny nz k b = marchSun w nx ny nz k.
 
 # bake one face of one cell into the lightmap
 bakeFace : unsafe (Vector Int) -> (Vector Int) -> Int -> Int -> Int -> ((Vector Int), (Vector Int)) .
-bakeFace w lm c f b | isSolidId b == False = (w, Vec.set (c * nFaces + f + 1) 0 lm).
+bakeFace w lm c f b | isSolidId b == False = (w, Vec.set (c * nFaces + f) 0 lm).
 bakeFace w lm c f b = bakeExposed w lm c f (nbrOf c f).
 
 nbrOf c f = ((c / 256) + stepFX f, imod (c / 16) 16 + stepFY f, imod c 16 + stepFZ f).
 
 bakeExposed : unsafe (Vector Int) -> (Vector Int) -> Int -> Int -> (Int, Int, Int) -> ((Vector Int), (Vector Int)) .
 bakeExposed w lm c f (nx, ny, nz) | inWorld nx ny nz == False =
-  (w, Vec.set (c * nFaces + f + 1) (litValue f 0) lm).
+  (w, Vec.set (c * nFaces + f) (litValue f 0) lm).
 bakeExposed w lm c f (nx, ny, nz) =
   (nb, w2) = wGet w (cellOf nx ny nz);
   bakeOpen w2 lm c f (nx, ny, nz) nb.
 
 bakeOpen : unsafe (Vector Int) -> (Vector Int) -> Int -> Int -> (Int, Int, Int) -> Int -> ((Vector Int), (Vector Int)) .
-bakeOpen w lm c f nbr nb | isSolidId nb = (w, Vec.set (c * nFaces + f + 1) ambient lm).
+bakeOpen w lm c f nbr nb | isSolidId nb = (w, Vec.set (c * nFaces + f) ambient lm).
 bakeOpen w lm c f (nx, ny, nz) nb =
   (sh, w2) = marchSun w (nx * fx + fx / 2) (ny * fx + fx / 2) (nz * fx + fx / 2) 40;
-  (w2, Vec.set (c * nFaces + f + 1) (litValue f sh) lm).
+  (w2, Vec.set (c * nFaces + f) (litValue f sh) lm).
 
 bakeCellFaces : unsafe (Vector Int) -> (Vector Int) -> Int -> Int -> Int -> ((Vector Int), (Vector Int)) .
 bakeCellFaces w lm c f b | f >= nFaces = (w, lm).
@@ -1010,7 +1010,7 @@ cellStr (fr, fg, fb) ti bi =
 rowChunk : unsafe ((Vector Int), (Vector Int), (Vector Int)) -> Int -> Int -> Int -> Int -> String -> (((Vector Int), (Vector Int), (Vector Int)), String) .
 rowChunk fb yb pw x k acc | k >= 8 = (fb, acc).
 rowChunk fb yb pw x k acc =
-  (fb2, s) = cellStr fb (yb + x + k + 1) (yb + pw + x + k + 1);
+  (fb2, s) = cellStr fb (yb + x + k) (yb + pw + x + k);
   rowChunk fb2 yb pw x (k + 1) (strcat acc s).
 
 rowStr : unsafe ((Vector Int), (Vector Int), (Vector Int)) -> Int -> Int -> Int -> String -> (((Vector Int), (Vector Int), (Vector Int)), String) .
@@ -1113,7 +1113,7 @@ frameWorker self =
   # measured, in 10 MHz clint ticks) into slot n mod latN, then average.
   # lv is a main-pool handle: set/fold hand the same object back, so
   # mutating it here and displaying it next frame needs no plumbing.
-  lv1 = Vec.set (imod n latN + 1) lat lv;
+  lv1 = Vec.set (imod n latN) lat lv;
   (lsum, lv2) = Vec.fold sumF 0 lv1;
   ms10 = lsum / minI n latN / 1000;                # ticks -> tenths of ms
   m0 = Mdl (Bd px py pz vx vy vz (g == 1)) yaw pit sel "";

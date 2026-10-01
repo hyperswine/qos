@@ -179,16 +179,16 @@ fitText a t =
       True -> fitP t e cap
     | False -> fitB t (scOf a) cap).
 fitP t e cap | propW t e <= cap = t.
-fitP t e cap = fpGo t 1 (strlen t) (cap * 1000 / e - Fm.width "..") 0.
-fpGo t i n lim acc | i > n = t + "..".
+fitP t e cap = fpGo t 0 (strlen t) (cap * 1000 / e - Fm.width "..") 0.
+fpGo t i n lim acc | i >= n = t + "..".
 fpGo t i n lim acc =
   a = acc + Fm.adv (charAt t i);
-  case a > lim of True -> substr t 1 (i - 1) + ".." | False -> fpGo t (i + 1) n lim a.
+  case a > lim of True -> substr t 0 i + ".." | False -> fpGo t (i + 1) n lim a.
 fitB t sc cap =
   most = (cap + sc) / (6 * sc);
   case strlen t <= most of
     True -> t
-  | False -> substr t 1 (imax 0 (most - 2)) + "..".
+  | False -> substr t 0 (imax 0 (most - 2)) + "..".
 
 # override natural size with W/H when given
 sized a (nw, nh) =
@@ -478,8 +478,8 @@ strips c x y w h d col =
 # ---- the 3x5 font ----------------------------------------------------------
 # 15 bits, row-major from the top-left; bit (r*3+c).  Space = 0.
 
-emitText c t x y sc col d = etGo c t 1 (strlen t) x y (sc, col, d).
-etGo c t i n x y st | i > n = c.
+emitText c t x y sc col d = etGo c t 0 (strlen t) x y (sc, col, d).
+etGo c t i n x y st | i >= n = c.
 etGo c t i n x y st =
   (sc, col, d) = st;
   c1 = glyph c (font (charAt t i)) x y sc col d;
@@ -513,7 +513,7 @@ nth Nil i = "".
 nth (v :: r) 0 = v.
 nth (v :: r) i = nth r (i - 1).
 
-clip s cap | strlen s > cap = substr s (strlen s - cap + 1) cap.
+clip s cap | strlen s > cap = substr s (strlen s - cap) cap.
 clip s cap = s.
 
 # ---- the fixed frame -------------------------------------------------------
@@ -674,8 +674,8 @@ diGo fb (Sl i x y sc col cap vp fs :: r) vals n =
   diGo fb2 r vals n2.
 diGo fb (other :: r) vals n = error "scene2d.dynsInto: expected Sl in dynamic slots".
 
-textInto fb t pos vp st n = tiGo fb t 1 (strlen t) pos vp st n.
-tiGo fb t i m pos vp st n | i > m = (fb, n).
+textInto fb t pos vp st n = tiGo fb t 0 (strlen t) pos vp st n.
+tiGo fb t i m pos vp st n | i >= m = (fb, n).
 tiGo fb t i m pos vp st n =
   (sc, col, d) = st;
   (x, y) = pos;
@@ -699,13 +699,13 @@ cellInto fb x y sc col d vp n =
   (r, g, bl) = col;
   (vw, vh) = vp;
   base = n * 10;
-  f1 = Vec.set (base + 1) (idiv2 ((2 * x + sc - vw) * pxm)) fb;
-  f2 = Vec.set (base + 2) (idiv2 ((vh - 2 * y - sc) * pxm)) f1;
-  f3 = Vec.set (base + 3) (d * 5) f2;
-  f4 = Vec.set (base + 4) 0 f3;
-  f5 = Vec.set (base + 5) (sc * pxm) f4;
-  f6 = Vec.set (base + 6) (sc * pxm) f5;
-  f7 = Vec.set (base + 7) 2 f6;
-  f8 = Vec.set (base + 8) r f7;
-  f9 = Vec.set (base + 9) g f8;
-  Vec.set (base + 10) bl f9.
+  f1 = Vec.set base (idiv2 ((2 * x + sc - vw) * pxm)) fb;
+  f2 = Vec.set (base + 1) (idiv2 ((vh - 2 * y - sc) * pxm)) f1;
+  f3 = Vec.set (base + 2) (d * 5) f2;
+  f4 = Vec.set (base + 3) 0 f3;
+  f5 = Vec.set (base + 4) (sc * pxm) f4;
+  f6 = Vec.set (base + 5) (sc * pxm) f5;
+  f7 = Vec.set (base + 6) 2 f6;
+  f8 = Vec.set (base + 7) r f7;
+  f9 = Vec.set (base + 8) g f8;
+  Vec.set (base + 9) bl f9.

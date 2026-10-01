@@ -36,14 +36,14 @@ pnType inp k | strlen inp > 29 = inp.
 pnType inp k = strcat inp (AK.keyChar k).
 
 pnDropLast s | strlen s < 2 = "".
-pnDropLast s = substr s 1 (strlen s - 1).
+pnDropLast s = substr s 0 (strlen s - 1).
 
 pnLoad self env =
   txt = AK.vfsRead self (AK.envVfs env) notesPath;
-  ls = pnSplit txt 1 1 Nil;
+  ls = pnSplit txt 0 0 Nil;
   _ = drop txt;
   ls.
-pnSplit s i st acc | i > strlen s = acc.
+pnSplit s i st acc | i >= strlen s = acc.
 pnSplit s i st acc | charAt s i == 10 =
   case i > st of
     True -> pnSplit s (i + 1) (i + 1) (substr s st (i - st) :: acc)

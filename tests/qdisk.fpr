@@ -25,9 +25,9 @@ okOr r alt = case r of Ok s -> s | Err e -> alt.
 
 # the index record is newline-joined; flatten for a one-line result
 oneLine : unsafe String -> String .
-oneLine s = olGo s 1 (strlen s) "".
+oneLine s = olGo s 0 (strlen s) "".
 olGo : unsafe String -> Int -> Int -> String -> String .
-olGo s i n acc = case i > n of True -> acc | False -> olCh s i n acc (charAt s i).
+olGo s i n acc = case i >= n of True -> acc | False -> olCh s i n acc (charAt s i).
 olCh : unsafe String -> Int -> Int -> String -> Int -> String .
 olCh s i n acc c =
   case c == 10 of

@@ -2,11 +2,11 @@
 # Every `use "spec#hash"` pin in this tree, resolved to its
 # committed version (.fpr/versions.db) and content blob (.fpr/store).
 # spec  version  hash  pinned-by
-svc v1.6 499b714b4dea5853 programs/mods/qlog.fpr
-coreutil v1.0 e40b6ecf8391aada programs/mods/qlog.fpr
-uart v2.0 0fe2ebd63a9638fe programs/mods/svc.fpr
+svc v1.7 7a8f8240e4f5728a programs/mods/qlog.fpr
+coreutil v1.1 00b87d7442c69e95 programs/mods/qlog.fpr
+uart v2.1 8753d4509634e17a programs/mods/svc.fpr
 timer v2.0 38fa906125d48580 programs/mods/svc.fpr
 mods/timefmt v1.0 39dff276efd647a1 programs/system.fpr
-mods/qlog v2.3 40c524a7bd2900c1 programs/system.fpr
-mods/tui v2.0 51748af84a3e003b programs/system.fpr
-mods/tui v2.0 51748af84a3e003b tests/tuiframes.fpr
+mods/qlog v2.4 7b69b12a610e0fef programs/system.fpr
+mods/tui v2.1 af7fad6c6e992699 programs/system.fpr
+mods/tui v2.1 af7fad6c6e992699 tests/tuiframes.fpr

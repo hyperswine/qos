@@ -42,7 +42,7 @@ place3 qa load r rel =
     Err e -> (0, "bad LOAD: {e}")
   | Ok m -> (case QaImg.check m iln of
       Err e -> (0, "bad image: {e}")
-    | Ok m2 -> Sys.placeImageAt qa ((ipos - 1) :: iln :: (rpos - 1) :: rln :: Nil) (QaImg.nums m2) "CkSlow\n").
+    | Ok m2 -> Sys.placeImageAt qa (ipos :: iln :: rpos :: rln :: Nil) (QaImg.nums m2) "CkSlow\n").
 
 main =
   me = myself 0;

@@ -9,10 +9,10 @@ and2 a b = case a of True -> b | False -> False.
 lfC = 10.
 # does any "url mode" line match?
 hasGrant : unsafe String -> String -> String -> Bool .
-hasGrant s url mode = hgGo s 1 (strlen s) (url + " " + mode).
+hasGrant s url mode = hgGo s 0 (strlen s) (url + " " + mode).
 hgGo : unsafe String -> Int -> Int -> String -> Bool .
 hgGo s i n want =
-  case i > n of
+  case i >= n of
     True -> False
   | False -> hgLine s i n want (lineEnd s i n).
 hgLine : unsafe String -> Int -> Int -> String -> Int -> Bool .
@@ -21,11 +21,11 @@ hgLine s i n want e =
     True -> True
   | False -> hgGo s (e + 1) n want.
 lineEnd : unsafe String -> Int -> Int -> Int .
-lineEnd s i n = case i > n of True -> n | False -> case charAt s i == lfC of True -> i | False -> lineEnd s (i + 1) n.
+lineEnd s i n = case i >= n of True -> n | False -> case charAt s i == lfC of True -> i | False -> lineEnd s (i + 1) n.
 lineEq : unsafe String -> Int -> Int -> String -> Bool .
 lineEq s i j want =
   case (j - i + 1) == strlen want of
-    True -> leGo s i j want 1
+    True -> leGo s i j want 0
   | False -> False.
 leGo : unsafe String -> Int -> Int -> String -> Int -> Bool .
 leGo s i j want k =

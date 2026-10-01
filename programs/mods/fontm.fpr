@@ -105,6 +105,6 @@ adv 126 = 838.   # ~
 adv c = 580.
 
 # width of a string in milli-em
-width s = wGo s 1 (strlen s) 0.
-wGo s i n acc | i > n = acc.
+width s = wGo s 0 (strlen s) 0.
+wGo s i n acc | i >= n = acc.
 wGo s i n acc = wGo s (i + 1) n (acc + adv (charAt s i)).

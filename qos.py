@@ -806,7 +806,7 @@ editName u = "plain.v1".
 # edit2 -- SIGNATURE-COMPATIBLE successor: capitalizes the first letter.
 editLine s = case strlen s == 0 of
     True -> s
-  | False -> "{upA (charAt s 1)}{substr s 2 (strlen s - 1)}".
+  | False -> "{upA (charAt s 0)}{substr s 1 (strlen s - 1)}".
 upA c = case c >= 97 of
     True -> upB c
   | False -> chr c.

@@ -74,8 +74,8 @@ brStart c | c > 9 = c - 9.
 brStart c = 0.
 
 # split served text into lines for the rows
-brLines s = brSplit s 1 1 Nil.
-brSplit s i st acc | i > strlen s = brRev (brSeg s st i :: acc) Nil.
+brLines s = brSplit s 0 0 Nil.
+brSplit s i st acc | i >= strlen s = brRev (brSeg s st i :: acc) Nil.
 brSplit s i st acc | charAt s i == 10 =
   brSplit s (i + 1) (i + 1) (brSeg s st i :: acc).
 brSplit s i st acc = brSplit s (i + 1) st acc.

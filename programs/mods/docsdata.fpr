@@ -28,7 +28,7 @@ Language conventions that apply everywhere:
   (a hard compile error says so). Cross-image shapes (messages) rely on
   content-addressed constructor tids: declare the type in ONE shared
   module and import it on both sides.
-- 1-based string indexing; no floats (integer Int only).
+- 0-based string indexing; no floats (integer Int only).
 
 ## Actors
 
@@ -169,15 +169,15 @@ long-lived actor may answer differently across yields.
 ## Strings
 
 **str : a -> String** — render any value (interpolation `\"\{x}\"`
-desugars to it). `strcat`, `strlen`, `String.len`, `charAt` (1-based
-code), `chr` (code -> 1-char string), `substr s i j` (1-based
-inclusive), `parseInt` / `toInt`.
+desugars to it). `strcat`, `strlen`, `String.len`, `charAt` (0-based
+code), `chr` (code -> 1-char string), `substr s off len` (0-based
+offset, length; clamped), `parseInt` / `toInt`.
 ```
 line = strcat name (strcat \",\" (str age));
-c = charAt s 1;  d = substr s 2 4;
+c = charAt s 0;  d = substr s 1 4;
 ```
 Note: charAt out of bounds panics, and `and2` is STRICT — guard bounds
-with control flow (`case i <= n of ...`), never with and2, or the
+with control flow (`case i < n of ...`), never with and2, or the
 \"guarded\" charAt evaluates anyway (the TUINotes bug).
 
 **sstr*** — the small mutable string builder: sstrNew / sstrPush /

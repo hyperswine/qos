@@ -87,3 +87,4 @@ Source-adjacent READMEs under `tools/` stay beside the tools they explain.
 
 - 2026-10-01: [CODE-PUBLICATION.md](2026-10-01-CODE-PUBLICATION.md) — Native loaded code is fenced on every hart before actor dispatch.
 - 2026-10-01: [TYPED-VECTORS.md](2026-10-01-TYPED-VECTORS.md) — Element-typed buffers, updated TUI module and Portable A64/Native RV64 regression gate.
+| 2026-10-02 | [ZERO-BASED.md](2026-10-02-ZERO-BASED.md) | QOS moved to 0-based positions with FP-RISC: QAR extents, coreutil, slice helpers, -1 for not found; five pins re-committed |

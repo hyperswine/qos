@@ -15,7 +15,7 @@
 QL = use "../programs/mods/qlog".
 Plug = use "../programs/mods/plug".
 
-has s sub = strIndexOf sub s > 0.
+has s sub = strIndexOf sub s >= 0.
 
 main =
   dsk = device "blk";

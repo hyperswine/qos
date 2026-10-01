@@ -65,16 +65,17 @@ cr = chr 13.
 lf = chr 10.
 crlf = strcat (chr 13) (chr 10).
 
-# index just PAST pat's first match at/after i; 0 = no match
+# index just PAST pat's first match at/after 0-based i; 0 = no match
+# (a match of a non-empty pat ends past index 0, so 0 is never a hit)
 findSub : unsafe String -> String -> Int -> Int .
 findSub s pat i = fsGo s pat i (strlen s) (strlen pat).
 fsGo : unsafe String -> String -> Int -> Int -> Int -> Int .
-fsGo s pat i n pn | i + pn - 1 > n = 0.
+fsGo s pat i n pn | i + pn > n = 0.
 fsGo s pat i n pn | G.strEq (substr s i pn) pat = i + pn.
 fsGo s pat i n pn = fsGo s pat (i + 1) n pn.
 
 digits : unsafe String -> Int -> Int -> Int .
-digits s i acc | i > strlen s = acc.
+digits s i acc | i >= strlen s = acc.
 digits s i acc = digCh s i acc (charAt s i).
 digCh : unsafe String -> Int -> Int -> Int -> Int .
 digCh s i acc c | and2 (c >= 48) (c <= 57) = digits s (i + 1) (acc * 10 + (c - 48)).
@@ -83,7 +84,7 @@ and2 a b = case a of True -> b | False -> False.
 
 # characters until the delimiter, from i
 until : unsafe String -> Int -> Int -> String -> String .
-until s i dl acc | i > strlen s = acc.
+until s i dl acc | i >= strlen s = acc.
 until s i dl acc | charAt s i == dl = acc.
 until s i dl acc = until s (i + 1) dl (strcat acc (chr (charAt s i))).
 
@@ -91,15 +92,15 @@ until s i dl acc = until s (i + 1) dl (strcat acc (chr (charAt s i))).
 
 # body start (just past the blank line); 0 while the head is partial
 headEnd : unsafe String -> Int .
-headEnd req = findSub req "{cr}{lf}{cr}{lf}" 1.
+headEnd req = findSub req "{cr}{lf}{cr}{lf}" 0.
 
 method : unsafe String -> String .
-method req = until req 1 32 "".
+method req = until req 0 32 "".
 path : unsafe String -> String .
-path req = until req (strlen (method req) + 2) 32 "".
+path req = until req (strlen (method req) + 1) 32 "".
 
 contentLen : unsafe String -> Int .
-contentLen req = clAt req (findSub req "Content-Length: " 1).
+contentLen req = clAt req (findSub req "Content-Length: " 0).
 clAt : unsafe String -> Int -> Int .
 clAt req 0 = 0.
 clAt req i = digits req i 0.
@@ -112,18 +113,18 @@ cDone req 0 = 0.
 cDone req he | G.strEq (method req) "POST" = cBody req he.
 cDone req he = 1.
 cBody : unsafe String -> Int -> Int .
-cBody req he = case strlen req - he + 1 >= contentLen req of
+cBody req he = case strlen req - he >= contentLen req of
     True -> 1
   | False -> 0.
 
 bodyOf : unsafe String -> String .
 bodyOf req = bAt req (headEnd req).
 bAt req 0 = "".
-bAt req he = substr req he (strlen req - he + 1).
+bAt req he = substr req he (strlen req - he).
 
 # {"msg":"x","arg":"y"} -> the named field (no unescaping: PoC wire)
 jStr : unsafe String -> String -> String .
-jStr s key = jAt s (findSub s "\"{key}\":\"" 1).
+jStr s key = jAt s (findSub s "\"{key}\":\"" 0).
 jAt : unsafe String -> Int -> String .
 jAt s 0 = "".
 jAt s i = until s i 34 "".
@@ -135,7 +136,7 @@ httpRespC code ctype sid body =
 
 # the client's session id off the Cookie header (0 = none)
 cookieSid : unsafe String -> Int .
-cookieSid req = csAt req (findSub req "lvsid=" 1).
+cookieSid req = csAt req (findSub req "lvsid=" 0).
 csAt : unsafe String -> Int -> Int .
 csAt req 0 = 0.
 csAt req i = digits req i 0.

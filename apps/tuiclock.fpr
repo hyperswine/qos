@@ -67,10 +67,10 @@ glyphRow mm ss col r =
     :: digCells (ss - (ss / 10) * 10) r col :: Nil).
 catAll xs = case xs of Nil -> Nil | x :: r -> TUI.append x (catAll r).
 gap n = TUI.repCell 8192 n.
-digCells d r col = blockCells (substr (fontD d) (r * 3 + 1) 3) col.
-blockCells s col = bcGo s col 1.
+digCells d r col = blockCells (substr (fontD d) (r * 3) 3) col.
+blockCells s col = bcGo s col 0.
 bcGo s col i =
-  case i > strlen s of
+  case i >= strlen s of
     True -> Nil
   | False -> bcCell s col i :: bcGo s col (i + 1).
 bcCell s col i =

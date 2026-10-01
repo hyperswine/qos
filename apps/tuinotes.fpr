@@ -30,8 +30,8 @@ notesHello con stg =
 notesHello1 con r =
   case r of
     Err e -> P.putLn con ("  [storage: " + e + "]")
-  | Ok s -> P.putLn con "  [storage: {countLf s 1 0} note(s) on disk]".
-countLf s i n = case i > strlen s of True -> n | False -> countLf s (i + 1) (n + lfAt s i).
+  | Ok s -> P.putLn con "  [storage: {countLf s 0 0} note(s) on disk]".
+countLf s i n = case i >= strlen s of True -> n | False -> countLf s (i + 1) (n + lfAt s i).
 lfAt s i = case charAt s i == 10 of True -> 1 | False -> 0.
 
 # ---- the editor loop: frame, key, commit ------------------------------------
@@ -47,16 +47,16 @@ nEdit con me stg notes count input buf =
     | False -> case P.and2 (k >= 32) (k <= 126) of
         True -> nFrame con me stg notes count (input + chr k) buf
       | False -> nEdit con me stg notes count input buf.
-strDrop1 s = substr s 1 (strlen s - 1).
+strDrop1 s = substr s 0 (strlen s - 1).
 # NB: FPRISC is strict -- `and2 a b` evaluates BOTH args before the
 # call, so charAt must be bounds-gated by CONTROL FLOW, not by and2
-# (charAt "" 1 inside an and2 guard panics on an empty buffer).
+# (charAt "" 0 inside an and2 guard panics on an empty buffer).
 nCommit con me stg notes count input buf =
   case strlen input == 0 of
     True -> nEdit con me stg notes count input buf                # empty: ignore
   | False -> nCommit1 con me stg notes count input buf.
 nCommit1 con me stg notes count input buf =
-  case P.and2 (strlen input == 1) (charAt input 1 == 46) of   # lone '.'
+  case P.and2 (strlen input == 1) (charAt input 0 == 46) of   # lone '.'
     True -> nExit con stg notes count
   | False -> nSave con me stg notes count input buf.
 nSave con me stg notes count input buf =

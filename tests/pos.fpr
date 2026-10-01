@@ -110,7 +110,7 @@ load env = case env of
 loaded r = m = fromRec r; _ = drop r; m.
 fromRec (Ok s) = fromLines (Core.lines s).
 fromRec (Err e) = M 0 initialStock Nil Nil.
-fromLines (r :: s :: rc) = M (Core.parseDigits r) (stockOf s 1 0 Nil) rc Nil.
+fromLines (r :: s :: rc) = M (Core.parseDigits r) (stockOf s 0 0 Nil) rc Nil.
 fromLines ls = M 0 initialStock Nil Nil.
 stockOf s i k acc | k == nItems = rev acc Nil.
 stockOf s i k acc =
@@ -142,7 +142,7 @@ pUpdate env ev m = case ev of
   | EGone sid -> (forget sid m, Nil)
   | e -> (m, Nil).
 
-pMsg env sid msg arg m | strEq msg "login" = (login sid (clean arg 1 "") m, Nil).
+pMsg env sid msg arg m | strEq msg "login" = (login sid (clean arg 0 "") m, Nil).
 pMsg env sid msg arg m | strEq msg "logout" = (forget sid m, Nil).
 pMsg env sid msg arg m | strEq msg "quit" = (m, MQuit :: Nil).
 pMsg env sid msg arg m = withUser env sid msg arg m (sGet (sessionsOf m) sid).
@@ -158,16 +158,16 @@ withUser env sid msg arg m s = (m, Nil).
 
 # a cashier name: printable (UTF-8 passes, control bytes drop), at most
 # 24 bytes and never cut inside a multi-byte character
-clean s i acc | i > strlen s = acc.
+clean s i acc | i >= strlen s = acc.
 clean s i acc | Core.and2 (strlen acc >= 24) (band (charAt s i) 192 != 128) = acc.
 clean s i acc | Core.or2 (charAt s i < 32) (charAt s i == 127) = clean s (i + 1) acc.
 clean s i acc = clean s (i + 1) (strcat acc (chr (charAt s i))).
 
-login sid name m | blank name 1 = m.
+login sid name m | blank name 0 = m.
 login sid name m =
   M rv st rc ss = m;
   M rv st rc (sPut ss (Sess sid name Nil "")).
-blank s i | i > strlen s = True.
+blank s i | i >= strlen s = True.
 blank s i | charAt s i == 32 = blank s (i + 1).
 blank s i = False.
 forget sid m =

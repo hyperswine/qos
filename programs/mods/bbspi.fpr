@@ -34,9 +34,9 @@ pow2 : unsafe Int -> Int .
 pow2 i = case i <= 0 of True -> 1 | False -> 2 * pow2 (i - 1).
 
 # transfer a whole string; returns the echoed string
-xfer bus s = xfGo bus s 1 (strlen s) "".
+xfer bus s = xfGo bus s 0 (strlen s) "".
 xfGo bus s i n acc =
-  case i > n of
+  case i >= n of
     True -> acc
   | False -> xfGo bus s (i + 1) n
       (strcat acc (chr (xferByte bus (charAt s i)))).

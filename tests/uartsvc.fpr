@@ -38,7 +38,7 @@ nap mt until = case read mt > until of
     True -> Unit
   | False -> nap mt until.
 
-firstCh s = case strlen s > 0 of True -> charAt s 1 | False -> 0.
+firstCh s = case strlen s > 0 of True -> charAt s 0 | False -> 0.
 
 main =
   clint = device "clint";

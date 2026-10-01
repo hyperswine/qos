@@ -196,7 +196,7 @@ lReplay fs me chain from =
   r = FS.readLatest me fs "sys/live";
   case r of
     Err e -> AC.reply from (Ok 0) >> lLoop fs me chain    # empty disk: nothing live
-  | Ok mf -> lRep fs me chain from (splitNl mf 1 1 Nil) 0.
+  | Ok mf -> lRep fs me chain from (splitNl mf 0 0 Nil) 0.
 lRep : unsafe Int -> Int -> List String -> (Int, Int) -> List String -> Int -> a .
 lRep fs me chain from ids n = case ids of
     Nil -> AC.reply from (Ok n) >> lLoop fs me chain
@@ -247,7 +247,7 @@ lJoin acc s = case strlen acc == 0 of True -> s | False -> "{acc} {s}".
 lRenderNl : unsafe List String -> String -> String .
 lRenderNl l acc = case l of Nil -> acc | s :: r -> lRenderNl r "{acc}{s}\n".
 splitNl : unsafe String -> Int -> Int -> List String -> List String .
-splitNl s i st acc = case i > strlen s of
+splitNl s i st acc = case i >= strlen s of
     True -> lRev acc Nil
   | False -> splitNl2 s i st acc.
 splitNl2 : unsafe String -> Int -> Int -> List String -> List String .

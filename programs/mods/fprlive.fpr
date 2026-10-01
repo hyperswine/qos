@@ -63,15 +63,16 @@ crlf = strcat (chr 13) (chr 10).
 and2 a b = case a of True -> b | False -> False.
 or2 a b = case a of True -> True | False -> b.
 
-# index just PAST pat's first match at/after i; 0 = no match
+# index just PAST pat's first match at/after 0-based i; 0 = no match
+# (a match of a non-empty pat ends past index 0, so 0 is never a hit)
 findSub s pat i = fsGo s pat i (strlen s) (strlen pat).
 fsGo : unsafe String -> String -> Int -> Int -> Int -> Int .
-fsGo s pat i n pn | i + pn - 1 > n = 0.
+fsGo s pat i n pn | i + pn > n = 0.
 fsGo s pat i n pn | G.strEq (substr s i pn) pat = i + pn.
 fsGo s pat i n pn = fsGo s pat (i + 1) n pn.
 
 digits : unsafe String -> Int -> Int -> Int .
-digits s i acc | i > strlen s = acc.
+digits s i acc | i >= strlen s = acc.
 digits s i acc = digCh s i acc (charAt s i).
 digCh : unsafe String -> Int -> Int -> Int -> Int .
 digCh s i acc c | and2 (c >= 48) (c <= 57) = digits s (i + 1) (acc * 10 + (c - 48)).
@@ -79,19 +80,19 @@ digCh s i acc c = acc.
 
 # characters until the delimiter, from i
 until : unsafe String -> Int -> Int -> String -> String .
-until s i dl acc | i > strlen s = acc.
+until s i dl acc | i >= strlen s = acc.
 until s i dl acc | charAt s i == dl = acc.
 until s i dl acc = until s (i + 1) dl (strcat acc (chr (charAt s i))).
 
 # ---- HTTP -----------------------------------------------------------------------
 
-headEnd req = findSub req "{crlf}{crlf}" 1.
-method req = until req 1 32 "".
-path req = until req (strlen (method req) + 2) 32 "".
+headEnd req = findSub req "{crlf}{crlf}" 0.
+method req = until req 0 32 "".
+path req = until req (strlen (method req) + 1) 32 "".
 
 # the value of a header, "" when absent (case-sensitive: browsers send
 # canonical names; a client sending odd casing gets a 400, by design)
-header req name = hAt req (findSub req "{crlf}{name}: " 1).
+header req name = hAt req (findSub req "{crlf}{name}: " 0).
 hAt req 0 = "".
 hAt req i = until req i 13 "".
 
@@ -119,17 +120,17 @@ padZeros 0 = "".
 padZeros k = strcat (chr 0) (padZeros (k - 1)).
 be64 n = "{chr 0}{chr 0}{chr 0}{chr 0}{chr (band (BITSHIFTR n 24) 255)}{chr (band (BITSHIFTR n 16) 255)}{chr (band (BITSHIFTR n 8) 255)}{chr (band n 255)}".
 wordsOf : unsafe String -> List Int .
-wordsOf s = woGo s 1 (strlen s).
+wordsOf s = woGo s 0 (strlen s).
 woGo : unsafe String -> Int -> Int -> List Int .
-woGo s i n | i > n = Nil.
+woGo s i n | i >= n = Nil.
 woGo s i n = (charAt s i * 16777216 + charAt s (i + 1) * 65536 + charAt s (i + 2) * 256 + charAt s (i + 3)) :: woGo s (i + 4) n.
 
 # 80-word schedule from a 16-word block (kept as a reversed list while extending)
 sched : unsafe List Int -> Int -> List Int .
 sched rw 80 = rw.
-sched rw t = sched (rotl 1 (bxor (bxor (nth rw 3) (nth rw 8)) (bxor (nth rw 14) (nth rw 16))) :: rw) (t + 1).
+sched rw t = sched (rotl 1 (bxor (bxor (nth rw 2) (nth rw 7)) (bxor (nth rw 13) (nth rw 15))) :: rw) (t + 1).
 nth : unsafe List Int -> Int -> Int .
-nth (x :: r) 1 = x.
+nth (x :: r) 0 = x.
 nth (x :: r) k = nth r (k - 1).
 nth Nil k = 0.
 
@@ -184,14 +185,14 @@ digestBytes (w :: r) = "{chr (band (BITSHIFTR w 24) 255)}{chr (band (BITSHIFTR w
 
 # ---- base64 ----------------------------------------------------------------------
 
-b64c i = charAt "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/" (i + 1).
-base64 s = b64Go s 1 (strlen s) "".
+b64c i = charAt "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/" i.
+base64 s = b64Go s 0 (strlen s) "".
 b64Go : unsafe String -> Int -> Int -> String -> String .
-b64Go s i n acc | i > n = acc.
-b64Go s i n acc | i + 2 <= n =
+b64Go s i n acc | i >= n = acc.
+b64Go s i n acc | i + 2 < n =
   x = charAt s i * 65536 + charAt s (i + 1) * 256 + charAt s (i + 2);
   b64Go s (i + 3) n "{acc}{chr (b64c (BITSHIFTR x 18))}{chr (b64c (band (BITSHIFTR x 12) 63))}{chr (b64c (band (BITSHIFTR x 6) 63))}{chr (b64c (band x 63))}".
-b64Go s i n acc | i + 1 <= n =
+b64Go s i n acc | i + 1 < n =
   x = charAt s i * 65536 + charAt s (i + 1) * 256;
   "{acc}{chr (b64c (BITSHIFTR x 18))}{chr (b64c (band (BITSHIFTR x 12) 63))}{chr (b64c (band (BITSHIFTR x 6) 63))}=".
 b64Go s i n acc =
@@ -210,8 +211,8 @@ maxFrame = 4096.
 frame b = frHead b (strlen b).
 frHead b n | n < 2 = (0, 0, "", 0).
 frHead b n =
-  b0 = charAt b 1;
-  b1 = charAt b 2;
+  b0 = charAt b 0;
+  b1 = charAt b 1;
   fin = band b0 128;
   rsv = band b0 112;
   op = band b0 15;
@@ -219,26 +220,26 @@ frHead b n =
   l7 = band b1 127;
   frLen b n fin rsv op masked l7.
 frLen b n fin rsv op masked l7 | or2 (fin == 0) (or2 (rsv != 0) (or2 (masked == 0) (op == 0))) = (2, op, "", 0).
-frLen b n fin rsv op masked l7 | l7 < 126 = frBody b n op l7 3.
+frLen b n fin rsv op masked l7 | l7 < 126 = frBody b n op l7 2.
 frLen b n fin rsv op masked l7 | l7 == 126 = frLen16 b n op.
 frLen b n fin rsv op masked l7 = (3, op, "", 0).           # 64-bit length: always over the cap
 frLen16 b n op | n < 4 = (0, 0, "", 0).
-frLen16 b n op = frBody b n op (charAt b 3 * 256 + charAt b 4) 5.
+frLen16 b n op = frBody b n op (charAt b 2 * 256 + charAt b 3) 4.
 frBody b n op len hdr | len > maxFrame = (3, op, "", 0).
-frBody b n op len hdr | n < hdr + 3 + len = (0, 0, "", 0).
+frBody b n op len hdr | n < hdr + 4 + len = (0, 0, "", 0).
 frBody b n op len hdr =
   key = substr b hdr 4;
-  (1, op, unmask (substr b (hdr + 4) len) key 1 "", hdr + 3 + len).
+  (1, op, unmask (substr b (hdr + 4) len) key 0 "", hdr + 4 + len).
 # unmasked in 32-byte pieces joined pairwise: a byte-at-a-time accumulator
 # on a 4 KiB frame would leave megabytes of garbage in the turn
 unmask : unsafe String -> String -> Int -> String -> String .
-unmask p key i acc = Core.concat (umPieces p key 1 (strlen p) Nil).
+unmask p key i acc = Core.concat (umPieces p key 0 (strlen p) Nil).
 umPieces : unsafe String -> String -> Int -> Int -> List String -> List String .
-umPieces p key i n acc | i > n = revS acc Nil.
-umPieces p key i n acc = umPieces p key (i + 32) n (umRun p key i (min2 (i + 31) n) "" :: acc).
+umPieces p key i n acc | i >= n = revS acc Nil.
+umPieces p key i n acc = umPieces p key (i + 32) n (umRun p key i (min2 (i + 31) (n - 1)) "" :: acc).
 umRun : unsafe String -> String -> Int -> Int -> String -> String .
 umRun p key i e acc | i > e = acc.
-umRun p key i e acc = umRun p key (i + 1) e (strcat acc (chr (bxor (charAt p i) (charAt key ((i - 1) % 4 + 1))))).
+umRun p key i e acc = umRun p key (i + 1) e (strcat acc (chr (bxor (charAt p i) (charAt key (i % 4))))).
 min2 a b = case a < b of True -> a | False -> b.
 revS : unsafe List String -> List String -> List String .
 revS Nil acc = acc.
@@ -255,29 +256,29 @@ closeFrame code reason = wsFrame 8 "{chr (BITSHIFTR code 8)}{chr (band code 255)
 
 # tolerant of whitespace around the colon (JSON.stringify emits none,
 # other encoders do); a non-string value reads as ""
-jStr s key = jAt s (findSub s "\"{key}\"" 1) (strlen s).
+jStr s key = jAt s (findSub s "\"{key}\"" 0) (strlen s).
 jAt s 0 n = "".
 jAt s i n = jColon s (skipSp s i n) n.
-jColon s i n | and2 (i <= n) (charAt s i == 58) = jQuote s (skipSp s (i + 1) n) n.
+jColon s i n | and2 (i < n) (charAt s i == 58) = jQuote s (skipSp s (i + 1) n) n.
 jColon s i n = "".
-jQuote s i n | and2 (i <= n) (charAt s i == 34) = jRun s (i + 1) n "".
+jQuote s i n | and2 (i < n) (charAt s i == 34) = jRun s (i + 1) n "".
 jQuote s i n = "".
 skipSp : unsafe String -> Int -> Int -> Int .
-skipSp s i n | and2 (i <= n) (charAt s i == 32) = skipSp s (i + 1) n.
+skipSp s i n | and2 (i < n) (charAt s i == 32) = skipSp s (i + 1) n.
 skipSp s i n = i.
 # plain runs are copied whole; only an escape costs a piece
 jRun : unsafe String -> Int -> Int -> String -> String .
 jRun s i n acc = jRunAt s i i n acc.
 jRunAt : unsafe String -> Int -> Int -> Int -> String -> String .
-jRunAt s st i n acc | i > n = strcat acc (substr s st (i - st)).
+jRunAt s st i n acc | i >= n = strcat acc (substr s st (i - st)).
 jRunAt s st i n acc | charAt s i == 34 = strcat acc (substr s st (i - st)).
-jRunAt s st i n acc | and2 (charAt s i == 92) (i < n) = jEsc s i n (strcat acc (substr s st (i - st))) (charAt s (i + 1)).
+jRunAt s st i n acc | and2 (charAt s i == 92) (i + 1 < n) = jEsc s i n (strcat acc (substr s st (i - st))) (charAt s (i + 1)).
 jRunAt s st i n acc = jRunAt s st (i + 1) n acc.
 jEsc : unsafe String -> Int -> Int -> String -> Int -> String .
 jEsc s i n acc 110 = jRun s (i + 2) n (strcat acc (chr 10)).
 jEsc s i n acc 116 = jRun s (i + 2) n (strcat acc (chr 9)).
 jEsc s i n acc 114 = jRun s (i + 2) n (strcat acc (chr 13)).
-jEsc s i n acc 117 | i + 5 <= n = jRun s (i + 6) n (strcat acc (utf8 (hex4 s (i + 2)))).
+jEsc s i n acc 117 | i + 5 < n = jRun s (i + 6) n (strcat acc (utf8 (hex4 s (i + 2)))).
 jEsc s i n acc 117 = acc.
 jEsc s i n acc c = jRun s (i + 2) n (strcat acc (chr c)).  # \" \\ \/
 hex4 s i = hexv (charAt s i) * 4096 + hexv (charAt s (i + 1)) * 256 + hexv (charAt s (i + 2)) * 16 + hexv (charAt s (i + 3)).
@@ -556,7 +557,7 @@ connRoute : unsafe Int -> Cs -> String -> String -> String -> Int .
 connRoute me st req mth pth | and2 (G.strEq mth "GET") (G.strEq pth "/") = connPage me st.
 connRoute me st req mth pth | and2 (G.strEq mth "GET") (G.strEq pth "/ws") = connUpgrade me st (header req "Sec-WebSocket-Key") (bodyOf req (headEnd req)).
 connRoute me st req mth pth = connHttpBad me st "404 Not Found".
-bodyOf req he = substr req he (strlen req - he + 1).
+bodyOf req he = substr req he (strlen req - he).
 connHttpBad me st code =
   Cs reg port cfg app cid mode buf sid ls ld model = st;
   _ = netWrite cid (httpResp code "text/plain" code);
@@ -625,7 +626,7 @@ connFrameWait me st =
   | False -> connLoop me st.
 consume st used =
   Cs reg port cfg app cid mode buf sid ls ld model = st;
-  Cs reg port cfg app cid mode (substr buf (used + 1) (strlen buf - used)) sid ls ld model.
+  Cs reg port cfg app cid mode (substr buf used (strlen buf - used)) sid ls ld model.
 connOp : unsafe Int -> Cs -> Int -> String -> Int .
 connOp me st 1 payload = connEvent me st (jStr payload "msg") (jStr payload "arg").
 connOp me st 9 payload = _ = netWrite (cidOf st) (wsFrame 10 payload); connFrames me st.

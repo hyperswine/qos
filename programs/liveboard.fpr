@@ -93,8 +93,8 @@ update ev m = case ev of
 
 uploadInfo file = case String.indexOf ":" file of
     Option.None -> "not a file"
-  | Option.Some at -> (case Encoding.fromBase64 (String.dropLeft at file) of
-        Ok bytes -> "{String.left (at - 1) file}: {strlen bytes} bytes, sha256 {String.left 12 (Digest.sha256 bytes)}"
+  | Option.Some at -> (case Encoding.fromBase64 (String.dropLeft (at + 1) file) of
+        Ok bytes -> "{String.left at file}: {strlen bytes} bytes, sha256 {String.left 12 (Digest.sha256 bytes)}"
       | Err why -> "bad upload: {why}").
 
 # the clock is a SUBSCRIPTION: it exists only while the model says so

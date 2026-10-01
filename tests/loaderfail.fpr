@@ -24,7 +24,7 @@ proxy2 fs me replyTo tag url pay =
     True -> send replyTo (Err "data partition full") >> proxy fs me
   | False -> send replyTo (FS.rpc me fs tag url pay) >> proxy fs me.
 
-has s sub = strIndexOf sub s > 0.
+has s sub = strIndexOf sub s >= 0.
 
 main =
   me = myself 0;

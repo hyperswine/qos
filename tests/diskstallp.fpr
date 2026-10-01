@@ -15,7 +15,7 @@
 FS = use "std/fs".
 dsk u = device "blk".
 reader : Int -> Int -> Int -> Unit .
-reader boss p self = send boss (substr (blkRead (dsk 0) p) 1 5) >> Unit.
+reader boss p self = send boss (substr (blkRead (dsk 0) p) 0 5) >> Unit.
 writer : Int -> Int -> String -> Int -> Unit .
 writer boss p text self = send boss (blkWrite (dsk 0) p text) >> Unit.
 outcome r = case r of Ok v -> "Ok {v}" | Err e -> "Err {e}".

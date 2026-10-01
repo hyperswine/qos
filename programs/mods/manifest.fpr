@@ -25,30 +25,31 @@ or2 a b = case a of True -> True | False -> b.
 # ---- strings ----------------------------------------------------------------
 # every cut is `substr` (O(1), the runtime prim): nothing here builds a
 # string a byte at a time
+# s[i..j] inclusive, 0-based; byteAt is 0 out of range
 slice s i j = substr s i (j - i + 1).
-byteAt s i = case or2 (i < 1) (i > strlen s) of True -> 0 | False -> charAt s i.
+byteAt s i = case or2 (i < 0) (i >= strlen s) of True -> 0 | False -> charAt s i.
 # space, tab, and CR -- so a CRLF manifest reads the same as an LF one
 isSpace c = or2 (c == 32) (or2 (c == 9) (c == 13)).
 
 findByte : unsafe String -> Int -> Int -> Int .
 findByte s b i =
-  case i > strlen s of
-    True -> 0
+  case i >= strlen s of
+    True -> 0 - 1
   | False -> case charAt s i == b of
       True -> i
     | False -> findByte s b (i + 1).
 
 ltrim : unsafe String -> Int -> Int .
-ltrim s i = case and2 (i <= strlen s) (isSpace (byteAt s i)) of True -> ltrim s (i + 1) | False -> i.
+ltrim s i = case and2 (i < strlen s) (isSpace (byteAt s i)) of True -> ltrim s (i + 1) | False -> i.
 rtrim : unsafe String -> Int -> Int .
-rtrim s j = case and2 (j >= 1) (isSpace (byteAt s j)) of True -> rtrim s (j - 1) | False -> j.
+rtrim s j = case and2 (j >= 0) (isSpace (byteAt s j)) of True -> rtrim s (j - 1) | False -> j.
 trim : unsafe String -> String .
-trim s = slice s (ltrim s 1) (rtrim s (strlen s)).
+trim s = slice s (ltrim s 0) (rtrim s (strlen s - 1)).
 
 unquote s =
   n = strlen s;
-  case and2 (n >= 2) (and2 (byteAt s 1 == 34) (byteAt s n == 34)) of
-    True -> slice s 2 (n - 1)
+  case and2 (n >= 2) (and2 (byteAt s 0 == 34) (byteAt s (n - 1) == 34)) of
+    True -> slice s 1 (n - 2)
   | False -> s.
 
 revGo : unsafe List (String, String) -> List (String, String) -> List (String, String) .
@@ -58,22 +59,22 @@ revGo xs acc = case xs of Nil -> acc | x :: r -> revGo r (x :: acc).
 # [header] -> Ok its text
 asHeader : unsafe String -> Result String String .
 asHeader t =
-  case and2 (strlen t >= 2) (and2 (byteAt t 1 == 91) (byteAt t (strlen t) == 93)) of
-    True -> Ok (slice t 2 (strlen t - 1))
+  case and2 (strlen t >= 2) (and2 (byteAt t 0 == 91) (byteAt t (strlen t - 1) == 93)) of
+    True -> Ok (slice t 1 (strlen t - 2))
   | False -> Err "not header".
 
 # key = value -> Ok (key, value), each trimmed and unquoted
 asKV : unsafe String -> Result (String, String) String .
 asKV ln =
-  eq = findByte ln 61 1;
-  case eq == 0 of
+  eq = findByte ln 61 0;
+  case eq < 0 of
     True -> Err "no ="
-  | False -> Ok (unquote (trim (slice ln 1 (eq - 1))), unquote (trim (slice ln (eq + 1) (strlen ln)))).
+  | False -> Ok (unquote (trim (slice ln 0 (eq - 1))), unquote (trim (slice ln (eq + 1) (strlen ln - 1)))).
 
 isBlankOrComment t =
   case strlen t == 0 of
     True -> True
-  | False -> charAt t 1 == 35.
+  | False -> charAt t 0 == 35.
 
 # 0 = top level, 1 = [permissions.required], 2 = [permissions.optional],
 # 3 = some other table, whose keys are not ours to read
@@ -96,16 +97,16 @@ topSet t k v =
       (pick version "version" k v) (pick mode "loadMode" k v)
       (pick abi "abi" k v) (pick shell "shell" k v).
 
-# walk the text line by line: i is the first byte of the line, n the length
+# walk the text line by line: i is the first byte of the line (0-based), n the length
 go : unsafe String -> Int -> Int -> Int -> Top -> List (String, String) -> List (String, String) -> Man .
 go s i n st top req opt =
-  case i > n of
+  case i >= n of
     True -> finish top req opt
   | False -> goLine s i n st top req opt (lineStop s i n).
 
-# the index of the newline ending the line at i, or n + 1
+# the index of the newline ending the line at i, or n
 lineStop : unsafe String -> Int -> Int -> Int .
-lineStop s i n = case i > n of True -> n + 1 | False -> case charAt s i == 10 of True -> i | False -> lineStop s (i + 1) n.
+lineStop s i n = case i >= n of True -> n | False -> case charAt s i == 10 of True -> i | False -> lineStop s (i + 1) n.
 
 goLine : unsafe String -> Int -> Int -> Int -> Top -> List (String, String) -> List (String, String) -> Int -> Man .
 goLine s i n st top req opt e = goTrimmed s (e + 1) n st top req opt (trim (slice s i (e - 1))).
@@ -144,7 +145,7 @@ finish top req opt =
 
 # the MANIFEST section's text -> Man
 parse : unsafe String -> Man .
-parse text = go text 1 (strlen text) 0 (Top "" "" "" "" "" "" "") Nil Nil.
+parse text = go text 0 (strlen text) 0 (Top "" "" "" "" "" "" "") Nil Nil.
 
 # a whole .qa archive -> Man, or QAR's reason it is not one
 parseQa : unsafe String -> Result Man String .

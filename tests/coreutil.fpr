@@ -12,10 +12,10 @@ parseBad r = case r of
     Ok n -> error "coreutil: invalid parse accepted"
   | Err e -> compatibility Unit.
 compatibility u =
-  (word, next) = C.wordAt "abc 12" 1 6;
-  case C.and2 (C.strEq word "abc") (next == 5) of
+  (word, next) = C.wordAt "abc 12" 0 6;
+  case C.and2 (C.strEq word "abc") (next == 4) of
     False -> error "coreutil: token helper changed"
-  | True -> case C.and2 (C.parseDigits "12x" == 12) (C.parseDigitsAt "h34" 2 == 34) of
+  | True -> case C.and2 (C.parseDigits "12x" == 12) (C.parseDigitsAt "h34" 1 == 34) of
       False -> error "coreutil: compatibility parse changed"
     | True -> collections Unit.
 collections u =
