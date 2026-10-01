@@ -1,0 +1,106 @@
+# tuiframes.fpr -- THE DISPLAY IN O(1) MEMORY (docs/2026-10-01-DISPLAY-BUFFERS.md).
+#
+# A long-lived actor redraws a TUI screen thousands of times, two ways:
+#
+#   lists   TUI.frame: every frame builds a fresh List (List Int) buffer in
+#           the actor's pool, which is reclaimed only when the actor dies
+#   screen  TUI.frameV under Sys.loopWith: front and back are the two
+#           halves of ONE linear Vector made once; a frame draws into the
+#           back half, emits the cells that differ from the front, and
+#           swaps by flipping an offset; each step is an arena and only
+#           the small state crosses to the next
+#
+# Both emit through a counting actor, so the bytes on the wire must be
+# identical; the lists loop's pool grows with the frame count; the screen
+# loop's does not (a second run of 5000 frames grows it by under 1 KiB --
+# the first loop in a process pays a one-time 64 KiB), and the heap
+# ends where it began.
+#
+#   ./qos.py run tests/tuiframes.fpr
+#: expect TUIFRAMES HOLD
+
+unsafe program.
+
+TUI = use "mods/tui#88e6fe357f5d8603".
+
+frames = 300.
+long = 5000.
+
+# a status screen: the frame number ticks in the header every frame, a
+# marker walks down the rows, the rest stays still
+statusW n sz =
+  (w, h) = sz;
+  TUI.borderW 6 (TUI.vboxW (
+    (TUI.LFix 1, TUI.lineW 6 0 "  frame {n}") ::
+    (TUI.LFlex 1, walkW (n - (n / 20) * 20)) :: Nil)) sz.
+walkW k sz =
+  (w, h) = sz;
+  rowsAt w h k 0.
+rowsAt w h k r = case r >= h of
+    True -> Nil
+  | False -> (case r == k of
+      True -> TUI.lineRow 8 5 "   > here" w
+    | False -> TUI.lineRow 0 0 "     ...." w) :: rowsAt w h k (r + 1).
+
+# the wire: count bytes and writes; "" asks for the totals
+counter parent me n k =
+  s = receive me;
+  case String.len s == 0 of
+    True -> send parent (n, k)
+  | False -> counter parent me (n + String.len s) (k + 1).
+wire me = spawn (fn self -> counter me self 0 0).
+totals me c =
+  _ = send c "";
+  receive me.
+
+# the old way: a new buffer per frame, kept in this actor's pool -- run
+# in a child, so the leak dies with it and the heap check below holds
+listsLoop w old n = case n > frames of
+    True -> 0
+  | False -> listsLoop w (TUI.frame w old (statusW n) (80, 24)) (n + 1).
+listsRun parent self =
+  c = wire self;
+  h0 = heapUsed Unit;
+  _ = listsLoop (fn s -> send c s) (TUI.invalidBuf 80 24) 1;
+  grew = heapUsed Unit - h0;
+  (bytes, writes) = totals self c;
+  send parent (grew, bytes, writes).
+
+# the new way: one step per frame, the Vector threaded through
+screenStep w last st v =
+  (n, fo) = st;
+  (fo2, v2) = TUI.frameV w v fo (statusW n) (80, 24);
+  (n + 1 <= last, (n + 1, fo2), v2).
+screenRun w last =
+  h0 = heapUsed Unit;
+  ((n, fo), v) = Sys.loopWith (TUI.screenNew 80 24) (1, 0) (fn st v -> screenStep w last st v);
+  grew = heapUsed Unit - h0;
+  _ = Vec.free v;
+  grew.
+
+settle me k = case k <= 0 of
+    True -> 0
+  | False -> Sys.sleepUs 1000 >> settle me (k - 1).
+
+main =
+  me = myself 0;
+  free0 = nth 1 (Sys.memInfo 0);
+  _ = spawn (fn self -> listsRun me self);
+  (grewL, bytesL, writesL) = receive me;
+  c2 = wire me;
+  grewS = screenRun (fn s -> send c2 s) frames;
+  (bytesS, writesS) = totals me c2;
+  c3 = wire me;
+  grewLong = screenRun (fn s -> send c3 s) long;
+  _ = totals me c3;
+  _ = settle me 20;
+  free1 = nth 1 (Sys.memInfo 0);
+  same = bytesL == bytesS and writesL == writesS and bytesS > 0;
+  verdict = case same and grewLong < 1024 and grewL > 1000 * (grewLong + 1) and free1 * 100 >= free0 * 99 of
+      True -> "TUIFRAMES HOLD"
+    | False -> "TUIFRAMES BROKEN";
+  print "tuiframes: wire over {frames} frames: lists {bytesL} B/{writesL} writes, screen {bytesS} B/{writesS} writes; pool grew: lists {grewL} B over {frames} frames, screen {grewS} B over {frames} (the first loop: one-time) then {grewLong} B over {long}; heap free {free0} -> {free1} KiB; {verdict}".
+
+nth 0 (x :: xs) = x.
+nth n (x :: xs) = nth (n - 1) xs.
+nth n Nil = 0.

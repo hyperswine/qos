@@ -90,7 +90,7 @@ QLog    = use "mods/qlog#40c524a7bd2900c1".
 UartM   = use "mods/uart".
 TimerM  = use "mods/timer".
 MK      = use "mods/matrixkpd".
-TUI     = use "mods/tui#28388960a8f6aa26".
+TUI     = use "mods/tui#88e6fe357f5d8603".
 
 # ---- small prelude ----------------------------------------------------------
 
@@ -766,34 +766,38 @@ slPush s st en acc = case en < st of
     True -> acc
   | False -> slice s st en :: acc.
 
-# Full-screen launcher on the TUI module: a cached cell buffer, diff
-# frames, a LIVE clock in the header (ticks between keystrokes via
-# svcPollKey), and j/k selection.  A tick repaints exactly the clock
-# cells; a selection move repaints exactly two rows -- the module's
-# diff renderer is what makes "dynamic" cheap.
+# Full-screen launcher on the TUI module: diff frames, a LIVE clock in the
+# header (ticks between keystrokes via svcPollKey), and j/k selection.  A
+# tick repaints exactly the clock cells; a selection move repaints exactly
+# two rows -- the module's diff renderer is what makes "dynamic" cheap.
+#
+# Memory is O(1) however long it idles.  The screen is TUI's two buffers
+# in ONE linear Vector, made here once: a frame draws into the back half,
+# emits what differs from the front, and swaps by flipping an offset.  The
+# loop is Sys.loopWith: each step (draw, wait for a key or the next second,
+# act on it) runs in an arena, only the small state (sel, page, front
+# offset) is copied to the next step, and the Vector threads through by
+# identity.  The launcher's own pool is never reset, so before this every
+# redraw left a frame buffer behind (2026-10-01).
 launcherLoop : unsafe Caps -> List String -> Int -> Unit .
 launcherLoop caps ids page =
   _ = TUI.enterScreen (svcWrite caps);
-  lFrame caps ids 1 page (TUI.invalidBuf 80 24).
+  (st, v) = Sys.loopWith (TUI.screenNew 80 24) (1, page, 0) (fn st v -> lStep caps ids st v);
+  _ = Vec.free v;
+  lQuit caps.
 
-lFrame : unsafe Caps -> List String -> Int -> Int -> List (List Int) -> Unit .
-lFrame caps ids sel page old =
+# one step: a frame, then a key (> 0) or 0 when the clock second changed
+lStep : unsafe Caps -> List String -> (Int, Int, Int) -> Vector -> (Bool, (Int, Int, Int), Vector) .
+lStep caps ids st v =
+  (sel, page, fo) = st;
   sec = secsOf (svcClock caps);
-  new = TUI.frame (svcWrite caps) old (launcherW ids sel page sec) (80, 24);
-  lWait caps ids sel page new sec.
-# Waiting for a key or the next clock second.  Every poll allocates a
-# little (the route's substring, the boxed reply) and the launcher's pool
-# is never reset, so the wait runs in an ARENA: its garbage goes when it
-# returns, and only the key code leaves.  It also parks 1 ms between empty
-# polls -- it used to spin, and a faster compiler exhausted the heap of an
-# idle launcher within seconds (2026-10-01).
-lWait : unsafe Caps -> List String -> Int -> Int -> List (List Int) -> Int -> Unit .
-lWait caps ids sel page buf sec =
-  k = Sys.arena (fn u -> lPoll caps sec);
-  case k == 0 of
-    True -> lFrame caps ids sel page buf
-  | False -> lKey caps ids sel page buf sec k.
-# a key (> 0), or 0 when the clock second changed
+  (fo2, v2) = TUI.frameV (svcWrite caps) v fo (launcherW ids sel page sec) (80, 24);
+  lKey caps ids sel page fo2 (Sys.arena (fn u -> lPoll caps sec)) v2.
+# Every poll allocates a little (the route's substring, the boxed reply);
+# the wait runs in an arena of its own inside the step's, so a long idle
+# second keeps only the key code.  It parks 1 ms between empty polls --
+# it used to spin, and a faster compiler exhausted the heap of an idle
+# launcher within seconds (2026-10-01).
 lPoll : unsafe Caps -> Int -> Int .
 lPoll caps sec =
   k = svcPollKey caps;
@@ -802,23 +806,23 @@ lPoll caps sec =
         True -> Sys.sleepUs 1000 >> lPoll caps sec
       | False -> 0)
   | False -> k.
-lKey : unsafe Caps -> List String -> Int -> Int -> List (List Int) -> Int -> Int -> Unit .
-lKey caps ids sel page buf sec k =
+lKey : unsafe Caps -> List String -> Int -> Int -> Int -> Int -> Vector -> (Bool, (Int, Int, Int), Vector) .
+lKey caps ids sel page fo k v =
   case k == 113 of                                        # q
-    True -> lQuit caps
+    True -> (False, (sel, page, fo), v)
   | False -> case k == 106 of                             # j: down
-      True -> lFrame caps ids (selClamp ids page (sel + 1)) page buf
+      True -> (True, (selClamp ids page (sel + 1), page, fo), v)
     | False -> case k == 107 of                           # k: up
-        True -> lFrame caps ids (selClamp ids page (sel - 1)) page buf
+        True -> (True, (selClamp ids page (sel - 1), page, fo), v)
       | False -> case or2 (k == 13) (k == 10) of          # enter
-          True -> lPick caps ids sel page buf
+          True -> lPick caps ids sel page fo v
         | False -> case k == 110 of                       # n: next page
-            True -> lFrame caps ids 1 (nextPage ids page) buf
+            True -> (True, (1, nextPage ids page, fo), v)
           | False -> case k == 112 of                     # p: prev page
-              True -> lFrame caps ids 1 (prevPage page) buf
+              True -> (True, (1, prevPage page, fo), v)
             | False -> case and2 (k >= 49) (k <= 57) of   # 1..9 direct
-                True -> lPick caps ids (k - 48) page buf
-              | False -> lWait caps ids sel page buf sec.
+                True -> lPick caps ids (k - 48) page fo v
+              | False -> (True, (sel, page, fo), v).      # (a no-op frame emits nothing)
 
 selClamp : unsafe List q301 -> Int -> Int -> Int .
 selClamp ids page s = maxI 1 (minI s (pageLen ids page)).
@@ -832,24 +836,24 @@ nextPage : unsafe List t301 -> Int -> Int .
 nextPage ids page = case page + 1 >= nPages ids of True -> page | False -> page + 1.
 prevPage page = case page <= 0 of True -> 0 | False -> page - 1.
 
-lPick : unsafe Caps -> List String -> Int -> Int -> List (List Int) -> Unit .
-lPick caps ids slot page buf =
+lPick : unsafe Caps -> List String -> Int -> Int -> Int -> Vector -> (Bool, (Int, Int, Int), Vector) .
+lPick caps ids slot page fo v =
   gi = page * launcherPageN + slot;
   case nth ids gi of
-    Err _ -> lWait caps ids slot page buf (0 - 1)
-  | Ok id -> lRun caps ids slot page id.
+    Err _ -> (True, (slot, page, fo), v)
+  | Ok id -> lRun caps ids slot page fo id v.
 
 # nested launch: DROP to the plain screen (the permission gate is line
-# chrome), run the app, come back and repaint from an invalid buffer.
-lRun : unsafe Caps -> List String -> Int -> Int -> String -> Unit .
-lRun caps ids sel page id =
+# chrome), run the app, come back and repaint from an invalid front.
+lRun : unsafe Caps -> List String -> Int -> Int -> Int -> String -> Vector -> (Bool, (Int, Int, Int), Vector) .
+lRun caps ids sel page fo id v =
   _ = TUI.leaveScreen (svcWrite caps);
   _ = svcWriteLn caps "";
   _ = launchFromApp caps id;
   _ = svcWriteLn caps "  (press any key to return to the launcher)";
   _ = svcReadKey caps;
   _ = TUI.enterScreen (svcWrite caps);
-  lFrame caps ids sel page (TUI.invalidBuf 80 24).
+  (True, (sel, page, fo), TUI.screenInvalidate v fo (80 * 24)).
 lQuit caps =
   _ = TUI.leaveScreen (svcWrite caps);
   svcWriteLn caps "  (launcher exit)".
