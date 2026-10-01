@@ -86,3 +86,4 @@ Source-adjacent READMEs under `tools/` stay beside the tools they explain.
 | 2026-10-01 | [IMPORT-TABLE.md](2026-10-01-IMPORT-TABLE.md) | Portable plugins are relocatable and bind the app's runtime by name (stubs through slots, an export table); no PLUGSLOT, plugsyms, shell stamps or plugin window |
 
 - 2026-10-01: [CODE-PUBLICATION.md](2026-10-01-CODE-PUBLICATION.md) — Native loaded code is fenced on every hart before actor dispatch.
+- 2026-10-01: [TYPED-VECTORS.md](2026-10-01-TYPED-VECTORS.md) — Element-typed buffers, updated TUI module and Portable A64/Native RV64 regression gate.

@@ -8,4 +8,5 @@ uart v2.0 0fe2ebd63a9638fe programs/mods/svc.fpr
 timer v2.0 38fa906125d48580 programs/mods/svc.fpr
 mods/timefmt v1.0 39dff276efd647a1 programs/system.fpr
 mods/qlog v2.3 40c524a7bd2900c1 programs/system.fpr
-mods/tui v1.1 88e6fe357f5d8603 programs/system.fpr
+mods/tui v2.0 51748af84a3e003b programs/system.fpr
+mods/tui v2.0 51748af84a3e003b tests/tuiframes.fpr

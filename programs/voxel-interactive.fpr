@@ -241,9 +241,9 @@ hutBlock y hy | y == hy + 1 = 10.       # glass course on top
 hutBlock y hy = 9.                      # brick below
 
 # build the block array once: 4096 pushes, index order
-buildWorld : unsafe Vector .
+buildWorld : unsafe (Vector Int) .
 buildWorld = wPush 0 (Vec.new Unit).
-wPush : unsafe Int -> Vector -> Vector .
+wPush : unsafe Int -> (Vector Int) -> (Vector Int) .
 wPush c v | c >= wCells = v.
 wPush c v = wPush (c + 1) (Vec.push (genAt (c / 256) (imod (c / 16) 16) (imod c 16)) v).
 
@@ -334,7 +334,7 @@ litValue f s = ambient + directLight f * shadowNum / shadowDen.
 # (20 blocks of reach -- more than the 16^3 box diagonal needs)
 # (the DDA below is this same ray in its SoA form; the bake is off the
 # frame path, so the cheap form is the right one here)
-marchSun : unsafe Vector -> Int -> Int -> Int -> Int -> (Int, Vector) .
+marchSun : unsafe (Vector Int) -> Int -> Int -> Int -> Int -> (Int, (Vector Int)) .
 marchSun w px py pz 0 = (0, w).
 marchSun w px py pz k =
   nx = px + sunX / 2;
@@ -347,44 +347,44 @@ marchSun w px py pz k =
 # world.  Every marcher checks the fixed-point value, not the cell.
 negPos px py pz = or2 (or2 (px < 0) (py < 0)) (pz < 0).
 
-marchAt : unsafe Vector -> Int -> Int -> Int -> Int -> Int -> Int -> Int -> (Int, Vector) .
+marchAt : unsafe (Vector Int) -> Int -> Int -> Int -> Int -> Int -> Int -> Int -> (Int, (Vector Int)) .
 marchAt w nx ny nz k cx cy cz | negPos nx ny nz = (0, w).
 marchAt w nx ny nz k cx cy cz | inWorld cx cy cz == False = (0, w).
 marchAt w nx ny nz k cx cy cz =
   (b, w2) = wGet w (cellOf cx cy cz);
   marchHit w2 nx ny nz k b.
 
-marchHit : unsafe Vector -> Int -> Int -> Int -> Int -> Int -> (Int, Vector) .
+marchHit : unsafe (Vector Int) -> Int -> Int -> Int -> Int -> Int -> (Int, (Vector Int)) .
 marchHit w nx ny nz k b | isSolidId b = (1, w).
 marchHit w nx ny nz k b = marchSun w nx ny nz k.
 
 # bake one face of one cell into the lightmap
-bakeFace : unsafe Vector -> Vector -> Int -> Int -> Int -> (Vector, Vector) .
+bakeFace : unsafe (Vector Int) -> (Vector Int) -> Int -> Int -> Int -> ((Vector Int), (Vector Int)) .
 bakeFace w lm c f b | isSolidId b == False = (w, Vec.set (c * nFaces + f + 1) 0 lm).
 bakeFace w lm c f b = bakeExposed w lm c f (nbrOf c f).
 
 nbrOf c f = ((c / 256) + stepFX f, imod (c / 16) 16 + stepFY f, imod c 16 + stepFZ f).
 
-bakeExposed : unsafe Vector -> Vector -> Int -> Int -> (Int, Int, Int) -> (Vector, Vector) .
+bakeExposed : unsafe (Vector Int) -> (Vector Int) -> Int -> Int -> (Int, Int, Int) -> ((Vector Int), (Vector Int)) .
 bakeExposed w lm c f (nx, ny, nz) | inWorld nx ny nz == False =
   (w, Vec.set (c * nFaces + f + 1) (litValue f 0) lm).
 bakeExposed w lm c f (nx, ny, nz) =
   (nb, w2) = wGet w (cellOf nx ny nz);
   bakeOpen w2 lm c f (nx, ny, nz) nb.
 
-bakeOpen : unsafe Vector -> Vector -> Int -> Int -> (Int, Int, Int) -> Int -> (Vector, Vector) .
+bakeOpen : unsafe (Vector Int) -> (Vector Int) -> Int -> Int -> (Int, Int, Int) -> Int -> ((Vector Int), (Vector Int)) .
 bakeOpen w lm c f nbr nb | isSolidId nb = (w, Vec.set (c * nFaces + f + 1) ambient lm).
 bakeOpen w lm c f (nx, ny, nz) nb =
   (sh, w2) = marchSun w (nx * fx + fx / 2) (ny * fx + fx / 2) (nz * fx + fx / 2) 40;
   (w2, Vec.set (c * nFaces + f + 1) (litValue f sh) lm).
 
-bakeCellFaces : unsafe Vector -> Vector -> Int -> Int -> Int -> (Vector, Vector) .
+bakeCellFaces : unsafe (Vector Int) -> (Vector Int) -> Int -> Int -> Int -> ((Vector Int), (Vector Int)) .
 bakeCellFaces w lm c f b | f >= nFaces = (w, lm).
 bakeCellFaces w lm c f b =
   (w2, lm2) = bakeFace w lm c f b;
   bakeCellFaces w2 lm2 c (f + 1) b.
 
-bakeCells : unsafe Vector -> Vector -> Int -> (Vector, Vector) .
+bakeCells : unsafe (Vector Int) -> (Vector Int) -> Int -> ((Vector Int), (Vector Int)) .
 bakeCells w lm c | c >= wCells = (w, lm).
 bakeCells w lm c =
   (b, w2) = wGet w c;
@@ -393,7 +393,7 @@ bakeCells w lm c =
 
 # the lightmap is allocated ONCE and rewritten in place on every edit
 newLightmap = Vec.axpb 0 0 (Vec.iota lmCells).
-bakeLight : unsafe Vector -> Vector -> (Vector, Vector) .
+bakeLight : unsafe (Vector Int) -> (Vector Int) -> ((Vector Int), (Vector Int)) .
 bakeLight w lm = bakeCells w lm 0.
 
 # ---- the incremental rebake -------------------------------------------------
@@ -412,36 +412,36 @@ cellY c = imod (c / 16) 16.
 cellZ c = imod c 16.
 cellMid c = Pt (cellX c * fx + fx / 2) (cellY c * fx + fx / 2) (cellZ c * fx + fx / 2).
 
-rebakeCell : unsafe Vector -> Vector -> Int -> (Vector, Vector) .
+rebakeCell : unsafe (Vector Int) -> (Vector Int) -> Int -> ((Vector Int), (Vector Int)) .
 rebakeCell w lm c =
   (b, w2) = wGet w c;
   bakeCellFaces w2 lm c 0 b.
 
-rebakeAt : unsafe Vector -> Vector -> Int -> Int -> Int -> (Vector, Vector) .
+rebakeAt : unsafe (Vector Int) -> (Vector Int) -> Int -> Int -> Int -> ((Vector Int), (Vector Int)) .
 rebakeAt w lm x y z | inWorld x y z == False = (w, lm).
 rebakeAt w lm x y z = rebakeCell w lm (cellOf x y z).
 
-rebakeNbrs : unsafe Vector -> Vector -> Int -> Int -> (Vector, Vector) .
+rebakeNbrs : unsafe (Vector Int) -> (Vector Int) -> Int -> Int -> ((Vector Int), (Vector Int)) .
 rebakeNbrs w lm c f | f >= nFaces = (w, lm).
 rebakeNbrs w lm c f =
   (nx, ny, nz) = nbrOf c f;
   (w2, lm2) = rebakeAt w lm nx ny nz;
   rebakeNbrs w2 lm2 c (f + 1).
 
-antiSun : unsafe Vector -> Vector -> Pt -> Int -> (Vector, Vector) .
+antiSun : unsafe (Vector Int) -> (Vector Int) -> Pt -> Int -> ((Vector Int), (Vector Int)) .
 antiSun w lm (Pt px py pz) k | k <= 0 = (w, lm).
 antiSun w lm (Pt px py pz) k | negPos px py pz = (w, lm).
 antiSun w lm (Pt px py pz) k =
   nx = px - sunX / 2; ny = py - sunY / 2; nz = pz - sunZ / 2;
   antiStep w lm (Pt nx ny nz) (k - 1) (nx / fx) (ny / fx) (nz / fx).
 
-antiStep : unsafe Vector -> Vector -> Pt -> Int -> Int -> Int -> Int -> (Vector, Vector) .
+antiStep : unsafe (Vector Int) -> (Vector Int) -> Pt -> Int -> Int -> Int -> Int -> ((Vector Int), (Vector Int)) .
 antiStep w lm pt k cx cy cz | inWorld cx cy cz == False = (w, lm).
 antiStep w lm pt k cx cy cz =
   (w2, lm2) = rebakeCell w lm (cellOf cx cy cz);
   antiSun w2 lm2 pt k.
 
-rebakeEdit : unsafe Vector -> Vector -> Int -> (Vector, Vector) .
+rebakeEdit : unsafe (Vector Int) -> (Vector Int) -> Int -> ((Vector Int), (Vector Int)) .
 rebakeEdit w lm c =
   (w1, lm1) = rebakeCell w lm c;
   (w2, lm2) = rebakeNbrs w1 lm1 c 0;
@@ -600,7 +600,7 @@ aliveCount v =
   (n, v2) = Vec.fold sumF 0 v;
   (v2, n).
 
-ddaLoop : unsafe Vector -> Dda -> Int -> (Vector, p220) .
+ddaLoop : unsafe (Vector Int) -> Dda -> Int -> ((Vector Int), p220) .
 ddaLoop w dda k | k <= 0 = ddaDone w dda.
 ddaLoop w dda k =
   (w2, dda2, cnt) = ddaStep w dda;
@@ -758,36 +758,36 @@ outOfBounds px py pz =
       (or2 (or2 (py < 0) (py + ph >= wN * fx))
            (or2 (pz - hw < 0) (pz + hw >= wN * fx))).
 
-blockedAt : unsafe Vector -> Int -> Int -> Int -> (Bool, Vector) .
+blockedAt : unsafe (Vector Int) -> Int -> Int -> Int -> (Bool, (Vector Int)) .
 blockedAt w px py pz | outOfBounds px py pz = (True, w).
 blockedAt w px py pz =
   scanX w ((px - hw) / fx) ((px + hw) / fx) (py / fx) ((py + ph) / fx)
           ((pz - hw) / fx) ((pz + hw) / fx).
 
-scanX : unsafe Vector -> Int -> Int -> Int -> Int -> Int -> Int -> (Bool, Vector) .
+scanX : unsafe (Vector Int) -> Int -> Int -> Int -> Int -> Int -> Int -> (Bool, (Vector Int)) .
 scanX w x x1 y0 y1 z0 z1 | x > x1 = (False, w).
 scanX w x x1 y0 y1 z0 z1 =
   (hit, w2) = scanY w x y0 y1 z0 z1;
   scanXMore w2 hit x x1 y0 y1 z0 z1.
-scanXMore : unsafe Vector -> Bool -> Int -> Int -> Int -> Int -> Int -> Int -> (Bool, Vector) .
+scanXMore : unsafe (Vector Int) -> Bool -> Int -> Int -> Int -> Int -> Int -> Int -> (Bool, (Vector Int)) .
 scanXMore w True x x1 y0 y1 z0 z1 = (True, w).
 scanXMore w False x x1 y0 y1 z0 z1 = scanX w (x + 1) x1 y0 y1 z0 z1.
 
-scanY : unsafe Vector -> Int -> Int -> Int -> Int -> Int -> (Bool, Vector) .
+scanY : unsafe (Vector Int) -> Int -> Int -> Int -> Int -> Int -> (Bool, (Vector Int)) .
 scanY w x y y1 z0 z1 | y > y1 = (False, w).
 scanY w x y y1 z0 z1 =
   (hit, w2) = scanZ w x y z0 z1;
   scanYMore w2 hit x y y1 z0 z1.
-scanYMore : unsafe Vector -> Bool -> Int -> Int -> Int -> Int -> Int -> (Bool, Vector) .
+scanYMore : unsafe (Vector Int) -> Bool -> Int -> Int -> Int -> Int -> Int -> (Bool, (Vector Int)) .
 scanYMore w True x y y1 z0 z1 = (True, w).
 scanYMore w False x y y1 z0 z1 = scanY w x (y + 1) y1 z0 z1.
 
-scanZ : unsafe Vector -> Int -> Int -> Int -> Int -> (Bool, Vector) .
+scanZ : unsafe (Vector Int) -> Int -> Int -> Int -> Int -> (Bool, (Vector Int)) .
 scanZ w x y z z1 | z > z1 = (False, w).
 scanZ w x y z z1 =
   (b, w2) = wGet w (cellOf x y z);
   scanZMore w2 (isSolidId b) x y z z1.
-scanZMore : unsafe Vector -> Bool -> Int -> Int -> Int -> Int -> (Bool, Vector) .
+scanZMore : unsafe (Vector Int) -> Bool -> Int -> Int -> Int -> Int -> (Bool, (Vector Int)) .
 scanZMore w True x y z z1 = (True, w).
 scanZMore w False x y z z1 = scanZ w x y (z + 1) z1.
 
@@ -797,28 +797,28 @@ Bd = Type (Bd px py pz vx vy vz grounded).
 
 # try one axis at a time; a blocked axis loses its velocity, and a
 # blocked DOWNWARD y move is what grounds the player
-moveX : unsafe Vector -> Bd -> (Vector, Bd) .
+moveX : unsafe (Vector Int) -> Bd -> ((Vector Int), Bd) .
 moveX w (Bd px py pz vx vy vz g) =
   (hit, w2) = blockedAt w (px + vx) py pz;
   moveXR w2 hit (Bd px py pz vx vy vz g).
 moveXR w True (Bd px py pz vx vy vz g) = (w, Bd px py pz 0 vy vz g).
 moveXR w False (Bd px py pz vx vy vz g) = (w, Bd (px + vx) py pz vx vy vz g).
 
-moveZ : unsafe Vector -> Bd -> (Vector, Bd) .
+moveZ : unsafe (Vector Int) -> Bd -> ((Vector Int), Bd) .
 moveZ w (Bd px py pz vx vy vz g) =
   (hit, w2) = blockedAt w px py (pz + vz);
   moveZR w2 hit (Bd px py pz vx vy vz g).
 moveZR w True (Bd px py pz vx vy vz g) = (w, Bd px py pz vx vy 0 g).
 moveZR w False (Bd px py pz vx vy vz g) = (w, Bd px py (pz + vz) vx vy vz g).
 
-moveY : unsafe Vector -> Bd -> (Vector, Bd) .
+moveY : unsafe (Vector Int) -> Bd -> ((Vector Int), Bd) .
 moveY w (Bd px py pz vx vy vz g) =
   (hit, w2) = blockedAt w px (py + vy) pz;
   moveYR w2 hit (Bd px py pz vx vy vz g).
 moveYR w True (Bd px py pz vx vy vz g) = (w, Bd px py pz vx 0 vz (vy < 0)).
 moveYR w False (Bd px py pz vx vy vz g) = (w, Bd px (py + vy) pz vx vy vz False).
 
-physics : unsafe Vector -> Bd -> (Vector, Bd) .
+physics : unsafe (Vector Int) -> Bd -> ((Vector Int), Bd) .
 physics w bd =
   (Bd px py pz vx vy vz g) = bd;
   vy2 = maxI (0 - termV) (vy - gravA);
@@ -847,7 +847,7 @@ viewDZ yaw pit = (cosA pit * cosA yaw) / fx.
 Pt = Type (Pt x y z).
 Vd = Type (Vd dx dy dz).
 
-pickAt : unsafe Vector -> Pt -> Vd -> Int -> Int -> (Pick, Vector) .
+pickAt : unsafe (Vector Int) -> Pt -> Vd -> Int -> Int -> (Pick, (Vector Int)) .
 pickAt w pt vd k prev | k <= 0 = (PkNone, w).
 pickAt w pt vd k prev =
   (Pt px py pz) = pt;
@@ -855,18 +855,18 @@ pickAt w pt vd k prev =
   nx = px + dx / 8; ny = py + dy / 8; nz = pz + dz / 8;
   pickCell w (Pt nx ny nz) vd k prev (nx / fx) (ny / fx) (nz / fx).
 
-pickCell : unsafe Vector -> Pt -> Vd -> Int -> Int -> Int -> Int -> Int -> (Pick, Vector) .
+pickCell : unsafe (Vector Int) -> Pt -> Vd -> Int -> Int -> Int -> Int -> Int -> (Pick, (Vector Int)) .
 pickCell w (Pt px py pz) vd k prev cx cy cz | negPos px py pz = (PkNone, w).
 pickCell w pt vd k prev cx cy cz | inWorld cx cy cz == False = (PkNone, w).
 pickCell w pt vd k prev cx cy cz =
   (b, w2) = wGet w (cellOf cx cy cz);
   pickTest w2 pt vd k prev (cellOf cx cy cz) b.
 
-pickTest : unsafe Vector -> Pt -> Vd -> Int -> Int -> Int -> Int -> (Pick, Vector) .
+pickTest : unsafe (Vector Int) -> Pt -> Vd -> Int -> Int -> Int -> Int -> (Pick, (Vector Int)) .
 pickTest w pt vd k prev c b | isSolidId b = (PkHit c prev, w).
 pickTest w pt vd k prev c b = pickAt w pt vd (k - 1) c.
 
-pickFrom : unsafe Vector -> Bd -> Int -> Int -> (Pick, Vector) .
+pickFrom : unsafe (Vector Int) -> Bd -> Int -> Int -> (Pick, (Vector Int)) .
 pickFrom w (Bd px py pz vx vy vz g) yaw pit =
   pickAt w (Pt px (py + eyeH) pz)
            (Vd (viewDX yaw pit) (viewDY yaw pit) (viewDZ yaw pit)) 80 (0 - 1).
@@ -888,7 +888,7 @@ Mdl = Type (Mdl body yaw pit sel act).
 # startup and again on every SIGWINCH.  Neither the evdev tier nor a
 # fully piped run ever emits one, so replays are byte-stable.
 
-applyKey : unsafe Int -> Mdl -> Vector -> Vector -> (Mdl, Vector, Vector) .
+applyKey : unsafe Int -> Mdl -> (Vector Int) -> (Vector Int) -> (Mdl, (Vector Int), (Vector Int)) .
 applyKey 103 m w lm = (moveBy m 1 0, w, lm).
 applyKey 108 m w lm = (moveBy m (0 - 1) 0, w, lm).
 applyKey 105 m w lm = (moveBy m 0 (0 - 1), w, lm).
@@ -912,9 +912,9 @@ revK : unsafe List w220 -> List w220 -> List w220 .
 revK acc Nil = acc.
 revK acc (x :: r) = revK (x :: acc) r.
 
-applyKeys : unsafe List Int -> Mdl -> Vector -> Vector -> (Mdl, Vector, Vector) .
+applyKeys : unsafe List Int -> Mdl -> (Vector Int) -> (Vector Int) -> (Mdl, (Vector Int), (Vector Int)) .
 applyKeys ks m w lm = applyKeysF (revK Nil ks) m w lm.
-applyKeysF : unsafe List Int -> Mdl -> Vector -> Vector -> (Mdl, Vector, Vector) .
+applyKeysF : unsafe List Int -> Mdl -> (Vector Int) -> (Vector Int) -> (Mdl, (Vector Int), (Vector Int)) .
 applyKeysF Nil m w lm = (m, w, lm).
 applyKeysF (k :: r) m w lm =
   (m2, w2, lm2) = applyKey k m w lm;
@@ -938,13 +938,13 @@ jump m = m.
 
 # ---- editing: destroy / place, then rebake the sun ------------------------
 
-editWorld : unsafe Mdl -> Vector -> Vector -> Int -> (Mdl, Vector, Vector) .
+editWorld : unsafe Mdl -> (Vector Int) -> (Vector Int) -> Int -> (Mdl, (Vector Int), (Vector Int)) .
 editWorld m w lm mode =
   (Mdl bd yaw pit sel act) = m;
   (pk, w2) = pickFrom w bd yaw pit;
   editApply m w2 lm mode pk.
 
-editApply : unsafe Mdl -> Vector -> Vector -> Int -> Pick -> (Mdl, Vector, Vector) .
+editApply : unsafe Mdl -> (Vector Int) -> (Vector Int) -> Int -> Pick -> (Mdl, (Vector Int), (Vector Int)) .
 editApply m w lm mode PkNone = (missMsg m mode, w, lm).
 editApply m w lm 0 (PkHit c prev) =
   (Mdl bd yaw pit sel act) = m;
@@ -961,7 +961,7 @@ occupiedBy (Bd px py pz vx vy vz g) c =
        (and2 (and2 (py / fx <= imod (c / 16) 16) ((py + ph) / fx >= imod (c / 16) 16))
              (and2 ((pz - hw) / fx <= imod c 16) ((pz + hw) / fx >= imod c 16))).
 
-placeAt : unsafe Mdl -> Vector -> Vector -> t221 -> Int -> Bool -> (Mdl, Vector, Vector) .
+placeAt : unsafe Mdl -> (Vector Int) -> (Vector Int) -> Int -> Int -> Bool -> (Mdl, (Vector Int), (Vector Int)) .
 placeAt m w lm sel c True = (missMsg m 1, w, lm).
 placeAt m w lm sel c False =
   (Mdl bd yaw pit sel2 act) = m;
@@ -1007,13 +1007,13 @@ cellStr (fr, fg, fb) ti bi =
   ((fr2, fg2, fb2),
    "{esc}[38;5;{cIdx r1 g1 b1}m{esc}[48;5;{cIdx r2 g2 b2}m{hbk}").
 
-rowChunk : unsafe (Vector, Vector, Vector) -> Int -> Int -> Int -> Int -> String -> ((Vector, Vector, Vector), String) .
+rowChunk : unsafe ((Vector Int), (Vector Int), (Vector Int)) -> Int -> Int -> Int -> Int -> String -> (((Vector Int), (Vector Int), (Vector Int)), String) .
 rowChunk fb yb pw x k acc | k >= 8 = (fb, acc).
 rowChunk fb yb pw x k acc =
   (fb2, s) = cellStr fb (yb + x + k + 1) (yb + pw + x + k + 1);
   rowChunk fb2 yb pw x (k + 1) (strcat acc s).
 
-rowStr : unsafe (Vector, Vector, Vector) -> Int -> Int -> Int -> String -> ((Vector, Vector, Vector), String) .
+rowStr : unsafe ((Vector Int), (Vector Int), (Vector Int)) -> Int -> Int -> Int -> String -> (((Vector Int), (Vector Int), (Vector Int)), String) .
 rowStr fb yb pw x acc | x >= pw = (fb, acc).
 rowStr fb yb pw x acc =
   (fb2, s) = rowChunk fb yb pw x 0 "";
@@ -1024,7 +1024,7 @@ rowStr fb yb pw x acc =
 rowLead 0 s = strcat "{esc}[H" s.
 rowLead y s = s.
 
-drawRows : unsafe (Vector, Vector, Vector) -> Int -> Int -> Int -> (Vector, Vector, Vector) .
+drawRows : unsafe ((Vector Int), (Vector Int), (Vector Int)) -> Int -> Int -> Int -> ((Vector Int), (Vector Int), (Vector Int)) .
 drawRows fb y pw ph | y >= ph = fb.
 drawRows fb y pw ph =
   (fb2, s) = rowStr fb (y * pw) pw 0 "";

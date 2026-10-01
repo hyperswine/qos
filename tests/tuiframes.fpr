@@ -21,7 +21,7 @@
 
 unsafe program.
 
-TUI = use "mods/tui#88e6fe357f5d8603".
+TUI = use "mods/tui#51748af84a3e003b".
 
 frames = 300.
 long = 5000.

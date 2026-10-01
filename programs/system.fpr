@@ -90,7 +90,7 @@ QLog    = use "mods/qlog#40c524a7bd2900c1".
 UartM   = use "mods/uart".
 TimerM  = use "mods/timer".
 MK      = use "mods/matrixkpd".
-TUI     = use "mods/tui#88e6fe357f5d8603".
+TUI     = use "mods/tui#51748af84a3e003b".
 
 # ---- small prelude ----------------------------------------------------------
 
@@ -792,7 +792,7 @@ launcherLoop caps ids page =
   lQuit caps.
 
 # one step: a frame, then a key (> 0) or 0 when the clock second changed
-lStep : unsafe Caps -> List String -> (Int, Int, Int) -> Vector -> (Bool, (Int, Int, Int), Vector) .
+lStep : unsafe Caps -> List String -> (Int, Int, Int) -> (Vector Int) -> (Bool, (Int, Int, Int), (Vector Int)) .
 lStep caps ids st v =
   (sel, page, fo) = st;
   sec = secsOf (svcClock caps);
@@ -811,7 +811,7 @@ lPoll caps sec =
         True -> Sys.sleepUs 1000 >> lPoll caps sec
       | False -> 0)
   | False -> k.
-lKey : unsafe Caps -> List String -> Int -> Int -> Int -> Int -> Vector -> (Bool, (Int, Int, Int), Vector) .
+lKey : unsafe Caps -> List String -> Int -> Int -> Int -> Int -> (Vector Int) -> (Bool, (Int, Int, Int), (Vector Int)) .
 lKey caps ids sel page fo k v =
   case k == 113 of                                        # q
     True -> (False, (sel, page, fo), v)
@@ -841,7 +841,7 @@ nextPage : unsafe List t301 -> Int -> Int .
 nextPage ids page = case page + 1 >= nPages ids of True -> page | False -> page + 1.
 prevPage page = case page <= 0 of True -> 0 | False -> page - 1.
 
-lPick : unsafe Caps -> List String -> Int -> Int -> Int -> Vector -> (Bool, (Int, Int, Int), Vector) .
+lPick : unsafe Caps -> List String -> Int -> Int -> Int -> (Vector Int) -> (Bool, (Int, Int, Int), (Vector Int)) .
 lPick caps ids slot page fo v =
   gi = page * launcherPageN + slot;
   case nth ids gi of
@@ -850,7 +850,7 @@ lPick caps ids slot page fo v =
 
 # nested launch: DROP to the plain screen (the permission gate is line
 # chrome), run the app, come back and repaint from an invalid front.
-lRun : unsafe Caps -> List String -> Int -> Int -> Int -> String -> Vector -> (Bool, (Int, Int, Int), Vector) .
+lRun : unsafe Caps -> List String -> Int -> Int -> Int -> String -> (Vector Int) -> (Bool, (Int, Int, Int), (Vector Int)) .
 lRun caps ids sel page fo id v =
   _ = TUI.leaveScreen (svcWrite caps);
   _ = svcWriteLn caps "";
