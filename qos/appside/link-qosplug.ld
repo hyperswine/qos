@@ -1,19 +1,18 @@
-/* link-qosplug.ld -- a plugin .qa image: generated code + module table
- * ONLY, linked at a PLUG sub-slot (qos_abi.h: QOS_PLUG_BASE + slot *
- * 4 MiB) against the RUNNING shell image's own symbol addresses (the
- * PROVIDE() script `make plugsyms` generates from nm).  Everything the
- * plugin does not define -- the runtime C, the prelude unit, shared
- * mods -- resolves to the shell's copy; tids are content-derived, so
- * constructors built here pattern-match there.
+/* link-qosplug.ld -- a plugin .qa image (docs/2026-10-01-IMPORT-TABLE.md):
+ * its generated code, its own copy of what it was compiled with (the
+ * prelude, its modules), and its module table -- linked at PLUG_BASE = 0
+ * with --emit-relocs.  The app places it in a block of its own heap, moves
+ * its address words (RELOC) and completes its imports of the runtime by
+ * name from its export table (IMPORT; tools/mkimports.py made the stubs).
  *
  * ENTRY is the MODULE TABLE, not code: mkqa.py records e_entry in the
- * LOAD section, qosp hands it back from tag 4, and fpr_mod_attach
+ * LOAD section, the host hands it back from tag 4, and fpr_mod_attach
  * registers it -- the table's address IS the plugin's identity.
  *
  * Two PT_LOADs, explicitly (the link-qosapp lesson): text+rodata r-x,
  * data+bss rw, ALIGN(0x10000) between them so the W^X boundary is real
- * on 4 K and 16 K pages alike.  PLUG_BASE arrives via --defsym from
- * the Makefile's sub-slot arithmetic. */
+ * on 4 K and 16 K pages alike (the app places the image on a 64 KiB
+ * boundary, so the alignment holds wherever it lands). */
 ENTRY(fpr_modtab)
 PHDRS {
   text PT_LOAD;

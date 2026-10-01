@@ -20,7 +20,7 @@ QOSHARTS ?= 8
 QOSAPP_RT_COMMON = $(QOS)/appside/entry.c $(QOS)/appside/hal.c $(QOS)/appside/support.c \
 				   $(FRUNTIME)/runtime.c $(FRUNTIME)/actors.c $(FRUNTIME)/bits.c \
 				   $(FRUNTIME)/vec.c $(FRUNTIME)/sstr.c $(FRUNTIME)/mod.c \
-				   $(FRUNTIME)/buddy.c
+				   $(FRUNTIME)/buddy.c loader/qaimg.c
 QOSAPP_RT = $(QOSAPP_RT_COMMON) $(FMACHINE)/unix/ctx_x64.S
 
 $(BUILD)/qosapp-prog.s: fprc $(SOURCE) $(FPRISC_ROOT)/core/prelude.fpr FORCE
@@ -29,15 +29,24 @@ $(BUILD)/qosapp-prog.s: fprc $(SOURCE) $(FPRISC_ROOT)/core/prelude.fpr FORCE
 
 # FORCE: the .s is regenerated every time, and a make with 1-second mtimes
 # (Apple's 3.81) otherwise packs the PREVIOUS program's image into this .qa
-$(BUILD)/qosapp.elf: $(BUILD)/qosapp-prog.s $(QOSAPP_RT) $(QOS)/appside/link-qosapp.ld FORCE
-	gcc -O2 -Wall -Wextra -ffreestanding -nostdlib -nostartfiles -static \
+# Two links: the first learns the image's symbols, tools/mkexports.py writes
+# the export table plugins complete their imports from (by NAME), and the
+# second links it in (docs/2026-10-01-IMPORT-TABLE.md)
+QOSAPP_X64_LINK = gcc -O2 -Wall -Wextra -ffreestanding -nostdlib -nostartfiles -static \
 	  -fno-stack-protector -fno-asynchronous-unwind-tables -fno-pic -mcmodel=large \
 	  -DFPR_POSIX -DFPR_QOSAPP -DFPR_NHARTS=$(QOSHARTS) -DFPR_SLAB_SZ=$(QOSSLAB) -DFPR_STACK_SZ=$(QOSSTACK) $(QOSCFLAGS_EXTRA) \
 	  -I$(FRUNTIME) -I$(QOS)/appside \
 	  -T $(QOS)/appside/link-qosapp.ld -Wl,--defsym=QOS_SLOT_BASE=$(QOS_SLOT_BASE) \
 	  -Wl,--defsym=_heap_start=_proc_image_end -Wl,--defsym=_heap_end=_proc_image_end \
 	  -Wl,--build-id=none -Wl,-z,noexecstack \
-	  $(BUILD)/qosapp-prog.s $$(cat $(BUILD)/qosapp-prog.s.units) $(QOSAPP_RT) -o $@
+	  $(BUILD)/qosapp-prog.s $$(cat $(BUILD)/qosapp-prog.s.units) $(QOSAPP_RT)
+
+# FORCE: the .s is regenerated every time, and a make with 1-second mtimes
+# (Apple's 3.81) otherwise packs the PREVIOUS program's image into this .qa
+$(BUILD)/qosapp.elf: $(BUILD)/qosapp-prog.s $(QOSAPP_RT) $(QOS)/appside/link-qosapp.ld tools/mkexports.py FORCE
+	$(QOSAPP_X64_LINK) -o $(BUILD)/qosapp.pre.elf
+	python3 tools/mkexports.py $(BUILD)/qosapp.pre.elf -o $(BUILD)/qosapp-exports.s
+	$(QOSAPP_X64_LINK) $(BUILD)/qosapp-exports.s -o $@
 
 qos-app-x64: $(BUILD)/qosapp.elf tools/mkqa.py
 	@MF=$(BUILD)/qosapp-gen.toml; ID=$$(basename $(SOURCE) .fpr); \
@@ -57,8 +66,7 @@ $(BUILD)/qosapp-a64.s: fprc $(SOURCE) $(FPRISC_ROOT)/core/prelude.fpr FORCE
 	@mkdir -p $(BUILD)
 	LC_ALL=C.UTF-8 "$(FPRC)" --target=qa64 --prelude=$(FPRISC_ROOT)/core/prelude.fpr $(SOURCE) $@
 
-$(BUILD)/qosapp-a64.elf: $(BUILD)/qosapp-a64.s $(QOSAPP_RT_COMMON) $(FMACHINE)/unix/ctx_a64.S $(QOS)/appside/link-qosapp-a64.ld FORCE
-	clang --target=aarch64-none-elf -fuse-ld=lld -O2 -Wall -Wextra \
+QOSAPP_A64_LINK = clang --target=aarch64-none-elf -fuse-ld=lld -O2 -Wall -Wextra \
 	  -ffreestanding -nostdlib -nostartfiles -fno-stack-protector \
 	  -fno-asynchronous-unwind-tables -fno-pic -ffixed-x18 -ffixed-x27 -ffixed-x28 \
 	  -DFPR_POSIX -DFPR_QOSAPP $(QOS_BASE_FLAG) -DFPR_NHARTS=$(QOSHARTS) -DFPR_SLAB_SZ=$(QOSSLAB) -DFPR_STACK_SZ=$(QOSSTACK) $(QOSCFLAGS_EXTRA) \
@@ -66,7 +74,12 @@ $(BUILD)/qosapp-a64.elf: $(BUILD)/qosapp-a64.s $(QOSAPP_RT_COMMON) $(FMACHINE)/u
 	  -T $(QOS)/appside/link-qosapp-a64.ld -Wl,--defsym=QOS_SLOT_BASE=$(QOS_SLOT_BASE) \
 	  -Wl,--defsym=_heap_start=_proc_image_end -Wl,--defsym=_heap_end=_proc_image_end \
 	  $(BUILD)/qosapp-a64.s $$(cat $(BUILD)/qosapp-a64.s.units) \
-	  $(QOSAPP_RT_COMMON) $(FMACHINE)/unix/ctx_a64.S -o $@
+	  $(QOSAPP_RT_COMMON) $(FMACHINE)/unix/ctx_a64.S
+
+$(BUILD)/qosapp-a64.elf: $(BUILD)/qosapp-a64.s $(QOSAPP_RT_COMMON) $(FMACHINE)/unix/ctx_a64.S $(QOS)/appside/link-qosapp-a64.ld tools/mkexports.py FORCE
+	$(QOSAPP_A64_LINK) -o $(BUILD)/qosapp-a64.pre.elf
+	python3 tools/mkexports.py $(BUILD)/qosapp-a64.pre.elf -o $(BUILD)/qosapp-a64-exports.s
+	$(QOSAPP_A64_LINK) $(BUILD)/qosapp-a64-exports.s -o $@
 
 qos-app-a64: $(BUILD)/qosapp-a64.elf tools/mkqa.py
 	@MF=$(BUILD)/qosapp-a64-gen.toml; ID=$$(basename $(SOURCE) .fpr); \
@@ -76,68 +89,64 @@ qos-app-a64: $(BUILD)/qosapp-a64.elf tools/mkqa.py
 	python3 tools/mkqa.py $$MF $(BUILD)/qosapp-a64.elf -o $(QA_OUT)
 	@echo "$(QA_OUT) built for Apple Silicon"
 
-# ---- plugin .qa: a library image loaded into the RUNNING shell -----------
-# Linked at a base inside the plugin window (qos_abi.h: slot base + 1 GiB;
-# by default PLUGSLOT * 4 MiB into it -- pass PLUGBASE for a bigger image) against the running app image's OWN symbol addresses -- a
-# PROVIDE() script generated from nm.  The plugin carries only its own
-# generated code + module table (ENTRY(fpr_modtab) in link-qosplug.ld);
-# the runtime C, prelude, and any shared mods resolve to the shell's
-# copy.  Load it from INSIDE: read apps/<id>.qa off qosp.disk with
-# mods/qlog, hand the bytes to Sys.attachQa (tests/qload.fpr).
-#
-# TWO LAWS, both previously paid for in blood:
-#   1. plugin targets DELIBERATELY do not depend on the app elf -- a
-#      silent shell rebuild would desync every PROVIDE address
-#      (SIGSEGV pc=0).  After ANY shell rebuild: make plugsyms[-a64],
-#      then rebuild EVERY plugin, then reinstall the whole set.
-#   2. qosp + app.qa + all plugin .qa's install as a matched set.
-PLUGSLOT ?= 0
+# ---- plugin .qa: a library image loaded into a RUNNING app -----------------
+# (docs/2026-10-01-IMPORT-TABLE.md)  A plugin carries its own generated code,
+# its own copy of the prelude and modules it was compiled with, and its module
+# table (ENTRY(fpr_modtab) in link-qosplug.ld).  It is RELOCATABLE: linked at
+# 0 with --emit-relocs, and the app places it in a block of its own heap.  The
+# runtime it calls is the app's, reached BY NAME:
+#   1. a first link leaves the runtime's symbols unresolved;
+#   2. tools/mkimports.py writes a stub (a jump through a slot) per function
+#      and a placeholder per data object it imports;
+#   3. the real link at 0, and a second at 256 MiB that mkqa --check-moved
+#      compares against the RELOC list;
+#   4. mkqa writes RELOC and IMPORT.  Load it from INSIDE with Plug.attach
+#      (mods/plug.fpr), or launch it with std/loader.
+# It is built against no particular app: any app that exports what it imports
+# loads it, and one that does not says which names are missing.
 PLUGID    = $(basename $(notdir $(SOURCE)))
 PLUG_OUT ?= $(PLUGID).qa
-PLUGBASE ?= $(shell printf '0x%x' $$(( $(QOS_SLOT_BASE) + 0x40000000 + $(PLUGSLOT) * 4194304 )))
+PLUG_MF   = printf 'name = "%s"\nid = "%s"\nentry = "fpr_modtab"\nversion = "1"\nloadMode = "plugin"\nabi = "%s.%s"\n' $(PLUGID) $(PLUGID) \
+	  $$(grep -m1 'define QOS_ABI_VERSION' $(QOS)/appside/qos_abi.h | grep -o '[0-9]\+' | head -1) $$(cat $(1).abirev 2>/dev/null || echo 0)
 
-plugsyms-x64:
-	@test -f $(BUILD)/qosapp.elf || { echo "build the shell first: make qos-app PROG=<shell>"; exit 1; }
-	nm --defined-only $(BUILD)/qosapp.elf | \
-	  awk '$$2 ~ /^[A-Z]$$/ && $$3 != "" && $$3 !~ /^\$$/ { printf "PROVIDE(%s = 0x%s);\n", $$3, $$1 }' > $(BUILD)/plugsyms-x64.ld
-	@echo "plugsyms-x64.ld: $$(wc -l < $(BUILD)/plugsyms-x64.ld) shell symbols"
+PLUG_X64_LINK = gcc -O2 -Wall -Wextra -ffreestanding -nostdlib -nostartfiles -static \
+	  -fno-stack-protector -fno-asynchronous-unwind-tables -fno-pic \
+	  -T $(QOS)/appside/link-qosplug.ld -Wl,--build-id=none -Wl,-z,noexecstack \
+	  -Wl,--no-relax -Wl,--emit-relocs -Wl,--no-warn-rwx-segments
 
-plugsyms-a64:
-	@test -f $(BUILD)/qosapp-a64.elf || { echo "build the shell first: make qos-app-a64 PROG=<shell>"; exit 1; }
-	nm --defined-only $(BUILD)/qosapp-a64.elf | \
-	  awk '$$2 ~ /^[A-Z]$$/ && $$3 != "" && $$3 !~ /^\$$/ { printf "PROVIDE(%s = 0x%s);\n", $$3, $$1 }' > $(BUILD)/plugsyms-a64.ld
-	@echo "plugsyms-a64.ld: $$(wc -l < $(BUILD)/plugsyms-a64.ld) shell symbols"
-
-plugin-qa-x64: fprc $(FPRISC_ROOT)/core/prelude.fpr
-	@test -f $(BUILD)/plugsyms-x64.ld || { echo "no plugsyms: make plugsyms first (after the shell build)"; exit 1; }
+plugin-qa-x64: fprc $(FPRISC_ROOT)/core/prelude.fpr tools/mkimports.py tools/mkqa.py
 	@mkdir -p $(BUILD)
 	LC_ALL=C.UTF-8 "$(FPRC)" --target=qx64 --plugin --prelude=$(FPRISC_ROOT)/core/prelude.fpr $(SOURCE) $(BUILD)/plug-$(PLUGID).s
-	gcc -O2 -Wall -Wextra -ffreestanding -nostdlib -nostartfiles -static \
-	  -fno-stack-protector -fno-asynchronous-unwind-tables -fno-pic -mcmodel=large \
-	  -DFPR_POSIX -DFPR_QOSAPP -DFPR_NHARTS=$(QOSHARTS) -DFPR_SLAB_SZ=$(QOSSLAB) -DFPR_STACK_SZ=$(QOSSTACK) $(QOSCFLAGS_EXTRA) -I$(FRUNTIME) -I$(QOS)/appside \
-	  -T $(QOS)/appside/link-qosplug.ld -T $(BUILD)/plugsyms-x64.ld \
-	  -Wl,--defsym=PLUG_BASE=$(PLUGBASE) -Wl,--build-id=none -Wl,-z,noexecstack \
-	  $(BUILD)/plug-$(PLUGID).s $$(cat $(BUILD)/plug-$(PLUGID).s.units) -o $(BUILD)/plug-$(PLUGID).elf
-	@MF=$(BUILD)/plug-$(PLUGID)-gen.toml; \
-	printf 'name = "%s"\nid = "%s"\nentry = "fpr_modtab"\nversion = "1"\nloadMode = "plugin"\n' $(PLUGID) $(PLUGID) > $$MF; \
-	python3 tools/mkqa.py $$MF $(BUILD)/plug-$(PLUGID).elf -o $(PLUG_OUT) --shell-of $(QA_OUT)
-	@echo "$(PLUG_OUT) built at sub-slot $(PLUGSLOT) ($(PLUGBASE)) -- install: make -C ../qos disk-seed QAS=..."
+	$(PLUG_X64_LINK) -Wl,--defsym=PLUG_BASE=0 -Wl,--unresolved-symbols=ignore-all \
+	  $(BUILD)/plug-$(PLUGID).s $$(cat $(BUILD)/plug-$(PLUGID).s.units) -o $(BUILD)/plug-$(PLUGID).u.elf
+	python3 tools/mkimports.py --arch x64 $(BUILD)/plug-$(PLUGID).u.elf -o $(BUILD)/plug-$(PLUGID).imp.s
+	$(PLUG_X64_LINK) -Wl,--defsym=PLUG_BASE=0 \
+	  $(BUILD)/plug-$(PLUGID).s $$(cat $(BUILD)/plug-$(PLUGID).s.units) $(BUILD)/plug-$(PLUGID).imp.s -o $(BUILD)/plug-$(PLUGID).elf
+	$(PLUG_X64_LINK) -Wl,--defsym=PLUG_BASE=0x10000000 \
+	  $(BUILD)/plug-$(PLUGID).s $$(cat $(BUILD)/plug-$(PLUGID).s.units) $(BUILD)/plug-$(PLUGID).imp.s -o $(BUILD)/plug-$(PLUGID).moved.elf
+	@$(call PLUG_MF,$(BUILD)/plug-$(PLUGID).s) > $(BUILD)/plug-$(PLUGID)-gen.toml
+	python3 tools/mkqa.py $(BUILD)/plug-$(PLUGID)-gen.toml $(BUILD)/plug-$(PLUGID).elf -o $(PLUG_OUT) \
+	  --relocatable --imports --check-moved $(BUILD)/plug-$(PLUGID).moved.elf --delta 0x10000000
+	@echo "$(PLUG_OUT) built (relocatable) -- install: make -C ../qos disk-seed QAS=..."
 
-plugin-qa-a64: fprc $(FPRISC_ROOT)/core/prelude.fpr
-	@test -f $(BUILD)/plugsyms-a64.ld || { echo "no plugsyms: make plugsyms-a64 first (after the shell build)"; exit 1; }
+PLUG_A64_LINK = clang --target=aarch64-none-elf -fuse-ld=lld \
+	  -nostdlib -nostartfiles \
+	  -T $(QOS)/appside/link-qosplug.ld -Wl,--emit-relocs
+
+plugin-qa-a64: fprc $(FPRISC_ROOT)/core/prelude.fpr tools/mkimports.py tools/mkqa.py
 	@mkdir -p $(BUILD)
 	LC_ALL=C.UTF-8 "$(FPRC)" --target=qa64 --plugin --prelude=$(FPRISC_ROOT)/core/prelude.fpr $(SOURCE) $(BUILD)/plug-$(PLUGID)-a64.s
-	clang --target=aarch64-none-elf -fuse-ld=lld -O2 -Wall -Wextra \
-	  -ffreestanding -nostdlib -nostartfiles -fno-stack-protector \
-	  -fno-asynchronous-unwind-tables -fno-pic -ffixed-x27 -ffixed-x28 \
-	  -DFPR_POSIX -DFPR_QOSAPP $(QOS_BASE_FLAG) -DFPR_NHARTS=$(QOSHARTS) -DFPR_SLAB_SZ=$(QOSSLAB) -DFPR_STACK_SZ=$(QOSSTACK) $(QOSCFLAGS_EXTRA) -I$(FRUNTIME) -I$(QOS)/appside \
-	  -T $(QOS)/appside/link-qosplug.ld -T $(BUILD)/plugsyms-a64.ld \
-	  -Wl,--defsym=PLUG_BASE=$(PLUGBASE) \
-	  $(BUILD)/plug-$(PLUGID)-a64.s $$(cat $(BUILD)/plug-$(PLUGID)-a64.s.units) -o $(BUILD)/plug-$(PLUGID)-a64.elf
-	@MF=$(BUILD)/plug-$(PLUGID)-a64-gen.toml; \
-	printf 'name = "%s"\nid = "%s"\nentry = "fpr_modtab"\nversion = "1"\nloadMode = "plugin"\n' $(PLUGID) $(PLUGID) > $$MF; \
-	python3 tools/mkqa.py $$MF $(BUILD)/plug-$(PLUGID)-a64.elf -o $(PLUG_OUT) --shell-of $(QA_OUT)
-	@echo "$(PLUG_OUT) built at sub-slot $(PLUGSLOT) ($(PLUGBASE)) -- install: make -C ../qos disk-seed QAS=..."
+	$(PLUG_A64_LINK) -Wl,--defsym=PLUG_BASE=0 -Wl,--unresolved-symbols=ignore-all \
+	  $(BUILD)/plug-$(PLUGID)-a64.s $$(cat $(BUILD)/plug-$(PLUGID)-a64.s.units) -o $(BUILD)/plug-$(PLUGID)-a64.u.elf
+	python3 tools/mkimports.py --arch a64 $(BUILD)/plug-$(PLUGID)-a64.u.elf -o $(BUILD)/plug-$(PLUGID)-a64.imp.s
+	$(PLUG_A64_LINK) -Wl,--defsym=PLUG_BASE=0 \
+	  $(BUILD)/plug-$(PLUGID)-a64.s $$(cat $(BUILD)/plug-$(PLUGID)-a64.s.units) $(BUILD)/plug-$(PLUGID)-a64.imp.s -o $(BUILD)/plug-$(PLUGID)-a64.elf
+	$(PLUG_A64_LINK) -Wl,--defsym=PLUG_BASE=0x10000000 \
+	  $(BUILD)/plug-$(PLUGID)-a64.s $$(cat $(BUILD)/plug-$(PLUGID)-a64.s.units) $(BUILD)/plug-$(PLUGID)-a64.imp.s -o $(BUILD)/plug-$(PLUGID)-a64.moved.elf
+	@$(call PLUG_MF,$(BUILD)/plug-$(PLUGID)-a64.s) > $(BUILD)/plug-$(PLUGID)-a64-gen.toml
+	python3 tools/mkqa.py $(BUILD)/plug-$(PLUGID)-a64-gen.toml $(BUILD)/plug-$(PLUGID)-a64.elf -o $(PLUG_OUT) \
+	  --relocatable --imports --check-moved $(BUILD)/plug-$(PLUGID)-a64.moved.elf --delta 0x10000000
+	@echo "$(PLUG_OUT) built (relocatable) -- install: make -C ../qos disk-seed QAS=..."
 
 qos-app-a64-run: qos-app-a64
 	$(MAKE) -C $(QOS) portable
@@ -152,8 +161,8 @@ qos-app-mac-object: fprc $(SOURCE) $(FPRISC_ROOT)/core/prelude.fpr
 # ---- which image a bare `qos-app` builds is the HOST's to say, once --------
 # qos.py chose the -macos targets on Apple Silicon while check-all.sh and the
 # qos/tests-host scripts said `make qos-app`, so every one of them failed
-# there.  The choice lives here now; both say `qos-app`, `plugsyms`,
-# `plugin-qa` and get the image this machine's qosp can run.
+# there.  The choice lives here now; both say `qos-app` and `plugin-qa` and
+# get the image this machine's qosp can run.
 # by ARCHITECTURE, not by OS: the a64 rules build a freestanding AArch64 ELF with
 # clang + lld, which is what qosp loads on Apple Silicon AND on arm64 Linux (a
 # Pi 4).  They were named -macos and chosen only on Darwin, so on arm64 Linux
@@ -165,6 +174,5 @@ else
 APP_HOST = x64
 endif
 qos-app: qos-app-$(APP_HOST)
-plugsyms: plugsyms-$(APP_HOST)
 plugin-qa: plugin-qa-$(APP_HOST)
-.PHONY: qos-app plugsyms plugin-qa qos-app-x64 plugsyms-x64 plugin-qa-x64 qos-app-a64 plugsyms-a64 plugin-qa-a64
+.PHONY: qos-app plugin-qa qos-app-x64 plugin-qa-x64 qos-app-a64 plugin-qa-a64

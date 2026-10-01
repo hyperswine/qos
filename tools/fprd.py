@@ -18,13 +18,13 @@ process while the editing/storing policy stays inside QOS.
 
 The plugin form is the PACKAGE op: the source is built as a
 hot-loadable module .qa -- the same `make plugin-qa` mechanics the
-livereload harness uses (fprc --plugin, link against the CURRENT
-shell's plugsyms at sub-slot <slot>'s base, mkqa) -- and the reply
-carries the .qa BYTES.  With it, a running QOS app closes the loop
-entirely from inside: edit source, CP.plugin it, append the bytes to
-its qlog store, LR.load them through the compat gate, hot-swap.  The
-slot is the runtime mapping base, so the CALLER assigns slots to
-versions exactly as the disk-seeded flow does.
+livereload harness uses (fprc --plugin, a relocatable link whose
+runtime imports bind by name, mkqa) -- and the reply carries the .qa
+BYTES.  With it, a running QOS app closes the loop entirely from
+inside: edit source, CP.plugin it, append the bytes to its qlog store,
+LR.load them through the compat gate, hot-swap.  The <slot> in the
+token is accepted and ignored: a plugin is placed wherever the app's
+heap has room (docs/2026-10-01-IMPORT-TABLE.md).
 
 One connection per compile, requests served sequentially (fprc is a
 process spawn; the client holds one syscall anyway).  The reply is
@@ -64,19 +64,12 @@ def recv_exact(c, n):
 
 
 def package_plugin(slot, plugid, source):
-    """The package op: source -> a linked, mkqa-wrapped plugin .qa at
-    sub-slot <slot>'s base, via the plugin-qa make target (so the unit
-    objects, link script, and manifest mechanics stay in ONE place).
-    Requests are served sequentially, so the per-id paths cannot race.
-
-    THE MATCHED-SET LAW (Makefile, hard-learned here as a one-byte
-    memory corruption): plugsyms bakes the SHELL IMAGE'S absolute
-    symbol addresses into the plugin, so a plugin is ABI-bound to the
-    exact build/qosapp.elf it linked against -- under any other image
-    its fuel/global accesses poke the wrong addresses.  Regenerate
-    plugsyms from the CURRENT shell image before every package; the
-    caller's contract is that the running app IS the last-built one
-    (true for the qos.py pipeline, which builds then hosts)."""
+    """The package op: source -> a linked, mkqa-wrapped relocatable
+    plugin .qa, via the plugin-qa make target (so the unit objects, link
+    script, and manifest mechanics stay in ONE place).  Requests are
+    served sequentially, so the per-id paths cannot race.  The slot is
+    the old protocol's and is ignored: the plugin is bound to no address
+    and to no shell build (its runtime imports resolve by name)."""
     # intermediates go where the caller's run keeps them (qos.py passes
     # its workspace build dir); a bare `fprd.py` from fp-risc/ uses build/
     bdir = os.environ.get("FPRD_BUILD", "build")
@@ -87,12 +80,7 @@ def package_plugin(slot, plugid, source):
     target = "plugin-qa"  # qos-app.mk picks the image this host's qosp runs
     env = dict(os.environ, LC_ALL="C.UTF-8")
     r = subprocess.run(
-        ["make", "-s", "plugsyms"],
-        capture_output=True, env=env, timeout=60)
-    if r.returncode != 0:
-        return b"err\n" + ((r.stderr + r.stdout).strip() or b"plugsyms failed")
-    r = subprocess.run(
-        ["make", "-s", target, "PROG=" + src, "PLUGSLOT=" + str(slot)],
+        ["make", "-s", target, "PROG=" + src],
         capture_output=True, env=env, timeout=300)
     qa = plugid + ".qa"
     if r.returncode != 0 or not os.path.exists(qa):

@@ -6,9 +6,10 @@
 # pure function of the log:
 #
 #   LLoad id     read apps/<id>.qa from the Files service, refuse it
-#                unless it passes EVERY gate (the host's abi + shell
-#                matched-set stamps, then the arity compat chain against
-#                the previously newest table), attach it, and append the
+#                unless it passes EVERY gate (the abi stamp, every import
+#                found in this app's exports by name, then the arity
+#                compat chain against the previously newest table),
+#                attach it, and append the
 #                new attach chain as the sys/live record
 #   LReplay u    read sys/live and re-attach the whole chain in order --
 #                the boot step: kill the machine, boot the same disk,
@@ -25,8 +26,8 @@
 #                is recorded, so a reboot starts none of them.
 #
 # The gates make refusal the loader's ONLY failure mode: a version that
-# does not match this shell image (plugsyms bakes absolute addresses --
-# the host compares stamps) or drifts an export's arity is REFUSED and
+# was built for another ABI, needs a name this app does not export, or
+# drifts an export's arity is REFUSED and
 # detached, the previous binding stands, and sys/live is NOT written --
 # the log never records a set that was not actually live.
 #

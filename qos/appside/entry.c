@@ -66,39 +66,149 @@ int fpr_hal_sleep_us(uintptr_t us) {
 }
 static char g_sysout[256 * 1024];
 
-/* Sys.attachImage <id> <abi> <shell> <sha> <IMAGE> <nums> -> Ok "" | Err reason:
- * load a plugin into the plugin window (syscall tag 4) and register its
- * module table (mod.c) so Mod.findAt resolves its exports.  Everything here
- * is what mods/plug.fpr found in the archive -- nums is mods/qaimg.fpr's
- * [base, entry, execsz, rwoff, memsz]; programs call Plug.attach with the .qa
- * bytes (read off qosp.disk with mods/qlog -- name->bytes resolution is the
- * FPRISC side's job too). */
+/* ---- plugins: relocatable images completed by name ---------------------
+ * (docs/2026-10-01-IMPORT-TABLE.md)  A plugin is linked at 0.  The app
+ * places it in a block of its OWN heap, like any other memory, moves its
+ * address words by where the block is (RELOC), and completes its imports
+ * of the runtime BY NAME from this image's export table (IMPORT,
+ * qos_exports: tools/mkimports.py and tools/mkexports.py).  Then it asks
+ * the host to make the code executable (tag 4), registers the block as an
+ * image (its cells are statics: fpr_in_heap) and its module table (mod.c).
+ * No slot, no address chosen at build time, no tie to one shell build: a
+ * plugin loads into any app that exports what it needs, and says what is
+ * missing when one does not. */
 int fpr_mod_attach(const uw *tab);
+extern const uw qos_exports[] __attribute__((weak)); /* absent in the first link */
+
 static qos_span_t span_of(V v, const char *who) {
   if (ISINT(v) || ((hdr_t *)v)->tid != T_STR) fpr_cpanic(who);
   str_t *s = (str_t *)v;
   return (qos_span_t){s->bytes, s->len};
 }
-static V h_sys_attach_image(V idv, V abiv, V shellv, V shav, V imgv, V numsv) {
+/* the export row named n[0..len), or 0 (rows sorted by name, bytewise) */
+static const qos_export_t *export_find(const unsigned char *n, uw len) {
+  if (!qos_exports) return 0;
+  const qos_export_t *t = (const qos_export_t *)(qos_exports + 1);
+  uw lo = 0, hi = qos_exports[0];
+  while (lo < hi) {
+    uw mid = lo + (hi - lo) / 2;
+    const unsigned char *m = (const unsigned char *)t[mid].name;
+    uw i = 0;
+    while (i < len && m[i] && m[i] == n[i]) i++;
+    int c = i == len ? (m[i] ? -1 : 0) : (!m[i] ? 1 : (n[i] < m[i] ? -1 : 1));
+    if (c == 0) return &t[mid];
+    if (c < 0) hi = mid; else lo = mid + 1;
+  }
+  return 0;
+}
+static uw dec(const unsigned char **p, const unsigned char *e) {
+  uw v = 0;
+  while (*p < e && **p >= '0' && **p <= '9') v = v * 10 + (uw)(*(*p)++ - '0');
+  return v;
+}
+/* the n-th element of a List String, as a span */
+static qos_span_t list_str(V l, uw n, const char *who) {
+  for (;;) {
+    if (ISINT(l) || TID(l) != T_LIST || ((hdr_t *)l)->var != 1) fpr_cpanic(who);
+    if (n == 0) return span_of(*(V *)((char *)l + 8), who);
+    l = *(V *)((char *)l + 8 + sizeof(uw));
+    n--;
+  }
+}
+/* fill each import: a slot gets the exporter's address, a placeholder a
+ * copy of its object.  Returns 0, or the refusal (written into err). */
+static const char *complete_imports(unsigned char *base, uw memsz, qos_span_t imp,
+                                    char *err, uw errcap) {
+  const unsigned char *p = imp.p, *e = imp.p + imp.n;
+  uw nerr = 0, missing = 0;
+  const char *why = 0;
+  while (p < e) {
+    unsigned char kind = *p++;
+    if (p < e && *p == ' ') p++;
+    uw off = dec(&p, e);
+    if (p < e && *p == ' ') p++;
+    uw size = dec(&p, e);
+    if (p < e && *p == ' ') p++;
+    const unsigned char *nm = p;
+    while (p < e && *p != '\n') p++;
+    uw nlen = (uw)(p - nm);
+    if (p < e) p++;
+    if ((kind != 'c' && kind != 'd') || !nlen || off + size > memsz || off + size < off)
+      return "the IMPORT section is malformed";
+    const qos_export_t *x = export_find(nm, nlen);
+    if (!x) { /* collect every missing name, then refuse once */
+      const char *pre = missing ? ", " : "the plugin needs ";
+      for (const char *c = pre; *c && nerr + 1 < errcap; c++) err[nerr++] = *c;
+      for (uw i = 0; i < nlen && nerr + 1 < errcap; i++) err[nerr++] = (char)nm[i];
+      missing++;
+      continue;
+    }
+    if (kind == 'c') {
+      *(uw *)(void *)(base + off) = (uw)x->addr;
+    } else {
+      if (x->size != size) { why = "a data import's size differs from the app's (rebuild the plugin)"; continue; }
+      __builtin_memcpy(base + off, (const void *)(uintptr_t)x->addr, size);
+    }
+  }
+  if (missing) {
+    const char *post = ", which this app does not export";
+    for (const char *c = post; *c && nerr + 1 < errcap; c++) err[nerr++] = *c;
+    err[nerr] = 0;
+    return err;
+  }
+  return why;
+}
+
+/* Sys.attachImage <id> <abi> <sha> <nums> [IMAGE, RELOC, IMPORT] -> Ok "" | Err
+ * reason: nums is mods/qaimg.fpr's [base, entry, execsz, rwoff, memsz] (base
+ * 0: relocatable); programs call Plug.attach with the .qa bytes. */
+static V h_sys_attach_image(V idv, V abiv, V shav, V numsv, V secsv) {
   if (!g_syscall) return fpr_mkresult(1, "no syscall channel (standalone run)");
   uw n[5];
   if (!fpr_list_ints(numsv, n, 5)) fpr_cpanic("Sys.attachImage: nums must be [base, entry, execsz, rwoff, memsz]");
+  qos_span_t img = list_str(secsv, 0, "Sys.attachImage: sections must be [IMAGE, RELOC, IMPORT]");
+  qos_span_t rel = list_str(secsv, 1, "Sys.attachImage: sections must be [IMAGE, RELOC, IMPORT]");
+  qos_span_t imp = list_str(secsv, 2, "Sys.attachImage: sections must be [IMAGE, RELOC, IMPORT]");
+  if (n[0] != 0)
+    return fpr_mkresult(1, "not a relocatable plugin (linked for a fixed slot): rebuild it");
+  uw memsz = n[4];
+  const uw align = 64u * 1024; /* the link script's W^X page: 4 K and 16 K hosts alike */
+  void *blk = buddy_alloc(sizeof(fpr_image_t) + align + memsz);
+  if (!blk) return fpr_mkresult(1, "no memory for the plugin");
+  unsigned char *base = (unsigned char *)(((uw)blk + sizeof(fpr_image_t) + align - 1) & ~(align - 1));
+  fpr_qaimg_t q = {(uw)base, n[1], n[2], n[3], memsz};
+  fpr_elf_load_t ld = fpr_qaimg_place(&q, img.p, img.n, base, memsz);
+  const char *bad = ld.ok ? fpr_qaimg_relocate(base, img.n, rel.p, rel.n) : ld.err;
+  if (!bad) bad = complete_imports(base, memsz, imp, g_sysout, sizeof g_sysout);
+  if (bad) {
+    buddy_free(blk);
+    return fpr_mkresult(1, bad);
+  }
   qos_plugin_t pl = {
       span_of(idv, "Sys.attachImage: id must be a String"),
       span_of(abiv, "Sys.attachImage: abi must be a String"),
-      span_of(shellv, "Sys.attachImage: shell must be a String"),
       span_of(shav, "Sys.attachImage: sha must be a String"),
-      span_of(imgv, "Sys.attachImage: IMAGE must be a String"),
-      n[0], n[1], n[2], n[3], n[4],
+      img, (uint64_t)(uintptr_t)base, n[1], n[2], n[3], memsz,
   };
   g_sysout[0] = 0;
   int64_t r = g_syscall(QOS_SYS_LOADQA, (const char *)&pl, sizeof pl, g_sysout, sizeof g_sysout);
-  if (r <= 0) return fpr_mkresult(1, g_sysout[0] ? g_sysout : "plugin load failed");
+  if (r <= 0) {
+    buddy_free(blk); /* refused before any page changed protection */
+    return fpr_mkresult(1, g_sysout[0] ? g_sysout : "plugin load failed");
+  }
+  /* the block's cells are statics now; a plugin is never unloaded, so it
+   * belongs to no process that could end (pid 0) */
+  fpr_image_t *im = (fpr_image_t *)blk;
+  im->lo = (char *)blk - sizeof(uw);
+  im->hi = (char *)blk + buddy_block_usable_size(blk);
+  im->pid = 0;
+  im->owner = 0;
+  fpr_image_add(im);
   if (fpr_mod_attach((const uw *)(uintptr_t)r))
     return fpr_mkresult(1, "module registry full");
   return fpr_mkresult(0, "");
 }
-FPR_FN(fpr_g_Sys_x2eattachImage, h_sys_attach_image, 6);
+FPR_FN(fpr_g_Sys_x2eattachImage, h_sys_attach_image, 5);
 
 /* Sys.compile <profile> <source> -> Ok asm | Err reason: the host-
  * side fpr compiler server, reached over the syscall channel (tag 7,
@@ -203,10 +313,9 @@ int64_t qos_app_entry(const qos_boot_t *boot, char *result_out,
    * The host mapped it and loaded us at its start; everything past the
    * image is handed over raw, and this image's buddy runs over it --
    * the same lower allocator a machine boot has, behind the same
-   * memory actor (docs/MEMORY.md).  The plugin window is a fixed
-   * address range inside the span: reserved here so no block ever
-   * lands where a runtime-loaded library will.  Hart 0's first slab is
-   * then an ordinary block, taken directly (no actor exists yet). */
+   * memory actor (docs/MEMORY.md); plugins are placed in its blocks
+   * too.  Hart 0's first slab is an ordinary block, taken directly (no
+   * actor exists yet). */
   {
     uw minb = 64u * 1024; /* buddy's BUDDY_MIN_BLOCK: the seed alignment */
     uw lo = ((uw)boot->arena_base + (minb - 1)) & ~(minb - 1);
@@ -215,9 +324,6 @@ int64_t qos_app_entry(const qos_boot_t *boot, char *result_out,
     buddy_init((void *)lo, hi - lo);
     fpr_heap_lo = (char *)boot->arena_base; /* fpr_in_heap's span: run-time, from the */
     fpr_heap_hi = (char *)hi;               /* boot record -- never linked in (v14) */
-    if (QOS_PLUG_BASE >= lo && QOS_PLUG_BASE + QOS_PLUG_SIZE <= hi &&
-        !buddy_reserve_range((void *)QOS_PLUG_BASE, QOS_PLUG_SIZE))
-      return -1;
     fpr_mem_own = 1;
   }
   {

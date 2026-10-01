@@ -1,0 +1,6 @@
+# plugneeds.fpr -- a plugin that imports a name no app exports
+# (tests/plugimports.fpr): the app must refuse to attach it, naming what is
+# missing, before anything runs (docs/2026-10-01-IMPORT-TABLE.md).
+Sys.notInAnyApp : Int -> Int .
+plugUse n = Sys.notInAnyApp n + 1.
+main = "plugneeds is a plugin: attach it via tests/plugimports.fpr".

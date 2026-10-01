@@ -19,7 +19,7 @@
 
 #include <stdint.h>
 
-#define QOS_ABI_VERSION 15u /* v15: copied worker disk requests; earlier offsets unchanged */
+#define QOS_ABI_VERSION 16u /* v16: tag 4 publishes a plugin the app placed (no shell span); v15: copied worker disk requests */
 
 /* ---- the address plan (linux-x86-64) --------------------------------
  * The host is linked non-PIE (default 0x400000 text); the arena is a
@@ -46,29 +46,19 @@
  * base -- the largest span it can get, from QOS_ARENA_MAX down -- and the OS
  * commits pages as the app touches them.  The size arrives in the boot
  * record; nothing is linked into the app (docs/2026-09-19-BOUNDS.md).  QOS_ARENA_MIN is
- * what the fixed windows below need. */
+ * the image window below and room for the app's own heap. */
 #define QOS_ARENA_MAX (1ul << 40) /* the buddy's largest block */
 #define QOS_ARENA_MIN (4ul << 30)
-/* The image window.  Images are linked non-PIC at the base, and a plugin
- * reaches the image's symbols with adrp (+-4 GiB on aarch64): the image and
- * the plugin window are 1 GiB each so everything is in reach of everything.
- * Relocatable images would retire both numbers. */
+/* The image window.  An app image is linked non-PIC at the base (a plugin is
+ * relocatable and lives in the app's own heap: docs/2026-10-01-IMPORT-TABLE.md).
+ * A relocatable app image would retire this number too. */
 #define QOS_SLOT_SIZE (1ul << 30) /* matches the SLOT LENGTH in link-qosapp*.ld */
 #define QOS_SLOT_BASE QOS_ARENA_BASE
-/* the PLUGIN slot: a second, smaller fixed-address window inside the
- * arena for DYNAMICALLY LOADED .qa libraries -- images linked at this
- * base against the running shell image's symbol addresses (a
- * PROVIDE()-script of the shell's nm output), carrying only their own
- * generated code + module table.  Loaded via syscall tag 4, registered
- * with the module registry, called through Mod.find PAPs.  The app
- * runtime EXCLUDES this range from fpr_in_heap (plugin rodata is
- * immortal literal data, not slab-backed heap). */
-#define QOS_PLUG_BASE (QOS_ARENA_BASE + QOS_SLOT_SIZE)
-#define QOS_PLUG_SIZE (1ul << 30) /* any number of images, each at the base it was linked for */
 /* syscall channel tags (boot->syscall_fn): 2 kv-append, 3 kv-replay,
- * 4 load-plugin (payload = the .qa CONTAINER BYTES, read off the disk
- * by the app itself -- qlog over the blk tier; returns the module-
- * table address as the int64, or <0 with an error string in out),
+ * 4 publish-plugin (payload = a qos_plugin_t: a plugin the app has
+ * already placed in its own heap, relocated and completed; the host
+ * checks it, makes its code r-x and returns the module-table address
+ * as the int64, or <0 with an error string in out),
  * 5 kv record index, 6 sleep (payload = decimal MICROSECONDS text;
  * the app-side Sys.sleepUs backend -- weak/strong linking cannot
  * cross the image boundary, so the sleep goes through the channel
@@ -77,19 +67,23 @@
  * server on its unix socket -- portable/compile.c + tools/fprd.py --
  * and out gets the framed "ok\n<asm>" / "err\n<msg>" reply) */
 #define QOS_SYS_LOADQA 4
-/* tag 4's payload (v13).  The APP interprets the plugin's archive -- with
+/* tag 4's payload (v16).  The APP interprets the plugin's archive -- with
  * mods/qar.fpr and mods/manifest.fpr, the code the kernel and the host
- * launch with -- and hands over what it found, LOAD's numbers included; the
- * host parses nothing, not even that section's text.
+ * launch with -- places it, and hands over what it did; the host parses
+ * nothing, not even the LOAD section's text.
  * Spans point into the app's own Strings: one address space, so a pointer
  * pass, the same discipline gfx_render uses. */
 typedef struct { const unsigned char *p; uint64_t n; } qos_span_t;
 typedef struct {
-  qos_span_t id, abi, shell;
+  qos_span_t id, abi;
   qos_span_t sha;  /* the sha-256 the LOAD section claims for IMAGE (64 hex), or empty */
-  qos_span_t img;
-  uint64_t base, entry, execsz, rwoff, memsz; /* LOAD's numbers, read by mods/qaimg.fpr */
+  qos_span_t img;  /* the archive's IMAGE bytes, as shipped (the sha's subject) */
+  uint64_t base;   /* v16: where the APP placed the image (64 KiB-aligned, in its arena) */
+  uint64_t entry, execsz, rwoff, memsz; /* LOAD's numbers, offsets from base */
 } qos_plugin_t;
+/* v16: an app's export table (tools/mkexports.py): a count word, then rows
+ * sorted by name.  A plugin's imports are completed from it by name. */
+typedef struct { const char *name; uint64_t addr, size; } qos_export_t;
 #define QOS_SYS_SLEEPUS 6
 #define QOS_SYS_COMPILE 7
 
@@ -280,14 +274,13 @@ typedef struct {
   uint64_t tls_off;
   /* ---- v12 additions (appended: earlier offsets unchanged) ----------
    * THE APP OWNS ITS ARENA.  [arena_base, arena_base + arena_size) is
-   * every byte of the mapped arena past the loaded image -- the slot
-   * tail, the plugin window, and the rest -- and the app runs its own
-   * buddy over it (reserving the plugin window itself, since it knows
-   * QOS_PLUG_BASE), behind its memory actor.  The host keeps no
-   * allocator over the arena: plugin loads write into the fixed window
-   * (syscall tag 4), nothing else.  The first slab, every growth, and
-   * every free happen inside the app; the host's grow callback and its
-   * mutex are gone with them. */
+   * every byte of the mapped arena past the loaded image, and the app
+   * runs its own buddy over it, behind its memory actor -- plugins are
+   * placed in its blocks too (v16).  The host keeps no allocator over
+   * the arena and writes nothing into it: tag 4 only makes a plugin's
+   * code pages r-x.  The first slab, every growth, and every free
+   * happen inside the app; the host's grow callback and its mutex are
+   * gone with them. */
   void *arena_base;
   uint64_t arena_size;
 } qos_boot_t;

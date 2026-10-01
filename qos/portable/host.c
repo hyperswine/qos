@@ -66,61 +66,33 @@ static int g_trace;
 #define TRACE(...) \
   do { if (g_trace) qos_hostlog("qosp: " __VA_ARGS__); } while (0)
 
-/* ---- runtime plugin loader (syscall tag 4, qos_abi.h) ---------------
- * Load a plugin .qa into the reserved plugin window from the BYTES the
- * app hands over -- the app read them off qosp.disk (mods/qlog over
- * the blk tier), so name->bytes resolution is FPRISC's job and the
- * host filesystem is out of the loop entirely.  Parse the QAR2
- * container, place its segments (they must all lie inside the window
- * -- the image was linked for its QOS_PLUG_BASE sub-slot), enforce the
- * identical W^X discipline as the shell image, and hand back the
- * module-table address (the plugin's e_entry -- ENTRY(fpr_modtab) in
- * link-qosplug.ld).  Any number of images, each where it was linked;
- * re-load / overlap refused (v1: no unload). */
-static struct plug_range { uintptr_t lo, hi; } *plug_ranges; /* doubles */
-static int plug_n, plug_cap;
-
-/* the hosted shell image's LOAD sha -- the identity every plugin must
- * have been linked against (plugsyms bakes the shell's ABSOLUTE symbol
- * addresses into the plugin, so under any other shell its global
- * accesses poke the wrong memory; the corruption is silent and
- * layout-dependent, hence a HARD gate, not a warning) */
+/* ---- publishing a plugin's code (syscall tag 4, qos_abi.h) ------------
+ * The APP places a plugin: it takes a block from its own buddy, copies the
+ * image in, moves its address words and completes its imports by name from
+ * its own export table (qos/appside/plugimg.c,
+ * docs/2026-10-01-IMPORT-TABLE.md).  What only the host can do is make the
+ * code executable: the arena is one rw mapping, and a page is never
+ * writable and executable at once.  So the host checks what it is asked to
+ * publish -- built for this ABI, the bytes the archive claims, inside the
+ * app's arena, its code on pages of its own -- flips the code to r-x,
+ * clears the instruction cache, and hands back the module table's address.
+ * Nothing about a plugin is tied to an address or to one app build. */
 void qosp_sha256(const unsigned char *msg, uint64_t n, unsigned char out[32]); /* sha256.c */
-static char g_shell_sha[72];
 static int span_is(qos_span_t a, const char *z) {
   uint64_t n = strlen(z);
   return a.n == n && !memcmp(a.p, z, n);
 }
+static uint64_t g_arena_size; /* 0: could not reserve at the published address */
 int64_t qosp_load_plugin(const qos_plugin_t *pl, char *err, uint64_t errcap) {
-  if (plug_n == plug_cap) {
-    int cap = plug_cap ? plug_cap * 2 : 8;
-    struct plug_range *r = realloc(plug_ranges, (size_t)cap * sizeof *r);
-    if (!r) { snprintf(err, errcap, "out of memory"); return -1; }
-    plug_ranges = r;
-    plug_cap = cap;
-  }
   int idn = (int)pl->id.n;
   const char *id = (const char *)pl->id.p;
-  /* The enforcer's checks, over fields the app read from the archive: is
-   * this plugin from the same build as the image it is joining?  They
-   * catch a stale matched set, not a hostile app -- one address space has
-   * no such boundary.  An unstamped plugin is a pre-stamp archive. */
   char want[24];
   snprintf(want, sizeof want, "%u.%u", (unsigned)QOS_ABI_VERSION, (unsigned)QOSP_CODEGEN_REV);
-  if (pl->abi.n && !span_is(pl->abi, want)) {
-    snprintf(err, errcap, "abi mismatch: plugin %.*s built for %.*s, shell wants "
-             "%s -- rebuild as a matched set", idn, id, (int)pl->abi.n, (const char *)pl->abi.p, want);
+  if (!span_is(pl->abi, want)) {
+    snprintf(err, errcap, "abi mismatch: plugin %.*s built for %.*s, this host is %s "
+             "-- rebuild the plugin", idn, id, (int)pl->abi.n, (const char *)pl->abi.p, want);
     return -1;
   }
-  if (pl->shell.n && g_shell_sha[0] && !span_is(pl->shell, g_shell_sha)) {
-    snprintf(err, errcap, "matched-set REFUSED: plugin %.*s was linked against "
-             "shell %.12s... but this shell is %.12s... -- repackage against "
-             "the running image", idn, id, (const char *)pl->shell.p, g_shell_sha);
-    return -1;
-  }
-  if (!pl->shell.n)
-    fprintf(stderr, "[qos] warning: plugin %.*s carries no shell stamp "
-            "(pre-stamp archive); the matched-set gate cannot protect it\n", idn, id);
   /* the image is what its LOAD section says it is, or it does not load */
   if (pl->sha.n) {
     unsigned char d[32];
@@ -132,47 +104,31 @@ int64_t qosp_load_plugin(const qos_plugin_t *pl, char *err, uint64_t errcap) {
       return -1;
     }
   }
-  /* the archive DECLARES its span (LOAD base/memsz, read by the app with
-   * mods/qaimg.fpr).  Overlap-check the declared span first, place second: a
-   * bad plugin is refused before a byte lands. */
-  fpr_qaimg_t qp = {pl->base, pl->entry, pl->execsz, pl->rwoff, pl->memsz};
-  if (qp.memsz == 0) {
-    snprintf(err, errcap, "plugin LOAD section unusable");
-    return -1;
-  }
   uintptr_t pg = (uintptr_t)getpagesize();
-  uintptr_t imlo = qp.base & ~(pg - 1);
-  uintptr_t imhi = (qp.base + qp.memsz + pg - 1) & ~(pg - 1);
-  for (int i = 0; i < plug_n; i++)
-    if (imlo < plug_ranges[i].hi && imhi > plug_ranges[i].lo) {
-      snprintf(err, errcap, "plugin overlaps an already-loaded image "
-               "(link each app at its own sub-slot base)");
-        return -1;
-    }
-  fpr_elf_load_t ld = fpr_qaimg_place(&qp, pl->img.p, pl->img.n,
-                                      (void *)QOS_PLUG_BASE, QOS_PLUG_SIZE);
-  if (!ld.ok) {
-    snprintf(err, errcap, "plugin image: %s", ld.err);
+  uintptr_t lo = (uintptr_t)pl->base, hi = lo + pl->memsz;
+  uintptr_t alo = (uintptr_t)QOS_ARENA_BASE, ahi = alo + g_arena_size;
+  if (pl->memsz == 0 || hi < lo || lo < alo || hi > ahi) {
+    snprintf(err, errcap, "plugin %.*s: not placed inside the app's arena", idn, id);
     return -1;
   }
-  uintptr_t xend = ((uintptr_t)ld.exec_end + pg - 1) & ~(pg - 1);
-  if (ld.exec_end && (uintptr_t)ld.rw_start < xend) {
-    snprintf(err, errcap, "plugin not page-separated (exec_end=%p rw=%p)",
-             ld.exec_end, ld.rw_start);
+  if (lo & (pg - 1)) {
+    snprintf(err, errcap, "plugin %.*s: placed off a page boundary", idn, id);
     return -1;
   }
-  if (mprotect((void *)imlo, xend - imlo, PROT_READ | PROT_EXEC)) {
+  uintptr_t xend = (lo + pl->execsz + pg - 1) & ~(pg - 1);
+  if (pl->execsz == 0 || pl->entry >= pl->memsz || (pl->rwoff < pl->memsz && lo + pl->rwoff < xend)) {
+    snprintf(err, errcap, "plugin %.*s: its code and writable data share a page", idn, id);
+    return -1;
+  }
+  if (mprotect((void *)lo, xend - lo, PROT_READ | PROT_EXEC)) {
     snprintf(err, errcap, "plugin mprotect: %s", strerror(errno));
     return -1;
   }
-  __builtin___clear_cache((char *)imlo, (char *)ld.image_end);
-  plug_ranges[plug_n].lo = imlo;
-  plug_ranges[plug_n].hi = imhi;
-  plug_n++;
-  qos_hostlog("[qosp] plugin %.*s (%llu B): table at %p, image %#lx-%#lx",
-              idn, id, (unsigned long long)pl->img.n, ld.entry, (unsigned long)imlo,
-              (unsigned long)imhi);
-  return (int64_t)(uintptr_t)ld.entry;
+  __builtin___clear_cache((char *)lo, (char *)hi);
+  qos_hostlog("[qosp] plugin %.*s (%llu B): published at %#lx-%#lx, table at %#lx",
+              idn, id, (unsigned long long)pl->img.n, (unsigned long)lo,
+              (unsigned long)hi, (unsigned long)(lo + pl->entry));
+  return (int64_t)(lo + pl->entry);
 }
 
 /* v12: no grow callback.  The app owns the arena past its image and
@@ -337,7 +293,6 @@ FPR_FN(fpr_g_Host_x2esha256, h_sha256, 1);
  * every app).  Made before this host's own heap is reserved, which would
  * otherwise be free to land here (machine/posix hal_heap_before_reserve).
  * QOSP_ARENA_MB caps it for a run: a test of exhaustion. */
-static uint64_t g_arena_size; /* 0: could not reserve at the published address */
 void hal_heap_before_reserve(void) {
   uw max = QOS_ARENA_MAX, min = QOS_ARENA_MIN, got = 0;
   const char *cap = getenv("QOSP_ARENA_MB");
@@ -397,9 +352,7 @@ static V h_load_image(V pathv, V shav, V imgv, V numsv) {
   memcpy(cpath, path->bytes, path->len);
   cpath[path->len] = 0;
   qos_snd_set_assets(cpath); /* music and other assets resolve beside the .qa */
-  if (sha->len >= sizeof g_shell_sha) return res_err("sha too long");
-  memcpy(g_shell_sha, sha->bytes, sha->len);
-  g_shell_sha[sha->len] = 0;
+  (void)sha; /* plugins no longer need the shell's identity: they bind by name */
 
   fpr_qaimg_t q = {n[0], n[1], n[2], n[3], n[4]};
   fpr_elf_load_t ld = fpr_qaimg_place(&q, img->bytes, img->len, (void *)QOS_SLOT_BASE, QOS_SLOT_SIZE);

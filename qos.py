@@ -321,18 +321,16 @@ def build_app(prog, harts=None):
 
 
 def build_plugins(prog, plugins, size_mb=8):
-    """Build each .fpr as a plugin .qa (sub-slot = list order), seed a
-    fresh QLOG image named after the program, return its path.  Mirrors
-    the livereload harness: plugsyms after the shell build, then one
-    plugin-qa per module, then mkdisk."""
-    sh(["make", "-s", "plugsyms"] + WS.make_vars(), cwd=ROOT, quiet=True)
+    """Build each .fpr as a (relocatable) plugin .qa, seed a fresh QLOG
+    image named after the program, return its path: one plugin-qa per
+    module, then mkdisk."""
     qas = []
-    for slot, p in enumerate(plugins):
+    for p in plugins:
         r = resolve_prog(p)
         out = WS.build / f"{Path(r).stem}.qa"
-        say(f"plugin-qa {r} (sub-slot {slot})")
+        say(f"plugin-qa {r}")
         sh(["make", "-s", "plugin-qa",
-            f"PROG={r}", f"PLUGSLOT={slot}", f"PLUG_OUT={out}", f"QA_OUT={WS.qa(prog)}"] + WS.make_vars(),
+            f"PROG={r}", f"PLUG_OUT={out}"] + WS.make_vars(),
            cwd=ROOT, quiet=True)
         qas.append(str(out))
     img = WS.build / f"plugdisk-{Path(prog).stem}.img"

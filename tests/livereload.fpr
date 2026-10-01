@@ -5,7 +5,7 @@
 # into live code) -- and everything after that is messages:
 #
 #   1. LD.load "mathv1": the loader reads the record, passes the shell
-#      matched-set + arity gates, attaches, RECORDS the chain as
+#      abi, import + arity gates, attaches, RECORDS the chain as
 #      sys/live.  A worker actor binds mathOp and folds requests into
 #      its own accumulator (the state that must survive).
 #   2. LD.load "mathv2" + a Reload nudge: the SAME worker re-binds --

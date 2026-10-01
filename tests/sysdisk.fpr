@@ -6,7 +6,7 @@
 #
 #   BOOT 1 (fresh disk: module records only, no sys/live)
 #     replay -> 0.  Load sysed1, commit a note; load sysed2 -- a hot
-#     swap through the shell-stamp + arity gates -- notes capitalize;
+#     swap through the abi, import + arity gates -- notes capitalize;
 #     sysbad REFUSES (chain intact, sys/live untouched).  Every step's
 #     outcome exists only as log records when the process exits.
 #   BOOT 2 (the SAME disk, same app, new process)

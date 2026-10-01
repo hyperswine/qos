@@ -3,12 +3,11 @@
 # top-level definition lands in this image's fpr_modtab, resolvable
 # after attach via Mod.findAt.
 #
-#   make plugin-qa-macos PROG=tests/plugmini.fpr PLUGSLOT=0
+#   make plugin-qa PROG=tests/plugmini.fpr
 #   make -C qos disk-seed QAS=../plugmini.qa
 #
-# (Shell-rebuild law: plugsyms[-macos] first, and rebuild this after
-# EVERY shell image rebuild -- the PROVIDE addresses must match the
-# running image exactly.)
+# (It is relocatable and binds the runtime by name: one build loads into
+# any app that exports what it imports -- docs/2026-10-01-IMPORT-TABLE.md.)
 
 plugPing u = "pong from a .qa read off qosp.disk".
 plugAdd a b = a + b.

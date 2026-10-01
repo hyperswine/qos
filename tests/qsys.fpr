@@ -13,9 +13,8 @@
 #   4. lists the namespace and logs one line through /services/log
 #
 #   make qos-app-macos PROG=tests/qsys.fpr
-#   make plugsyms-macos
-#   make plugin-qa-macos PROG=tests/plugmini.fpr  PLUGSLOT=0
-#   make plugin-qa-macos PROG=tests/plughello.fpr PLUGSLOT=1
+#   make plugin-qa PROG=tests/plugmini.fpr
+#   make plugin-qa PROG=tests/plughello.fpr
 #   cd qos && make disk-seed QAS="../plugmini.qa ../plughello.qa" \
 #     && make portable && ./qosp --yes ../app.qa      # run TWICE
 #

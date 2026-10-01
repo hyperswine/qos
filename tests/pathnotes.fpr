@@ -30,10 +30,10 @@
 #: expect pathnotes: OK notes=Third note|Fourth one n=4 cap=2 ui=live ver=caps.v2 log=refused notesedbad
 #
 #   by hand, the same thing:
-#   make qos-app PROG=tests/pathnotes.fpr && make plugsyms
-#   make plugin-qa PROG=tests/notesed1.fpr PLUGSLOT=0
-#   make plugin-qa PROG=tests/notesed2.fpr PLUGSLOT=1
-#   make plugin-qa PROG=tests/notesedbad.fpr PLUGSLOT=2
+#   make qos-app PROG=tests/pathnotes.fpr
+#   make plugin-qa PROG=tests/notesed1.fpr
+#   make plugin-qa PROG=tests/notesed2.fpr
+#   make plugin-qa PROG=tests/notesedbad.fpr
 #   python3 tools/mkdisk.py /tmp/pn.img 8 notesed1.qa notesed2.qa notesedbad.qa
 #   (cd qos && FPR_DISK=/tmp/pn.img ./qosp --yes ../app.qa)
 #
@@ -116,7 +116,7 @@ appSet m pv = case L.setWords (@Model) pv m of
   | Err e -> ({m | log = e}, Nil).
 
 # the ladder's next rung: module swap at a step boundary, as ONE
-# message to the Loader service -- which gates it (shell stamp, arity
+# message to the Loader service -- which gates it (abi, imports by name, arity
 # chain) and records the new live set as sys/live; ver (a model VALUE)
 # records what's live on this side.
 appSwap : Int -> _ -> _ -> String -> _ .

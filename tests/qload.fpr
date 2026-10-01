@@ -4,15 +4,13 @@
 # Plug.attach (syscall tag 4 -- the host filesystem never enters the
 # path), then resolve and call the plugin's exports through Mod.findAt.
 #
-#   make qos-app-macos PROG=tests/qload.fpr
-#   make plugsyms-macos
-#   make plugin-qa-macos PROG=tests/plugmini.fpr PLUGSLOT=0
+#   make qos-app PROG=tests/qload.fpr
+#   make plugin-qa PROG=tests/plugmini.fpr
 #   (cd qos && make disk-seed QAS=../plugmini.qa \
 #     && make portable && ./qosp --yes ../app.qa)
 #
 # Expected: "qload: <N>B .qa read off disk -> table #0; ping=pong from
-# a .qa read off qosp.disk; 40+2=42".  Ordering law: plugsyms AFTER the
-# shell build, plugin AFTER plugsyms, disk-seed AFTER the plugin.
+# a .qa read off qosp.disk; 40+2=42".
 
 QL = use "../programs/mods/qlog".
 Plug = use "../programs/mods/plug".
