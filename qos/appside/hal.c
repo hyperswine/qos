@@ -198,8 +198,19 @@ FPR_FN(fpr_g_netClose, h_netClose, 1);
  * virtio-blk on native.  entry.c refuses version-mismatched tables,
  * so on a v5 host these entries always exist; blkPages still reports
  * 0 when the host could not open its backing file, the graceful
- * no-disk state system.fpr gates on.  Out-of-range and oversize are
- * panics, byte-identical to virt's driver honesty. */
+ * no-disk state system.fpr gates on.  A request that cannot complete
+ * fail-stops its caller, as on virt (below); argument errors panic. */
+/* The deadline: how long a caller waits for its page before the disk counts
+ * as stalled, in 10 MHz machine-clock ticks (5 s, as on virt); a test build
+ * shortens it.  Past it the caller lets go of its request -- the worker
+ * still owns the buffer and frees it when the host call returns -- and
+ * fail-stops.  A refused submission (the host refuses while its worker is
+ * stalled past the deadline: hal/unix/blk_raw.c), an I/O error and an
+ * out-of-range page fail-stop the caller too: its RPC callers hear
+ * "dead actor", and the rest of the system runs on. */
+#ifndef QOS_BLK_DEADLINE_TICKS
+#define QOS_BLK_DEADLINE_TICKS 50000000ULL
+#endif
 static int64_t disk_wait(uint64_t page, const char *src, uint64_t len, int write, char *dst) {
 #ifdef QOS_DISK_TEST_SYNC
   return write ? qos_hal->blk_write(page, src, len) : qos_hal->blk_read(page, dst);
@@ -207,9 +218,17 @@ static int64_t disk_wait(uint64_t page, const char *src, uint64_t len, int write
   if (!qos_hal->blk_submit || !qos_hal->blk_done || !qos_hal->blk_result || !qos_hal->blk_release)
     fpr_cpanic("blk: asynchronous disk capability not granted");
   void *job = qos_hal->blk_submit(page, src, len, write);
-  if (!job) fpr_cpanic("blk: cannot submit disk request");
+  if (!job) fpr_actor_fail("blk: request refused (the disk worker is stalled past its deadline, or cannot take requests)");
   fpr_actor_cleanup_set(qos_hal->blk_release, job);
-  while (!qos_hal->blk_done(job)) fpr_actor_sleep_us(200);
+  uint64_t start = hal_mtime();
+  while (!qos_hal->blk_done(job)) {
+    if (hal_mtime() - start >= QOS_BLK_DEADLINE_TICKS) {
+      fpr_actor_cleanup_clear(job);
+      qos_hal->blk_release(job); /* the worker's reference keeps the buffer */
+      fpr_actor_fail("blk: request timed out (the disk worker stalled)");
+    }
+    fpr_actor_sleep_us(200);
+  }
   int64_t result = qos_hal->blk_result(job, dst);
   fpr_actor_cleanup_clear(job);
   qos_hal->blk_release(job);
@@ -227,7 +246,7 @@ static V h_blkRead(V d, V pv) {
     fpr_cpanic("blk: capability not granted by this host's HAL table");
   char buf[4096];
   if (disk_wait((uint64_t)UNTAG(pv), 0, 0, 0, buf) < 0)
-    fpr_cpanic("blk: page out of range");
+    fpr_actor_fail("blk: read failed (page out of range, or an I/O error)");
   return (V)fpr_mkstr((const uint8_t *)buf, 4096);
 }
 static V h_blkWrite(V d, V pv, V sv) {
@@ -239,7 +258,7 @@ static V h_blkWrite(V d, V pv, V sv) {
   if (!qos_hal->blk_write)
     fpr_cpanic("blk: capability not granted by this host's HAL table");
   if (disk_wait((uint64_t)UNTAG(pv), (const char *)s->bytes, s->len, 1, 0) < 0)
-    fpr_cpanic("blk: page out of range");
+    fpr_actor_fail("blk: write failed (page out of range, or an I/O error)");
   return TAG((sw)s->len);
 }
 FPR_FN(fpr_g_blkPages, h_blkPages, 1);

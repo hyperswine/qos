@@ -27,6 +27,17 @@
  *     3-descriptor chain: 16-byte header, 4 KiB data, 1 status byte.
  *   - no feature negotiation beyond VERSION_1 on modern: we need none
  *     of RO/FLUSH/SEG_MAX for a PoC, and QEMU is fine with that.
+ *
+ * Failure (2026-10-01, docs/2026-10-01-DISK-HARDENING.md): nothing here
+ * halts the machine and nothing waits without a deadline.  A request the
+ * device does not complete within BLK_DEADLINE, an I/O error, a missing
+ * disk or an out-of-range page FAIL-STOPS the calling actor
+ * (fpr_actor_fail: its RPC callers hear "dead actor").  The DMA buffers of
+ * a request the device may still be working on stay reserved until the
+ * used ring shows it complete or a reset is confirmed; a stalled orphan is
+ * reset by the next caller once it is older than the deadline, and a
+ * device that does not come back from reset takes the disk OFFLINE --
+ * every later request is refused at once.
  */
 #include "fpr.h"
 
@@ -113,26 +124,109 @@ static struct {
 static struct { u32 type, reserved; u64 sector; } __attribute__((packed, aligned(16))) breq;
 static u8 bdata[PAGE_SZ] __attribute__((aligned(PAGE_SZ)));
 static u8 bstatus __attribute__((aligned(16)));
-static unsigned blk_busy, blk_orphan;
+
+/* The deadline: how long a request may take before the device counts as
+ * stalled, in 10 MHz CLINT ticks (5 s); a test build shortens it.  Without
+ * a usable clock (early boot) the same wait is counted in 200 us parks. */
+#ifndef BLK_DEADLINE_TICKS
+#define BLK_DEADLINE_TICKS 50000000ULL
+#endif
+#define BLK_DEADLINE_PARKS (BLK_DEADLINE_TICKS / 2000ULL)
+
+/* busy: the DMA buffers belong to a request (held by its owner, or by an
+ * orphan).  orphan: 1 = the owner is gone and the device may still be
+ * using the buffers; 2 = one waiter is resetting the device.  offline: a
+ * reset did not bring the device back. */
+static unsigned blk_busy, blk_orphan, blk_offline;
 static u16 blk_before;
+static uint64_t blk_since; /* mtime the request in flight was submitted */
+
+#ifdef QOS_BLK_TEST
+/* test-only (never in an ordinary build): withhold the doorbell of the
+ * next request (a device that never completes it), and make the next
+ * reset fail to come back */
+static unsigned blk_test_stall, blk_test_reset_fails;
+static V h_blkTestStall(V u) { (void)u; blk_test_stall = 1; return TAG(0); }
+static V h_blkTestResetFails(V u) { (void)u; blk_test_reset_fails = 1; return TAG(0); }
+FPR_FN(fpr_g_blkTestStall, h_blkTestStall, 1);
+FPR_FN(fpr_g_blkTestResetFails, h_blkTestResetFails, 1);
+/* the machine clock, in microseconds (10 MHz CLINT) */
+static V h_blkTestNow(V u) { (void)u; return TAG((sw)(hal_mtime() / 10)); }
+FPR_FN(fpr_g_blkTestNow, h_blkTestNow, 1);
+#endif
+
+static uint64_t blk_elapsed(uint64_t since) {
+  uint64_t now = hal_mtime();
+  return (since && now) ? now - since : 0;
+}
+
+/* a killed owner: the request stays in flight, its buffers reserved */
 static void blk_abandon(void *unused) {
   (void)unused;
   __atomic_store_n(&blk_orphan, 1, __ATOMIC_RELEASE);
 }
+
+static int blk_init(void);
+
+/* Reset, CONFIRMED: after the driver writes 0 the device may not touch the
+ * queue or the buffers again once it reads back 0 (virtio 1.x, 4.2.2.1).
+ * Only then is the queue rebuilt and the buffers free.  1 = the device is
+ * back. */
+static int blk_reset(void) {
+  wr(R_STATUS, 0);
+  int confirmed = 0;
+  for (int i = 0; i < 1000; i++) {
+    if (rr(R_STATUS) == 0) { confirmed = 1; break; }
+    fpr_actor_sleep_us(100);
+  }
+#ifdef QOS_BLK_TEST
+  if (blk_test_reset_fails) { blk_test_reset_fails = 0; confirmed = 0; }
+#endif
+  if (!confirmed) return 0;
+  return blk_init();
+}
+
 static void blk_lock(void) {
+  uint64_t t0 = hal_mtime();
+  uint64_t parks = 0;
   for (;;) {
+    if (__atomic_load_n(&blk_offline, __ATOMIC_ACQUIRE))
+      fpr_actor_fail("blk: the disk is offline (a stalled request could not be reset) -- request refused");
     unsigned free = 0;
     if (__atomic_compare_exchange_n(&blk_busy, &free, 1, 0, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)) break;
-    /* A killed owner cannot release DMA storage before the device is done. */
-    if (__atomic_load_n(&blk_orphan, __ATOMIC_ACQUIRE)) {
+    /* A killed or timed-out owner cannot release DMA storage before the
+     * device is done with it: completion, or a confirmed reset. */
+    if (__atomic_load_n(&blk_orphan, __ATOMIC_ACQUIRE) == 1) {
       FENCE();
       unsigned abandoned = 1;
-      if (QUSED->idx != blk_before && __atomic_compare_exchange_n(&blk_orphan, &abandoned, 0, 0, __ATOMIC_ACQ_REL, __ATOMIC_RELAXED)) {
-        wr(R_INTACK, 3);
-        __atomic_store_n(&blk_orphan, 0, __ATOMIC_RELAXED);
-        __atomic_store_n(&blk_busy, 0, __ATOMIC_RELEASE);
+      if (QUSED->idx != blk_before) {
+        if (__atomic_compare_exchange_n(&blk_orphan, &abandoned, 0, 0, __ATOMIC_ACQ_REL, __ATOMIC_RELAXED)) {
+          q.last_used = QUSED->idx;
+          wr(R_INTACK, 3);
+          __atomic_store_n(&blk_busy, 0, __ATOMIC_RELEASE);
+        }
+      } else if ((blk_since ? blk_elapsed(blk_since) >= BLK_DEADLINE_TICKS : parks >= BLK_DEADLINE_PARKS) &&
+                 __atomic_compare_exchange_n(&blk_orphan, &abandoned, 2, 0, __ATOMIC_ACQ_REL, __ATOMIC_RELAXED)) {
+        /* the orphan is past the deadline: the device stalled */
+        if (blk_reset()) {
+          bputs("[blk] the device stalled on an abandoned request; reset, that request was dropped\n");
+          __atomic_store_n(&blk_orphan, 0, __ATOMIC_RELEASE);
+          __atomic_store_n(&blk_busy, 0, __ATOMIC_RELEASE);
+        } else {
+          /* still possibly DMA-ing: the buffers stay reserved for good */
+          bputs("[blk] the device stalled and did not come back from reset: disk offline\n");
+          __atomic_store_n(&blk_offline, 1, __ATOMIC_RELEASE);
+          __atomic_store_n(&blk_orphan, 0, __ATOMIC_RELEASE);
+          fpr_actor_fail("blk: the device stalled and did not come back from reset -- disk offline");
+        }
+        continue;
       }
+    } else if (t0 ? blk_elapsed(t0) >= 3 * BLK_DEADLINE_TICKS : parks >= 3 * BLK_DEADLINE_PARKS) {
+      /* a live owner has its own deadline, after which the buffers become
+       * an orphan's; waiting three deadlines means something is wrong */
+      fpr_actor_fail("blk: waited three deadlines for the disk -- request refused");
     }
+    parks++;
     fpr_actor_sleep_us(200);
   }
   fpr_actor_cleanup_set(blk_abandon, &blk_busy);
@@ -161,6 +255,28 @@ static void vq_setup(void) {
   }
 }
 
+/* bring a reset device up: status handshake, features, the queue, DRIVER_OK
+ * (boot, and recovery after a stalled request).  0 = the device refused */
+static int blk_init(void) {
+  wr(R_STATUS, ST_ACK);
+  wr(R_STATUS, ST_ACK | ST_DRIVER);
+  wr(R_DRVFEATSEL, 0);
+  wr(R_DRVFEAT, 0);                         /* accept no feature bits 0..31 */
+  if (blk_version == 2) {
+    wr(R_DEVFEATSEL, 1);
+    u32 feat1 = rr(R_DEVFEAT);
+    wr(R_DRVFEATSEL, 1);
+    wr(R_DRVFEAT, feat1 & 1u);              /* VIRTIO_F_VERSION_1 */
+    wr(R_STATUS, ST_ACK | ST_DRIVER | ST_FEAT_OK);
+    if (!(rr(R_STATUS) & ST_FEAT_OK)) return 0;
+  } else {
+    wr(R_GUESTPAGESZ, 4096);
+  }
+  vq_setup();
+  wr(R_STATUS, ST_ACK | ST_DRIVER | (blk_version == 2 ? ST_FEAT_OK : 0) | ST_DRIVER_OK);
+  return 1;
+}
+
 static int blk_probe(void) {
   for (int i = 0; i < VIRTIO_NSLOTS; i++) {
     blk = (volatile u32 *)(VIRTIO_SLOT0 + i * VIRTIO_STRIDE);
@@ -170,28 +286,12 @@ static int blk_probe(void) {
     if (blk_version != 1 && blk_version != 2) continue;
 
     wr(R_STATUS, 0);                        /* reset */
-    wr(R_STATUS, ST_ACK);
-    wr(R_STATUS, ST_ACK | ST_DRIVER);
-    wr(R_DRVFEATSEL, 0);
-    wr(R_DRVFEAT, 0);                       /* accept no feature bits 0..31 */
-    if (blk_version == 2) {
-      wr(R_DEVFEATSEL, 1);
-      u32 feat1 = rr(R_DEVFEAT);
-      wr(R_DRVFEATSEL, 1);
-      wr(R_DRVFEAT, feat1 & 1u);            /* VIRTIO_F_VERSION_1 */
-      wr(R_STATUS, ST_ACK | ST_DRIVER | ST_FEAT_OK);
-      if (!(rr(R_STATUS) & ST_FEAT_OK)) fpr_cpanic("blk: FEATURES_OK refused");
-    } else {
-      wr(R_GUESTPAGESZ, 4096);
-    }
+    if (!blk_init()) fpr_cpanic("blk: FEATURES_OK refused");
 
     /* capacity: u64 sector count at config+0, byte reads for alignment */
     blk_sectors = 0;
     for (int b = 7; b >= 0; b--)
       blk_sectors = (blk_sectors << 8) | ((volatile u8 *)blk)[R_CONFIG + b];
-
-    vq_setup();
-    wr(R_STATUS, ST_ACK | ST_DRIVER | (blk_version == 2 ? ST_FEAT_OK : 0) | ST_DRIVER_OK);
 
     bputs("[blk] virtio-blk v");
     hal_putc('0' + blk_version);
@@ -206,10 +306,10 @@ static int blk_probe(void) {
   return 0;
 }
 
-/* one synchronous page transfer through the 3-descriptor chain */
+/* one page transfer through the 3-descriptor chain; the caller holds the
+ * lock.  On return the transfer is complete and the status good; every
+ * other outcome fail-stops the caller (see the header). */
 static void blk_rw(u64 page, int is_write) {
-  if (!blk) fpr_cpanic("blk: no disk (boot QEMU with `make run-disk`)");
-  if (page >= blk_sectors / SEC_PER_PAGE) fpr_cpanic("blk: page out of range");
 
   breq.type = is_write ? BLK_T_OUT : BLK_T_IN;
   breq.reserved = 0;
@@ -228,21 +328,38 @@ static void blk_rw(u64 page, int is_write) {
   FENCE();
   av->idx = ++q.avail_shadow;
   FENCE();
-  wr(R_QNOTIFY, 0);
   uint64_t start = hal_mtime();
-  u32 fallback = 0;
+  blk_since = start;
+#ifdef QOS_BLK_TEST
+  if (blk_test_stall) blk_test_stall = 0; else
+#endif
+  wr(R_QNOTIFY, 0);
+  uint64_t parks = 0;
   for (;;) {
     FENCE();
     if (QUSED->idx != before) break;
-    if (!start) start = hal_mtime();
-    if ((start && hal_mtime() - start >= 50000000ULL) || (!start && ++fallback >= 40000000))
-      fpr_cpanic("blk: request timed out");
+    if (start ? blk_elapsed(start) >= BLK_DEADLINE_TICKS : ++parks >= BLK_DEADLINE_PARKS) {
+      /* the device may still DMA into the buffers: they stay reserved (an
+       * orphan) until it completes or a later caller resets it */
+      fpr_actor_cleanup_clear(&blk_busy);
+      __atomic_store_n(&blk_orphan, 1, __ATOMIC_RELEASE);
+      fpr_actor_fail("blk: request timed out (the device stalled); its buffers stay reserved until it completes or is reset");
+    }
     fpr_actor_sleep_us(200);
   }
   q.last_used = QUSED->idx;
   wr(R_INTACK, 3);
   FENCE();
-  if (bstatus != 0) fpr_cpanic("blk: device reported I/O error");
+  if (bstatus != 0) {
+    blk_unlock();
+    fpr_actor_fail("blk: device reported an I/O error");
+  }
+}
+
+/* a request that cannot be made: refused, the caller fail-stops */
+static void blk_check(V pv) {
+  if (!blk) fpr_actor_fail("blk: no disk (boot QEMU with `make run-disk`)");
+  if ((u64)UNTAG(pv) >= blk_sectors / SEC_PER_PAGE) fpr_actor_fail("blk: page out of range");
 }
 
 /* ---- device table hook + FPRISC surface -------------------------------- */
@@ -261,7 +378,7 @@ static V h_blkPages(V d) {
 static V h_blkRead(V d, V pv) {
   (void)d;
   if (!ISINT(pv)) fpr_cpanic("blkRead: page must be an Int");
-  if (!blk) fpr_cpanic("blk: no disk");
+  blk_check(pv);
   blk_lock();
   blk_rw((u64)UNTAG(pv), 0);
   V result = (V)fpr_mkstr(bdata, PAGE_SZ);
@@ -275,7 +392,7 @@ static V h_blkWrite(V d, V pv, V sv) {
   if (ISINT(sv) || TID(sv) != T_STR) fpr_cpanic("blkWrite: payload must be a String");
   str_t *s = (str_t *)sv;
   if (s->len > PAGE_SZ) fpr_cpanic("blkWrite: payload exceeds one page");
-  if (!blk) fpr_cpanic("blk: no disk");
+  blk_check(pv);
   blk_lock();
   for (u64 i = 0; i < PAGE_SZ; i++) bdata[i] = i < s->len ? s->bytes[i] : 0;
   blk_rw((u64)UNTAG(pv), 1);

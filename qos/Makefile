@@ -162,8 +162,11 @@ include $(FMACHINE)/virt/virt.mk
 QOS_HAL := $(abspath $(HAL))
 include $(HAL)/virt/qos-virt.mk
 
+# NATIVE_CFLAGS_EXTRA: test-only switches for a test kernel (e.g.
+# -DQOS_BLK_TEST, tools/disk-harden-check.py); empty in every real build
+NATIVE_CFLAGS_EXTRA ?=
 native: $(BUILD)/system.s $(BUILD)/apps_data.c $(RT_VIRT) $(VIRT_FPR) $(QOS_VIRT_HAL) $(RT_CORE) $(FMACHINE)/virt/link.ld
-	$(CROSS)gcc $(CFLAGS) -T $(FMACHINE)/virt/link.ld -I$(FRUNTIME) -I$(FMACHINE)/virt \
+	$(CROSS)gcc $(CFLAGS) $(NATIVE_CFLAGS_EXTRA) -T $(FMACHINE)/virt/link.ld -I$(FRUNTIME) -I$(FMACHINE)/virt \
 	  $(RT_VIRT) $(VIRT_FPR) $(QOS_VIRT_HAL) $(BUILD)/system.s $$(cat $(BUILD)/system.s.units) $(RT_CORE) \
 	  ../loader/apps.c $(BUILD)/apps_data.c ../loader/qaimg.c ../loader/process.c \
 	  -o $(KERNEL)

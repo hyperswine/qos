@@ -1,0 +1,39 @@
+# diskstallp.fpr -- QOS Portable's disk failure paths, through a real host
+# built with -DQOS_BLK_TEST and an app built with a 0.3 s deadline:
+#
+#   QOS_BLK_TEST_DELAY_US=800000 QOS_BLK_TEST_DELAY_READS=2 QOS_BLK_DEADLINE_MS=300
+#
+#   0. the STORAGE ACTOR (std/fs over qlog) meets the stalled disk: it
+#      fail-stops, and its client gets an ordinary Err -- no hang, no panic
+#   1. the next read takes 0.8 s: its caller gives up at its deadline and
+#      fail-stops (Err "dead actor" to whoever waits on it)
+#   2. while the worker is still stuck past the deadline, a new request is
+#      REFUSED at once (the queue does not grow behind a stalled worker)
+#   3. once the worker drains, the disk works: a write and a read land
+#
+#   tools/disk-harden-check.py runs it
+FS = use "std/fs".
+dsk u = device "blk".
+reader : Int -> Int -> Int -> Unit .
+reader boss p self = send boss (substr (blkRead (dsk 0) p) 1 5) >> Unit.
+writer : Int -> Int -> String -> Int -> Unit .
+writer boss p text self = send boss (blkWrite (dsk 0) p text) >> Unit.
+outcome r = case r of Ok v -> "Ok {v}" | Err e -> "Err {e}".
+
+main : String .
+main =
+  me = myself 0;
+  fs = FS.serve (dsk 0);
+  r0 = outcome (FS.readLatest me fs "notes/x");
+  _ = Sys.sleepUs 900000;
+  a = spawn (reader me 0);
+  r1 = outcome (receiveFromRes me a);
+  b = spawn (reader me 0);
+  r2 = outcome (receiveFromRes me b);
+  _ = Sys.sleepUs 900000;
+  c = spawn (writer me 1 "fresh");
+  r3 = outcome (receiveFromRes me c);
+  d = spawn (reader me 1);
+  r4 = outcome (receiveFromRes me d);
+  verdict = if r0 == "Err storage service: dead actor" and r1 == "Err dead actor" and r2 == "Err dead actor" and r3 == "Ok 5" and r4 == "Ok fresh" then "HOLDS" else "FAILED";
+  "diskstallp: storage={r0} timeout={r1} refused={r2} write={r3} read={r4} {verdict}".

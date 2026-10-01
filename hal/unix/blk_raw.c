@@ -23,6 +23,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 static pthread_mutex_t blk_mu = PTHREAD_MUTEX_INITIALIZER;
@@ -92,8 +93,13 @@ int64_t qos_blkraw_pages(void) {
 
 int64_t qos_blkraw_read(uint64_t page, char *dst) {
 #ifdef QOS_BLK_TEST
+  /* test-only: a slow disk; QOS_BLK_TEST_DELAY_READS limits it to the
+   * first N reads (a device that stalls, then recovers) */
+  static unsigned long delayed;
   const char *delay = getenv("QOS_BLK_TEST_DELAY_US");
-  if (delay) usleep((useconds_t)strtoul(delay, 0, 10));
+  const char *count = getenv("QOS_BLK_TEST_DELAY_READS");
+  if (delay && (!count || __atomic_fetch_add(&delayed, 1, __ATOMIC_RELAXED) < strtoul(count, 0, 10)))
+    usleep((useconds_t)strtoul(delay, 0, 10));
 #endif
   qos_blkraw_setup();
   if (blk_fd < 0 || page >= blk_npages) return -1;
@@ -116,13 +122,24 @@ int64_t qos_blkraw_write(uint64_t page, const char *src, uint64_t len) {
 
 /* One host worker serves the disk. No actor-stack or arena pointers cross
  * this boundary. Two references: caller and queue/worker. Killing a waiting
- * actor releases the caller reference; the worker finishes and frees its own. */
+ * actor (or a caller giving up at its deadline) releases the caller
+ * reference; the worker finishes and frees its own -- the page buffer lives
+ * until the host call that may still write it has returned.
+ *
+ * THE BOUND (2026-10-01): the queue is bounded by time, not by a count.
+ * When the worker is STALLED -- the job it is running, or the oldest one
+ * waiting, has been in the system longer than the deadline -- a new
+ * submission is REFUSED (NULL) instead of joining a queue that is not
+ * draining.  Callers are themselves deadline-bound, so the queue holds at
+ * most what arrives within one deadline.  $QOS_BLK_DEADLINE_MS sets the
+ * deadline (default 5000, the virt driver's). */
 typedef struct blk_job {
   struct blk_job *next;
   unsigned refs, done;
   uint64_t page, len;
   int write;
   int64_t result;
+  uint64_t submitted; /* monotonic ns */
   char data[QOS_BLK_PAGE];
 } blk_job;
 static pthread_mutex_t job_mu = PTHREAD_MUTEX_INITIALIZER;
@@ -130,6 +147,13 @@ static pthread_cond_t job_cv = PTHREAD_COND_INITIALIZER;
 static pthread_once_t worker_once = PTHREAD_ONCE_INIT;
 static blk_job *job_head, *job_tail;
 static int worker_ok;
+static uint64_t running_since; /* ns the worker's current job started; 0 idle (job_mu) */
+static uint64_t deadline_ns;
+static uint64_t mono_ns(void) {
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
+}
 void qos_blkraw_release(void *p) {
   blk_job *j = p;
   if (__atomic_sub_fetch(&j->refs, 1, __ATOMIC_ACQ_REL) == 0) free(j);
@@ -142,15 +166,22 @@ static void *disk_worker(void *unused) {
     blk_job *j = job_head;
     job_head = j->next;
     if (!job_head) job_tail = 0;
+    running_since = mono_ns();
     pthread_mutex_unlock(&job_mu);
     j->result = j->write ? qos_blkraw_write(j->page, j->data, j->len)
                          : qos_blkraw_read(j->page, j->data);
+    pthread_mutex_lock(&job_mu);
+    running_since = 0;
+    pthread_mutex_unlock(&job_mu);
     __atomic_store_n(&j->done, 1, __ATOMIC_RELEASE);
     qos_blkraw_release(j);
   }
   return 0;
 }
 static void start_worker(void) {
+  const char *ms = getenv("QOS_BLK_DEADLINE_MS");
+  unsigned long v = ms && *ms ? strtoul(ms, 0, 10) : 0;
+  deadline_ns = (uint64_t)(v ? v : 5000) * 1000000ull;
   pthread_t t;
   if (pthread_create(&t, 0, disk_worker, 0) == 0) {
     pthread_detach(t); worker_ok = 1;
@@ -165,6 +196,15 @@ void *qos_blkraw_submit(uint64_t page, const char *src, uint64_t len, int write)
   j->refs = 2; j->page = page; j->len = len; j->write = write;
   if (write && len) memcpy(j->data, src, len);
   pthread_mutex_lock(&job_mu);
+  uint64_t now = mono_ns();
+  j->submitted = now;
+  if ((running_since && now - running_since > deadline_ns) ||
+      (job_head && now - job_head->submitted > deadline_ns)) {
+    /* stalled: refuse rather than queue behind a worker that is not draining */
+    pthread_mutex_unlock(&job_mu);
+    free(j);
+    return 0;
+  }
   if (job_tail) job_tail->next = j; else job_head = j;
   job_tail = j;
   pthread_cond_signal(&job_cv);

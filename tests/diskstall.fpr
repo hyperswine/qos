@@ -1,0 +1,63 @@
+# diskstall.fpr -- a TEST KERNEL for the native disk's failure paths, built
+# with -DQOS_BLK_TEST (a 0.3 s deadline and the two test switches below):
+#
+#   1. a request the device never completes: its owner fail-stops at the
+#      deadline (its caller hears Err "dead actor"), the machine runs on
+#   2. the next request waits behind that orphan, resets the device once
+#      the orphan is past the deadline, and proceeds: the stalled write
+#      never reached the disk, a new write lands
+#   3. an owner KILLED while its request is in flight: the buffers stay
+#      reserved, the next request recovers the same way
+#   4. a reset that does not bring the device back takes the disk offline:
+#      the request that tried fails, and a later one is refused at once
+#
+#   tools/disk-harden-check.py builds and boots it
+
+blkTestStall : Unit -> Int .
+blkTestResetFails : Unit -> Int .
+blkTestNow : Unit -> Int .
+
+dsk u = device "blk".
+page6 p = substr (blkRead (dsk 0) p) 1 6.
+
+# write and report back (a fail-stopped child never reports)
+writer : Int -> Int -> String -> Int -> Unit .
+writer boss p text self = send boss (blkWrite (dsk 0) p text) >> Unit.
+reader : Int -> Int -> Int -> Unit .
+reader boss p self = send boss (page6 p) >> Unit.
+
+outcome r = case r of Ok v -> "Ok" | Err e -> "Err {e}".
+
+main : String .
+main =
+  me = myself 0;
+  _ = blkWrite (dsk 0) 3 "before";
+  # 1. the stalled request
+  _ = blkTestStall Unit;
+  a = spawn (writer me 3 "stalls");
+  r1 = outcome (receiveFromRes me a);
+  # 2. a request behind the orphan: reset after the deadline, then proceed
+  after = page6 3;
+  _ = blkWrite (dsk 0) 4 "rewrit";
+  rewrite = page6 4;
+  # 3. kill an owner mid-request
+  _ = blkTestStall Unit;
+  b = spawn (writer me 5 "killed");
+  _ = Sys.sleepUs 50000;
+  _ = kill b;
+  _ = blkWrite (dsk 0) 6 "afterk";
+  cancel = page6 6;
+  untouched = page6 5;
+  # 4. a reset that fails: offline, then refused at once
+  _ = blkTestStall Unit;
+  _ = blkTestResetFails Unit;
+  c = spawn (writer me 7 "stall2");
+  r4 = outcome (receiveFromRes me c);
+  d = spawn (reader me 3);
+  r5 = outcome (receiveFromRes me d);
+  t0 = blkTestNow Unit;
+  e = spawn (reader me 3);
+  r6 = outcome (receiveFromRes me e);
+  fast = blkTestNow Unit - t0 < 200000;
+  verdict = if r1 == "Err dead actor" and after == "before" and rewrite == "rewrit" and cancel == "afterk" and untouched != "killed" and r4 == "Err dead actor" and r5 == "Err dead actor" and r6 == "Err dead actor" and fast then "HOLDS" else "FAILED";
+  "diskstall: stalled={r1} after-reset={after} rewrite={rewrite} cancel={cancel} untouched={untouched} offline={r5} refused={r6} fast={fast} {verdict}".
