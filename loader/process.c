@@ -238,7 +238,7 @@ static V g_sys_place_image_at(V qastr, V extv, V numsv, V capsv) {
     return refuse(bad);
   }
   /* new instructions in memory the I-cache may remember as something else */
-  __asm__ volatile(".option push\n.option arch, +zifencei\nfence.i\n.option pop" ::: "memory");
+  fpr_code_publish(); /* local fence now; remote fences before dispatch */
 
   if (!g_sched_ready) {
     fpr_sched_export(&g_kernel_sched);
