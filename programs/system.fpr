@@ -603,8 +603,8 @@ capsBlob : Caps -> String .
 capsBlob caps = Manifest.capsBlob (capId caps) (capGranted caps).
 
 # NAME-DISPATCH IS DEAD.  The only in-image app is the launcher --
-# System.qa's builtin shell, which cannot be a process while there is
-# one slot (the shell could never nest-launch anything).  Everything
+# System.qa's builtin shell (it launches the processes, and was built in
+# while there was a single process slot it could not share).  Everything
 # else is a loaded process.  Apps.entry/Apps.run and the genapps entry
 # table are deleted with it.
 runBuiltin : unsafe (Int, Int) -> String -> Caps -> Unit .
@@ -620,9 +620,11 @@ runBuiltin con entry caps =
 # goes to the placer by (offset, length) ONLY, never as a sliced String.
 #
 # The placer is this file's own foreign primitive (loader/process.c): the
-# archive, IMAGE's extent, LOAD's numbers [base, entry, execsz, rwoff, memsz]
-# and the capability blob.
-Sys.placeImageAt : String -> Int -> Int -> List Int -> String -> (Int, String) .
+# archive, the extents [IMAGE offset, length, RELOC offset, length], LOAD's
+# numbers [base, entry, execsz, rwoff, memsz] and the capability blob.  The image is relocatable (linked
+# at 0); the placer puts it in a block from the buddy and moves it there
+# (docs/2026-10-01-PROCESS-IMAGES.md).
+Sys.placeImageAt : String -> List Int -> List Int -> String -> (Int, String) .
 
 runProcess : unsafe (Int, Int) -> String -> String -> Unit .
 runProcess con qa blob =
@@ -630,20 +632,23 @@ runProcess con qa blob =
     Err e -> putLn con (strcat "No LOAD section in this .qa: " e)
   | Ok load -> case QAR.extent qa "IMAGE" of
       Err e -> putLn con (strcat "No IMAGE section in this .qa: " e)
-    | Ok r -> runProcessAt con qa (QaImg.parse load) r blob.
+    | Ok r -> (case QAR.extent qa "RELOC" of
+        Err e -> putLn con "process load failed: no RELOC section (an image linked for a fixed slot): rebuild it with tools/build-process-app.sh"
+      | Ok rel -> runProcessAt con qa (QaImg.parse load) r rel blob).
 
-runProcessAt : unsafe (Int, Int) -> String -> Result QaImg.Img String -> (Int, Int) -> String -> Unit .
-runProcessAt con qa parsed r blob =
+runProcessAt : unsafe (Int, Int) -> String -> Result QaImg.Img String -> (Int, Int) -> (Int, Int) -> String -> Unit .
+runProcessAt con qa parsed r rel blob =
   (ipos, iln) = r;
   case parsed of
     Err e -> putLn con (strcat "process load failed: " e)
-  | Ok m -> runProcessChecked con qa (QaImg.check m iln) (ipos - 1) iln blob.
+  | Ok m -> runProcessChecked con qa (QaImg.check m iln) (ipos - 1) iln rel blob.
 
-runProcessChecked : unsafe (Int, Int) -> String -> Result QaImg.Img String -> Int -> Int -> String -> Unit .
-runProcessChecked con qa checked ioff iln blob =
+runProcessChecked : unsafe (Int, Int) -> String -> Result QaImg.Img String -> Int -> Int -> (Int, Int) -> String -> Unit .
+runProcessChecked con qa checked ioff iln rel blob =
+  (rpos, rln) = rel;
   case checked of
     Err e -> putLn con (strcat "process load failed: " e)
-  | Ok m -> runProcessLoaded con (Sys.placeImageAt qa ioff iln (QaImg.nums m) blob).
+  | Ok m -> runProcessLoaded con (Sys.placeImageAt qa (ioff :: iln :: (rpos - 1) :: rln :: Nil) (QaImg.nums m) blob).
 
 runProcessLoaded : unsafe (Int, Int) -> (Int, String) -> Unit .
 runProcessLoaded con res =

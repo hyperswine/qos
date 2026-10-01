@@ -1,12 +1,14 @@
 /* process.c -- System.qa's side of dynamic loading: the growth
  * callback handed to a running process, and the FPRISC-facing
  * Sys.placeImageAt primitive that ties buddy.c + qaimg.c + proc_entry
- * together. docs/PROCESS-LOADING.md has the full design; this file is
- * the last mile that makes it callable from FPRISC.  (The ELF loader it
- * first used, elfload.c, was retired by qaimg's flat image and is gone.)
+ * together (docs/2026-10-01-PROCESS-IMAGES.md).
  *
- * ONE arena, buddy_init'd once from fpr_rt_init's caller (see the hook
- * below); ONE concurrent process slot this pass (stated in the docs).
+ * A process image is a block of memory like any other: Memory.qa's buddy
+ * hands it out, the image is copied in and its address words are moved to
+ * wherever the block is (it is linked at 0, with a RELOC list), and it is
+ * registered as process pid's image.  There is no slot: as many processes
+ * run at once as memory holds.  The block goes back to the buddy when the
+ * last actor of its process has been reclaimed.
  */
 #include "fpr.h"
 
@@ -20,11 +22,6 @@ void fpr_proc_arena_init(void) {
    * existing system.fpr code keeps working unchanged. */
 }
 
-/* the callback wired into fpr_process_entry (runtime.c's fpr_alloc
- * calls it through fpr_grow_memory on bump exhaustion). Captures no
- * state -- single concurrent slot means "ask the one arena" is
- * unambiguous; a multi-slot future version would close over which
- * process is asking. */
 /* ---- the storage SYSCALL channel ------------------------------------
  * A loaded process lives in its own scheduler world: it cannot `send`
  * to System.qa's actors.  Instead System.qa passes ONE C function
@@ -54,6 +51,7 @@ static V g_sys_bind_store(V a, V rpc_proto) {
   g_rpc_var = p->var;
   return (V)&fpr_unit;
 }
+/* the id the NEXT placement is launched as (copied into its image record) */
 static V g_sys_bind_app(V idv) {
   if (ISINT(idv) || ((hdr_t *)idv)->tid != T_STR) fpr_cpanic("Sys.bindApp: id must be a String");
   g_app_id = (str_t *)idv;
@@ -86,61 +84,78 @@ static V mkrpc(V a, V b, V c, V d) {
 }
 
 /* ---- the shared plane (transparent process ACBs) --------------------
- * One process at a time (the single slot); its root actor's exit
- * clears the gate through on_exit so the next launch may reuse the
- * slot.  Actors a process leaves running past its root are its own
- * bug -- the slot must not be reloaded under them. */
+ * A process's actors run on the kernel's own scheduler under its pid.
+ * Each loaded image carries its own record at the head of its block: the
+ * registry entry, the boot record the image keeps for its whole life
+ * (on_exit runs at its root's exit), and the app id it was launched as --
+ * the kv capability is scoped by the CALLER's pid, so processes running at
+ * once each reach only their own file. */
 typedef struct {
   fpr_sched_t *sched;
   void *reply;
   uw pid;
   void (*on_exit)(void);
 } shared_boot_t;
+typedef struct {
+  fpr_image_t im;     /* lo/hi: the whole buddy block; owner: this record */
+  shared_boot_t sb;
+  void *block;        /* what buddy_alloc returned */
+  int ending;         /* taken by the one teardown */
+  uw idlen;
+  char id[];          /* the app id (Sys.bindApp) */
+} proc_image_t;
 static fpr_sched_t g_kernel_sched;
 static int g_sched_ready;
 static uw g_next_pid = 1;
-static volatile int g_shared_live;
-static void shared_on_exit(void) { g_shared_live = 0; }
-/* the slot's occupant: the pid of the image placed there last (0 = the
- * slot has never held one).  The slot is reusable only when none of that
- * pid's actors can still run its code (fpr_pid_live == 0) -- root exit
- * alone is not enough, a child the root spawned may still be running.
- * g_slot_claim serializes placements: taken before anything is written,
- * released when the launch is done or refused. */
-static uw g_slot_pid;
-static int g_slot_claim;
+static fpr_lock_t g_img_lock; /* serializes teardown against lookups by pid */
+static void shared_on_exit(void) {} /* the root's exit; the image goes with the pid */
+
+static proc_image_t *image_of_pid(uw pid) {
+  fpr_image_t *im = fpr_image_of_pid(pid);
+  return im ? (proc_image_t *)im->owner : 0;
+}
+
+/* fpr_pid_quiet (actors.c reap): an actor of pid was reclaimed.  When none
+ * of that process's actors is left -- none can run its code -- the image
+ * is unregistered and its block goes home. */
+static void image_quiet(uw pid) {
+  fpr_lock(&g_img_lock);
+  proc_image_t *pi = image_of_pid(pid);
+  if (!pi || pi->ending || fpr_pid_live(pid)) { fpr_unlock(&g_img_lock); return; }
+  pi->ending = 1;
+  fpr_image_remove(&pi->im);
+  fpr_unlock(&g_img_lock);
+  buddy_free(pi->block);
+}
 
 sw qos_store_call(uw tag, const char *pay, uw plen, char *out, uw outcap) {
-  if (!g_store_actor || !g_app_id) return -2; /* no disk / no app bound */
+  if (!g_store_actor) return -2; /* no disk */
   if (tag != 2 && tag != 3) return -3;
-  /* apps/<id>/<id>.kv */
+  /* apps/<id>/<id>.kv, where <id> is the CALLING process's own app id */
+  fpr_lock(&g_img_lock);
+  proc_image_t *pi = image_of_pid(fpr_current_pid());
   char url[128];
   uw n = 0;
-  const char *pre = "apps/";
-  for (const char *q = pre; *q; q++) url[n++] = *q;
-  for (uw i = 0; i < g_app_id->len && n < 100; i++) url[n++] = (char)g_app_id->bytes[i];
-  url[n++] = '/';
-  for (uw i = 0; i < g_app_id->len && n < 120; i++) url[n++] = (char)g_app_id->bytes[i];
-  const char *suf = ".kv";
-  for (const char *q = suf; *q; q++) url[n++] = *q;
+  if (pi) {
+    const char *pre = "apps/";
+    for (const char *q = pre; *q; q++) url[n++] = *q;
+    for (uw i = 0; i < pi->idlen && n < 100; i++) url[n++] = pi->id[i];
+    url[n++] = '/';
+    for (uw i = 0; i < pi->idlen && n < 120; i++) url[n++] = pi->id[i];
+    const char *suf = ".kv";
+    for (const char *q = suf; *q; q++) url[n++] = *q;
+  }
+  fpr_unlock(&g_img_lock);
+  if (!pi) return -2; /* not a loaded process: no app bound */
 
   V urlv = (V)fpr_mkstr((const uint8_t *)url, n);
   V payv = (V)fpr_mkstr((const uint8_t *)pay, plen);
-  V r;
-  if (g_shared_live) {
-    /* shared plane: the calling PROCESS ACB is the replyTo -- kv IO
-     * becomes an ordinary actor round trip (blocking receive frees
-     * the hart; no mailbox spin, no hart-1 assumption) */
-    void *me = fpr_hart()->current;
-    V msg = mkrpc((V)me, TAG((sw)tag), urlv, payv);
-    send_or_die((uw)me, g_store_actor, msg);
-    r = fpr_receive_res_c((V)me);
-  } else {
-    V mb = (V)fpr_syscall_mailbox();
-    V msg = mkrpc(mb, TAG((sw)tag), urlv, payv);
-    send_or_die((uw)mb, g_store_actor, msg);
-    r = fpr_syscall_wait_result();
-  }
+  /* the calling PROCESS ACB is the replyTo -- kv IO is an ordinary actor
+   * round trip (a blocking receive frees the hart) */
+  void *me = fpr_hart()->current;
+  V msg = mkrpc((V)me, TAG((sw)tag), urlv, payv);
+  send_or_die((uw)me, g_store_actor, msg);
+  V r = fpr_receive_res_c((V)me);
   /* r = Ok s | Err s (builtin Result, variant 0/1), field at +8 */
   hdr_t *h = (hdr_t *)r;
   str_t *s = (str_t *)*(V *)((char *)h + 8);
@@ -172,112 +187,99 @@ static V mktup2v(V a, V b) {
   return (V)t;
 }
 
-/* Sys.placeImageAt : String -> Int -> Int -> List Int -> String -> (Int, String)
- * The ARCHIVE bytes, the (offset, length) of its IMAGE section, LOAD's
- * numbers [base, entry, execsz, rwoff, memsz] as programs/mods/qaimg.fpr read
- * them, and the capability blob.  The payload is read straight out of the
- * .qa String's own bytes, never as a pre-sliced copy; the LOAD section's TEXT
- * never reaches C at all.  fst = 1 success / 0 failure / 2 "queued under this
- * pid"; snd = the rendered result, the pid, or a human-readable reason.
- * Argument-type errors panic, like every HAL primitive; an image that does
- * not fit its slot is reported through the tuple, so the launcher keeps
- * running and says what went wrong. */
-static V g_sys_place_image_at(V qastr, V ioffv, V ilenv, V numsv, V capsv) {
+static V refuse(const char *why) {
+  uw n = 0;
+  while (why[n]) n++;
+  return mktup2v(TAG(0), (V)fpr_mkstr((const uint8_t *)why, n));
+}
+
+/* Sys.placeImageAt : String -> List Int -> List Int -> String -> (Int, String)
+ * The ARCHIVE bytes; the extents [IMAGE offset, IMAGE length, RELOC offset,
+ * RELOC length] of its sections; LOAD's numbers [base, entry, execsz, rwoff,
+ * memsz] as programs/mods/qaimg.fpr read them; and the capability blob.  The
+ * payloads are read straight out of the .qa String's own bytes, never as
+ * pre-sliced copies.  fst = 2 "running under this pid" / 0 failure; snd =
+ * the pid, or a human-readable reason.  Argument-type errors panic, like
+ * every HAL primitive; anything about the image or memory is reported
+ * through the tuple, so the launcher keeps running and says what went
+ * wrong. */
+static V g_sys_place_image_at(V qastr, V extv, V numsv, V capsv) {
   if (ISINT(capsv) || ((hdr_t *)capsv)->tid != T_STR)
     fpr_cpanic("Sys.placeImageAt: caps must be a String (the serialized grant blob)");
   if (ISINT(qastr) || ((hdr_t *)qastr)->tid != T_STR)
     fpr_cpanic("Sys.placeImageAt: first argument must be a String (the .qa archive bytes)");
-  if (!ISINT(ioffv) || !ISINT(ilenv))
-    fpr_cpanic("Sys.placeImageAt: the IMAGE extent must be Ints");
-  uw nums[5];
+  uw ext[4], nums[5];
+  if (!fpr_list_ints(extv, ext, 4))
+    fpr_cpanic("Sys.placeImageAt: extents must be [image offset, image length, reloc offset, reloc length]");
   if (!fpr_list_ints(numsv, nums, 5))
     fpr_cpanic("Sys.placeImageAt: nums must be [base, entry, execsz, rwoff, memsz]");
   str_t *qa = (str_t *)qastr;
-  sw ioff = UNTAG(ioffv), ilen = UNTAG(ilenv);
-  if (ioff < 0 || ilen < 0 || (uw)ioff + (uw)ilen > qa->len)
+  uw ioff = ext[0], ilen = ext[1], roff = ext[2], rlen = ext[3];
+  if (ioff > qa->len || ilen > qa->len - ioff)
     fpr_cpanic("Sys.placeImageAt: the IMAGE extent is out of range for this archive");
-  const unsigned char *ibytes = qa->bytes + ioff;
-  uw blen = (uw)ilen;
+  if (roff > qa->len || rlen > qa->len - roff)
+    fpr_cpanic("Sys.placeImageAt: the RELOC extent is out of range for this archive");
+  if (nums[0] != 0)
+    return refuse("not a relocatable image (linked for a fixed slot): rebuild it with tools/build-process-app.sh");
+  uw memsz = nums[4];
 
-  /* the image is LINKED at _proc_arena_start: the fixed region IS the
-   * slot (one concurrent process, per the docs) -- no allocation, no
-   * fragmentation interplay with the slab heap.  Growth grants still
-   * come from buddy and are reclaimed on exit. */
-  void *slot = _proc_arena_start;
-  uw slot_size = (uw)(_proc_arena_end - _proc_arena_start);
-  if (blen + (64 * 1024) > slot_size)
-    return mktup2v(TAG(0), (V)fpr_mkstr((const uint8_t *)"image larger than the process slot", 34));
-
-  /* OCCUPANCY BEFORE ANY WRITE: claim the slot, then refuse while the
-   * previous image may still run -- clearing the static window and
-   * copying/zeroing the image below would overwrite a live process */
-  if (__atomic_exchange_n(&g_slot_claim, 1, __ATOMIC_ACQ_REL))
-    return mktup2v(TAG(0), (V)fpr_mkstr((const uint8_t *)"another placement is in progress", 32));
-  if (g_slot_pid) {
-    uw live = fpr_pid_live(g_slot_pid);
-    if (live) {
-      __atomic_store_n(&g_slot_claim, 0, __ATOMIC_RELEASE);
-      char why[80];
-      const char *pre = "a process is still running in the slot (";
-      uw n = 0;
-      for (const char *c = pre; *c; c++) why[n++] = *c;
-      char d[24]; int k = 0;
-      do { d[k++] = (char)('0' + live % 10); live /= 10; } while (live);
-      while (k) why[n++] = d[--k];
-      const char *post = " actors live)";
-      for (const char *c = post; *c; c++) why[n++] = *c;
-      return mktup2v(TAG(0), (V)fpr_mkstr((const uint8_t *)why, n));
-    }
+  /* the block: the record, then the image at the next 4 KiB boundary */
+  uw idlen = g_app_id ? g_app_id->len : 0;
+  uw head = (sizeof(proc_image_t) + idlen + 15) & ~(uw)15;
+  void *blk = buddy_alloc(head + 4096 + memsz);
+  if (!blk) return refuse("no memory for the image");
+  proc_image_t *pi = (proc_image_t *)blk;
+  unsigned char *img = (unsigned char *)(((uw)blk + head + 4095) & ~(uw)4095);
+  fpr_qaimg_t q = {(uw)img, nums[1], nums[2], nums[3], memsz};
+  fpr_elf_load_t r = fpr_qaimg_place(&q, qa->bytes + ioff, ilen, img, memsz);
+  const char *bad = r.ok ? fpr_qaimg_relocate(img, ilen, qa->bytes + roff, rlen) : r.err;
+  if (bad) {
+    buddy_free(blk);
+    return refuse(bad);
   }
+  /* new instructions in memory the I-cache may remember as something else */
+  __asm__ volatile(".option push\n.option arch, +zifencei\nfence.i\n.option pop" ::: "memory");
 
-  fpr_static_lo = fpr_static_hi = 0; /* the outgoing image's window, if any */
-  fpr_qaimg_t q = {nums[0], nums[1], nums[2], nums[3], nums[4]};
-  fpr_elf_load_t r = fpr_qaimg_place(&q, ibytes, blen, slot, slot_size);
-  if (!r.ok) {
-    __atomic_store_n(&g_slot_claim, 0, __ATOMIC_RELEASE);
-    uw n = 0; while (r.err[n]) n++;
-    return mktup2v(TAG(0), (V)fpr_mkstr((const uint8_t *)r.err, n));
+  if (!g_sched_ready) {
+    fpr_sched_export(&g_kernel_sched);
+    g_sched_ready = 1;
   }
+  uw pid = __atomic_fetch_add(&g_next_pid, 1, __ATOMIC_RELAXED);
+  pi->im.lo = (char *)blk - sizeof(uw); /* the block's own header */
+  pi->im.hi = (char *)blk + buddy_block_usable_size(blk);
+  pi->im.pid = pid;
+  pi->im.owner = pi;
+  pi->block = blk;
+  pi->ending = 0;
+  pi->idlen = idlen;
+  for (uw i = 0; i < idlen; i++) pi->id[i] = (char)g_app_id->bytes[i];
+  pi->sb.sched = &g_kernel_sched;
+  pi->sb.reply = fpr_hart()->current; /* the launcher actor gets the result */
+  pi->sb.pid = pid;
+  pi->sb.on_exit = shared_on_exit;
+  if (!fpr_pid_quiet) fpr_pid_quiet = image_quiet;
+  /* registered BEFORE the root is spawned: from here its cells are statics
+   * to the kernel, and what leaves the process is decided against its pid */
+  fpr_image_add(&pi->im);
 
-  void *heap_base = r.image_end;
-  uw heap_size = (uw)slot + slot_size - (uw)heap_base;
-  /* the loaded image's cells are STATICS inside the buddy span: no
-   * alloc preheaders, so the deep-copier (spawn's entry pap, any
-   * static a process actor sends) and ARC must skip them (fpr.h) */
-  fpr_static_lo = (char *)slot;
-  fpr_static_hi = (char *)r.image_end;
-
-  /* the process's OWN fpr_process_entry returns its result directly --
-   * see the note in proc_entry.c about why this must not be fetched
-   * via a same-named function call from THIS (System.qa's) image. */
+  /* the process's OWN fpr_process_entry: it spawns the root actor under
+   * pid and returns.  heap_base/heap_size/grow belong to the retired
+   * nested-scheduler path and are unused on the shared plane. */
   str_t *cs = (str_t *)capsv;
   V (*entry)(void *, uw, fpr_grant_t (*)(uw), const unsigned char *, uw,
              sw (*)(uw, const char *, uw, char *, uw), void *) =
       (V (*)(void *, uw, fpr_grant_t (*)(uw), const unsigned char *, uw,
              sw (*)(uw, const char *, uw, char *, uw), void *))r.entry;
-  if (!g_sched_ready) {
-    fpr_sched_export(&g_kernel_sched);
-    g_sched_ready = 1;
-  }
-  static shared_boot_t sb; /* single slot: one launch at a time */
-  sb.sched = &g_kernel_sched;
-  sb.reply = fpr_hart()->current; /* the launcher actor gets the result */
-  sb.pid = g_next_pid++;
-  sb.on_exit = shared_on_exit;
-  g_shared_live = 1;
-  g_slot_pid = sb.pid;
-  entry(heap_base, heap_size, loader_grow_memory, cs->bytes, cs->len,
-        qos_store_call, &sb);
-  __atomic_store_n(&g_slot_claim, 0, __ATOMIC_RELEASE);
-  /* the root ACB is queued with our pid; ok=2 tells the launcher to
-   * receiveRes for main's result.  Growth grants are shared-buddy
-   * slabs reaped with the acbs, so nothing to free here. */
+  entry(r.image_end, 0, loader_grow_memory, cs->bytes, cs->len, qos_store_call, &pi->sb);
+  /* a process that started nothing, or has already ended, goes now */
+  image_quiet(pid);
+
   char pm[32];
   uw pn = 0;
   const char *pp = "pid ";
-  for (const char *q = pp; *q; q++) pm[pn++] = *q;
+  for (const char *c = pp; *c; c++) pm[pn++] = *c;
   {
-    uw v = sb.pid, st = pn;
+    uw v = pid, st = pn;
     do { pm[pn++] = (char)('0' + v % 10); v /= 10; } while (v);
     for (uw i = 0; i < (pn - st) / 2; i++) {
       char t = pm[st + i]; pm[st + i] = pm[pn - 1 - i]; pm[pn - 1 - i] = t;
@@ -286,7 +288,7 @@ static V g_sys_place_image_at(V qastr, V ioffv, V ilenv, V numsv, V capsv) {
   return mktup2v(TAG(2), (V)fpr_mkstr((const uint8_t *)pm, pn));
 }
 
-FPR_FN(fpr_g_Sys_x2eplaceImageAt, g_sys_place_image_at, 5);
+FPR_FN(fpr_g_Sys_x2eplaceImageAt, g_sys_place_image_at, 4);
 
 /* Sys.init : Unit -> Unit -- must be called once, before the first
  * Sys.loadElf, by whichever image owns the process arena (System.qa's
@@ -297,6 +299,11 @@ FPR_FN(fpr_g_Sys_x2eplaceImageAt, g_sys_place_image_at, 5);
 static V g_sys_init(V d) { (void)d; fpr_proc_arena_init(); return (V)&fpr_unit; }
 FPR_FN(fpr_g_Sys_x2einit, g_sys_init, 1);
 
-/* introspection: how much of the process arena is currently free */
+/* Sys.images : Int -> Int -- process images loaded now (each goes when its
+ * process has ended) */
+static V g_sys_images(V d) { (void)d; return TAG((sw)fpr_image_count()); }
+FPR_FN(fpr_g_Sys_x2eimages, g_sys_images, 1);
+
+/* introspection: how much of the buddy (the heap) is currently free */
 static V g_sys_arena_free(V d) { (void)d; return TAG((sw)buddy_free_bytes()); }
 FPR_FN(fpr_g_Sys_x2earenaFree, g_sys_arena_free, 1);

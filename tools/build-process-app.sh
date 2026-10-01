@@ -7,9 +7,12 @@
 #
 # Usage: tools/build-process-app.sh <app.fpr> <manifest.toml> <out.qa> [rv32|rv64]
 #
-# The kernel is qos/qos-native.elf (`make -C qos native` first) -- its _proc_arena_start is the slot address
-# this app gets linked against.  The ELF built here is a toolchain
-# intermediate: mkqa.py flattens it into the QAR2 IMAGE at the end.
+# The image is RELOCATABLE (docs/2026-10-01-PROCESS-IMAGES.md): linked at 0
+# with --emit-relocs, and mkqa.py writes the RELOC section the kernel applies
+# wherever Memory.qa's buddy put the block.  Nothing is linked against the
+# kernel, so any kernel build loads it.  A second link 256 MiB higher checks
+# the relocation list: the two images must differ at exactly those words.
+# The ELFs built here are toolchain intermediates.
 
 set -euo pipefail
 APP_FPR="$1"; MANIFEST="$2"; OUT_QA="$3"; TARGET="${4:-rv64}"
@@ -21,22 +24,14 @@ export FPR_FOREIGN="$ROOT/core/foreign.fpr"
 RUNTIME="$FPRISC_ROOT/runtime"
 MACHINE="$FPRISC_ROOT/machine"
 QOS=qos   # relative to the repository root (it was ../qos from fp-risc/tools/, before the programs moved up)
-KERNEL=${KERNEL:-$QOS/qos-native.elf}   # the kernel the image is linked against
-
-[ -f "$KERNEL" ] || { echo "$KERNEL not found -- run 'make -C qos native' first" >&2; exit 1; }
-
 if [ "$TARGET" = rv32 ]; then
   ARCHFLAGS="-march=rv32imac_zicsr -mabi=ilp32"; WORDSZ=4
 else
   ARCHFLAGS="-march=rv64imafdc_zicsr -mabi=lp64 -mcmodel=medany"; WORDSZ=8
 fi
 
-ARENA_HEX=$(riscv64-unknown-elf-nm "$KERNEL" | awk '/ _proc_arena_start$/{print $1}')
-[ -n "$ARENA_HEX" ] || { echo "could not find _proc_arena_start in $KERNEL" >&2; exit 1; }
-# the true first-allocation address is arena_base + sizeof(uw): buddy_alloc
-# returns a pointer past its own bookkeeping header (docs/PROCESS-LOADING.md)
-SLOT_BASE=$(printf '0x%x' $((0x$ARENA_HEX + WORDSZ)))
-echo "target=$TARGET  _proc_arena_start=0x$ARENA_HEX  PROC_SLOT_BASE=$SLOT_BASE"
+[ "$TARGET" = rv64 ] || { echo "native process images are rv64 (relocation is implemented for R_RISCV_64)" >&2; exit 1; }
+echo "target=$TARGET  relocatable (linked at 0)"
 
 BASE=$(basename "$APP_FPR" .fpr)
 mkdir -p build
@@ -49,11 +44,16 @@ make -s -f hal/virt/qos-virt.mk FPRC="$FPRISC_ROOT/fpr" BUILD=build QOS_HAL=hal 
 VIRT_FPR="build/virt-clint.s $MACHINE/virt/rawunit.c build/qos-plic.s hal/virt/plic.c hal/virt/net.c hal/virt/blk.c hal/virt/pins.c hal/virt/devices.c"
 
 RT="$VIRT_FPR $QOS/native/proc_entry.c $MACHINE/virt/ctx.S $MACHINE/virt/ctx_fab.c $RUNTIME/runtime.c $MACHINE/virt/hal.c $MACHINE/virt/memshim.c $RUNTIME/actors.c $RUNTIME/buddy.c $RUNTIME/mod.c $RUNTIME/bits.c $RUNTIME/vec.c $RUNTIME/sstr.c"
-riscv64-unknown-elf-gcc $ARCHFLAGS -DFPR_NHARTS=1 -ffreestanding -nostdlib -nostartfiles -O2 \
-  -Wl,--defsym=PROC_SLOT_BASE=$SLOT_BASE \
-  -Wl,--defsym=_heap_start=_proc_image_end \
-  -Wl,--defsym=_heap_end=_proc_image_end -Wl,--defsym=_proc_arena_end=0x84000000 \
-  -T $MACHINE/virt/link-app.ld -I$RUNTIME -I$MACHINE/virt $RT "build/${BASE}.s" $(cat "build/${BASE}.s.units") -o "build/${BASE}.elf"
+link() { # link <base> <out.elf>
+  riscv64-unknown-elf-gcc $ARCHFLAGS -DFPR_NHARTS=1 -ffreestanding -nostdlib -nostartfiles -O2 \
+    -Wl,--defsym=PROC_IMAGE_BASE=$1 -Wl,--emit-relocs -Wl,--no-relax -Wl,--no-warn-rwx-segments \
+    -Wl,--defsym=_heap_start=_proc_image_end \
+    -Wl,--defsym=_heap_end=_proc_image_end -Wl,--defsym=_proc_arena_end=_proc_image_end \
+    -T $MACHINE/virt/link-app.ld -I$RUNTIME -I$MACHINE/virt $RT "build/${BASE}.s" $(cat "build/${BASE}.s.units") -o "$2"
+}
+link 0 "build/${BASE}.elf"
+link 0x10000000 "build/${BASE}.moved.elf"
 
-python3 tools/mkqa.py "$MANIFEST" "build/${BASE}.elf" -o "$OUT_QA"
-echo "wrote $OUT_QA (loadMode=process; seed it with tools/mkdisk.py for a disk boot)"
+python3 tools/mkqa.py "$MANIFEST" "build/${BASE}.elf" -o "$OUT_QA" --relocatable \
+  --check-moved "build/${BASE}.moved.elf" --delta 0x10000000
+echo "wrote $OUT_QA (loadMode=process, relocatable; seed it with tools/mkdisk.py for a disk boot)"

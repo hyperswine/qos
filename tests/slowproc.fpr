@@ -1,6 +1,6 @@
-# slowproc.fpr -- a process that is still running when a second placement is
-# attempted (tests/nativeslot.fpr): some work, then a result that shows its
-# code and data survived.
+# slowproc.fpr -- a process that runs while a second one is placed beside it
+# (tests/nativeimage.fpr): some work, then a result that shows its code and
+# data survived.
 sumTo : unsafe Int -> Int -> Int .
 sumTo n acc = case n == 0 of
     True -> acc

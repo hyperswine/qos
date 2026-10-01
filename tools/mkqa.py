@@ -5,7 +5,11 @@
 QAR2 (docs/2026-07-19-QA-FORMAT.md): the ELF is consumed HERE, once, at build
 time.  Its PT_LOADs are flattened into one image blob; what ships is
 
-    QAR2\n MANIFEST/LOAD/IMAGE table \n\n  payloads
+    QAR2\n MANIFEST/LOAD/IMAGE[/RELOC] table \n\n  payloads
+
+A native process image is RELOCATABLE (--relocatable): linked at 0, with
+a RELOC section listing the address words the loader moves by wherever
+it put the block (docs/2026-10-01-PROCESS-IMAGES.md).
 
 where LOAD is six text numbers (base, entry offset, execsz, rwoff,
 imagesz, memsz) + a sha256 of the image -- the entire loader contract.
@@ -57,6 +61,90 @@ def flatten_elf(elf):
         raise SystemExit("mkqa: e_entry outside the loadable span")
     return base, e_entry - base, execsz, rwoff, bytes(img), memsz
 
+# RISC-V relocation types (the psABI numbers) whose effect does not depend
+# on where the image lands: PC-relative code references, differences of
+# two symbols, and linker bookkeeping.  An image linked at 0 and moved by
+# d is still right at all of these; only R_RISCV_64 words need `+= d`.
+R_RISCV_64 = 2
+RISCV_POSITION_FREE = {
+    0,            # NONE
+    16, 17, 18, 19,  # BRANCH JAL CALL CALL_PLT
+    23, 24, 25,   # PCREL_HI20 PCREL_LO12_I PCREL_LO12_S
+    33, 34, 35, 36, 37, 38, 39, 40,  # ADD8..ADD64 SUB8..SUB64 (differences)
+    43, 44, 45,   # ALIGN RVC_BRANCH RVC_JUMP
+    51, 52, 53, 54, 55, 56,  # RELAX SUB6 SET6 SET8 SET16 SET32 (with SUB: differences)
+    57,           # 32_PCREL
+}
+SHT_SYMTAB, SHT_RELA = 2, 4
+SHF_ALLOC = 2
+SHN_UNDEF, SHN_ABS = 0, 0xFFF1
+
+def relocations(elf, base, imagesz):
+    """The offsets (from base) of every 64-bit word that holds an absolute
+    address inside the image, from an ELF linked with --emit-relocs.  Any
+    other relocation that would bind the image to its link address is an
+    error: such an image cannot be moved, and placing it would be wrong."""
+    fmt = "<" if elf[5] == 1 else ">"
+    e_machine, = struct.unpack_from(fmt + "H", elf, 18)
+    if e_machine != 243:
+        raise SystemExit("mkqa: --relocatable is implemented for RISC-V images only")
+    e_shoff, = struct.unpack_from(fmt + "Q", elf, 40)
+    e_shentsize, e_shnum = struct.unpack_from(fmt + "HH", elf, 58)
+    secs = []
+    for i in range(e_shnum):
+        o = e_shoff + i * e_shentsize
+        name, typ, flags, addr, off, size, link, info, align, entsz = \
+            struct.unpack_from(fmt + "IIQQQQIIQQ", elf, o)
+        secs.append((typ, flags, addr, off, size, link, info, entsz))
+    offs, refused = set(), []
+    for typ, _f, _a, off, size, link, info, entsz in secs:
+        if typ != SHT_RELA:
+            continue
+        target = secs[info]
+        if not (target[1] & SHF_ALLOC):
+            continue  # debug info: not loaded
+        symtab = secs[link]
+        for k in range(size // entsz):
+            r_offset, r_info, _add = struct.unpack_from(fmt + "QQq", elf, off + k * entsz)
+            rtype, rsym = r_info & 0xFFFFFFFF, r_info >> 32
+            st_shndx, = struct.unpack_from(fmt + "H", elf, symtab[3] + rsym * symtab[7] + 6)
+            if rtype in RISCV_POSITION_FREE:
+                continue
+            if st_shndx == SHN_ABS:
+                continue  # an absolute constant stays put wherever the image goes
+            if rtype == R_RISCV_64 and st_shndx != SHN_UNDEF:
+                at = r_offset - base
+                if not 0 <= at <= imagesz - 8:
+                    raise SystemExit(f"mkqa: an address word at 0x{r_offset:x} lies outside the image's file bytes")
+                offs.add(at)
+                continue
+            refused.append((rtype, r_offset))
+    if refused:
+        kinds = ", ".join(sorted({str(t) for t, _ in refused}))
+        raise SystemExit(f"mkqa: {len(refused)} relocation(s) bind this image to its link "
+                         f"address (R_RISCV types {kinds}; first at 0x{refused[0][1]:x}) -- "
+                         f"it cannot be moved; build it -mcmodel=medany, non-PIC")
+    return sorted(offs)
+
+def check_moved(image, relocs, other_elf, delta):
+    """The same image linked `delta` higher must differ from this one at
+    exactly the relocated words, by exactly delta: the list is complete."""
+    _b, _e, _x, _r, other, _m = flatten_elf(other_elf)
+    if len(other) != len(image):
+        raise SystemExit("mkqa: --check-moved: the two links differ in size")
+    covered = bytearray(len(image))
+    for o in relocs:
+        covered[o:o + 8] = b"\x01" * 8
+    for o in range(len(image)):
+        if image[o] != other[o] and not covered[o]:
+            raise SystemExit(f"mkqa: --check-moved: the byte at 0x{o:x} moves with the link "
+                             f"address but is not in a relocated word")
+    for o in relocs:
+        a, = struct.unpack_from("<Q", image, o)
+        b, = struct.unpack_from("<Q", other, o)
+        if b - a != delta:
+            raise SystemExit(f"mkqa: --check-moved: the word at 0x{o:x} moved by {b - a}, not {delta}")
+
 def load_sha_of(qa_path):
     """The LOAD section's image sha of an existing .qa -- the identity
     of the shell a plugin links against (the matched-set stamp)."""
@@ -75,7 +163,8 @@ def load_sha_of(qa_path):
                     return ln.split()[1]
     raise SystemExit(f"mkqa: --shell-of {qa_path}: no LOAD sha found")
 
-def build(manifest_path, elf_path, out_path, shell_of=None):
+def build(manifest_path, elf_path, out_path, shell_of=None, relocatable=False,
+          check_moved_elf=None, check_delta=0):
     with open(manifest_path, "rb") as f:
         manifest = f.read()
     if shell_of:
@@ -87,6 +176,13 @@ def build(manifest_path, elf_path, out_path, shell_of=None):
         with open(elf_path, "rb") as f:
             elf = f.read()
         base, entry, execsz, rwoff, image, memsz = flatten_elf(elf)
+        if relocatable:
+            if base != 0:
+                raise SystemExit("mkqa: --relocatable expects an image linked at 0")
+            relocs = relocations(elf, base, len(image))
+            if check_moved_elf:
+                with open(check_moved_elf, "rb") as f:
+                    check_moved(image, relocs, f.read(), check_delta)
     else:
         base = entry = execsz = rwoff = memsz = 0
         image = b""  # placeholder: name-dispatch era, nothing to load
@@ -95,20 +191,25 @@ def build(manifest_path, elf_path, out_path, shell_of=None):
             f"rwoff {rwoff}\nimagesz {len(image)}\nmemsz {memsz}\n"
             f"sha {hashlib.sha256(image).hexdigest()}\n").encode()
 
+    sections = [("MANIFEST", manifest), ("LOAD", load), ("IMAGE", image)]
+    if relocatable:
+        # RELOC: little-endian u32 offsets of the address words to move by
+        # the load address (the image is linked at 0)
+        sections.append(("RELOC", b"".join(struct.pack("<I", o) for o in relocs)))
     off = 0
     table_lines = []
-    for name, blob in (("MANIFEST", manifest), ("LOAD", load), ("IMAGE", image)):
+    for name, blob in sections:
         table_lines.append(f"{name} {off} {len(blob)}")
         off += len(blob)
 
     header = b"QAR2\n" + ("\n".join(table_lines)).encode() + b"\n\n"
     with open(out_path, "wb") as f:
         f.write(header)
-        f.write(manifest)
-        f.write(load)
-        f.write(image)
+        for _n, blob in sections:
+            f.write(blob)
+    extra = f" + {len(relocs)} relocations" if relocatable else ""
     print(f"wrote {out_path}: manifest {len(manifest)}B + load {len(load)}B "
-          f"+ image {len(image)}B (memsz {memsz}) = {os.path.getsize(out_path)}B total")
+          f"+ image {len(image)}B (memsz {memsz}){extra} = {os.path.getsize(out_path)}B total")
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
@@ -116,5 +217,10 @@ if __name__ == "__main__":
     ap.add_argument("elf", nargs="?", default="-")
     ap.add_argument("-o", "--out", required=True)
     ap.add_argument("--shell-of", help="stamp the manifest with this app .qa's image sha (plugin matched-set gate)")
+    ap.add_argument("--relocatable", action="store_true",
+                    help="the ELF is linked at 0 with --emit-relocs: write a RELOC section (native process images)")
+    ap.add_argument("--check-moved", metavar="ELF",
+                    help="the same image linked --delta higher: verify the RELOC list against it")
+    ap.add_argument("--delta", type=lambda x: int(x, 0), default=0)
     a = ap.parse_args()
-    build(a.manifest, a.elf, a.out, a.shell_of)
+    build(a.manifest, a.elf, a.out, a.shell_of, a.relocatable, a.check_moved, a.delta)

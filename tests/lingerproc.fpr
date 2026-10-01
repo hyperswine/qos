@@ -1,6 +1,6 @@
 # lingerproc.fpr -- a process whose main returns while a child actor it
-# spawned is still running slot code (tests/nativeslot.fpr): the slot is
-# not reusable until that child has ended too.
+# spawned is still running the image's code (tests/nativeimage.fpr): the image
+# stays until that child has ended too.
 sumTo : unsafe Int -> Int -> Int .
 sumTo n acc = case n == 0 of
     True -> acc
