@@ -1,0 +1,219 @@
+# ============================================================================
+# sysep.fpr -- System.qa's services as URL OWNERS (mods/ep.fpr).
+#
+# Until 2026-10-02 these were branches of one prefix chain in mods/svc.fpr:
+# adding a route meant editing the router.  Now each is an actor that
+# claims its url at boot with one NsReg, and the router is gone: Svc.read
+# and Svc.write (the compatibility surface every app still calls) resolve
+# through the namespace like anybody else.
+#
+#   /services/display, /services/display/line   write IStr -> the console
+#   /services/keyboard, /services/keyboard/poll  read -> IInt key (held / 0)
+#   /services/clock                              read -> IInt mtime
+#   /services/modules/<hash>/<fn>                read -> IFn (a miss is Err)
+#   /services/storage/kv/<app id>                read replay / write append
+#   /services/uart                               read rx / write tx (IInt n)
+#   /services/timer                              write IInt ms: TFire to the
+#                                                CLIENT's mailbox when due
+#   /pins/<n>, /pins/<n>/mode                    read level / write level, mode
+#
+# The keyboard is the one with a held read: a Read on /services/keyboard
+# waits for a key, and a Close of that handle answers it Err "closed" (the
+# contract's cancellation).  Everything else is EP.simple: a handle is its
+# url and its client, and each request is one function.
+# ============================================================================
+
+EP = use "ep".
+SV = use "svc".
+UM = use "uart#8753d4509634e17a".
+TM = use "timer#38fa906125d48580".
+AC = use "std/actor".
+
+IStr = EP.IStr. IInt = EP.IInt. IUnit = EP.IUnit. IFn = EP.IFn. IErr = EP.IErr.
+Open = EP.Open. Read = EP.Read. Write = EP.Write. Close = EP.Close.
+Opened = EP.Opened. Refused = EP.Refused.
+
+# ---- boot: every endpoint, claimed ------------------------------------------
+# st is the services record {has, act, uart, timer, ns}.
+boot : unsafe Int -> Int -> (Int, Int) -> Int -> Int -> Int -> _ -> Unit .
+boot me ns con clk usvc tsvc st =
+  _ = claim me ns "/services/display" (spawnD (EP.simple EP.noRead (dispW con)));
+  _ = claim me ns "/services/keyboard" (spawnD (keyboard con));
+  _ = claim me ns "/services/clock" (spawnD (EP.simple (clockR clk) EP.noWrite));
+  _ = claim me ns "/services/modules" (spawnD (EP.simple modR EP.noWrite));
+  _ = claim me ns "/services/storage" (spawnD (EP.simple (kvR st) (kvW st)));
+  _ = claim me ns "/services/uart" (spawnD (EP.simple (uartR usvc) (uartW usvc)));
+  _ = claim me ns "/services/timer" (spawnD (EP.simple EP.noRead (timerW tsvc)));
+  _ = claim me ns "/pins" (spawnD (EP.simple pinR pinW));
+  Unit.
+spawnD f = AC.spawnWith (AC.Dynamic 64) f.
+claim : Int -> Int -> String -> Int -> Unit .
+claim me ns url a = case EP.register me ns url a of
+    Ok n -> Unit
+  | Err e -> error "system: could not claim {url}: {e}".
+
+# ---- the console -------------------------------------------------------------
+dispW : unsafe (Int, Int) -> Int -> Int -> String -> EP.IoV -> Result EP.IoV String .
+dispW con me client url v = case v of
+    IStr s -> dispPut con url s
+  | o -> Err "/services/display wants IStr".
+dispPut : unsafe (Int, Int) -> String -> String -> Result EP.IoV String .
+dispPut con url s =
+  _ = SV.puts con s;
+  _ = case EP.strEq (EP.segAfter url 18) "line" of
+      True -> SV.nl con
+    | False -> Unit;
+  Ok IUnit.
+
+# ---- the clock ---------------------------------------------------------------
+clockR clk me client url = Ok (IInt (read clk)).
+
+# ---- modules: "/services/modules/<hash>/<fn>", a miss is data ------------------
+modR : unsafe Int -> Int -> String -> Result EP.IoV String .
+modR me client url =
+  h = EP.segAfter url 18;
+  f = EP.segAfter url (18 + strlen h + 1);
+  modRes (Mod.resolve h f).
+modRes r = case r of (ok, f) ->
+  case ok == 1 of True -> Ok (IFn f) | False -> Err "module miss".
+
+# ---- storage: "/services/storage/kv/<id>" -> apps/<id>/<id>.kv ------------------
+# The id is in the url, and the url an app can reach is built by its
+# capability (svc.fpr's kvScope): naming another app's stream stays
+# structurally impossible for a routed caller.
+kvR : unsafe _ -> Int -> Int -> String -> Result EP.IoV String .
+kvR st me client url = kvOn st me url "" 3.
+kvW : unsafe _ -> Int -> Int -> String -> EP.IoV -> Result EP.IoV String .
+kvW st me client url v = case v of
+    IStr line -> kvOn st me url (strcat line (chr 10)) 2
+  | o -> Err "/services/storage/kv wants IStr".
+kvOn : unsafe _ -> Int -> String -> String -> Int -> Result EP.IoV String .
+kvOn st me url pay tag =
+  id = EP.segAfter url 21;
+  case strlen id == 0 of
+    True -> Err "no storage route: {url}"
+  | False -> kvRes (SV.storeRpcAt me st tag "apps/{id}/{id}.kv" pay).
+kvRes r = case r of Ok s -> Ok (IStr s) | Err e -> Err e.
+
+# ---- uart: the service actor behind the url -----------------------------------
+uartR : Int -> Int -> Int -> String -> Result EP.IoV String .
+uartR usvc me client url = case uartRpc me usvc UM.UGet of
+    UM.UOkS s -> Ok (IStr (strcat s ""))
+  | UM.UErr e -> Err e
+  | o -> Err "/services/uart: protocol reply mismatch".
+uartW : Int -> Int -> Int -> String -> EP.IoV -> Result EP.IoV String .
+uartW usvc me client url v = case v of
+    IStr s -> uartWRep (uartRpc me usvc (UM.UWrite s))
+  | o -> Err "/services/uart wants IStr".
+uartWRep r = case r of
+    UM.UOkI k -> Ok (IInt k)
+  | UM.UErr e -> Err e
+  | o -> Err "/services/uart: protocol reply mismatch".
+# the send is checked and the wait answers: a UART service that refused or
+# ended is an Err to the caller, never a wait for a reply never accepted
+uartRpc : Int -> Int -> _ -> _ .
+uartRpc me usvc msg = case usvc == 0 of
+    True -> UM.UErr "no uart service"
+  | False -> (case send usvc (me, msg) of
+      Err e -> UM.UErr "the UART service refused the request ({e})"
+    | Ok s -> uartAwait me usvc).
+uartAwait : Int -> Int -> _ .
+uartAwait me usvc = case receiveFromRes me usvc of
+    Ok r -> SV.resultKept r
+  | Err e -> UM.UErr "the UART service {e} before answering".
+
+# ---- timer: TFire lands in the CLIENT's mailbox ----------------------------------
+timerW : Int -> Int -> Int -> String -> EP.IoV -> Result EP.IoV String .
+timerW tsvc me client url v = case v of
+    IInt ms -> timerArm tsvc client ms
+  | o -> Err "/services/timer wants IInt".
+timerArm : Int -> Int -> Int -> Result EP.IoV String .
+timerArm tsvc client ms = case tsvc == 0 of
+    True -> Err "no timer service"
+  | False -> (case send tsvc (client, TM.TAfter ms) of
+      Ok u -> Ok IUnit
+    | Err e -> Err "the timer service refused the request ({e})").
+
+# ---- pins: "/pins/<n>" and "/pins/<n>/mode" ----------------------------------------
+pinR : unsafe Int -> Int -> String -> Result EP.IoV String .
+pinR me client url =
+  ns = EP.segAfter url 6;
+  case EP.strEq (EP.segAfter url (6 + strlen ns + 1)) "mode" of
+    True -> Err "/pins mode is write-only"
+  | False -> Ok (IInt (Pin.read (EP.parseNum ns))).
+pinW : unsafe Int -> Int -> String -> EP.IoV -> Result EP.IoV String .
+pinW me client url v = case v of
+    IInt x -> pinSet url x
+  | o -> Err "/pins wants IInt".
+pinSet : unsafe String -> Int -> Result EP.IoV String .
+pinSet url x =
+  ns = EP.segAfter url 6;
+  n = EP.parseNum ns;
+  _ = case EP.strEq (EP.segAfter url (6 + strlen ns + 1)) "mode" of
+      True -> Pin.mode n x
+    | False -> Pin.write n x;
+  Ok IUnit.
+
+# ---- the keyboard: a held read, cancelled by Close ------------------------------
+# hs: (h, url, client); pend: (from, id, h) of the one held read (h 0: none).
+# With a read held the actor polls the line-status register and gives its
+# hart away between polls, taking other requests as they come (receiveNow);
+# with nothing held it parks in receive.
+keyboard : unsafe (Int, Int) -> Int -> a .
+keyboard con me = kLoop con me Nil 1 (0, 0, 0).
+kLoop : unsafe (Int, Int) -> Int -> List (Int, String, Int) -> Int -> (Int, Int, Int) -> a .
+kLoop con me hs next pend =
+  (pf, pi, ph) = pend;
+  case ph == 0 of
+    True -> kTurn con me hs next pend (receive me)
+  | False -> kPoll con me hs next pend.
+kPoll : unsafe (Int, Int) -> Int -> List (Int, String, Int) -> Int -> (Int, Int, Int) -> a .
+kPoll con me hs next pend =
+  (pf, pi, ph) = pend;
+  k = SV.pollKey con;
+  case k > 0 of
+    True -> AC.reply (pf, pi) (Ok (IInt k)) >> kLoop con me hs next (0, 0, 0)
+  | False -> kIdle con me hs next pend (receiveNow me).
+kIdle : unsafe (Int, Int) -> Int -> List (Int, String, Int) -> Int -> (Int, Int, Int) -> _ -> a .
+kIdle con me hs next pend r = case r of
+    Ok m -> kTurn con me hs next pend m
+  | Err e -> yield me >> kLoop con me hs next pend.
+kTurn : unsafe (Int, Int) -> Int -> List (Int, String, Int) -> Int -> (Int, Int, Int) -> _ -> a .
+kTurn con me hs next pend m =
+  (from, id, q) = m;
+  kMsg con me hs next pend (from, id) from q.
+kMsg : unsafe (Int, Int) -> Int -> List (Int, String, Int) -> Int -> (Int, Int, Int) -> (Int, Int) -> Int -> EP.Ep -> a .
+kMsg con me hs next pend ret from q = case q of
+    Open url mode -> AC.reply ret (Opened next) >> kLoop con me ((next, strcat url "", from) :: hs) (next + 1) pend
+  | Read h n -> kRead con me hs next pend ret h (EP.hFind hs h)
+  | Write h v -> AC.reply ret (Err "/services/keyboard is read-only") >> kLoop con me hs next pend
+  | Close h -> kClose con me hs next pend ret h.
+kRead : unsafe (Int, Int) -> Int -> List (Int, String, Int) -> Int -> (Int, Int, Int) -> (Int, Int) -> Int -> (String, Int) -> a .
+kRead con me hs next pend ret h b =
+  (url, client) = b;
+  case strlen url == 0 of
+    True -> AC.reply ret (Err "no such handle") >> kLoop con me hs next pend
+  | False -> (case EP.strEq (EP.segAfter url 19) "poll" of
+      True -> AC.reply ret (Ok (IInt (SV.pollKey con))) >> kLoop con me hs next pend
+    | False -> kHold con me hs next pend ret h).
+kHold : unsafe (Int, Int) -> Int -> List (Int, String, Int) -> Int -> (Int, Int, Int) -> (Int, Int) -> Int -> a .
+kHold con me hs next pend ret h =
+  (pf, pi, ph) = pend;
+  k = SV.pollKey con;
+  case ph != 0 of
+    True -> AC.reply ret (Err "busy: a read is already held") >> kLoop con me hs next pend
+  | False -> (case k > 0 of
+      True -> AC.reply ret (Ok (IInt k)) >> kLoop con me hs next pend
+    | False -> kHeld con me hs next ret h).
+kHeld : unsafe (Int, Int) -> Int -> List (Int, String, Int) -> Int -> (Int, Int) -> Int -> a .
+kHeld con me hs next ret h =
+  (rf, ri) = ret;
+  kLoop con me hs next (rf, ri, h).
+kClose : unsafe (Int, Int) -> Int -> List (Int, String, Int) -> Int -> (Int, Int, Int) -> (Int, Int) -> Int -> a .
+kClose con me hs next pend ret h =
+  (pf, pi, ph) = pend;
+  _ = case ph == h of
+      True -> AC.reply (pf, pi) (Err "closed")
+    | False -> Ok Unit;
+  _ = AC.reply ret (Ok 0);
+  kLoop con me (EP.hRemove hs h) next (case ph == h of True -> (0, 0, 0) | False -> pend).

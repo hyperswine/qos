@@ -1,5 +1,6 @@
-# qsysfail.fpr -- the failure paths of mods/qsys and mods/appkit's calls,
-# against fake services (no disk): every outcome is an honest answer.
+# qsysfail.fpr -- the failure paths of mods/qsys's files and mods/ep's
+# contract, against fake services (no disk): every outcome is an honest
+# answer.
 #
 #   1. a write that storage refuses (Err) is reported, and the cached
 #      body is unchanged: a read after it returns what the disk holds
@@ -7,7 +8,7 @@
 #   3. a file actor whose first replay failed says "read failed", never
 #      serves "" as the file, and refuses writes until it can read
 #   4. a service that ended is Err "dead actor" (not a caller parked for
-#      ever); a vfs relay to an ended owner answers in text
+#      ever); an open of a url whose owner has ended is refused by name
 #   5. a full mailbox is Err "mailbox full" (the request never queued)
 #   6. an unrelated message queued by another actor is not read as the
 #      reply, and is still there afterwards
@@ -15,8 +16,11 @@
 #   ./qos.py run tests/qsysfail.fpr
 #: expect qsysfail: HOLDS
 
+unsafe program.
+
 QS = use "../programs/mods/qsys".
 AK = use "../programs/mods/appkit".
+EP = use "../programs/mods/ep".
 AC = use "std/actor".
 SVC = use "../programs/mods/svc".
 Rpc = SVC.Rpc.
@@ -51,49 +55,59 @@ expect what got want = case QS.strEq got want of
     True -> True
   | False -> _ = print "qsysfail: {what}: got [{got}] wanted [{want}]"; False.
 
+# a file actor over a fake store, claimed in a fresh namespace
+fileAt : unsafe Int -> Int -> Int -> String -> Unit .
+fileAt me ns st path =
+  f = AC.spawnWith (AC.Dynamic 64) (QS.fileActor st path);
+  case EP.register me ns path f of
+    Ok n -> Unit
+  | Err e -> error "qsysfail: claim {path}: {e}".
+
 main =
   me = myself 0;
+  ns = AC.spawnWith (AC.Dynamic 64) EP.namespace;
+  _ = EP.register me ns "/" (AC.spawnWith (AC.Dynamic 64) (EP.lister ns));
   # 1. a refused append
   st1 = spawn (store "abc" (Err "data partition full"));
-  f1 = spawn (QS.fileActor st1 "/tmp/a");
-  w1 = AK.vfsWrite me f1 "/tmp/a" "X";
-  r1 = AK.vfsRead me f1 "/tmp/a";
+  _ = fileAt me ns st1 "/tmp/a";
+  w1 = AK.vfsWrite me ns "/tmp/a" "X";
+  r1 = AK.vfsRead me ns "/tmp/a";
   ok1 = expect "refused write" w1 "write failed: data partition full"
     and expect "body after refused write" r1 "abc";
   # 2. storage that ended after the replay
   st2 = spawn storeOnce;
-  f2 = spawn (QS.fileActor st2 "/tmp/b");
-  w2 = AK.vfsWrite me f2 "/tmp/b" "X";
-  r2 = AK.vfsRead me f2 "/tmp/b";
+  _ = fileAt me ns st2 "/tmp/b";
+  w2 = AK.vfsWrite me ns "/tmp/b" "X";
+  r2 = AK.vfsRead me ns "/tmp/b";
   ok2 = expect "write to ended storage" w2 "write failed: storage service: dead actor"
     and expect "body after ended storage" r2 "abc";
   # 3. a file actor that never could read its body
   st3 = spawn gone;
   _ = Sys.sleepUs 20000;
-  f3 = spawn (QS.fileActor st3 "/tmp/c");
-  r3 = AK.vfsRead me f3 "/tmp/c";
-  w3 = AK.vfsWrite me f3 "/tmp/c" "X";
+  _ = fileAt me ns st3 "/tmp/c";
+  r3 = AK.vfsRead me ns "/tmp/c";
+  w3 = AK.vfsWrite me ns "/tmp/c" "X";
   ok3 = expect "unreadable file" r3 "read failed: /tmp/c (storage service: dead actor)"
     and expect "write to unreadable file" w3 "write failed: /tmp/c could not be read (storage service: dead actor)";
-  # 4. an ended service, directly and through the vfs relay
+  # 4. an ended service, directly and as the owner of a url
   g = spawn gone;
   _ = Sys.sleepUs 20000;
-  c4 = QS.call me g (AK.Read "/x");
-  vfs = spawn (QS.vfsActor (("/tmp/d", 2, g) :: Nil));
-  r4 = AK.vfsRead me vfs "/tmp/d";
+  c4 = AC.call me g (EP.Read 1 0);
+  _ = EP.register me ns "/tmp/d" g;
+  r4 = AK.vfsRead me ns "/tmp/d";
   ok4 = expect "call to ended service" "{c4}" "Err dead actor"
-    and expect "relay to ended owner" r4 "unavailable: the service for this path dead actor";
+    and expect "open of an ended owner" r4 "/tmp/d: its owner dead actor";
   # 5. a full mailbox
   k = AC.spawnWith (AC.Static 8) stuck;
   _ = fill k 8;
-  c5 = QS.call me k (AK.Read "/x");
+  c5 = AC.call me k (EP.Read 1 0);
   ok5 = expect "full mailbox" "{c5}" "Err mailbox full";
   # 6. an event from someone else, queued before the call
   st6 = spawn (store "note" (Ok "1"));
-  f6 = spawn (QS.fileActor st6 "/tmp/e");
+  _ = fileAt me ns st6 "/tmp/e";
   _ = spawn (pinger me);
   _ = Sys.sleepUs 20000;
-  r6 = AK.vfsRead me f6 "/tmp/e";
+  r6 = AK.vfsRead me ns "/tmp/e";
   ev = receive me;
   ok6 = expect "reply with an event queued" r6 "note" and expect "the event" ev "tick";
   case ok1 and ok2 and ok3 and ok4 and ok5 and ok6 of

@@ -1,4 +1,5 @@
-# timerroute.fpr -- "/services/timer" through the ONE Svc funnel: a
+# timerroute.fpr -- "/services/timer" through Svc (an open, a write, a
+# close through the namespace; the timer endpoint is mods/sysep.fpr's): a
 # capability-gated write (IInt ms) schedules a fire, and Timer.qa
 # sends TFire straight to the CALLER's mailbox once due -- the message
 # is what moves the caller from the backlog into the ready zone, under
@@ -10,13 +11,18 @@
 #
 # Expected: timerroute: write=ok fire=ok
 
+unsafe program.
+
 SV = use "../programs/mods/svc".
+EP = use "../programs/mods/ep".
+SE = use "../programs/mods/sysep".
 TM = use "../programs/mods/timer".
+AC = use "std/actor".
 
 Caps = SV.Caps.
 Svc = SV.Svc.
-IInt = SV.IInt.
-IUnit = SV.IUnit.
+IInt = EP.IInt.
+IUnit = EP.IUnit.
 TFire = TM.TFire.
 
 main =
@@ -26,8 +32,12 @@ main =
   cl = device "clint";
   clk = reg32 cl 49144;
   tsvc = spawn TM.actor;
+  ns = AC.spawnWith (AC.Dynamic 64) EP.namespace;
+  _ = EP.register me ns "/" (AC.spawnWith (AC.Dynamic 64) (EP.lister ns));
+  st = { has = False, act = 0, uart = 0, timer = tsvc, ns = ns };
+  _ = SE.boot me ns con clk 0 tsvc st;
   granted = ("/services/timer", "rw") :: Nil;
-  caps = Caps con me clk granted "timerroute" { has = False, act = 0, uart = 0, timer = tsvc };
+  caps = Caps con me clk granted "timerroute" st;
   t0 = read clk;
   r = Svc.write caps "/services/timer" (IInt 30);
   wok = case r of IUnit -> "ok" | e -> "ERR";

@@ -1,7 +1,7 @@
-# uartroute.fpr -- "/services/uart" through the ONE Svc funnel, the
-# System.qa route in miniature: a Caps value carrying the uart service
-# actor in its services slot, writes routed as DMA-shaped enqueues,
-# reads routed as rx takes -- all capability-gated by the URL grant.
+# uartroute.fpr -- "/services/uart" through Svc, which is now one open,
+# one operation, one close through the namespace: the uart endpoint
+# (mods/sysep.fpr) claims its url at boot, writes are DMA-shaped
+# enqueues, reads are rx takes -- all capability-gated by the URL grant.
 #
 #   make qos-app PROG=tests/uartroute.fpr
 #   printf 'hi' | (cd qos && ./qosp --yes ../app.qa)
@@ -9,14 +9,19 @@
 # Expected: ROUTED-UART-TX on the console, then
 #   uartroute: wrote 15B via /services/uart; rx="hi"
 
+unsafe program.
+
 SV = use "../programs/mods/svc".
+EP = use "../programs/mods/ep".
+SE = use "../programs/mods/sysep".
 UM = use "../programs/mods/uart".
+AC = use "std/actor".
 
 Caps = SV.Caps.
 Svc = SV.Svc.
-IStr = SV.IStr.
-IInt = SV.IInt.
-IErr = SV.IErr.
+IStr = EP.IStr.
+IInt = EP.IInt.
+IErr = EP.IErr.
 
 ucall : Int -> Int -> _ -> Unit .
 ucall me a msg =
@@ -37,8 +42,13 @@ main =
   _ = ucall me usvc UM.UOpen;
   _ = ucall me usvc (UM.UBuf 8192);
   _ = ucall me usvc UM.UShare;
+  # the namespace and System.qa's endpoints, claimed the way system.fpr does
+  ns = AC.spawnWith (AC.Dynamic 64) EP.namespace;
+  _ = EP.register me ns "/" (AC.spawnWith (AC.Dynamic 64) (EP.lister ns));
+  st = { has = False, act = 0, uart = usvc, timer = 0, ns = ns };
+  _ = SE.boot me ns con clk usvc 0 st;
   granted = ("/services/uart", "rw") :: Nil;
-  caps = Caps con me clk granted "uartroute" { has = True, act = 0, uart = usvc, timer = 0 };
+  caps = Caps con me clk granted "uartroute" st;
   r1 = Svc.write caps "/services/uart" (IStr "ROUTED-UART-TX\n");
   n = case r1 of IInt k -> k | e -> 0 - 1;
   rx = waitR caps clk (read clk + 30000000);

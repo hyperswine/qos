@@ -1,10 +1,11 @@
 # ============================================================================
 # cliapp.fpr -- CLI.qa.  A command line whose entire world is the URL
-# namespace: `ls` is VfsList, `cat` is Read, `write` is Write, and each
-# of those is a message to whichever actor owns the path -- for a real
-# file, one of System.qa's per-file actors.  The CLI holds no file
-# handles, no working directory, and no privileges: it has the
-# resolver capability from its env, and that is the whole story.
+# namespace: `ls` is a read of "/", `cat` is open/read/close, `write` is
+# open/write/close, and after the open each is a message to whichever
+# actor owns the url -- for a real file, one of the system's per-file
+# actors.  The CLI holds no file handles, no working directory, and no
+# privileges: it has the namespace from its env, and that is the whole
+# story.
 #
 # Commands run in appUpdate, which the launcher runs in the SHELL
 # actor -- so a command may hold a conversation with a service, which
@@ -59,8 +60,8 @@ clDo self env cmd rest | strEq cmd "ps" = clPs 0.
 clDo self env cmd rest | strEq cmd "clear" = Nil.
 clDo self env cmd rest = "{cmd}: no such command" :: Nil.
 
-# ls [prefix]: the namespace, optionally filtered -- "directories" are
-# a filter over a flat set, which is all they ever were
+# ls [prefix]: the namespace (a read of "/"), optionally filtered --
+# "directories" are a filter over a flat set, which is all they ever were
 clLs self env pre =
   ents = AK.vfsList self (AK.envVfs env);
   ls = clRev (clPaths ents pre) Nil;
@@ -71,9 +72,7 @@ clPaths ((p, k) :: r) pre =
   case clStarts p pre of
     True -> "{clKind k} {p}" :: clPaths r pre
   | False -> clPaths r pre.
-clKind 0 = "virt".
-clKind 1 = "data".
-clKind 2 = "file".
+clKind k = "url".
 clStarts p pre | strlen pre == 0 = True.
 clStarts p pre | strlen p < strlen pre = False.
 clStarts p pre = strEqS (substr p 0 (strlen pre)) pre.

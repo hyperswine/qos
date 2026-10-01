@@ -1,15 +1,23 @@
-# svcurl.fpr -- the one-funnel IO surface (mods/svc.fpr) exercised on the
-# hosted HAL: every service is `Svc.read caps url` / `Svc.write caps url v`,
-# capability-gated by URL prefix at the single dispatch point.  Storage is
-# diskless here, so its route answers IErr -- absence is data.
+# svcurl.fpr -- the Svc surface (mods/svc.fpr) on the hosted HAL: every
+# service is `Svc.read caps url` / `Svc.write caps url v`, capability-gated
+# by URL prefix, then an open, one operation and a close through the
+# namespace to the endpoint that claimed the url (mods/sysep.fpr).
+# Storage is diskless here, so its endpoint answers IErr -- absence is data.
+
+#: expect svcurl done
+
+unsafe program.
 
 SVCM = use "../programs/mods/svc".
+EP = use "../programs/mods/ep".
+SE = use "../programs/mods/sysep".
+AC = use "std/actor".
 Svc  = SVCM.Svc.
-IoV  = SVCM.IoV.
-IUnit = SVCM.IUnit.
-IInt = SVCM.IInt.
-IStr = SVCM.IStr.
-IErr = SVCM.IErr.
+IoV  = EP.IoV.
+IUnit = EP.IUnit.
+IInt = EP.IInt.
+IStr = EP.IStr.
+IErr = EP.IErr.
 
 expect name ok = case ok of
     True -> print ("ok " + name)
@@ -27,7 +35,11 @@ main =
          :: ("/services/storage", "write")
          :: ("/nope", "read")
          :: Nil;
-  caps = SVCM.Caps con me clk granted "svctest" (False, 0);
+  ns = AC.spawnWith (AC.Dynamic 64) EP.namespace;
+  _ = EP.register me ns "/" (AC.spawnWith (AC.Dynamic 64) (EP.lister ns));
+  st = { has = False, act = 0, uart = 0, timer = 0, ns = ns };
+  _ = SE.boot me ns con clk 0 0 st;
+  caps = SVCM.Caps con me clk granted "svctest" st;
 
   # display: the write verb (and the /line sub-route)
   _ = Svc.write caps "/services/display" (IStr "svc: display route ");

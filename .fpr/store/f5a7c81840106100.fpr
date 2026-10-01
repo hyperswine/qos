@@ -1,0 +1,431 @@
+# ============================================================================
+# ep.fpr -- ENDPOINTS: the one contract every URL in QOS is reached by.
+#
+# A URL names a resource an ACTOR owns.  The namespace (one actor, System's)
+# knows which actor owns which URL prefix and which process may open what.
+# Everything else is four messages, spoken directly between a client and
+# the owner once the namespace has introduced them:
+#
+#   open   the client asks the NAMESPACE: NsOpen url mode.  The namespace
+#          authorizes (the caller's pid's grants: a '/'-boundary prefix of
+#          url with that mode, or pid 0 which is the system itself), resolves
+#          (the longest registered prefix of url; a url ending in '/' is a
+#          listing and resolves to "/"), FORWARDS the client's own request
+#          envelope to the owner -- (client, id, Open url mode) -- and
+#          answers the client Ok (owner, id) at once.  The owner answers
+#          the client directly: (id, Opened h), (id, Refused why), or
+#          (id, Redirect a) when another actor serves this url (it has
+#          forwarded the envelope on; the client waits on `a` instead).
+#          From here on the namespace is out of the conversation.
+#   read   Read h n       -> Ok v    (an IoV; IStr bytes for a file)
+#   write  Write h v      -> Ok v    (what the owner says about it)
+#   close  Close h        -> Ok 0; a Read the owner still holds for that
+#          handle is answered Err "closed" first.  Close is the only
+#          cancellation.
+#
+# Every exchange is std/actor's correlated request (from, id, q) and reply
+# (id, r): a refused send and a dead peer are answers (Err "mailbox full",
+# Err "dead actor"), never a wait.  An owner whose reply is refused because
+# the client has ended closes that handle itself.
+#
+# Registration is the service's own act: NsReg url owner.  There is no
+# dispatch table anywhere; a new service claims its URL with one message
+# and no edit to System or QSys (tests/epecho.fpr is that proof).  A
+# listing -- `ls /services/` -- is a READ of the URL "/services/", served
+# by the lister registered at "/": a directory is a read of a namespace
+# URL, not a verb.
+#
+# Trust: the namespace is the single authorization point, but nothing
+# stops a program on the same plane from sending Open to an owner
+# directly.  This is a cooperative system without hardware isolation
+# (docs/2026-10-02-QOS-AUDIT.md), and the contract says so.
+# ============================================================================
+
+AC = use "std/actor#06e72a5feec8a6d4".
+
+Sys.pidOf : Int -> Int .
+
+# the value both directions
+IoV = Type (IUnit | IInt Int | IStr String | IFn Int | IErr String).
+
+# the four, as an owner receives them inside (from, id, q)
+Ep = Type (Open url mode | Read h n | Write h v | Close h).
+
+# an owner's answer to Open
+OpenRep = Type (Opened h | Refused why | Redirect a).
+
+# what the namespace is asked
+Ns = Type (NsReg url owner | NsUnreg url | NsOpen url mode
+         | NsGrant pid grants | NsList prefix).
+
+# ---- strings ---------------------------------------------------------------
+
+and2 a b = case a of True -> b | False -> False.
+or2 a b = case a of True -> True | False -> b.
+
+strEq : unsafe String -> String -> Bool .
+strEq a b = case strlen a == strlen b of
+    False -> False
+  | True -> seGo a b 0 (strlen a).
+seGo : unsafe String -> String -> Int -> Int -> Bool .
+seGo a b i n = case i >= n of
+    True -> True
+  | False -> case charAt a i == charAt b i of
+      True -> seGo a b (i + 1) n
+    | False -> False.
+
+# '/'-boundary prefix: p covers u iff u == p, or u starts with p and the
+# next byte is '/'.  "/pins" covers "/pins/5/mode", not "/pinstripe".
+# "/" covers only "/" itself.
+prefixOf : unsafe String -> String -> Bool .
+prefixOf p u =
+  pn = strlen p;
+  case pn > strlen u of
+    True -> False
+  | False -> case peGo p u 0 pn of
+      False -> False
+    | True -> case strlen u == pn of
+        True -> True
+      | False -> charAt u pn == 47.
+peGo : unsafe String -> String -> Int -> Int -> Bool .
+peGo p u i n = case i >= n of
+    True -> True
+  | False -> case charAt p i == charAt u i of
+      True -> peGo p u (i + 1) n
+    | False -> False.
+
+# plain string prefix (a listing prefix ends in '/')
+startsWith : unsafe String -> String -> Bool .
+startsWith p u = case strlen p > strlen u of
+    True -> False
+  | False -> peGo p u 0 (strlen p).
+
+endsSlash u = case strlen u == 0 of
+    True -> False
+  | False -> charAt u (strlen u - 1) == 47.
+
+# the path segment starting at 0-based position start; "" when absent
+segAfter : unsafe String -> Int -> String .
+segAfter url start =
+  case start >= strlen url of True -> "" | False -> segTake url start (strlen url).
+segTake : unsafe String -> Int -> Int -> String .
+segTake url i n =
+  k = segSlash url i n;
+  case k < 0 of True -> substr url i (n - i) | False -> substr url i (k - i).
+segSlash : unsafe String -> Int -> Int -> Int .
+segSlash url i n = case i >= n of
+    True -> 0 - 1
+  | False -> case charAt url i == 47 of True -> i | False -> segSlash url (i + 1) n.
+
+parseNum : unsafe String -> Int .
+parseNum s = pnGo s 0 (strlen s) 0.
+pnGo : unsafe String -> Int -> Int -> Int -> Int .
+pnGo s i n acc = case i >= n of
+    True -> acc
+  | False -> pnGo s (i + 1) n (acc * 10 + (charAt s i - 48)).
+
+# mode "rw" covers both verbs
+modeOk : unsafe String -> String -> Bool .
+modeOk m want = or2 (strEq m want) (strEq m "rw").
+
+# is url covered by any granted (prefix, mode)?
+covered : unsafe List (String, String) -> String -> String -> Bool .
+covered g url want = case g of
+    Nil -> False
+  | p :: r -> case p of (u, m) ->
+      case and2 (prefixOf u url) (modeOk m want) of
+        True -> True
+      | False -> covered r url want.
+
+# ---- the namespace actor ---------------------------------------------------
+# State: the entries (url, owner) in registration order; the grants
+# (pid, [(url, mode)]); nothing else.  It holds no handles and relays no
+# traffic: after an open it is not in the conversation.
+
+NsSt = Type (NsSt ents grants).
+
+namespace : unsafe Int -> a .
+namespace me = nsLoop me (NsSt Nil Nil).
+nsLoop : unsafe Int -> NsSt -> a .
+nsLoop me st =
+  m = receive me;
+  (from, id, q) = m;
+  nsMsg me st (from, id) from q.
+nsMsg : unsafe Int -> NsSt -> (Int, Int) -> Int -> Ns -> a .
+nsMsg me st ret from q =
+  NsSt ents grants = st;
+  case q of
+    NsReg url owner -> nsReg me st ret from url owner
+  | NsUnreg url -> nsUnreg me st ret from url
+  | NsOpen url mode -> nsOpen me st ret from url mode
+  | NsGrant pid gs -> AC.reply ret (Ok 1) >> nsLoop me (NsSt ents ((pid, copyGrants gs) :: grants))
+  | NsList pre -> AC.reply ret (Ok (listing ents pre "")) >> nsLoop me st.
+
+# a service claims a url; an exact duplicate is refused.  owner 0 = the sender.
+nsReg : unsafe Int -> NsSt -> (Int, Int) -> Int -> String -> Int -> a .
+nsReg me st ret from url owner =
+  NsSt ents grants = st;
+  o = case owner == 0 of True -> from | False -> owner;
+  case ownerOf ents url == 0 of
+    False -> AC.reply ret (Err "taken: {url}") >> nsLoop me st
+  | True -> AC.reply ret (Ok 1) >> nsLoop me (NsSt (cat ents ((strcat url "", o) :: Nil)) grants).
+# only the owner may withdraw its url
+nsUnreg : unsafe Int -> NsSt -> (Int, Int) -> Int -> String -> a .
+nsUnreg me st ret from url =
+  NsSt ents grants = st;
+  case ownerOf ents url == from of
+    False -> AC.reply ret (Err "not the owner of {url}") >> nsLoop me st
+  | True -> AC.reply ret (Ok 1) >> nsLoop me (NsSt (without ents url) grants).
+
+# authorize by the CALLER's pid, resolve, forward the caller's envelope
+nsOpen : unsafe Int -> NsSt -> (Int, Int) -> Int -> String -> String -> a .
+nsOpen me st ret from url mode =
+  NsSt ents grants = st;
+  case allowed grants (Sys.pidOf from) url mode of
+    False -> AC.reply ret (Err "not granted: {url} ({mode})") >> nsLoop me st
+  | True -> nsOpen2 me st ret from url mode (resolve ents url).
+nsOpen2 : unsafe Int -> NsSt -> (Int, Int) -> Int -> String -> String -> Int -> a .
+nsOpen2 me st ret from url mode owner = case owner == 0 of
+    True -> AC.reply ret (Err "no such url: {url}") >> nsLoop me st
+  | False -> nsForward me st ret from url mode owner.
+nsForward : unsafe Int -> NsSt -> (Int, Int) -> Int -> String -> String -> Int -> a .
+nsForward me st ret from url mode owner =
+  id2 = Sys.nextId Unit;
+  case send owner (from, id2, Open url mode) of
+    Err e -> AC.reply ret (Err "{url}: its owner {e}") >> nsLoop me st
+  | Ok u -> AC.reply ret (Ok (owner, id2)) >> nsLoop me st.
+
+# the system (pid 0) may open anything; a process only what it was granted
+allowed : unsafe List (Int, List (String, String)) -> Int -> String -> String -> Bool .
+allowed grants pid url mode = case pid == 0 of
+    True -> True
+  | False -> covered (grantsOf grants pid) url mode.
+grantsOf : unsafe List (Int, List (String, String)) -> Int -> List (String, String) .
+grantsOf grants pid = case grants of
+    Nil -> Nil
+  | g :: r -> goStep r pid g.
+goStep : unsafe List (Int, List (String, String)) -> Int -> (Int, List (String, String)) -> List (String, String) .
+goStep r pid g = case g of (p, gs) ->
+  case p == pid of True -> gs | False -> grantsOf r pid.
+copyGrants : unsafe List (String, String) -> List (String, String) .
+copyGrants gs = case gs of
+    Nil -> Nil
+  | g :: r -> cgStep r g.
+cgStep : unsafe List (String, String) -> (String, String) -> List (String, String) .
+cgStep r g = case g of (u, m) -> (strcat u "", strcat m "") :: copyGrants r.
+
+# a url ending in '/' is a listing: the entry "/" serves it; anything else
+# goes to the longest '/'-boundary prefix registered.  0 = nobody.
+resolve : unsafe List (String, Int) -> String -> Int .
+resolve ents url = case endsSlash url of
+    True -> ownerOf ents "/"
+  | False -> longest ents url "" 0.
+longest : unsafe List (String, Int) -> String -> String -> Int -> Int .
+longest ents url best bo = case ents of
+    Nil -> bo
+  | e :: r -> loStep r url best bo e.
+loStep : unsafe List (String, Int) -> String -> String -> Int -> (String, Int) -> Int .
+loStep r url best bo e = case e of (u, o) ->
+  case and2 (prefixOf u url) (strlen u > strlen best) of
+    True -> longest r url u o
+  | False -> longest r url best bo.
+ownerOf : unsafe List (String, Int) -> String -> Int .
+ownerOf ents url = case ents of
+    Nil -> 0
+  | e :: r -> ooStep r url e.
+ooStep : unsafe List (String, Int) -> String -> (String, Int) -> Int .
+ooStep r url e = case e of (u, o) ->
+  case strEq u url of True -> o | False -> ownerOf r url.
+without : unsafe List (String, Int) -> String -> List (String, Int) .
+without ents url = case ents of
+    Nil -> Nil
+  | e :: r -> woStep r url e.
+woStep : unsafe List (String, Int) -> String -> (String, Int) -> List (String, Int) .
+woStep r url e = case e of (u, o) ->
+  case strEq u url of True -> without r url | False -> e :: without r url.
+cat : unsafe List a -> List a -> List a .
+cat l b = case l of Nil -> b | x :: r -> x :: cat r b.
+
+# the registered urls under a listing prefix, one per line ("/" lists all;
+# the lister's own "/" entry is not a resource)
+listing : unsafe List (String, Int) -> String -> String -> String .
+listing ents pre acc = case ents of
+    Nil -> acc
+  | e :: r -> liStep r pre acc e.
+liStep : unsafe List (String, Int) -> String -> String -> (String, Int) -> String .
+liStep r pre acc e = case e of (u, o) ->
+  case and2 (startsWith pre u) (strlen u > 1) of
+    True -> listing r pre (case strlen acc == 0 of True -> strcat u "" | False -> "{acc}\n{u}")
+  | False -> listing r pre acc.
+
+# ---- the lister: "/" ---------------------------------------------------------
+# A read of "<prefix>/" is the listing of what is registered under it.
+# Registered by whoever boots the namespace: register me ns "/" (spawn (lister ns)).
+
+lister : unsafe Int -> Int -> a .
+lister ns me = lsLoop ns me Nil 1.
+lsLoop : unsafe Int -> Int -> List (Int, String) -> Int -> a .
+lsLoop ns me hs next =
+  m = receive me;
+  (from, id, q) = m;
+  lsMsg ns me hs next (from, id) q.
+lsMsg : unsafe Int -> Int -> List (Int, String) -> Int -> (Int, Int) -> Ep -> a .
+lsMsg ns me hs next ret q = case q of
+    Open url mode -> lsOpen ns me hs next ret url
+  | Read h n -> AC.reply ret (lsRead ns me (hUrl hs h)) >> lsLoop ns me hs next
+  | Write h v -> AC.reply ret (Err "a listing is read-only") >> lsLoop ns me hs next
+  | Close h -> AC.reply ret (Ok 0) >> lsLoop ns me (hDrop hs h) next.
+lsOpen : unsafe Int -> Int -> List (Int, String) -> Int -> (Int, Int) -> String -> a .
+lsOpen ns me hs next ret url = case endsSlash url of
+    False -> AC.reply ret (Refused "not a listing: {url}") >> lsLoop ns me hs next
+  | True -> AC.reply ret (Opened next) >> lsLoop ns me ((next, strcat url "") :: hs) (next + 1).
+lsRead : Int -> Int -> String -> Result IoV String .
+lsRead ns me pre = case strlen pre == 0 of
+    True -> Err "no such handle"
+  | False -> (case AC.call me ns (NsList pre) of
+      Ok r -> (case r of Ok s -> Ok (IStr s) | Err e -> Err e)
+    | Err e -> Err "namespace: {e}").
+
+hUrl : unsafe List (Int, String) -> Int -> String .
+hUrl hs h = case hs of
+    Nil -> ""
+  | e :: r -> huStep r h e.
+huStep : unsafe List (Int, String) -> Int -> (Int, String) -> String .
+huStep r h e = case e of (k, u) -> case k == h of True -> u | False -> hUrl r h.
+hDrop : unsafe List (Int, String) -> Int -> List (Int, String) .
+hDrop hs h = case hs of
+    Nil -> Nil
+  | e :: r -> hdStep r h e.
+hdStep : unsafe List (Int, String) -> Int -> (Int, String) -> List (Int, String) .
+hdStep r h e = case e of (k, u) -> case k == h of True -> hDrop r h | False -> e :: hDrop r h.
+
+# ---- the client ----------------------------------------------------------------
+
+# a service claims its url (owner 0 = the caller itself)
+register : Int -> Int -> String -> Int -> Result Int String .
+register me ns url owner = flat (AC.call me ns (NsReg url owner)).
+unregister : Int -> Int -> String -> Result Int String .
+unregister me ns url = flat (AC.call me ns (NsUnreg url)).
+# the grants a process was launched with (the launcher's act, at launch)
+grant : Int -> Int -> Int -> List (String, String) -> Result Int String .
+grant me ns pid gs = flat (AC.call me ns (NsGrant pid gs)).
+
+# open: Ok (owner, h) -- the endpoint -- or why not
+open : unsafe Int -> Int -> String -> String -> Result (Int, Int) String .
+open me ns url mode = case AC.call me ns (NsOpen url mode) of
+    Err e -> Err "namespace: {e}"
+  | Ok r -> openRes me r.
+openRes : unsafe Int -> Result (Int, Int) String -> Result (Int, Int) String .
+openRes me r = case r of
+    Err e -> Err e
+  | Ok p -> openAt me p.
+openAt : unsafe Int -> (Int, Int) -> Result (Int, Int) String .
+openAt me p =
+  (owner, id2) = p;
+  openAwait me owner id2.
+# the owner's answer to the forwarded envelope: it may hand us on
+openAwait : unsafe Int -> Int -> Int -> Result (Int, Int) String .
+openAwait me owner id2 = case AC.awaitReply me owner id2 of
+    Err e -> Err "the owner {e} before answering open"
+  | Ok rep -> openRep me owner id2 rep.
+openRep : unsafe Int -> Int -> Int -> OpenRep -> Result (Int, Int) String .
+openRep me owner id2 rep = case rep of
+    Opened h -> Ok (owner, h)
+  | Refused why -> Err why
+  | Redirect a -> openAwait me a id2.
+
+read : Int -> (Int, Int) -> Int -> Result IoV String .
+read me ep n =
+  (owner, h) = ep;
+  flat (AC.call me owner (Read h n)).
+write : Int -> (Int, Int) -> IoV -> Result IoV String .
+write me ep v =
+  (owner, h) = ep;
+  flat (AC.call me owner (Write h v)).
+close : Int -> (Int, Int) -> Result Int String .
+close me ep =
+  (owner, h) = ep;
+  flat (AC.call me owner (Close h)).
+
+flat : Result (Result r String) String -> Result r String .
+flat r = case r of
+    Ok inner -> inner
+  | Err e -> Err "the owner {e}".
+
+# one-shot conveniences: open, one operation, close
+readOnce : unsafe Int -> Int -> String -> Result IoV String .
+readOnce me ns url = case open me ns url "read" of
+    Err e -> Err e
+  | Ok ep -> readClose me ep.
+readClose : Int -> (Int, Int) -> Result IoV String .
+readClose me ep =
+  r = read me ep 0;
+  _ = close me ep;
+  r.
+writeOnce : unsafe Int -> Int -> String -> IoV -> Result IoV String .
+writeOnce me ns url v = case open me ns url "write" of
+    Err e -> Err e
+  | Ok ep -> writeClose me ep v.
+writeClose : Int -> (Int, Int) -> IoV -> Result IoV String .
+writeClose me ep v =
+  r = write me ep v;
+  _ = close me ep;
+  r.
+
+# the text of a read: the bytes, or the reason
+text : Result IoV String -> String .
+text r = case r of
+    Ok v -> (case v of
+        IStr s -> s
+      | IInt n -> "{n}"
+      | IUnit -> ""
+      | IFn f -> "(a function)"
+      | IErr e -> e)
+  | Err e -> e.
+
+# ---- an owner with no state of its own ------------------------------------------
+# `simple rd wr`: every open is a handle bound to its url and its client;
+# Read h n answers rd me client url, Write h v answers wr me client url v.
+# Enough for a device register, a clock, a log, a listing of something.
+
+simple : unsafe _ -> _ -> Int -> a .
+simple rd wr me = sLoop rd wr me Nil 1.
+sLoop : unsafe _ -> _ -> Int -> List (Int, String, Int) -> Int -> a .
+sLoop rd wr me hs next =
+  m = receive me;
+  (from, id, q) = m;
+  sMsg rd wr me hs next (from, id) from q.
+sMsg : unsafe _ -> _ -> Int -> List (Int, String, Int) -> Int -> (Int, Int) -> Int -> Ep -> a .
+sMsg rd wr me hs next ret from q = case q of
+    Open url mode -> AC.reply ret (Opened next) >> sLoop rd wr me ((next, strcat url "", from) :: hs) (next + 1)
+  | Read h n -> AC.reply ret (sRead rd me (hFind hs h)) >> sLoop rd wr me hs next
+  | Write h v -> AC.reply ret (sWrite wr me (hFind hs h) v) >> sLoop rd wr me hs next
+  | Close h -> AC.reply ret (Ok 0) >> sLoop rd wr me (hRemove hs h) next.
+sRead : _ -> Int -> (String, Int) -> Result IoV String .
+sRead rd me b =
+  (url, client) = b;
+  case strlen url == 0 of
+    True -> Err "no such handle"
+  | False -> rd me client url.
+sWrite : _ -> Int -> (String, Int) -> IoV -> Result IoV String .
+sWrite wr me b v =
+  (url, client) = b;
+  case strlen url == 0 of
+    True -> Err "no such handle"
+  | False -> wr me client url v.
+# a read-only or write-only owner says so
+noRead me client url = Err "{url} is write-only".
+noWrite me client url v = Err "{url} is read-only".
+
+hFind : unsafe List (Int, String, Int) -> Int -> (String, Int) .
+hFind hs h = case hs of
+    Nil -> ("", 0)
+  | e :: r -> hfStep r h e.
+hfStep : unsafe List (Int, String, Int) -> Int -> (Int, String, Int) -> (String, Int) .
+hfStep r h e = case e of (k, u, c) -> case k == h of True -> (u, c) | False -> hFind r h.
+hRemove : unsafe List (Int, String, Int) -> Int -> List (Int, String, Int) .
+hRemove hs h = case hs of
+    Nil -> Nil
+  | e :: r -> hrStep r h e.
+hrStep : unsafe List (Int, String, Int) -> Int -> (Int, String, Int) -> List (Int, String, Int) .
+hrStep r h e = case e of (k, u, c) -> case k == h of True -> hRemove r h | False -> e :: hRemove r h.

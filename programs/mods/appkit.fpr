@@ -26,21 +26,16 @@
 
 # sev: 0 normal, 1 warn, 2 error -- the /logs/{normal,warns,errors} axis
 #
-# Read/VfsList are the ROOT NAMESPACE protocol.  There is no root
-# filesystem: the root is what the registry KNOWS -- a flat set of URL
-# paths, most naming virtual resources (a service, an actor inside
-# one, an app), a few naming stored bytes.  "Directories" are just
-# shared path prefixes, computed by whoever displays them.  Resolution
-# is a walk to the path's OWNER: the vfs actor forwards Read to it and
-# relays what comes back, so serving a path is a capability an actor
-# holds, never a table of file contents.
-# Write is the same walk as Read: the resolver hands it to the path's
-# OWNER, and what "writing" means is that actor's business -- for a
-# file it is a delta appended to the log and a cache updated; for
-# something else it could be an ordinary message.  The namespace is a
-# VIEW; writability is a property of the owner, not of the path.
-Ak = Type (LogAdd sev line | LogSnap sev | VfsList u | Read path
-         | Write path text).
+# The log capability is an actor handle apps are given; everything else
+# an app reaches is a URL, through the endpoint contract (mods/ep.fpr):
+# open at the namespace, read/write with the owner directly, close.  There
+# is no root filesystem: the namespace is what the services CLAIMED -- a
+# flat set of URL prefixes, most naming virtual resources (a service, an
+# app), a few naming stored bytes.  A "directory" is a read of a url
+# ending in '/': the listing of what is registered under it.  What a
+# write means is the owner's business -- for a file it is a delta
+# appended to the log; for a log it is one line.
+Ak = Type (LogAdd sev line | LogSnap sev).
 
 # ---- service call (one request, one reply) ---------------------------------
 # std/actor's correlated protocol, the one the shell's services answer --
@@ -48,6 +43,7 @@ Ak = Type (LogAdd sev line | LogSnap sev | VfsList u | Read path
 # refused or the service ended before answering; never an unrelated
 # message read as the reply.
 AC = use "std/actor".
+EP = use "ep".
 call : unsafe Int -> Int -> q -> Result r String .
 call me a q = AC.call me a q.
 
@@ -57,11 +53,11 @@ logAdd me log line = logRes (call me log (LogAdd 0 line)).
 logAddAt me log sev line = logRes (call me log (LogAdd sev line)).
 logRes r = case r of Ok n -> n | Err e -> 0 - 1.
 
-# env = (log, mt, (titles, vfs)): the log capability, the mtime handle,
+# env = (log, mt, (titles, ns)): the log capability, the mtime handle,
 # the launcher's app-title list (attach order == sub-slot order by
-# construction of apps-qa; the monitor leans on that), and the root
-# namespace resolver.  ALWAYS go through these accessors -- the shape
-# is packed to stay inside the tuple arities.
+# construction of apps-qa; the monitor leans on that), and the NAMESPACE
+# (the resolver every open goes to).  ALWAYS go through these accessors
+# -- the shape is packed to stay inside the tuple arities.
 envLog (log, mt, rest) = log.
 envMt (log, mt, rest) = mt.
 envTitles (log, mt, rest) =
@@ -71,19 +67,33 @@ envVfs (log, mt, rest) =
   (ts, vfs) = rest;
   vfs.
 
-# the root namespace, through the resolver capability
-# The namespace verbs answer in the text protocol's own terms: a vfs that
-# refused or ended is reported as text, the way "no such path" already
-# is, rather than as an empty answer.
-vfsList me vfs = case call me vfs (VfsList 0) of
-    Ok ents -> ents
-  | Err e -> ("(vfs unavailable: {e})", 1) :: Nil.
-vfsRead me vfs path = case call me vfs (Read path) of
-    Ok text -> text
-  | Err e -> "vfs unavailable: {e}".
-vfsWrite me vfs path text = case call me vfs (Write path text) of
-    Ok r -> r
-  | Err e -> "write failed: vfs unavailable: {e}".
+# the namespace, in the text protocol's own terms: a listing is a read of
+# "/" (every registered url, kind 0 -- the kinds went with the vfs table);
+# a read is one open/read/close; a write one open/write/close.  An owner
+# that refused or ended is reported as text, the way "no such url" is.
+vfsList : unsafe Int -> Int -> List (String, Int) .
+vfsList me ns = case EP.readOnce me ns "/" of
+    Ok v -> (case v of EP.IStr s -> withKind (lines s) | o -> ("(not a listing)", 0) :: Nil)
+  | Err e -> ("(namespace unavailable: {e})", 0) :: Nil.
+withKind : unsafe List String -> List (String, Int) .
+withKind l = case l of Nil -> Nil | u :: r -> (u, 0) :: withKind r.
+lines : unsafe String -> List String .
+lines s = lnGo s 0 0 Nil.
+lnGo : unsafe String -> Int -> Int -> List String -> List String .
+lnGo s i st acc = case i >= strlen s of
+    True -> lnRev (lnSeg s st i acc) Nil
+  | False -> (case charAt s i == 10 of
+      True -> lnGo s (i + 1) (i + 1) (lnSeg s st i acc)
+    | False -> lnGo s (i + 1) st acc).
+lnSeg s st i acc = case i > st of True -> substr s st (i - st) :: acc | False -> acc.
+lnRev : unsafe List a -> List a -> List a .
+lnRev l acc = case l of Nil -> acc | x :: r -> lnRev r (x :: acc).
+vfsRead : unsafe Int -> Int -> String -> String .
+vfsRead me ns path = EP.text (EP.readOnce me ns path).
+vfsWrite : unsafe Int -> Int -> String -> String -> String .
+vfsWrite me ns path text = case EP.writeOnce me ns path (EP.IStr text) of
+    Ok v -> (case v of EP.IInt n -> "wrote {n} bytes to {path}" | o -> "wrote to {path}")
+  | Err e -> e.
 
 # the plugin window: sub-slot attribution for entry-code addresses
 plugBase u = 17314086912.            # 0x408000000

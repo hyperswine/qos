@@ -143,7 +143,6 @@ viaOp me ep want v =
 # ---- the storage actor's own protocol ----------------------------------------
 # the actor-backed RPC: the send is checked and the wait answers (a dead
 # storage actor is Err); the reply is the storage actor's bare Result
-storeRpc caps tag url pay = storeRpcAt (capMe caps) (capSt caps) tag url pay.
 storeRpcAt me st tag url pay =
   case stHas st of
     True -> (case send (stAct st) (Rpc me tag url pay) of

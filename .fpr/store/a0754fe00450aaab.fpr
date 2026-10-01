@@ -64,7 +64,7 @@
 # ============================================================================
 
 # ---- format helpers over the shared pure core -------------------------------
-SVC = use "svc#cb230123cb8ab665".
+SVC = use "svc#cb1722278bece764".
 Core = use "coreutil#00b87d7442c69e95".
 Rpc = SVC.Rpc.
 

@@ -74,19 +74,22 @@ getcV me lsr dat v =
 # name, only the (hash, fn) identity -- the FPRLive wire shape.
 TimeFmt = use "mods/timefmt#39dff276efd647a1".
 SVCM    = use "mods/svc".
+EP      = use "mods/ep".
+SysEp   = use "mods/sysep".
+AC      = use "std/actor".
 QAR     = use "mods/qar".
 Manifest = use "mods/manifest".
 QaImg   = use "mods/qaimg".
 Caps    = SVCM.Caps.
 Rpc     = SVCM.Rpc.
 Svc  = SVCM.Svc.
-IoV  = SVCM.IoV.
-IUnit = SVCM.IUnit.
-IInt = SVCM.IInt.
-IStr = SVCM.IStr.
-IFn  = SVCM.IFn.
-IErr = SVCM.IErr.
-QLog    = use "mods/qlog#93fcbf4747b85fee".
+IoV  = EP.IoV.
+IUnit = EP.IUnit.
+IInt = EP.IInt.
+IStr = EP.IStr.
+IFn  = EP.IFn.
+IErr = EP.IErr.
+QLog    = use "mods/qlog#25f2d194977c496c".
 UartM   = use "mods/uart".
 TimerM  = use "mods/timer".
 MK      = use "mods/matrixkpd".
@@ -951,7 +954,7 @@ cfgGo lns key =
 # 2. read config -> startup app id
 # 3. launch it through the SAME permission flow every app goes through
 #    (the launcher is not privileged; it asks for its perms like anyone)
-# (main's unsafe marker was stale -- rule 3: the analysis finds it safe)
+main : unsafe Unit .
 main =
   me = myself 0;
   u = device "uart";
@@ -968,9 +971,14 @@ main =
   dsk = device "blk";
   usvc = spawnUart me;
   tsvc = spawnTimer Unit;
+  # the namespace: every url System.qa serves is claimed by its owner at
+  # boot (mods/sysep.fpr); a listing is a read of "<prefix>/" (the lister)
+  ns = AC.spawnWith (AC.Dynamic 64) EP.namespace;
+  _ = claimRoot me ns (AC.spawnWith (AC.Dynamic 64) (EP.lister ns));
   st = case blkPages dsk == 0 of
-         True  -> { has = False, act = 0, uart = usvc, timer = tsvc }
-       | False -> { has = True, act = spawnStore dsk, uart = usvc, timer = tsvc };
+         True  -> { has = False, act = 0, uart = usvc, timer = tsvc, ns = ns }
+       | False -> { has = True, act = spawnStore dsk, uart = usvc, timer = tsvc, ns = ns };
+  _ = SysEp.boot me ns con clk usvc tsvc st;
   io = Io4 con me clk st;
   _ = bootBeat io con;
   startup = configGet systemConfig "startup";
@@ -1016,10 +1024,16 @@ uartAwait me a = case receiveFromRes me a of
 # this one actor (the deadline interrupt itself is serviced by the
 # IRQ HART -- the last live hart, auxiliary by design); spawn it
 # THERE so the fire messages start life on the hart that drains them.
+spawnTimer : Unit -> Int .
 spawnTimer u =
   case Sys.harts Unit > 1 of
     True -> spawnOn (Sys.harts Unit - 1) TimerM.actor
   | False -> spawn TimerM.actor.
+
+claimRoot : Int -> Int -> Int -> Unit .
+claimRoot me ns lst = case EP.register me ns "/" lst of
+    Ok n -> Unit
+  | Err e -> error "system: could not claim / ({e})".
 
 spawnStore dsk =
   a = case Sys.harts Unit > 1 of

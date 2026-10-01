@@ -1,0 +1,182 @@
+# epecho.fpr -- the endpoint contract (mods/ep.fpr), end to end, with a
+# service nobody wrote System or QSys code for: `echo` claims
+# /services/echo with one NsReg, and from then on it is a URL like any
+# other.  The proof the audit asked for (docs/2026-10-02-QOS-AUDIT.md,
+# convergence item 3): a new service, a new URL, no central edit.
+#
+#   1. open /services/echo, write "ping", read it back, close -- every
+#      step after open goes to the echo actor directly
+#   2. a read of "/services/" (a listing: a READ of a namespace url, not
+#      a verb) names /services/echo among the registered urls
+#   3. an unregistered url is refused by name; a url whose owner has
+#      ended is refused by name; a second claim of a taken url is refused
+#   4. a Close answers a Read the owner was holding: Err "closed"
+#   5. a process without a grant for a url is refused; one with it is
+#      let through (a child under a fresh pid, granted by the launcher)
+#
+#   ./qos.py run tests/epecho.fpr
+#: expect epecho: HOLDS
+
+unsafe program.
+
+EP = use "../programs/mods/ep".
+AC = use "std/actor".
+
+Open = EP.Open. Read = EP.Read. Write = EP.Write. Close = EP.Close.
+Opened = EP.Opened. Refused = EP.Refused.
+IStr = EP.IStr. IInt = EP.IInt.
+
+# ---- the new service: an echo with one line of state per handle --------------
+# A Read with nothing written yet is HELD until a Write arrives or the
+# handle is closed (the contract's cancellation): one pending reader.
+
+echo : unsafe Int -> a .
+echo me = eLoop me Nil 1 (0, 0, 0).
+# hs: (h, last); pend: (from, id, h) of a held read, h 0 = none
+eLoop : unsafe Int -> List (Int, String) -> Int -> (Int, Int, Int) -> a .
+eLoop me hs next pend =
+  m = receive me;
+  (from, id, q) = m;
+  eMsg me hs next pend (from, id) q.
+eMsg : unsafe Int -> List (Int, String) -> Int -> (Int, Int, Int) -> (Int, Int) -> EP.Ep -> a .
+eMsg me hs next pend ret q = case q of
+    Open url mode -> AC.reply ret (Opened next) >> eLoop me ((next, "") :: hs) (next + 1) pend
+  | Write h v -> eWrite me hs next pend ret h v
+  | Read h n -> eRead me hs next pend ret h
+  | Close h -> eClose me hs next pend ret h.
+eWrite : unsafe Int -> List (Int, String) -> Int -> (Int, Int, Int) -> (Int, Int) -> Int -> EP.IoV -> a .
+eWrite me hs next pend ret h v = case v of
+    IStr s -> eStore me hs next pend ret h (strcat s "")
+  | o -> AC.reply ret (Err "echo wants IStr") >> eLoop me hs next pend.
+eStore : unsafe Int -> List (Int, String) -> Int -> (Int, Int, Int) -> (Int, Int) -> Int -> String -> a .
+eStore me hs next pend ret h s =
+  hs2 = eSet hs h s;
+  _ = AC.reply ret (Ok (IInt (strlen s)));
+  (pf, pi, ph) = pend;
+  case ph == h of
+    True -> AC.reply (pf, pi) (Ok (IStr s)) >> eLoop me hs2 next (0, 0, 0)
+  | False -> eLoop me hs2 next pend.
+eRead : unsafe Int -> List (Int, String) -> Int -> (Int, Int, Int) -> (Int, Int) -> Int -> a .
+eRead me hs next pend ret h =
+  s = eGet hs h;
+  (rf, ri) = ret;
+  case strlen s == 0 of
+    True -> eLoop me hs next (rf, ri, h)          # held until a write or close
+  | False -> AC.reply ret (Ok (IStr s)) >> eLoop me hs next pend.
+eClose : unsafe Int -> List (Int, String) -> Int -> (Int, Int, Int) -> (Int, Int) -> Int -> a .
+eClose me hs next pend ret h =
+  (pf, pi, ph) = pend;
+  _ = case ph == h of
+      True -> AC.reply (pf, pi) (Err "closed")
+    | False -> Ok Unit;
+  _ = AC.reply ret (Ok 0);
+  eLoop me (eDrop hs h) next (case ph == h of True -> (0, 0, 0) | False -> pend).
+
+eSet : unsafe List (Int, String) -> Int -> String -> List (Int, String) .
+eSet hs h s = case hs of
+    Nil -> Nil
+  | e :: r -> esStep r h s e.
+esStep : unsafe List (Int, String) -> Int -> String -> (Int, String) -> List (Int, String) .
+esStep r h s e = case e of (k, old) -> case k == h of True -> (k, s) :: r | False -> e :: eSet r h s.
+eGet : unsafe List (Int, String) -> Int -> String .
+eGet hs h = case hs of
+    Nil -> ""
+  | e :: r -> egStep r h e.
+egStep : unsafe List (Int, String) -> Int -> (Int, String) -> String .
+egStep r h e = case e of (k, s) -> case k == h of True -> s | False -> eGet r h.
+eDrop : unsafe List (Int, String) -> Int -> List (Int, String) .
+eDrop hs h = case hs of
+    Nil -> Nil
+  | e :: r -> edStep r h e.
+edStep : unsafe List (Int, String) -> Int -> (Int, String) -> List (Int, String) .
+edStep r h e = case e of (k, s) -> case k == h of True -> eDrop r h | False -> e :: eDrop r h.
+
+# ---- the test ------------------------------------------------------------------
+
+expect : String -> String -> String -> Bool .
+expect what got want = case EP.strEq got want of
+    True -> True
+  | False -> _ = print "epecho: {what}: got [{got}] wanted [{want}]"; False.
+
+# a reader that opens, reads (held), and reports what it got
+reader : unsafe Int -> Int -> Int -> Unit .
+reader ns back me =
+  case EP.open me ns "/services/echo" "read" of
+    Err e -> send back (0, "open: {e}") >> Unit
+  | Ok ep -> readerGo ns back me ep.
+readerGo : unsafe Int -> Int -> Int -> (Int, Int) -> Unit .
+readerGo ns back me ep =
+  (owner, h) = ep;
+  _ = send back (h, "opened");
+  r = EP.read me ep 0;
+  _ = send back (h, EP.text r);
+  Unit.
+
+# a child under its own pid: may it open the url?
+child : unsafe Int -> String -> Int -> Int -> Int .
+child ns url back me =
+  r = EP.open me ns url "read";
+  got = case r of Ok ep -> "opened" | Err e -> e;
+  _ = send back got;
+  0.
+
+contains : unsafe String -> String -> Bool .
+contains s sub = coGo s sub 0.
+coGo : unsafe String -> String -> Int -> Bool .
+coGo s sub i = case i + strlen sub > strlen s of
+    True -> False
+  | False -> case EP.strEq (substr s i (strlen sub)) sub of
+      True -> True
+    | False -> coGo s sub (i + 1).
+
+main =
+  me = myself 0;
+  ns = AC.spawnWith (AC.Dynamic 64) EP.namespace;
+  lst = AC.spawnWith (AC.Dynamic 64) (EP.lister ns);
+  _ = EP.register me ns "/" lst;
+  # 1. the new service claims its url and is used through the four
+  svc = AC.spawnWith (AC.Dynamic 64) echo;
+  reg = EP.register me ns "/services/echo" svc;
+  ok0 = expect "register" "{reg}" "Ok 1";
+  ep = case EP.open me ns "/services/echo" "rw" of
+      Ok e -> e
+    | Err e -> error "epecho: open: {e}";
+  (owner, h) = ep;
+  ok1 = expect "owner is the echo actor" "{owner == svc}" "True";
+  w = EP.write me ep (IStr "ping");
+  r = EP.read me ep 0;
+  c = EP.close me ep;
+  ok2 = expect "write" "{w}" "Ok (IInt 4)" and expect "read" (EP.text r) "ping" and expect "close" "{c}" "Ok 0";
+  # 2. the listing is a read of "/services/"
+  ls = EP.text (EP.readOnce me ns "/services/");
+  ok3 = expect "listing names the service" "{contains ls "/services/echo"}" "True";
+  # 3. refusals by name
+  no = case EP.open me ns "/services/nothing" "read" of Ok e -> "opened" | Err e -> e;
+  dup = case EP.register me ns "/services/echo" me of Ok n -> "ok" | Err e -> e;
+  ok4 = expect "unknown url" no "no such url: /services/nothing"
+    and expect "taken url" dup "taken: /services/echo";
+  # 4. a close answers the held read
+  rd = spawn (reader ns me);
+  (h2, st1) = receive me;
+  _ = Sys.sleepUs 20000;                    # the reader is parked in its read
+  ep2 = case EP.open me ns "/services/echo" "rw" of Ok e -> e | Err e -> error "epecho: open2: {e}";
+  _ = EP.close me (svc, h2);                # close the READER's handle
+  (h3, st2) = receive me;
+  ok5 = expect "reader opened" st1 "opened" and expect "held read answered by close" st2 "closed";
+  _ = EP.close me ep2;
+  # 5. grants: a child without one is refused; granted, it opens
+  c1 = Sys.spawnApp (child ns "/services/echo" me);
+  g1 = receive me;
+  c2 = Sys.spawnApp (child ns "/services/echo" me);
+  _ = EP.grant me ns (Sys.pidOf c2) (("/services/echo", "read") :: Nil);
+  g2 = receive me;
+  ok6 = expect "ungranted child" g1 "not granted: /services/echo (read)"
+    and expect "granted child" g2 "opened";
+  # 3b. a dead owner
+  _ = kill svc;
+  _ = Sys.sleepUs 20000;
+  dead = case EP.open me ns "/services/echo" "read" of Ok e -> "opened" | Err e -> e;
+  ok7 = expect "dead owner" dead "/services/echo: its owner dead actor";
+  case ok0 and ok1 and ok2 and ok3 and ok4 and ok5 and ok6 and ok7 of
+    True -> "epecho: HOLDS"
+  | False -> "epecho: FAILED".
