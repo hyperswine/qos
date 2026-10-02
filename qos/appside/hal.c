@@ -275,6 +275,11 @@ static void need_gfx(void) {
   if (!qos_hal->gfx_init)
     fpr_cpanic("gfx: capability not granted by this host (build qosp with GFX=1)");
 }
+/* glHas 0 -> Int: 1 when this host grants the gfx tier, 0 when not -- so a
+ * system service can decline to claim /services/graphics instead of
+ * panicking on its first frame */
+static V h_glHas(V d) { (void)d; return TAG(qos_hal->gfx_init ? 1 : 0); }
+FPR_FN(fpr_g_glHas, h_glHas, 1);
 static V h_glInit_ret(void) {
   int w = 0, h = 0;
   if (qos_hal->gfx_dims) qos_hal->gfx_dims(&w, &h);

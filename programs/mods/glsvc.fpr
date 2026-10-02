@@ -1,20 +1,24 @@
-# glsvc.fpr -- the GPU tier as an MVU render service.
+# glsvc.fpr -- the GPU tier as Graphics.qa's backend, and `serve`: one
+# program alone with the display, as before.
 #
-# std.MVU draws through ANY actor that answers the Rv protocol (Dims /
-# Render / Poll).  This module is that actor for the GLES scene walker
-# (hal/unix/gfx.c): glInit once, one glRender per frame, inputPoll for
-# the drain.  It is the piece interactive_desktop_gl.fpr hand-rolls as
-# its frameWorker, lifted so a game is the elm four (MVU.game) and
-# nothing else:
+# The service is mods/graphics.fpr: sessions, focus, input routing, the
+# lifetimes.  This module is what it draws WITH: the GLES scene walker
+# (hal/unix/gfx.c) as the backend record -- glInit once, one glRender per
+# frame, inputPoll for the drain, glMesh for program-carried geometry,
+# glSavePpm for a snapshot.  The context is thread-bound and the service
+# actor is its only caller: the backend is functions, not an actor, so the
+# scene is walked from the frame message itself, no copy.
 #
-#   gl = spawn (GL.serve 960 600);
+# A program that is alone (a test under Xvfb, a standalone game):
+#
+#   gl = spawn (GL.serve 960 600 "terra2" models);
 #   cfg = { env = 0, mt = mt, tick = 160000, input = gl, render = gl };
 #   MV.game me cfg (App init update subs view)
 #
-# The GL context is thread-bound; gfx.c rebinds on migration, and
-# this ONE actor is the only caller, so the mailbox is the
-# serialization.  Init happens lazily on the first request, in this
-# actor, so the context belongs to the thread that will draw.
+# is a private Graphics.qa with this backend, and the program its one
+# session, admitted on its first frame.  Under a system that claims
+# /services/graphics the same program opens a session there instead
+# (GX.attach) and shares the display with the others.
 #
 # view's value is (scene, ui, snap): the Scene the walker draws; a 2D
 # layer over it as (ents, dist) -- scene2d's entities in its pixel space
@@ -26,76 +30,19 @@
 
 unsafe module.
 
-MV = use "std/mvu".
+GX = use "graphics".
 
-Rv = MV.Rv.
-Render = MV.Render.
-Dims = MV.Dims.
-Poll = MV.Poll.
-
-# serve w h tag meshes: meshes = (name, text) pairs (tools/mkmesh.py's
-# `meshes`), registered right after glInit -- the context is thread-bound,
-# so the geometry a program carries must be handed over from THIS actor.
-# serveWith is the same service without meshes.
-
-serve : unsafe Int -> Int -> String -> List (String, String) -> Int -> a .
-serve w h tag meshes me = loop w h tag meshes 0 0 me.
-serveWith : unsafe Int -> Int -> String -> Int -> a .
-serveWith w h tag me = loop w h tag Nil 0 0 me.
-
-loop : unsafe Int -> Int -> String -> List (String, String) -> Int -> Int -> Int -> a .
-loop w h tag meshes inited last me =
-  m = receive me;
-  (replyTo, q) = m;
-  r = handle w h tag meshes inited last replyTo q;
-  _ = drop m;
-  (i2, l2) = r;
-  loop w h tag meshes i2 l2 me.
-
-handle : unsafe Int -> Int -> String -> List (String, String) -> Int -> Int -> Int -> Rv -> (Int, Int) .
-handle w h tag meshes inited last replyTo q = case q of
-    Dims u -> dims w h tag meshes inited last replyTo
-  | Render st vs sc fr -> frame w h tag meshes inited last replyTo vs
-  | Poll u -> poll w h meshes inited last replyTo.
-
-ensure w h meshes inited | inited != 0 = inited.
-ensure w h meshes inited =
-  _ = glInit w h;
-  _ = register meshes;
-  1.
-register : unsafe List (String, String) -> Int .
-register ms = case ms of
-    Nil -> 0
-  | (name, text) :: r -> _ = glMesh name text; register r.
-
-dims w h tag meshes inited last replyTo =
-  i = ensure w h meshes inited;
-  _ = send replyTo (w, h);
-  (i, last).
-
-poll w h meshes inited last replyTo =
-  i = ensure w h meshes inited;
-  ev = inputPoll 0;
-  _ = send replyTo ev;
-  _ = drop ev;
-  (i, last).
-
-frame w h tag meshes inited last replyTo vs =
-  i = ensure w h meshes inited;
-  (scene, ui, snap) = vs;
-  (ents, dist) = ui;
-  r = case dist == 0 of
+# the backend: the walker's primitives, in the shape graphics.fpr draws with
+glBackend = { init = glInit, mesh = glMesh, render = glRenderWith, poll = glPoll, snap = glSavePpm }.
+glRenderWith : unsafe _ -> _ -> Int -> (Int, Int) .
+glRenderWith scene ents dist = case dist == 0 of
     True -> glRender scene
-  | False -> glRenderUi scene ents dist;
-  (draws, bytes) = r;
-  _ = drop r;
-  l2 = shot tag last snap;
-  _ = send replyTo (draws, bytes);
-  (i, l2).
+  | False -> glRenderUi scene ents dist.
+glPoll u = inputPoll 0.
 
-shot tag last snap | snap == last = last.
-shot tag last snap | snap == 0 = last.
-shot tag last snap =
-  rc = glSavePpm "/tmp/{tag}-{snap}.ppm";
-  _ = Sys.logAt 0 "[{tag}] snapshot {snap} -> /tmp/{tag}-{snap}.ppm rc={rc}";
-  snap.
+# serve w h tag meshes: a private service, this program its one session
+# (tagged for its snapshots).  serveWith is the same without meshes.
+serve : unsafe Int -> Int -> String -> List (String, String) -> Int -> a .
+serve w h tag meshes me = GX.serviceAs w h glBackend meshes tag me.
+serveWith : unsafe Int -> Int -> String -> Int -> a .
+serveWith w h tag me = GX.serviceAs w h glBackend Nil tag me.

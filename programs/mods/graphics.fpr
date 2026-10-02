@@ -1,0 +1,401 @@
+# ============================================================================
+# graphics.fpr -- Graphics.qa: the ONE owner of the display.
+#
+# The GPU tier (hal/unix/gfx.c) is one thread-bound context, one window,
+# one FBO.  Until 2026-10-02 every graphical program spawned its own GL
+# actor over that one context (mods/glsvc.fpr), so two of them could not
+# share a machine.  This service owns it: programs open SESSIONS, the
+# FOCUSED session's frames are drawn and its polls get the input, the
+# others keep running and are told (0, 0) -- a frame they did not pay for
+# -- until focus comes to them.  Closing a session, or dying, frees it;
+# a new open is a new session; the service never stops.
+#
+# Two protocols meet in one actor:
+#
+#   the endpoint contract (mods/ep.fpr), through the namespace:
+#     open  /services/graphics/<tag>     a session for the caller, tagged
+#     write <session> (IStr "<name>\n<mesh text>")   a program-carried mesh
+#     read  <session>                    "<w>x<h>"
+#     open  /services/graphics/focus     the control handle
+#     write <control> (IStr "<tag>")     focus that session
+#     read  <control>                    one line per session: "<h> <tag>[ *]"
+#     close                              the session is gone (focus moves on)
+#
+#   std.MVU's render/input protocol (Rv), spoken by a session's program
+#   straight to this actor (its handle's owner):
+#     Dims u                -> (w, h)
+#     Render st vs sc fr    -> (draws, bytes)   drawn when focused, else (0, 0)
+#     Poll u                -> (kind, a, b)     the input when focused, else none
+#   A program that speaks Rv without an open is admitted as a session of
+#   its own ("app<h>"): mods/glsvc.fpr's `serve` is that, one program
+#   alone, exactly as before.
+#
+# F1 (evdev 59) cycles focus; the service swallows it.  A focused program
+# that has died is noticed on the next frame anyone sends (Sys.alive) and
+# the focus moves on, so a dead program never holds the display.
+#
+# THE BACKEND is a record of functions, not an actor: the scene a program
+# renders is walked from the frame message itself, no copy, in this
+# actor -- the thread-bound context's one caller.  mods/glsvc.fpr supplies
+# the GL one; a test supplies a stub that reports what was drawn.
+#   { init  : w h -> (w, h)
+#     mesh  : name text -> triangles
+#     render: scene ents dist -> (draws, bytes)
+#     poll  : u -> (kind, a, b)
+#     snap  : path -> rc }
+# ============================================================================
+
+unsafe module.
+
+EP = use "ep".
+AC = use "std/actor#06e72a5feec8a6d4".
+MV = use "std/mvu".
+
+Sys.alive : Int -> Bool .
+glHas : Int -> Int .
+
+Open = EP.Open. Read = EP.Read. Write = EP.Write. Close = EP.Close.
+Opened = EP.Opened. Refused = EP.Refused.
+IStr = EP.IStr. IInt = EP.IInt. IUnit = EP.IUnit.
+Render = MV.Render. Dims = MV.Dims. Poll = MV.Poll.
+
+focusKey = 59.   # evdev F1
+
+# a session: the PROGRAM (its pid: every actor of it speaks for it, the
+# MVU frame worker included), its handle, its tag, its last snapshot, and
+# the actor that opened it (or spoke first) -- whose end is the session's
+Ses = Type (Ses pid h tag snap owner).
+# the service: dims, the backend, sessions (newest first), the focused
+# handle (0 = none), the next handle, inited, control handles, meshes to
+# register once the context exists
+Gs = Type (Gs w h be ses focus next inited ctl meshes).
+
+# ---- the service ----------------------------------------------------------
+# w h: the window (0 0 = the display's); meshes: (name, text) pairs
+# registered right after init -- the geometry a program carries (mkmesh)
+service : unsafe Int -> Int -> _ -> List (String, String) -> Int -> a .
+service w h be meshes me = loop me (Gs w h be Nil 0 1 0 Nil meshes).
+# the same, with a tag waiting for the first program admitted on its frames
+# (mods/glsvc.fpr's `serve`: one program alone, its snapshots named)
+serviceAs : unsafe Int -> Int -> _ -> List (String, String) -> String -> Int -> a .
+serviceAs w h be meshes tag me = loop me (Gs w h be (Ses (0 - 1) 0 (strcat tag "") 0 0 :: Nil) 0 1 0 Nil meshes).
+
+loop : unsafe Int -> Gs -> a .
+loop me st =
+  m = receive me;
+  case m of
+    (from, id, q) -> epMsg me st (from, id) from q
+  | rv -> rvMsg me st rv.
+
+# ---- the endpoint side ---------------------------------------------------------
+epMsg : unsafe Int -> Gs -> (Int, Int) -> Int -> EP.Ep -> a .
+epMsg me st ret from q = case q of
+    Open url mode -> epOpen me st ret from (EP.segAfter url 19)
+  | Read h n -> AC.reply ret (epRead st h) >> loop me st
+  | Write h v -> epWrite me st ret h v
+  | Close h -> epClose me st ret h.
+
+epOpen : unsafe Int -> Gs -> (Int, Int) -> Int -> String -> a .
+epOpen me st ret from tag =
+  Gs w h be ses focus next inited ctl meshes = st;
+  case EP.strEq tag "focus" of
+    True -> AC.reply ret (Opened next) >> loop me (Gs w h be ses focus (next + 1) inited (next :: ctl) meshes)
+  | False -> admit me st ret from tag.
+# a new session; the first one is focused
+admit : unsafe Int -> Gs -> (Int, Int) -> Int -> String -> a .
+admit me st ret from tag =
+  Gs w h be ses focus next inited ctl meshes = st;
+  t = case strlen tag == 0 of True -> "app{next}" | False -> strcat tag "";
+  f2 = case focus == 0 of True -> next | False -> focus;
+  _ = AC.reply ret (Opened next);
+  loop me (Gs w h be (Ses (Sys.pidOf from) next t 0 from :: ses) f2 (next + 1) inited ctl meshes).
+
+epRead : unsafe Gs -> Int -> Result EP.IoV String .
+epRead st h =
+  Gs w hh be ses focus next inited ctl meshes = st;
+  case isCtl ctl h of
+    True -> Ok (IStr (listing ses focus ""))
+  | False -> (case hasH ses h of
+      True -> Ok (IStr "{w}x{hh}")
+    | False -> Err "no such handle").
+
+listing : unsafe List Ses -> Int -> String -> String .
+listing ses focus acc = case ses of
+    Nil -> acc
+  | s :: r -> liStep r focus acc s.
+liStep : unsafe List Ses -> Int -> String -> Ses -> String .
+liStep r focus acc s = case s of Ses pd h t sn ow ->
+  line = "{h} {t}{case h == focus of True -> " *" | False -> ""}";
+  listing r focus (case strlen acc == 0 of True -> line | False -> "{line}\n{acc}").
+
+epWrite : unsafe Int -> Gs -> (Int, Int) -> Int -> EP.IoV -> a .
+epWrite me st ret h v =
+  Gs w hh be ses focus next inited ctl meshes = st;
+  case isCtl ctl h of
+    True -> ctlWrite me st ret v
+  | False -> (case hasH ses h of
+      True -> meshWrite me st ret v
+    | False -> AC.reply ret (Err "no such handle") >> loop me st).
+# the control handle: focus by tag
+ctlWrite : unsafe Int -> Gs -> (Int, Int) -> EP.IoV -> a .
+ctlWrite me st ret v =
+  Gs w hh be ses focus next inited ctl meshes = st;
+  case v of
+    IStr tag -> (case hByTag ses tag of
+        0 -> AC.reply ret (Err "no session tagged {tag}") >> loop me st
+      | h -> AC.reply ret (Ok IUnit) >> loop me (Gs w hh be ses h next inited ctl meshes))
+  | o -> AC.reply ret (Err "focus wants IStr <tag>") >> loop me st.
+# a program's mesh: "<name>\n<text>", registered now or once the context exists
+meshWrite : unsafe Int -> Gs -> (Int, Int) -> EP.IoV -> a .
+meshWrite me st ret v =
+  Gs w hh be ses focus next inited ctl meshes = st;
+  case v of
+    IStr s -> meshAdd me st ret (splitName s)
+  | o -> AC.reply ret (Err "a session takes IStr \"<name>\\n<mesh text>\"") >> loop me st.
+meshAdd : unsafe Int -> Gs -> (Int, Int) -> (String, String) -> a .
+meshAdd me st ret nt =
+  Gs w hh be ses focus next inited ctl meshes = st;
+  (name, text) = nt;
+  case inited == 0 of
+    True -> AC.reply ret (Ok (IInt 0)) >> loop me (Gs w hh be ses focus next inited ctl ((strcat name "", strcat text "") :: meshes))
+  | False -> AC.reply ret (Ok (IInt (be.mesh name text))) >> loop me st.
+splitName : unsafe String -> (String, String) .
+splitName s = snGo s 0.
+snGo : unsafe String -> Int -> (String, String) .
+snGo s i = case i >= strlen s of
+    True -> (s, "")
+  | False -> (case charAt s i == 10 of
+      True -> (substr s 0 i, substr s (i + 1) (strlen s - i - 1))
+    | False -> snGo s (i + 1)).
+
+epClose : unsafe Int -> Gs -> (Int, Int) -> Int -> a .
+epClose me st ret h =
+  _ = AC.reply ret (Ok 0);
+  loop me (dropH st h).
+
+# ---- the frame side (std.MVU's Rv) ----------------------------------------------
+rvMsg : unsafe Int -> Gs -> (Int, MV.Rv) -> a .
+rvMsg me st rv =
+  (replyTo, q) = rv;
+  st2 = admitted st replyTo;
+  st3 = aliveFocus st2 replyTo;
+  Gs w h be ses focus next inited ctl meshes = st3;
+  case q of
+    Dims u -> dims me st3 replyTo
+  | Render s vs sc fr -> frame me st3 replyTo vs
+  | Poll u -> poll me st3 replyTo.
+
+# a program that speaks Rv without an open is a session of its own
+admitted : unsafe Gs -> Int -> Gs .
+admitted st c =
+  Gs w h be ses focus next inited ctl meshes = st;
+  case hByClient ses c == 0 of
+    False -> st
+  | True ->
+      (t, ses2) = takeTag ses next;
+      Gs w h be (Ses (Sys.pidOf c) next t 0 c :: ses2) (case focus == 0 of True -> next | False -> focus) (next + 1) inited ctl meshes.
+# a waiting tag (a placeholder session with client 0) names the admitted
+# program; otherwise it is "app<h>"
+takeTag : unsafe List Ses -> Int -> (String, List Ses) .
+takeTag ses h = case ses of
+    Nil -> ("app{h}", Nil)
+  | s :: r -> ttStep r h s.
+ttStep : unsafe List Ses -> Int -> Ses -> (String, List Ses) .
+ttStep r h s = case s of Ses pd hh t sn ow ->
+  case pd == 0 - 1 of
+    True -> (t, r)
+  | False ->
+      (t2, r2) = takeTag r h;
+      (t2, s :: r2).
+# a focused program that has died holds nothing: the next frame from
+# anyone moves the focus on
+aliveFocus : unsafe Gs -> Int -> Gs .
+aliveFocus st c =
+  Gs w h be ses focus next inited ctl meshes = st;
+  fc = ownerOf ses focus;
+  case or2 (fc == 0) (Sys.alive fc) of
+    True -> st
+  | False -> nextFocus (dropH st focus).
+or2 a b = case a of True -> True | False -> b.
+
+dims : unsafe Int -> Gs -> Int -> a .
+dims me st replyTo =
+  st2 = ensure st;
+  Gs w h be ses focus next inited ctl meshes = st2;
+  answer me st2 replyTo (w, h).
+ensure : unsafe Gs -> Gs .
+ensure st =
+  Gs w h be ses focus next inited ctl meshes = st;
+  case inited == 1 of
+    True -> st
+  | False ->
+      (w2, h2) = be.init w h;
+      _ = regMeshes be meshes;
+      Gs w2 h2 be ses focus next 1 ctl Nil.
+regMeshes : unsafe _ -> List (String, String) -> Unit .
+regMeshes be ms = case ms of
+    Nil -> Unit
+  | nt :: r -> rmStep be r nt.
+rmStep : unsafe _ -> List (String, String) -> (String, String) -> Unit .
+rmStep be r nt =
+  (name, text) = nt;
+  _ = be.mesh name text;
+  regMeshes be r.
+
+frame : unsafe Int -> Gs -> Int -> _ -> a .
+frame me st replyTo vs =
+  st2 = ensure st;
+  Gs w h be ses focus next inited ctl meshes = st2;
+  case hByClient ses replyTo == focus of
+    False -> answer me st2 replyTo (0, 0)
+  | True -> draw me st2 replyTo vs.
+draw : unsafe Int -> Gs -> Int -> _ -> a .
+draw me st replyTo vs =
+  Gs w h be ses focus next inited ctl meshes = st;
+  (scene, ui, snap) = vs;
+  (ents, dist) = ui;
+  r = be.render scene ents dist;
+  st2 = shot st focus snap;
+  answer me st2 replyTo r.
+# a changed snapshot counter: the frame just drawn goes to /tmp/<tag>-<snap>.ppm
+shot : unsafe Gs -> Int -> Int -> Gs .
+shot st h snap =
+  Gs w hh be ses focus next inited ctl meshes = st;
+  case or2 (snap == 0) (snap == snapOf ses h) of
+    True -> st
+  | False ->
+      tag = tagOf ses h;
+      rc = be.snap "/tmp/{tag}-{snap}.ppm";
+      _ = Sys.logAt 0 "[{tag}] snapshot {snap} -> /tmp/{tag}-{snap}.ppm rc={rc}";
+      Gs w hh be (setSnap ses h snap) focus next inited ctl meshes.
+
+poll : unsafe Int -> Gs -> Int -> a .
+poll me st replyTo =
+  st2 = ensure st;
+  Gs w h be ses focus next inited ctl meshes = st2;
+  case hByClient ses replyTo == focus of
+    False -> answer3 me st2 replyTo (0, 0, 0)
+  | True -> pollFocused me st2 replyTo (be.poll 0).
+pollFocused : unsafe Int -> Gs -> Int -> (Int, Int, Int) -> a .
+pollFocused me st replyTo ev =
+  (kind, a, b) = ev;
+  case and2 (kind == 4) (a == focusKey) of
+    True -> answer3 me (nextFocus st) replyTo (0, 0, 0)
+  | False -> answer3 me st replyTo ev.
+and2 a b = case a of True -> b | False -> False.
+
+# a reply to a program; one that has ended is dropped from the sessions
+# (two by arity: the service's recursive group keeps each monomorphic)
+answer : unsafe Int -> Gs -> Int -> (Int, Int) -> a .
+answer me st replyTo r = case send replyTo r of
+    Ok u -> loop me st
+  | Err e -> loop me (dropH st (hByClientSt st replyTo)).
+answer3 : unsafe Int -> Gs -> Int -> (Int, Int, Int) -> a .
+answer3 me st replyTo r = case send replyTo r of
+    Ok u -> loop me st
+  | Err e -> loop me (dropH st (hByClientSt st replyTo)).
+
+# ---- sessions --------------------------------------------------------------------
+# the session an actor speaks for: its program's
+hByClient : unsafe List Ses -> Int -> Int .
+hByClient ses c = hByPid ses (Sys.pidOf c).
+hByPid : unsafe List Ses -> Int -> Int .
+hByPid ses p = case ses of
+    Nil -> 0
+  | s :: r -> hcStep r p s.
+hcStep : unsafe List Ses -> Int -> Ses -> Int .
+hcStep r p s = case s of Ses pd h t sn ow -> case pd == p of True -> h | False -> hByPid r p.
+hByClientSt st c =
+  Gs w h be ses focus next inited ctl meshes = st;
+  hByClient ses c.
+hByTag : unsafe List Ses -> String -> Int .
+hByTag ses tag = case ses of
+    Nil -> 0
+  | s :: r -> htStep r tag s.
+htStep : unsafe List Ses -> String -> Ses -> Int .
+htStep r tag s = case s of Ses pd h t sn ow -> case EP.strEq t tag of True -> h | False -> hByTag r tag.
+ownerOf : unsafe List Ses -> Int -> Int .
+ownerOf ses h = case ses of
+    Nil -> 0
+  | s :: r -> coStep r h s.
+coStep : unsafe List Ses -> Int -> Ses -> Int .
+coStep r h s = case s of Ses pd hh t sn ow -> case hh == h of True -> ow | False -> ownerOf r h.
+tagOf : unsafe List Ses -> Int -> String .
+tagOf ses h = case ses of
+    Nil -> "none"
+  | s :: r -> toStep r h s.
+toStep : unsafe List Ses -> Int -> Ses -> String .
+toStep r h s = case s of Ses pd hh t sn ow -> case hh == h of True -> t | False -> tagOf r h.
+snapOf : unsafe List Ses -> Int -> Int .
+snapOf ses h = case ses of
+    Nil -> 0
+  | s :: r -> soStep r h s.
+soStep : unsafe List Ses -> Int -> Ses -> Int .
+soStep r h s = case s of Ses pd hh t sn ow -> case hh == h of True -> sn | False -> snapOf r h.
+setSnap : unsafe List Ses -> Int -> Int -> List Ses .
+setSnap ses h snap = case ses of
+    Nil -> Nil
+  | s :: r -> ssStep r h snap s.
+ssStep : unsafe List Ses -> Int -> Int -> Ses -> List Ses .
+ssStep r h snap s = case s of Ses pd hh t sn ow ->
+  case hh == h of
+    True -> Ses pd hh t snap ow :: r
+  | False -> s :: setSnap r h snap.
+hasH : unsafe List Ses -> Int -> Bool .
+hasH ses h = tagOf ses h != "none".
+isCtl : unsafe List Int -> Int -> Bool .
+isCtl ctl h = case ctl of
+    Nil -> False
+  | c :: r -> case c == h of True -> True | False -> isCtl r h.
+
+# remove a handle (a session or a control); the focus moves on if it was it
+dropH : unsafe Gs -> Int -> Gs .
+dropH st h =
+  Gs w hh be ses focus next inited ctl meshes = st;
+  st2 = Gs w hh be (without ses h) focus next inited (withoutI ctl h) meshes;
+  case h == focus of
+    True -> nextFocus st2
+  | False -> st2.
+without : unsafe List Ses -> Int -> List Ses .
+without ses h = case ses of
+    Nil -> Nil
+  | s :: r -> woStep r h s.
+woStep : unsafe List Ses -> Int -> Ses -> List Ses .
+woStep r h s = case s of Ses pd hh t sn ow -> case hh == h of True -> without r h | False -> s :: without r h.
+withoutI : unsafe List Int -> Int -> List Int .
+withoutI l h = case l of
+    Nil -> Nil
+  | c :: r -> case c == h of True -> withoutI r h | False -> c :: withoutI r h.
+# the session after the focused one in opening order (the list is newest
+# first, so: the next older, wrapping to the newest); none -> 0
+nextFocus : unsafe Gs -> Gs .
+nextFocus st =
+  Gs w hh be ses focus next inited ctl meshes = st;
+  Gs w hh be ses (after ses focus) next inited ctl meshes.
+after : unsafe List Ses -> Int -> Int .
+after ses focus = case ses of
+    Nil -> 0
+  | s :: r -> afStep ses r focus s.
+afStep : unsafe List Ses -> List Ses -> Int -> Ses -> Int .
+afStep all r focus s = case s of Ses pd h t sn ow ->
+  case h == focus of
+    True -> (case r of Nil -> firstH all | n :: rr -> hOf n)
+  | False -> (case r of Nil -> firstH all | n :: rr -> afStep all rr focus n).
+firstH : unsafe List Ses -> Int .
+firstH ses = case ses of Nil -> 0 | s :: r -> hOf s.
+hOf s = case s of Ses pd h t sn ow -> h.
+
+# ---- a program's side ---------------------------------------------------------------
+# open a session: the service actor to hand std.MVU as input and render
+attach : unsafe Int -> Int -> String -> Result (Int, Int) String .
+attach me ns tag = EP.open me ns "/services/graphics/{tag}" "rw".
+# register a program's meshes on a session
+meshes : unsafe Int -> (Int, Int) -> List (String, String) -> Unit .
+meshes me ep ms = case ms of
+    Nil -> Unit
+  | nt :: r -> mStep me ep r nt.
+mStep : unsafe Int -> (Int, Int) -> List (String, String) -> (String, String) -> Unit .
+mStep me ep r nt =
+  (name, text) = nt;
+  _ = EP.write me ep (IStr "{name}\n{text}");
+  meshes me ep r.

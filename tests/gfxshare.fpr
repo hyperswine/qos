@@ -1,0 +1,160 @@
+# gfxshare.fpr -- two graphical programs on ONE Graphics.qa (mods/graphics.fpr),
+# headless: the backend is a stub that reports every frame it is asked to
+# draw, so the policy -- sessions, focus, input routing, lifetimes -- is
+# checked without a display.  The GL backend is the same service under
+# Xvfb (the Terra II and dungeon legs, one program each).
+#
+#   1. a and b open sessions and run std.MVU game loops; a, opened first,
+#      is focused: its frames are drawn, b's are answered (0, 0) undrawn
+#      while b's loop keeps running
+#   2. focus b (a write of "b" to /services/graphics/focus): b is drawn, a
+#      is not
+#   3. a ends (MQuit) and closes its session; b is still drawn
+#   4. a is started again: a new session, not focused, undrawn until
+#      focused; then drawn while b is not
+#   5. b is killed while focused: the next frame from anyone moves the
+#      focus on, and a is drawn again -- a dead program never holds the
+#      display
+#   6. the control handle lists the sessions
+#
+#   ./qos.py run tests/gfxshare.fpr
+#: expect gfxshare: HOLDS
+
+unsafe program.
+
+EP = use "../programs/mods/ep".
+GX = use "../programs/mods/graphics".
+MV = use "std/mvu".
+AC = use "std/actor".
+
+Sys.pidOf : Int -> Int .
+IStr = EP.IStr.
+App = MV.App. MQuit = MV.MQuit. ETick = MV.ETick. STick = MV.STick.
+
+# ---- the stub backend: a record of functions reporting to the tester -----
+stubInit tester w h = (w, h).
+stubMesh tester name text = 0.
+stubRender tester scene ents dist =
+  _ = send tester (7, scene);
+  (1, 0).
+stubPoll tester u = (0, 0, 0).
+stubSnap tester path = 0.
+stub tester = { init = stubInit tester, mesh = stubMesh tester, render = stubRender tester,
+                poll = stubPoll tester, snap = stubSnap tester }.
+
+# ---- a program: an MVU game whose scene is its number ----------------------
+# life: ticks until it quits (0 = forever)
+appInit env = 0.
+appUpdate life env ev n = case ev of
+    ETick -> (case and2 (life > 0) (n + 1 >= life) of
+        True -> (n + 1, MQuit :: Nil)
+      | False -> (n + 1, Nil))
+  | e -> (n, Nil).
+appSubs n = STick 1 :: Nil.
+appView tag n = (tag, (Nil, 0), 0).
+and2 a b = case a of True -> b | False -> False.
+
+runApp : unsafe Int -> String -> Int -> Int -> Int -> Int -> Unit .
+runApp ns tag scene life tester me =
+  go = receive me;                 # the launcher's word, after it recorded this program's grants
+  case GX.attach me ns tag of
+    Err e -> send tester (9, "attach {tag}: {e}") >> Unit
+  | Ok ep -> runApp2 ns tag scene life tester me ep.
+runApp2 : unsafe Int -> String -> Int -> Int -> Int -> Int -> (Int, Int) -> Unit .
+runApp2 ns tag scene life tester me ep =
+  (gfx, h) = ep;
+  clint = device "clint";
+  mt = reg32 clint 49144;
+  cfg = { env = 0, mt = mt, tick = 2000, input = gfx, render = gfx };
+  r = MV.game me cfg (App appInit (appUpdate life) appSubs (appView scene));
+  _ = EP.close me ep;
+  _ = send tester (9, "{tag} done");
+  Unit.
+
+# ---- the tester -----------------------------------------------------------
+# drain the draw reports queued so far: (draws of scene 1, draws of scene 2)
+drain : unsafe Int -> Int -> Int -> (Int, Int) .
+drain me a b = case receiveNow me of
+    Ok m -> drainOne me a b m
+  | Err e -> (a, b).
+drainOne : unsafe Int -> Int -> Int -> (Int, Int) -> (Int, Int) .
+drainOne me a b m = case m of (k, x) ->
+  case k == 7 of
+    True -> drain me (case x == 1 of True -> a + 1 | False -> a) (case x == 2 of True -> b + 1 | False -> b)
+  | False -> drain me a b.
+# wait for a lifecycle note (9, text), dropping draw reports meanwhile
+awaitNote : unsafe Int -> String .
+awaitNote me = case receive me of (k, x) ->
+  case k == 9 of True -> "{x}" | False -> awaitNote me.
+# a window of w microseconds, then the counts
+window : unsafe Int -> Int -> (Int, Int) .
+window me us =
+  _ = drain me 0 0;
+  _ = Sys.sleepUs us;
+  drain me 0 0.
+
+expect : String -> Bool -> Bool .
+expect what ok = case ok of
+    True -> True
+  | False -> _ = print "gfxshare: {what}: FAILED"; False.
+
+focus me ns tag = case EP.writeOnce me ns "/services/graphics/focus" (IStr tag) of
+    Ok v -> True
+  | Err e -> _ = print "gfxshare: focus {tag}: {e}"; False.
+
+# a program under its own pid, granted the display before it is told to go
+launch : unsafe Int -> Int -> String -> Int -> Int -> Int .
+launch me ns tag scene life =
+  a = Sys.spawnApp (runApp ns tag scene life me);
+  _ = EP.grant me ns (Sys.pidOf a) (("/services/graphics", "rw") :: Nil);
+  _ = send a 1;
+  a.
+
+contains : unsafe String -> String -> Bool .
+contains s sub = coGo s sub 0.
+coGo : unsafe String -> String -> Int -> Bool .
+coGo s sub i = case i + strlen sub > strlen s of
+    True -> False
+  | False -> (case EP.strEq (substr s i (strlen sub)) sub of
+      True -> True
+    | False -> coGo s sub (i + 1)).
+
+main =
+  me = myself 0;
+  ns = AC.spawnWith (AC.Dynamic 64) EP.namespace;
+  _ = EP.register me ns "/" (AC.spawnWith (AC.Dynamic 64) (EP.lister ns));
+  g = AC.spawnWith (AC.Dynamic 64) (GX.service 960 600 (stub me) Nil);
+  _ = EP.register me ns "/services/graphics" g;
+  # 1. a first, then b: a is focused
+  a1 = launch me ns "a" 1 400;    # each program its own pid: the session is the program's
+  _ = Sys.sleepUs 20000;
+  b1 = launch me ns "b" 2 0;
+  (a, b) = window me 100000;
+  ok1 = expect "a focused: a drawn ({a}), b not ({b})" (and2 (a > 0) (b == 0));
+  # 6. the listing
+  ls = EP.text (EP.readOnce me ns "/services/graphics/focus");
+  ok6 = expect "listing names both ({ls})" (and2 (contains ls " a") (contains ls " b"));
+  # 2. focus b
+  _ = focus me ns "b";
+  (a2, b2) = window me 100000;
+  ok2 = expect "b focused: b drawn ({b2}), a not ({a2})" (and2 (b2 > 0) (a2 == 0));
+  # 3. a ends and closes; b goes on
+  note = awaitNote me;
+  (a3, b3) = window me 100000;
+  ok3 = expect "a ended ({note}); b still drawn ({b3})" (and2 (EP.strEq note "a done") (b3 > 0));
+  # 4. a again: a new session, undrawn until focused
+  a2nd = launch me ns "a" 1 0;
+  (a4, b4) = window me 100000;
+  _ = focus me ns "a";
+  (a5, b5) = window me 100000;
+  ok4 = expect "a restarted: undrawn ({a4}) then drawn ({a5}), b not ({b5})" (and2 (and2 (a4 == 0) (a5 > 0)) (b5 == 0));
+  # 5. b is killed while focused: the focus moves on by itself
+  _ = focus me ns "b";
+  (a6, b6) = window me 50000;
+  _ = kill b1;
+  (a7, b7) = window me 100000;
+  ok5 = expect "b killed while focused ({b6} drawn before): a drawn again ({a7})" (and2 (b6 > 0) (a7 > 0));
+  _ = kill a2nd;
+  case and2 (and2 ok1 ok2) (and2 (and2 ok3 ok4) (and2 ok5 ok6)) of
+    True -> "gfxshare: HOLDS"
+  | False -> "gfxshare: FAILED".

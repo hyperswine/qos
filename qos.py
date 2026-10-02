@@ -1218,6 +1218,7 @@ SMOKE = [
     # (label, list-of-(prog, backend, expect))
     ("hello / qosp",      "tests/hello.fpr",    "qosp", "hello from a .qa"),
     ("endpoints",         "tests/epecho.fpr",   "qosp", "epecho: HOLDS"),
+    ("graphics shared",   "tests/gfxshare.fpr", "qosp", "gfxshare: HOLDS"),
     ("mvu engine",        "tests/mvutick.fpr",  "qosp", "4 statics builds"),
     ("display O(1)",      "tests/tuiframes.fpr", "qosp", "TUIFRAMES HOLD"),
     ("disk v2",           "tests/qdisk2.fpr",   "qosp", "torn=True"),

@@ -49,6 +49,10 @@ Core = use "coreutil".
 QAR = use "qar".
 Plug = use "plug".
 AC = use "std/actor".
+GX = use "graphics".
+GL = use "glsvc".
+
+glHas : Int -> Int .
 
 Rpc     = SVC.Rpc.
 LogAdd  = AK.LogAdd.
@@ -371,6 +375,11 @@ bootWire me st apps =
   _ = claim me ns "/logs" logs;
   appsA = spawnD (EP.simple (appsR apps) EP.noWrite);
   _ = claim me ns "/apps" appsA;
+  # the display, when this host has one: Graphics.qa owns it; programs
+  # open sessions at /services/graphics/<tag> (mods/graphics.fpr)
+  _ = case glHas 0 == 1 of
+      True -> claim me ns "/services/graphics" (spawnD (GX.service 0 0 GL.glBackend Nil))
+    | False -> Unit;
   _ = claimApps me ns appsA apps;
   _ = case st == 0 of
       True -> Unit
