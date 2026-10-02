@@ -1222,8 +1222,9 @@ static void stage_clear(void) {
 typedef struct { uw cap; uw *base; } gfx_col_t;
 typedef struct {
   uint32_t tid, var;
-  uw len, eltid, elvar, ncols, kinds, fkinds; /* fkinds: float columns */
-  gfx_col_t *cols[1];
+  uw len, eltid, elvar, ncols;
+  uint8_t *kinds;   /* one byte per column: bit 0 raw word, bit 1 float bits (vec_layout.h VK_*) */
+  gfx_col_t **cols; /* the column directory */
 } gfx_vec_t;
 
 static sw gfx_vec_int_at(V vec, uw i) {
@@ -1232,13 +1233,13 @@ static sw gfx_vec_int_at(V vec, uw i) {
     fpr_cpanic("gfx: packed dynamics: not an Int vector");
   if (i >= x->len) fpr_cpanic("gfx: packed dynamics: index out of range");
   gfx_col_t *c = x->cols[0];
-  /* unboxed Int columns (kinds bit 0) store RAW sw words; boxed store
+  /* raw Int columns (kind bit 0) store RAW sw words; boxed store
    * tagged values -- match get_cell's convention exactly */
   uw raw = c->base[i];
   /* a float column here would be IEEE bits, not a number this packer
-   * can use -- refuse rather than reinterpret (vec.c's fkinds) */
-  if (x->fkinds & 1) fpr_cpanic("gfx: packed dynamics: float column, expected Int");
-  if (x->kinds & 1) return (sw)raw;
+   * can use -- refuse rather than reinterpret (kind bit 1) */
+  if (x->kinds[0] & 2) fpr_cpanic("gfx: packed dynamics: float column, expected Int");
+  if (x->kinds[0] & 1) return (sw)raw;
   V v = (V)raw;
   if (!ISINT(v)) fpr_cpanic("gfx: packed dynamics: element not an Int");
   return UNTAG(v);
