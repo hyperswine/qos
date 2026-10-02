@@ -1,0 +1,26 @@
+unsafe program.
+# Native test kernel, QOS_NET_TEST, one hart and a 0.3 s TX deadline.
+netTestStall : Unit -> Int .
+netTestSend : Unit -> Int .
+netTestNow : Unit -> Int .
+sender boss self = send boss (netTestSend Unit) >> Unit.
+beat boss self = _ = send boss 77; _ = Sys.sleepUs 10000; beat boss self.
+count me n = case receiveNow me of Ok 77 -> count me (n + 1) | _ -> n.
+dead r = case r of Err "dead actor" -> True | _ -> False.
+main =
+  me = myself 0;
+  _ = netTestSend Unit;
+  ticker = spawn (beat me);
+  _ = netTestStall Unit;
+  start = netTestNow Unit;
+  a = spawn (sender me);
+  stalled = dead (receiveFromRes me a);
+  elapsed = netTestNow Unit - start;
+  beats = count me 0;
+  _ = kill ticker;
+  t0 = netTestNow Unit;
+  b = spawn (sender me);
+  offline = dead (receiveFromRes me b);
+  fast = netTestNow Unit - t0 < 1000000;
+  verdict = if stalled and offline and fast and beats >= 10 and elapsed >= 3000000 and elapsed < 15000000 then "HOLDS" else "FAILED";
+  "netstall: stalled={stalled} heartbeat={beats} elapsed={elapsed} offline={offline} fast={fast} {verdict}".

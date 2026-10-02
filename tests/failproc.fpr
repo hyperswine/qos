@@ -1,0 +1,5 @@
+# A loaded process calls a real failing device primitive. This exercises
+# fpr_actor_fail through the shared scheduler table, not language `error`
+# (which deliberately panics). The disk rejects the negative page.
+unsafe program.
+main = blkRead (device "blk") (-1).

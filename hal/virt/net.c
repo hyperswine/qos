@@ -222,6 +222,11 @@ static int net_probe(void) {
 #endif
 #define NET_DEADLINE_PARKS (NET_DEADLINE_TICKS / 2000ULL) /* when mtime reads 0 */
 static unsigned tx_busy, tx_orphan, net_offline;
+#ifdef QOS_NET_TEST
+/* Test kernels only: withhold a real TX doorbell, then release the same
+ * descriptor to the device. Queue ownership/deadline code stays unchanged. */
+static unsigned net_test_stall, net_test_pending;
+#endif
 static u16 tx_before;      /* the used index before the owner's frame */
 static uint64_t net_elapsed(uint64_t since) {
   uint64_t now = hal_mtime();
@@ -279,6 +284,11 @@ static void nic_tx(u32 flen) {
   FENCE();
   av->idx = ++q_tx.avail_shadow;
   FENCE();
+#ifdef QOS_NET_TEST
+  if (__atomic_exchange_n(&net_test_stall, 0, __ATOMIC_ACQ_REL))
+    __atomic_store_n(&net_test_pending, 1, __ATOMIC_RELEASE);
+  else
+#endif
   wr(R_QNOTIFY, 1);
   for (u32 spin = 0; spin < 2000; spin++) {   /* the usual case: done at once */
     FENCE();
@@ -567,3 +577,38 @@ FPR_FN(fpr_g_netPoll, h_netPoll, 1);
 FPR_FN(fpr_g_netRead, h_netRead, 1);
 FPR_FN(fpr_g_netWrite, h_netWrite, 2);
 FPR_FN(fpr_g_netClose, h_netClose, 1);
+
+#ifdef QOS_NET_TEST
+static V h_netTestStall(V u) {
+  (void)u; __atomic_store_n(&net_test_stall, 1, __ATOMIC_RELEASE); return TAG(0);
+}
+static V h_netTestPending(V u) {
+  (void)u; return TAG(__atomic_load_n(&net_test_pending, __ATOMIC_ACQUIRE));
+}
+static V h_netTestRelease(V u) {
+  (void)u;
+  if (!__atomic_exchange_n(&net_test_pending, 0, __ATOMIC_ACQ_REL))
+    fpr_actor_fail("net test: no withheld descriptor");
+  wr(R_QNOTIFY, 1);
+  return TAG(0);
+}
+static V h_netTestNow(V u) { (void)u; return TAG((sw)hal_mtime()); }
+static V h_netTestSend(V u) {
+  (void)u;
+  net_setup();
+  if (!nic) fpr_actor_fail("net test: NIC absent");
+  tx_take();
+  nset(tx_buf + vhdr_len, 0, 60);
+  nset(tx_buf + vhdr_len, 0xff, 6);
+  ncpy(tx_buf + vhdr_len + 6, our_mac, 6);
+  tx_buf[vhdr_len + 12] = 0x88; tx_buf[vhdr_len + 13] = 0xb5;
+  nic_tx(60);
+  tx_release();
+  return TAG(1);
+}
+FPR_FN(fpr_g_netTestStall, h_netTestStall, 1);
+FPR_FN(fpr_g_netTestPending, h_netTestPending, 1);
+FPR_FN(fpr_g_netTestRelease, h_netTestRelease, 1);
+FPR_FN(fpr_g_netTestNow, h_netTestNow, 1);
+FPR_FN(fpr_g_netTestSend, h_netTestSend, 1);
+#endif

@@ -183,6 +183,19 @@ sw qos_store_call(uw tag, const char *pay, uw plen, char *out, uw outcap) {
   return h->var == 0 ? (sw)cp : -1;
 }
 
+#ifdef QOS_PROCESS_TEST
+/* Static mailboxes are bounded PER SENDER. A test kernel fills the
+ * process root's channel before letting that process call the real ABI. */
+static V g_sys_test_fill_from(V target, V sender, V count) {
+  sw n = UNTAG(count);
+  for (sw i = 0; i < n; i++)
+    if (!fpr_sent(fpr_send_as((uw)sender, target, TAG(i))))
+      fpr_cpanic("process test: channel refused before its capacity");
+  return fpr_send_as((uw)sender, target, TAG(n));
+}
+FPR_FN(fpr_g_Sys_x2etestFillFrom, g_sys_test_fill_from, 3);
+#endif
+
 
 /* a growth grant is a shared-buddy slab: it is reaped with the acbs that
  * own it, so the loader keeps no ledger of its own (it once kept a

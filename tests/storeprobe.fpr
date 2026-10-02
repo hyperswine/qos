@@ -1,0 +1,10 @@
+unsafe program.
+# Loaded native process: the real ABI trampoline must return storage Err
+# while preserving unrelated mailbox traffic from the kernel.
+main =
+  me = myself 0;
+  _ = receive me;
+  _ = Sys.sleepUs 50000;
+  r = Sys.storeReq 3 "";
+  noise = case receiveNow me of Ok (Err "unrelated") -> True | _ -> False;
+  "storeprobe: {r} noise={noise}".

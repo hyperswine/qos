@@ -69,3 +69,10 @@ killed sender mid-frame (the orphan path), a full console pipe, and a
 refused storage send from a native process. These are the failure
 injections the disk tier got in DISK-HARDENING and the net tier still
 needs.
+
+## Later the same day: failure injections
+
+The four paths listed as "Not exercised" above now have deterministic tests.
+See [FAILURE-INJECTIONS](2026-10-02-FAILURE-INJECTIONS.md) for the exact fault
+boundaries, acceptance checks and fresh QEMU/host results. This supersedes that
+verification gap; the remaining design limitations above still apply.

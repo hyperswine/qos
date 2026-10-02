@@ -1,0 +1,39 @@
+unsafe program.
+# Kill only after the test driver confirms submission. The next sender
+# must not reuse the DMA buffer until the real used ring advances.
+netTestStall : Unit -> Int .
+netTestSend : Unit -> Int .
+netTestPending : Unit -> Int .
+netTestRelease : Unit -> Int .
+netTestNow : Unit -> Int .
+sender boss self = send boss (netTestSend Unit) >> Unit.
+submitted n = case netTestPending Unit of
+    1 -> Unit
+  | _ -> case n <= 0 of True -> error "TX never submitted" | False -> Sys.sleepUs 1000 >> submitted (n - 1).
+dead r = case r of Err "dead actor" -> True | _ -> False.
+sent r = case r of Ok 1 -> True | _ -> False.
+main =
+  me = myself 0;
+  _ = netTestStall Unit;
+  a = spawn (sender me);
+  _ = submitted 100;
+  _ = kill a;
+  _ = dead (receiveFromRes me a);
+  b = spawn (sender me);
+  _ = Sys.sleepUs 50000;
+  held = case receiveNow me of Err _ -> True | _ -> False;
+  _ = netTestRelease Unit;
+  recovered = sent (receiveFromRes me b);
+  _ = netTestStall Unit;
+  c = spawn (sender me);
+  _ = submitted 100;
+  _ = kill c;
+  _ = dead (receiveFromRes me c);
+  d = spawn (sender me);
+  orphanTimeout = dead (receiveFromRes me d);
+  t0 = netTestNow Unit;
+  e = spawn (sender me);
+  offline = dead (receiveFromRes me e);
+  fast = netTestNow Unit - t0 < 1000000;
+  verdict = if held and recovered and orphanTimeout and offline and fast then "HOLDS" else "FAILED";
+  "netorphan: held={held} recovered={recovered} orphan-timeout={orphanTimeout} offline={offline} fast={fast} {verdict}".
