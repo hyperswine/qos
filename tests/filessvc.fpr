@@ -1,0 +1,48 @@
+# Two application pids share one Files.qa. Only their record prefixes
+# are granted; no application opens the disk or owns a QLog actor.
+#: expect filessvc: HOLDS
+unsafe program.
+Services = use "../programs/mods/services".
+EP = use "../programs/mods/ep".
+AC = use "std/actor".
+FS = use "std/fs".
+
+ok (Ok _) = True.
+ok (Err _) = False.
+refused (Err why) = True.
+refused (Ok _) = False.
+bytes (Ok text) = text.
+bytes (Err why) = error "unexpected file error: {why}".
+and2 a b = case a of True -> b | False -> False.
+
+app ns tester prefix other me =
+  _ = receive me;
+  client = FS.connect me ns;
+  record = "{prefix}/log";
+  w = FS.append me client record "hello\n";
+  r = FS.readLatest me client record;
+  replay = FS.replay me client record;
+  denied = FS.readLatest me client "{other}/log";
+  compact = FS.compact me client;
+  valid = and2 (and2 (ok w) (EP.strEq (bytes r) "hello\n")) (and2 (ok replay) (and2 (refused denied) (refused compact)));
+  _ = send tester (prefix, (valid, strlen (bytes replay)));
+  Unit.
+
+main =
+  me = myself 0;
+  hub = Services.boot;
+  a = Services.launch me hub (Services.filesGrants "terra2") (app hub.ns me "terra2" "pos");
+  b = Services.launch me hub (Services.filesGrants "pos") (app hub.ns me "pos" "terra2");
+  first = receive me;
+  second = receive me;
+  (_, (ok1, length1)) = first;
+  (_, (ok2, length2)) = second;
+  _ = print "filessvc: replay lengths {length1} {length2}";
+  client = FS.connect me hub.ns;
+  status = case EP.open me hub.ns "/services/files/status" "read" of Ok ep -> ep | Err why -> error why;
+  (owner, _) = status;
+  _ = kill owner;
+  dead = FS.readLatest me client "terra2/log";
+  case and2 (and2 ok1 ok2) (refused dead) of
+    True -> "filessvc: HOLDS"
+  | False -> error "filessvc: FAILED".

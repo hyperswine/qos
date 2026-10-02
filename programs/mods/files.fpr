@@ -1,0 +1,42 @@
+# Files.qa: one disk owner, namespace endpoints for named log records.
+# /services/files/<record>/{latest,replay,stats,append,delete}
+# Only System (pid 0) may compact the whole log. Apps receive grants to
+# their record prefix; opening a record does not give them a raw disk.
+unsafe module.
+EP = use "ep".
+FS = use "std/fs".
+AC = use "std/actor".
+
+serve fs me = EP.simple (readRecord fs) (writeRecord fs) me.
+result (Ok text) = Ok (EP.IStr text).
+result (Err why) = Err why.
+
+readRecord fs me client url | EP.strEq url "/services/files/status" = Ok (EP.IInt (case fs == 0 of True -> 0 | False -> 1)).
+readRecord 0 _ _ _ = Err "no disk".
+readRecord fs me client url =
+  (key, op) = recordOp url;
+  readOp fs me key op.
+readOp fs me key "latest" = FS.readLatest me fs key |> result.
+readOp fs me key "replay" = FS.replay me fs key |> result.
+readOp fs me key "stats" = FS.stats me fs key |> result.
+readOp _ _ _ _ = Err "unknown file read operation".
+
+writeRecord 0 _ _ _ _ = Err "no disk".
+writeRecord fs me client url value | EP.strEq url "/services/files/compact" =
+  case Sys.pidOf client == 0 of
+    True -> FS.compact me fs |> result
+  | False -> Err "compaction is system-only".
+writeRecord fs me client url (EP.IStr text) =
+  (key, op) = recordOp url;
+  writeOp fs me key op text.
+writeRecord _ _ _ _ _ = Err "file writes require bytes".
+writeOp fs me key "append" text = FS.append me fs key text |> result.
+writeOp fs me key "delete" _ = FS.del me fs key |> result.
+writeOp _ _ _ _ _ = Err "unknown file write operation".
+
+recordOp url =
+  rest = substr url 16 (strlen url - 16);
+  split rest (strlen rest - 1).
+split text i | i < 0 = ("", "").
+split text i | charAt text i == 47 = (substr text 0 i, substr text (i + 1) (strlen text - i - 1)).
+split text i = split text (i - 1).

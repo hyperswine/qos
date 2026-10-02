@@ -46,7 +46,8 @@
 unsafe program.
 
 MV = use "std/mvu".
-GL = use "mods/glsvc".
+Services = use "mods/services".
+EP = use "mods/ep".
 S2 = use "mods/scene2d".
 Fm = use "mods/fontm".
 FS = use "std/fs".
@@ -56,6 +57,7 @@ Tank = use "../models/tank/tank".
 Inf = use "../models/infantry/infantry".
 Truck = use "../models/truck/truck".
 Hq = use "../models/hq/hq".
+models : List (String, String) .
 models = Tank.meshes + Inf.meshes + Truck.meshes + Hq.meshes.
 
 App = MV.App.
@@ -463,8 +465,6 @@ loadProf m me 0 =
   _ = print "[terra2] profile: no disk, games are not recorded";
   { m | fsOn = 0 }.
 loadProf m me fs =
-  c = FS.compact me fs;
-  _ = drop c;
   r = FS.replay me fs profUrl;
   p = profOf r;
   _ = drop r;
@@ -2065,15 +2065,20 @@ subs m = STick tickMs :: SKeys :: Nil.
 
 view m = (scene m, ui m, m.snap).
 
-main =
+# Shared and standalone use the same application entry. A supervisor owns
+# the devices; this program owns one graphics session and a Files client.
+run hub tag app =
   me = myself 0;
-  clint = device "clint";
-  mt = reg32 clint 49144;
-  gl = spawn (GL.serve 960 600 "terra2" models);
-  disk = device "blk";
-  fs = case blkPages disk == 0 of True -> 0 | False -> FS.serve disk;
-  cfg = { env = (me, fs), mt = mt, tick = 160000, input = gl, render = gl };
-  MV.game me cfg (App init update subs view).
+  ep = Services.graphics hub tag models me;
+  (graphics, _) = ep;
+  fs = FS.connect me hub.ns;
+  cfg = {env = (me, fs), mt = hub.mt, tick = 160000, input = graphics, render = graphics};
+  result = MV.game me cfg app;
+  _ = EP.close me ep;
+  result.
+main =
+  hub = Services.withGraphics Services.boot 960 600;
+  run hub "terra2" (App init update subs view).
 
 # ---- not in this cut --------------------------------------------------------------------------
 # Tactics cards, every card text (Rally, Last Stand, Breakthrough, Hammer

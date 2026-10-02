@@ -1,0 +1,116 @@
+# Actual Terra II and dungeon models on ONE GL-backed Graphics.qa.
+# The tester adds a message port for orderly shutdown and a snapshot
+# counter; all ordinary update/subscription/scene code is the real app's.
+#: host gl
+#: expect gfxapps: HOLDS
+unsafe program.
+Services = use "../programs/mods/services".
+EP = use "../programs/mods/ep".
+TR = use "../programs/terra2".
+DG = use "../programs/dungeon".
+MV = use "std/mvu".
+AC = use "std/actor".
+FS = use "std/fs".
+
+Note = Type (Ready String Int | Viewed String | Ended String | Pressed String Int).
+and2 a b = case a of True -> b | False -> False.
+
+terraUpdate tester tag env (MV.EMsg "quit" _) m = (m, MV.MQuit :: Nil).
+terraUpdate tester tag env (MV.EKey key) m = _ = send tester (Pressed tag key); TR.update env (MV.EKey key) m.
+terraUpdate tester tag env ev m = TR.update env ev m.
+dungeonUpdate tester tag env (MV.EMsg "quit" _) m = (m, MV.MQuit :: Nil).
+dungeonUpdate tester tag env (MV.EKey key) m = _ = send tester (Pressed tag key); DG.update env (MV.EKey key) m.
+dungeonUpdate tester tag env ev m = DG.update env ev m.
+terraSubs port m = MV.SPort port :: TR.subs m.
+dungeonSubs port m = MV.SPort port :: DG.subs m.
+terraView tester tag m =
+  _ = send tester (Viewed tag);
+  (scene, ui, snap) = TR.view m;
+  (scene, ui, snap + 1).
+dungeonView tester tag m =
+  _ = send tester (Viewed tag);
+  (scene, ui, snap) = DG.view m;
+  (scene, ui, snap + 1).
+
+terra hub tester tag me =
+  _ = receive me;
+  port = spawn MV.port;
+  _ = send tester (Ready tag port);
+  result = TR.run hub tag (MV.App TR.init (terraUpdate tester tag) (terraSubs port) (terraView tester tag));
+  _ = send tester (Ended tag);
+  Unit.
+dungeon hub tester tag me =
+  _ = receive me;
+  port = spawn MV.port;
+  _ = send tester (Ready tag port);
+  result = DG.run hub tag (MV.App DG.init (dungeonUpdate tester tag) (dungeonSubs port) (dungeonView tester tag));
+  _ = send tester (Ended tag);
+  Unit.
+
+ready me tag = case receive me of
+    Ready name port -> (case EP.strEq name tag of True -> port | False -> error "wrong app started")
+  | Viewed _ -> ready me tag
+  | Ended name -> error "app ended before startup: {name}"
+  | Pressed _ _ -> error "unexpected input before startup".
+ended me tag = case receive me of
+    Ended name -> (case EP.strEq name tag of True -> Unit | False -> error "wrong app ended")
+  | Viewed _ -> ended me tag
+  | Ready _ _ -> error "unexpected startup"
+  | Pressed _ _ -> error "unexpected input while closing".
+seen me tag = case receive me of
+    Viewed name -> (case EP.strEq name tag of True -> Unit | False -> seen me tag)
+  | _ -> error "unexpected lifecycle while waiting for a frame".
+pressed me tag expected = case receive me of
+    Pressed name key -> (case and2 (EP.strEq name tag) (key == expected) of True -> Unit | False -> error "focused input reached {name}: {key}")
+  | Viewed _ -> pressed me tag expected
+  | _ -> error "unexpected lifecycle while waiting for input".
+
+require (Ok v) = v.
+require (Err why) = error "gfxapps: {why}".
+listing me hub = EP.text (EP.readOnce me hub.ns "/services/graphics/focus").
+focus me hub tag = _ = require (EP.writeOnce me hub.ns "/services/graphics/focus" (EP.IStr tag)); Unit.
+
+main =
+  me = myself 0;
+  hub = Services.withGraphics Services.boot 960 600;
+  grants = ("/services/graphics", "rw") :: Services.filesGrants "terra2";
+  a = Services.launch me hub grants (terra hub me "gfxapps-terra");
+  ap = ready me "gfxapps-terra";
+  _ = seen me "gfxapps-terra";
+  _ = Sys.sleepUs 300000;
+  b = Services.launch me hub (("/services/graphics", "rw") :: Nil) (dungeon hub me "gfxapps-dungeon");
+  bp = ready me "gfxapps-dungeon";
+  _ = seen me "gfxapps-dungeon";
+  _ = seen me "gfxapps-terra";
+  _ = print "gfxapps: two actual apps running: {listing me hub}";
+  _ = print "gfxapps: inject terra";
+  _ = pressed me "gfxapps-terra" 28;
+  _ = pressed me "gfxapps-terra" 25;
+  _ = Sys.sleepUs 1000000;
+  _ = focus me hub "gfxapps-dungeon";
+  _ = seen me "gfxapps-dungeon";
+  _ = Sys.sleepUs 300000;
+  _ = print "gfxapps: inject dungeon";
+  _ = pressed me "gfxapps-dungeon" 57;
+  _ = pressed me "gfxapps-dungeon" 25;
+  _ = Sys.sleepUs 1000000;
+  _ = send ap ("quit", "");
+  _ = ended me "gfxapps-terra";
+  _ = seen me "gfxapps-dungeon";
+  _ = print "gfxapps: terra closed; dungeon still running";
+  a2 = Services.launch me hub grants (terra hub me "gfxapps-restart");
+  ap2 = ready me "gfxapps-restart";
+  _ = seen me "gfxapps-restart";
+  _ = focus me hub "gfxapps-restart";
+  _ = seen me "gfxapps-restart";
+  _ = Sys.sleepUs 300000;
+  _ = seen me "gfxapps-dungeon";
+  _ = print "gfxapps: terra restarted; dungeon still running: {listing me hub}";
+  _ = send ap2 ("quit", "");
+  _ = ended me "gfxapps-restart";
+  _ = send bp ("quit", "");
+  _ = ended me "gfxapps-dungeon";
+  remaining = listing me hub;
+  _ = case EP.strEq remaining "" of True -> Unit | False -> error "graphics sessions leaked: {remaining}";
+  _ = print "gfxapps: all sessions closed";
+  "gfxapps: HOLDS".

@@ -6,11 +6,11 @@
 # module versions (apps/<id>.qa), system state (sys/*), user files,
 # kv event logs -- is a named record on it, and every consumer speaks
 # MESSAGES to the service instead of touching the device.  This module
-# is the client half: the app opens the device once, hands it to
-# `serve`, and never sees it again.
+# is the client half: system composition opens the device once and hands
+# it to `serve`; applications use `connect me namespace` and never open it.
 #
 #   me = myself 0;
-#   fs = FS.serve (device "blk");
+#   fs = FS.connect me namespace;
 #   r  = FS.readLatest me fs "apps/edit1.qa";   # Ok bytes | Err e
 #   h  = FS.append me fs "sys/live" manifest;   # Ok head  | Err e
 #   t  = FS.replay me fs "notes/log";           # all live records, joined
@@ -23,6 +23,7 @@
 QL = use "../programs/mods/qlog".
 SVC = use "../programs/mods/svc".
 AC = use "std/actor".
+EP = use "../programs/mods/ep".
 
 # spawn the service on a device the caller opened; the returned actor
 # handle IS the filesystem from here on
@@ -54,3 +55,35 @@ stats me fs url = rpc me fs 5 url "".
 # the GC sweep: live records copied forward, the log truncated (idempotent)
 compact : unsafe Int -> Int -> Result String String .
 compact me fs = rpc me fs 6 "" "".
+
+# Namespace client for a system-owned Files.qa. Its small adapter preserves
+# the existing FS API; it owns no disk. Every operation is authorized at open.
+# 0 preserves the documented optional/no-disk application behavior.
+connect : unsafe Int -> Int -> Int .
+connect me ns = case EP.readOnce me ns "/services/files/status" of
+    Ok v -> connected ns v
+  | Err why -> error "Files.qa unavailable: {why}".
+connected ns (EP.IInt 0) = 0.
+connected ns (EP.IInt 1) = AC.spawnWith (AC.Dynamic 64) (forward ns).
+connected _ _ = error "Files.qa returned an invalid status".
+forward : unsafe Int -> Int -> a .
+forward ns self =
+  msg = receive self;
+  SVC.Rpc caller tag key payload = msg;
+  answer = viaNamespace self ns tag key payload;
+  _ = send caller answer;
+  _ = drop answer;
+  _ = drop msg;
+  _ = Sys.poolReset 0;
+  forward ns self.
+viaNamespace : unsafe Int -> Int -> Int -> String -> String -> Result String String .
+viaNamespace me ns 1 key _ = fileReply (EP.readOnce me ns "/services/files/{key}/latest").
+viaNamespace me ns 2 key bytes = fileReply (EP.writeOnce me ns "/services/files/{key}/append" (EP.IStr bytes)).
+viaNamespace me ns 3 key _ = fileReply (EP.readOnce me ns "/services/files/{key}/replay").
+viaNamespace me ns 4 key _ = fileReply (EP.writeOnce me ns "/services/files/{key}/delete" (EP.IStr "")).
+viaNamespace me ns 5 key _ = fileReply (EP.readOnce me ns "/services/files/{key}/stats").
+viaNamespace me ns 6 _ _ = fileReply (EP.writeOnce me ns "/services/files/compact" EP.IUnit).
+viaNamespace _ _ _ _ _ = Err "unknown storage operation".
+fileReply (Ok (EP.IStr bytes)) = Ok bytes.
+fileReply (Ok _) = Err "Files.qa returned non-bytes".
+fileReply (Err why) = Err why.

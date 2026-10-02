@@ -618,6 +618,7 @@ connFrame me st 0 op payload used = connFrameWait me st.
 connFrame me st 2 op payload used = connClose me st 1002 "protocol error".
 connFrame me st 3 op payload used = connClose me st 1009 "frame too big".
 connFrame me st 1 op payload used = connOp me (consume st used) op payload.
+connFrame me st status op payload used = connClose me st 1002 "invalid frame status".
 # an incomplete frame: keep the bytes unless the buffer is already absurd
 connFrameWait me st =
   Cs reg port cfg app cid mode buf sid ls ld model = st;

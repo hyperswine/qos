@@ -40,6 +40,7 @@ unsafe program.
 
 MV = use "std/mvu".
 FS = use "std/fs".
+Services = use "mods/services".
 G  = use "std/view".
 FL = use "mods/fprlive".
 Core = use "mods/coreutil".
@@ -656,6 +657,6 @@ watch label v =
 
 main =
   me = myself 0;
-  disk = device "blk";
-  fs = case blkPages disk == 0 of True -> 0 | False -> FS.serve disk;
+  hub = Services.boot;
+  fs = FS.connect me hub.ns;
   FL.serve { env = (me, fs), css = cssAll } (App init update view subs).

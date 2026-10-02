@@ -55,7 +55,8 @@
 unsafe program.
 
 MV = use "std/mvu".
-GL = use "mods/glsvc".
+Services = use "mods/services".
+EP = use "mods/ep".
 S2 = use "mods/scene2d".
 Fm = use "mods/fontm".
 Core = use "mods/coreutil".
@@ -412,12 +413,15 @@ colOf (Key i) = goldCol.
 colOf k = dim.
 
 # ---- boot ---------------------------------------------------------------------------------
-main =
+run hub tag app =
   me = myself 0;
-  clint = device "clint";
-  mt = reg32 clint 49144;
-  gl = spawn (GL.serve uiW uiH "dungeon" Nil);
-  cfg = { env = 0, mt = mt, tick = 160000, input = gl, render = gl };
-  r = MV.game me cfg (App init update subs view);
+  ep = Services.graphics hub tag Nil me;
+  (graphics, _) = ep;
+  cfg = {env = (me, 0), mt = hub.mt, tick = 160000, input = graphics, render = graphics};
+  result = MV.game me cfg app;
+  _ = EP.close me ep;
   _ = print "dungeon over";
-  r.
+  result.
+main =
+  hub = Services.withGraphics Services.boot uiW uiH;
+  run hub "dungeon" (App init update subs view).

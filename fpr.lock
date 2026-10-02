@@ -3,6 +3,7 @@
 # committed version (.fpr/versions.db) and content blob (.fpr/store).
 # spec  version  hash  pinned-by
 std/actor v1.0 06e72a5feec8a6d4 programs/mods/ep.fpr
+std/actor v1.0 06e72a5feec8a6d4 programs/mods/graphics.fpr
 svc v3.0 0c925c3cb42f0f77 programs/mods/qlog.fpr
 coreutil v1.1 00b87d7442c69e95 programs/mods/qlog.fpr
 ep v1.0 f5a7c81840106100 programs/mods/svc.fpr

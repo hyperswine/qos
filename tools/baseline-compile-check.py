@@ -23,6 +23,8 @@ with tempfile.TemporaryDirectory(prefix='qos-compile-gate-') as temp:
                     src, tmp / 'checked.s'], expected, contains)
     for name in ('gl2d', 'mvuweb'):
         check(ROOT / 'tests' / (name + '.fpr'))
+    check(ROOT / "programs/pos1.fpr")
+    print("POS with namespace Files client compiles: PASS")
     # LiveView has explicit unsafe declarations, not a trust exception.
     # Removing the entry's marker must still refuse the imported server call.
     unsafe_caller = tmp / 'unmarked-liveview.fpr'

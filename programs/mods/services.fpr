@@ -1,0 +1,41 @@
+# The Portable system composition root. Device handles stay here; apps
+# attach to Graphics.qa and access Files.qa through their namespace.
+# Clock capability remains the legacy MVU mtime handle for now.
+unsafe module.
+EP = use "ep".
+AC = use "std/actor".
+FS = use "std/fs".
+Files = use "files".
+GX = use "graphics".
+GL = use "glsvc".
+
+claim me ns url owner = case EP.register me ns url owner of
+    Ok _ -> Unit
+  | Err why -> error "service registration {url}: {why}".
+boot =
+  me = myself 0;
+  ns = AC.spawnWith (AC.Dynamic 64) EP.namespace;
+  _ = claim me ns "/" (AC.spawnWith (AC.Dynamic 64) (EP.lister ns));
+  disk = device "blk";
+  fs = case blkPages disk == 0 of True -> 0 | False -> FS.serve disk;
+  _ = claim me ns "/services/files" (AC.spawnWith (AC.Dynamic 64) (Files.serve fs));
+  clk = reg32 (device "clint") 49144;
+  {ns = ns, mt = clk}.
+withGraphics hub w h =
+  me = myself 0;
+  graphics = AC.spawnWith (AC.Dynamic 64) (GX.service w h GL.glBackend Nil);
+  _ = claim me hub.ns "/services/graphics" graphics;
+  hub.
+
+graphics : unsafe _ -> String -> List (String, String) -> Int -> (Int, Int) .
+graphics hub tag models me = case GX.attach me hub.ns tag of
+    Err why -> error "graphics open {tag}: {why}"
+  | Ok ep -> _ = GX.meshes me ep models; ep.
+
+# A root started by a supervisor waits until its grants have been recorded.
+launch me hub grants entry =
+  a = Sys.spawnApp entry;
+  _ = case EP.grant me hub.ns (Sys.pidOf a) grants of Ok _ -> Unit | Err why -> error "app grants: {why}";
+  _ = case send a 1 of Ok _ -> Unit | Err why -> error "app launch: {why}";
+  a.
+filesGrants prefix = ("/services/files/status", "read") :: ("/services/files/{prefix}", "rw") :: Nil.
