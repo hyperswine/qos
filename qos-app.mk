@@ -36,7 +36,7 @@ QOSAPP_X64_LINK = gcc -O2 -Wall -Wextra -ffreestanding -nostdlib -nostartfiles -
 	  -fno-stack-protector -fno-asynchronous-unwind-tables -fno-pic -mcmodel=large \
 	  -DFPR_POSIX -DFPR_QOSAPP -DFPR_NHARTS=$(QOSHARTS) -DFPR_SLAB_SZ=$(QOSSLAB) -DFPR_STACK_SZ=$(QOSSTACK) $(QOSCFLAGS_EXTRA) \
 	  -I$(FRUNTIME) -I$(QOS)/appside \
-	  -T $(QOS)/appside/link-qosapp.ld -Wl,--defsym=QOS_SLOT_BASE=$(QOS_SLOT_BASE) \
+	  -T $(QOS)/appside/link-qosapp.ld -Wl,--emit-relocs \
 	  -Wl,--defsym=_heap_start=_proc_image_end -Wl,--defsym=_heap_end=_proc_image_end \
 	  -Wl,--build-id=none -Wl,-z,noexecstack \
 	  $(BUILD)/qosapp-prog.s $$(cat $(BUILD)/qosapp-prog.s.units) $(QOSAPP_RT)
@@ -44,17 +44,19 @@ QOSAPP_X64_LINK = gcc -O2 -Wall -Wextra -ffreestanding -nostdlib -nostartfiles -
 # FORCE: the .s is regenerated every time, and a make with 1-second mtimes
 # (Apple's 3.81) otherwise packs the PREVIOUS program's image into this .qa
 $(BUILD)/qosapp.elf: $(BUILD)/qosapp-prog.s $(QOSAPP_RT) $(QOS)/appside/link-qosapp.ld tools/mkexports.py FORCE
-	$(QOSAPP_X64_LINK) -o $(BUILD)/qosapp.pre.elf
+	$(QOSAPP_X64_LINK) -Wl,--defsym=QOS_SLOT_BASE=0 -Wl,--unresolved-symbols=ignore-all -o $(BUILD)/qosapp.pre.elf
 	python3 tools/mkexports.py $(BUILD)/qosapp.pre.elf -o $(BUILD)/qosapp-exports.s
-	$(QOSAPP_X64_LINK) $(BUILD)/qosapp-exports.s -o $@
+	$(QOSAPP_X64_LINK) -Wl,--defsym=QOS_SLOT_BASE=0 $(BUILD)/qosapp-exports.s -o $@
+	$(QOSAPP_X64_LINK) -Wl,--defsym=QOS_SLOT_BASE=0x10000000 $(BUILD)/qosapp-exports.s -o $(BUILD)/qosapp.moved.elf
 
 qos-app-x64: $(BUILD)/qosapp.elf tools/mkqa.py
 	@MF=$(BUILD)/qosapp-gen.toml; ID=$$(basename $(SOURCE) .fpr); \
 	ABIV=$$(grep -m1 'define QOS_ABI_VERSION' $(QOS)/appside/qos_abi.h | grep -o '[0-9]\+' | head -1); \
 	REV=$$(cat $(BUILD)/qosapp-prog.s.abirev 2>/dev/null || echo 0); \
 	printf 'name = "%s"\nid = "%s"\nentry = "n/a"\nversion = "1"\nloadMode = "process"\nabi = "%s.%s"\n' $$ID $$ID $$ABIV $$REV > $$MF; \
-	python3 tools/mkqa.py $$MF $(BUILD)/qosapp.elf -o $(QA_OUT)
-	@echo "$(QA_OUT) built — run with: (make -C qos portable && qos/qosp --yes $(QA_OUT))"
+	python3 tools/mkqa.py $$MF $(BUILD)/qosapp.elf -o $(QA_OUT) \
+	  --relocatable --check-moved $(BUILD)/qosapp.moved.elf --delta 0x10000000
+	@echo "$(QA_OUT) built (relocatable) — run with: (make -C qos portable && qos/qosp --yes $(QA_OUT))"
 
 # ---- QOS app for an AArch64 host: Apple Silicon, arm64 Linux (a Pi 4) --------
 # qosp's in-process loader consumes fixed-slot ELF on every host.  Apple
@@ -71,23 +73,25 @@ QOSAPP_A64_LINK = clang --target=aarch64-none-elf -fuse-ld=lld -O2 -Wall -Wextra
 	  -fno-asynchronous-unwind-tables -fno-pic -ffixed-x18 -ffixed-x27 -ffixed-x28 \
 	  -DFPR_POSIX -DFPR_QOSAPP $(QOS_BASE_FLAG) -DFPR_NHARTS=$(QOSHARTS) -DFPR_SLAB_SZ=$(QOSSLAB) -DFPR_STACK_SZ=$(QOSSTACK) $(QOSCFLAGS_EXTRA) \
 	  -I$(FRUNTIME) -I$(QOS)/appside \
-	  -T $(QOS)/appside/link-qosapp-a64.ld -Wl,--defsym=QOS_SLOT_BASE=$(QOS_SLOT_BASE) \
+	  -T $(QOS)/appside/link-qosapp-a64.ld -Wl,--emit-relocs \
 	  -Wl,--defsym=_heap_start=_proc_image_end -Wl,--defsym=_heap_end=_proc_image_end \
 	  $(BUILD)/qosapp-a64.s $$(cat $(BUILD)/qosapp-a64.s.units) \
 	  $(QOSAPP_RT_COMMON) $(FMACHINE)/unix/ctx_a64.S
 
 $(BUILD)/qosapp-a64.elf: $(BUILD)/qosapp-a64.s $(QOSAPP_RT_COMMON) $(FMACHINE)/unix/ctx_a64.S $(QOS)/appside/link-qosapp-a64.ld tools/mkexports.py FORCE
-	$(QOSAPP_A64_LINK) -o $(BUILD)/qosapp-a64.pre.elf
+	$(QOSAPP_A64_LINK) -Wl,--defsym=QOS_SLOT_BASE=0 -Wl,--unresolved-symbols=ignore-all -o $(BUILD)/qosapp-a64.pre.elf
 	python3 tools/mkexports.py $(BUILD)/qosapp-a64.pre.elf -o $(BUILD)/qosapp-a64-exports.s
-	$(QOSAPP_A64_LINK) $(BUILD)/qosapp-a64-exports.s -o $@
+	$(QOSAPP_A64_LINK) -Wl,--defsym=QOS_SLOT_BASE=0 $(BUILD)/qosapp-a64-exports.s -o $@
+	$(QOSAPP_A64_LINK) -Wl,--defsym=QOS_SLOT_BASE=0x10000000 $(BUILD)/qosapp-a64-exports.s -o $(BUILD)/qosapp-a64.moved.elf
 
 qos-app-a64: $(BUILD)/qosapp-a64.elf tools/mkqa.py
 	@MF=$(BUILD)/qosapp-a64-gen.toml; ID=$$(basename $(SOURCE) .fpr); \
 	ABIV=$$(grep -m1 'define QOS_ABI_VERSION' $(QOS)/appside/qos_abi.h | grep -o '[0-9]\+' | head -1); \
 	REV=$$(cat $(BUILD)/qosapp-a64.s.abirev 2>/dev/null || echo 0); \
 	printf 'name = "%s"\nid = "%s"\nentry = "n/a"\nversion = "1"\nloadMode = "process"\nabi = "%s.%s"\n' $$ID $$ID $$ABIV $$REV > $$MF; \
-	python3 tools/mkqa.py $$MF $(BUILD)/qosapp-a64.elf -o $(QA_OUT)
-	@echo "$(QA_OUT) built for Apple Silicon"
+	python3 tools/mkqa.py $$MF $(BUILD)/qosapp-a64.elf -o $(QA_OUT) \
+	  --relocatable --check-moved $(BUILD)/qosapp-a64.moved.elf --delta 0x10000000
+	@echo "$(QA_OUT) built for Apple Silicon (relocatable)"
 
 # ---- plugin .qa: a library image loaded into a RUNNING app -----------------
 # (docs/2026-10-01-IMPORT-TABLE.md)  A plugin carries its own generated code,

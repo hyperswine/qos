@@ -42,5 +42,5 @@ SECTIONS {
   } > SLOT :data
   . = ALIGN(16); _proc_image_end = .; /* where the heap hand-off starts */
 
-  /DISCARD/ : { *(.note.* .comment .eh_frame .eh_frame_hdr .rela.*) }
+  /DISCARD/ : { *(.note.* .comment .eh_frame .eh_frame_hdr) } /* .rela.* kept: --emit-relocs, the RELOC list (2026-10-02) */
 }

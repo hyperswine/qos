@@ -82,7 +82,10 @@ static int span_is(qos_span_t a, const char *z) {
   uint64_t n = strlen(z);
   return a.n == n && !memcmp(a.p, z, n);
 }
-static uint64_t g_arena_size; /* 0: could not reserve at the published address */
+static uint64_t g_arena_size; /* 0: could not reserve address space for the arena */
+static uintptr_t g_arena_base; /* where it landed: the published address when free, else anywhere (the image is relocatable) */
+static fpr_elf_load_t g_ld;    /* the placed image (Host.loadImage) */
+static uintptr_t g_img_base;   /* where it was placed: the arena's start */
 int64_t qosp_load_plugin(const qos_plugin_t *pl, char *err, uint64_t errcap) {
   int idn = (int)pl->id.n;
   const char *id = (const char *)pl->id.p;
@@ -106,7 +109,7 @@ int64_t qosp_load_plugin(const qos_plugin_t *pl, char *err, uint64_t errcap) {
   }
   uintptr_t pg = (uintptr_t)getpagesize();
   uintptr_t lo = (uintptr_t)pl->base, hi = lo + pl->memsz;
-  uintptr_t alo = (uintptr_t)QOS_ARENA_BASE, ahi = alo + g_arena_size;
+  uintptr_t alo = g_arena_base, ahi = alo + g_arena_size;
   if (pl->memsz == 0 || hi < lo || lo < alo || hi > ahi) {
     snprintf(err, errcap, "plugin %.*s: not placed inside the app's arena", idn, id);
     return -1;
@@ -139,7 +142,7 @@ int64_t qosp_unload_plugin(const qos_unload_t *u, char *err, uint64_t errcap) {
   uintptr_t pg = (uintptr_t)getpagesize();
   uintptr_t lo = (uintptr_t)u->base;
   uintptr_t xend = (lo + u->execsz + pg - 1) & ~(pg - 1);
-  uintptr_t alo = (uintptr_t)QOS_ARENA_BASE, ahi = alo + g_arena_size;
+  uintptr_t alo = g_arena_base, ahi = alo + g_arena_size;
   if (u->execsz == 0 || xend < lo || lo < alo || xend > ahi || (lo & (pg - 1))) {
     snprintf(err, errcap, "unload: not a published plugin range");
     return -1;
@@ -244,7 +247,7 @@ static void bus_handler(int sig, siginfo_t *info, void *vctx) {
   uintptr_t pc = 0; (void)uc;
 #endif
   void *addr = info ? info->si_addr : 0;
-  int in_image = (pc >= QOS_SLOT_BASE && pc < QOS_SLOT_BASE + QOS_SLOT_SIZE);
+  int in_image = (g_img_base && pc >= g_img_base && pc < (uintptr_t)g_ld.image_end);
   /* DELIBERATELY bare stderr: a fault handler must not take the
    * app's locks (the fault may BE inside fpr_logput); the app-side
    * error ring + #24 persist already cover app panics. */
@@ -319,7 +322,14 @@ void hal_heap_before_reserve(void) {
   uw max = QOS_ARENA_MAX, min = QOS_ARENA_MIN, got = 0;
   const char *cap = getenv("QOSP_ARENA_MB");
   if (cap && atol(cap) > 0) max = min = (uw)atol(cap) << 20;
-  g_arena_size = fpr_heap_reserve((void *)QOS_ARENA_BASE, max, min, &got) ? got : 0;
+  /* the published address first (a hint: nothing is linked to it any more),
+   * else anywhere the OS has the room -- the app image is relocatable
+   * (2026-10-02; it was linked at QOS_SLOT_BASE, and a host whose ASLR slide
+   * landed there had to re-exec itself) */
+  void *p = getenv("QOSP_ARENA_ANYWHERE") ? 0 : fpr_heap_reserve((void *)QOS_ARENA_BASE, max, min, &got);
+  if (!p) p = fpr_heap_reserve(0, max, min, &got); /* QOSP_ARENA_ANYWHERE: the fallback on purpose (a test of the relocation) */
+  g_arena_size = p ? got : 0;
+  g_arena_base = (uintptr_t)p;
 }
 
 static V h_init(V tracev) {
@@ -332,41 +342,25 @@ static V h_init(V tracev) {
   sigaction(SIGBUS, &sa, NULL);
   sigaction(SIGSEGV, &sa, NULL);
   TRACE("stage 1 (initializer): arena at %#lx, %lu MiB of address space reserved\n",
-        QOS_ARENA_BASE, (unsigned long)(g_arena_size >> 20));
-  if (!g_arena_size) {
-#ifdef __APPLE__
-    /* arm64 macOS forces PIE, and occasionally slides this host across the
-     * fixed app arena.  A new exec gets a fresh slide; never MAP_FIXED over
-     * the live image. */
-    const char *retry_s = getenv("QOSP_ARENA_REEXEC");
-    int retry = retry_s ? atoi(retry_s) : 0;
-    if (retry < 8) {
-      char next[16];
-      snprintf(next, sizeof next, "%d", retry + 1);
-      setenv("QOSP_ARENA_REEXEC", next, 1);
-      execvp(fpr_posix_argv[0], fpr_posix_argv);
-    }
-#endif
-    return res_err("cannot map the arena at its published address (ASLR collision or RWX "
-                   "policy) -- the app image is linked there, so there is no fallback");
-  }
-#ifdef __APPLE__
-  unsetenv("QOSP_ARENA_REEXEC");
-#endif
+        (unsigned long)g_arena_base, (unsigned long)(g_arena_size >> 20));
+  if (!g_arena_size)
+    return res_err("cannot reserve address space for the arena (QOSP_ARENA_MB caps it; a strict "
+                   "overcommit or RWX policy refuses it)");
   return res_ok_str("", 0);
 }
 FPR_FN(fpr_g_Host_x2einit, h_init, 1);
 
-/* Host.loadImage : String -> String -> String -> List Int -> Result String String
+/* Host.loadImage : String -> String -> String -> List Int -> String -> Result String String
  * the archive's path (assets resolve beside it), the sha its LOAD section
- * claims (this image's identity: every plugin must have been linked against
- * it), its IMAGE section and LOAD's numbers as mods/qaimg.fpr read them:
- * place the image in the slot and publish its code r-x. */
-static fpr_elf_load_t g_ld;
-static V h_load_image(V pathv, V shav, V imgv, V numsv) {
+ * claims, its IMAGE section, LOAD's numbers as mods/qaimg.fpr read them, and
+ * its RELOC section: place the image at the arena's start, move its address
+ * words there, and publish its code r-x.  A fixed image (base != 0) is
+ * refused unless the arena happens to be where it was linked. */
+static V h_load_image(V pathv, V shav, V imgv, V numsv, V relv) {
   const str_t *path = arg_str(pathv, "Host.loadImage: path must be a String");
   const str_t *sha = arg_str(shav, "Host.loadImage: sha must be a String");
   const str_t *img = arg_str(imgv, "Host.loadImage: IMAGE must be a String");
+  const str_t *rel = arg_str(relv, "Host.loadImage: RELOC must be a String (empty for a fixed image)");
   uw n[5];
   if (!fpr_list_ints(numsv, n, 5)) fpr_cpanic("Host.loadImage: nums must be [base, entry, execsz, rwoff, memsz]");
   char *cpath = malloc(path->len + 1); /* qos_snd keeps the pointer */
@@ -376,9 +370,19 @@ static V h_load_image(V pathv, V shav, V imgv, V numsv) {
   qos_snd_set_assets(cpath); /* music and other assets resolve beside the .qa */
   (void)sha; /* plugins no longer need the shell's identity: they bind by name */
 
-  fpr_qaimg_t q = {n[0], n[1], n[2], n[3], n[4]};
-  fpr_elf_load_t ld = fpr_qaimg_place(&q, img->bytes, img->len, (void *)QOS_SLOT_BASE, QOS_SLOT_SIZE);
+  uintptr_t dst = n[0] ? (uintptr_t)n[0] : ((g_arena_base + 0xFFFF) & ~(uintptr_t)0xFFFF);
+  if (n[0] && (uintptr_t)n[0] != g_arena_base)
+    return res_err("a fixed image linked for another address than the arena landed at -- rebuild it (relocatable)");
+  if (!n[0] && rel->len == 0) return res_err("a relocatable image without a RELOC section");
+  uintptr_t room = (g_arena_base + g_arena_size) - dst;
+  fpr_qaimg_t q = {dst, n[1], n[2], n[3], n[4]};
+  fpr_elf_load_t ld = fpr_qaimg_place(&q, img->bytes, img->len, (void *)dst, room < QOS_SLOT_SIZE ? room : QOS_SLOT_SIZE);
   if (!ld.ok) return res_err(ld.err);
+  if (!n[0]) {
+    const char *bad = fpr_qaimg_relocate((unsigned char *)dst, img->len, rel->bytes, rel->len);
+    if (bad) return res_err(bad);
+  }
+  g_img_base = dst;
   /* Publish the code: the arena is one rw anonymous mapping, and a page is
    * never writable and executable at once, so flip just the executable
    * prefix (the PF_X PT_LOADs) to r-x and leave the rest rw.  The linker
@@ -388,20 +392,20 @@ static V h_load_image(V pathv, V shav, V imgv, V numsv) {
    * either.  The icache clear is needed on any arm64 host. */
   uintptr_t pg = (uintptr_t)getpagesize();
   uintptr_t xend = ((uintptr_t)ld.exec_end + pg - 1) & ~(pg - 1);
-  if (xend <= (uintptr_t)QOS_SLOT_BASE || ld.exec_end == 0)
+  if (xend <= dst || ld.exec_end == 0)
     return res_err("image has no executable segment");
   if ((uintptr_t)ld.rw_start < xend)
     return res_err("executable pages would capture writable image data -- relink "
                    "with page-separated segments");
-  if (mprotect((void *)QOS_SLOT_BASE, xend - QOS_SLOT_BASE, PROT_READ | PROT_EXEC))
+  if (mprotect((void *)dst, xend - dst, PROT_READ | PROT_EXEC))
     return res_err("mprotect(code, r-x) failed");
   TRACE("stage 2: image [%#lx..%p), entry %p, code r-x to %#lx\n",
-        QOS_SLOT_BASE, ld.image_end, ld.entry, (unsigned long)xend);
-  __builtin___clear_cache((char *)QOS_SLOT_BASE, (char *)ld.image_end);
+        (unsigned long)dst, ld.image_end, ld.entry, (unsigned long)xend);
+  __builtin___clear_cache((char *)dst, (char *)ld.image_end);
   g_ld = ld;
   return res_ok_str("", 0);
 }
-FPR_FN(fpr_g_Host_x2eloadImage, h_load_image, 4);
+FPR_FN(fpr_g_Host_x2eloadImage, h_load_image, 5);
 
 /* the app's entry is freestanding code that keeps ITS hart in x28 and does
  * not restore ours; this program's own hart lives there too */
@@ -434,7 +438,7 @@ static V h_run(V idv, V namev, V capsv) {
   qosp_store_bind(cid);
 
   uint64_t arena_base = ((uint64_t)g_ld.image_end + 15) & ~15ull;
-  uint64_t arena_size = (QOS_ARENA_BASE + g_arena_size) - arena_base;
+  uint64_t arena_size = (g_arena_base + g_arena_size) - arena_base;
   qos_boot_t boot = {
       .abi_version = QOS_ABI_VERSION,
       .hal = qosp_hal_table(),

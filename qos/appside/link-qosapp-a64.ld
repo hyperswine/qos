@@ -1,4 +1,4 @@
-/* link-qosapp-a64.ld -- fixed-slot linker script for QOS-aarch64 app images.
+/* link-qosapp-a64.ld -- linker script for QOS-aarch64 app images, linked at 0 and RELOCATABLE (2026-10-02).
  * Same layout and contract as link-qosapp.ld; only OUTPUT_FORMAT/ARCH differ.
  */
 OUTPUT_FORMAT("elf64-littleaarch64")
@@ -27,5 +27,5 @@ SECTIONS {
   } > SLOT :data
   . = ALIGN(16); _proc_image_end = .; /* where the heap hand-off starts */
 
-  /DISCARD/ : { *(.note.* .comment .eh_frame .eh_frame_hdr .rela.*) }
+  /DISCARD/ : { *(.note.* .comment .eh_frame .eh_frame_hdr) } /* .rela.* kept: --emit-relocs, the RELOC list (2026-10-02) */
 }

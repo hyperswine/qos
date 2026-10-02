@@ -78,7 +78,12 @@ static char g_sysout[256 * 1024];
  * plugin loads into any app that exports what it needs, and says what is
  * missing when one does not. */
 int fpr_mod_attach(const uw *tab);
-extern const uw qos_exports[] __attribute__((weak)); /* absent in the first link */
+/* defined by tools/mkexports.py's table, absent in the FIRST link (which
+ * ignores unresolved symbols: qos-app.mk).  Not weak: a weak extern is
+ * reached through the GOT, whose slot the image's relocation list cannot
+ * move (mkqa refuses R_AARCH64_*_GOT_* by name), and a relocatable image
+ * (2026-10-02) reaches every symbol by address. */
+extern const uw qos_exports[];
 
 static qos_span_t span_of(V v, const char *who) {
   if (ISINT(v) || ((hdr_t *)v)->tid != T_STR) fpr_cpanic(who);
@@ -87,7 +92,6 @@ static qos_span_t span_of(V v, const char *who) {
 }
 /* the export row named n[0..len), or 0 (rows sorted by name, bytewise) */
 static const qos_export_t *export_find(const unsigned char *n, uw len) {
-  if (!qos_exports) return 0;
   const qos_export_t *t = (const qos_export_t *)(qos_exports + 1);
   uw lo = 0, hi = qos_exports[0];
   while (lo < hi) {

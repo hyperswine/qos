@@ -22,7 +22,7 @@ QI  = use "../../programs/mods/qaimg".
 Host.init      : Bool -> Result String String .                       # fault reporting; the arena at its address
 Host.abi       : Unit -> String .                                     # "<abi>.<codegenRev>" this host was built for
 Host.sha256    : String -> String .                                   # lower-case hex
-Host.loadImage : String -> String -> String -> List Int -> Result String String . # path, sha, IMAGE, LOAD's numbers: place it, publish code r-x
+Host.loadImage : String -> String -> String -> List Int -> String -> Result String String . # path, sha, IMAGE, LOAD's numbers, RELOC: place it where the arena is, move its address words, publish code r-x
 Host.run       : String -> String -> String -> Result String String . # id, name, caps: enter the image; main's result
 Host.log       : String -> Unit .                                     # one /logs/host line
 
@@ -104,6 +104,10 @@ gateOne man yes kind p r granted =
 section qa name = case QAR.sectionBytes qa name of
     Ok b -> b
   | Err e -> die "{name}: {e}".
+# a section an archive may lack (RELOC: a fixed image has none)
+sectionOr qa name = case QAR.sectionBytes qa name of
+    Ok b -> b
+  | Err e -> "".
 
 launch o =
   Opts yes0 trace path = o;
@@ -119,7 +123,7 @@ launch o =
   m = case QI.load (section qa "LOAD") img of Ok x -> x | Err e -> die "image load failed: {e}";
   _ = shaGate m img;
   granted = append (gate man yes "required" (M.req man)) (gate man yes "optional" (M.opt man));
-  _ = case Host.loadImage path (QI.sha m) img (QI.nums m) of Ok _ -> Unit | Err e -> die "image load failed: {e}";
+  _ = case Host.loadImage path (QI.sha m) img (QI.nums m) (sectionOr qa "RELOC") of Ok _ -> Unit | Err e -> die "image load failed: {e}";
   case Host.run (M.id man) (M.name man) (M.capsBlob (M.id man) granted) of
     Err e -> die e
   | Ok result -> print "\n[qos] {M.id man} => {result}".
