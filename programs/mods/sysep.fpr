@@ -34,7 +34,7 @@
 
 EP = use "ep".
 SV = use "svc".
-UM = use "uart#8753d4509634e17a".
+UM = use "uart#cdee34460c2ad81a".
 TM = use "timer#38fa906125d48580".
 AC = use "std/actor".
 
@@ -58,6 +58,16 @@ boot me ns usvc tsvc clk st =
   _ = claim me ns "/pins" (spawnD (EP.simple pinR pinW));
   Unit.
 spawnD f = AC.spawnWith (AC.Dynamic 64) f.
+
+# the UART factory: one actor per device the board has, each claiming
+# /services/uart/<n> (device 0 is also /services/uart, the console's).
+# The board is a list of (device name, PLIC source); the actor is
+# mods/uart.fpr's, with its device and interrupt injected.
+claimUarts : unsafe Int -> Int -> List Int -> Int -> Unit .
+claimUarts me ns svcs n = case svcs of
+    Nil -> Unit
+  | u :: r -> claim me ns "/services/uart/{n}" (spawnD (EP.simple (uartR u) (uartW u))) >> claimUarts me ns r (n + 1).
+
 claim : Int -> Int -> String -> Int -> Unit .
 claim me ns url a = case EP.register me ns url a of
     Ok n -> Unit

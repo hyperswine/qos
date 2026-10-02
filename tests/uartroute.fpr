@@ -47,10 +47,12 @@ main =
   _ = EP.register me ns "/" (AC.spawnWith (AC.Dynamic 64) (EP.lister ns));
   st = { has = False, act = 0, uart = usvc, timer = 0, ns = ns };
   _ = SE.boot me ns usvc 0 clk st;
+  _ = SE.claimUarts me ns (usvc :: Nil) 0;   # the factory: /services/uart/0 is device 0
   granted = ("/services/uart", "rw") :: Nil;
   caps = Caps con me clk granted "uartroute" st;
   r1 = Svc.write caps "/services/uart" (IStr "ROUTED-UART-TX\n");
-  n = case r1 of IInt k -> k | e -> 0 - 1;
+  n0 = case Svc.write caps "/services/uart/0" (IStr "") of IInt k -> k | e -> 0 - 1;
+  n = case r1 of IInt k -> (case n0 == 0 of True -> k | False -> 0 - 2) | e -> 0 - 1;
   rx = waitR caps clk (read clk + 30000000);
   "uartroute: wrote {n}B via /services/uart; rx=\"{rx}\"".
 

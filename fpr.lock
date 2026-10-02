@@ -6,7 +6,7 @@ std/actor v1.0 06e72a5feec8a6d4 programs/mods/ep.fpr
 svc v3.0 0c925c3cb42f0f77 programs/mods/qlog.fpr
 coreutil v1.1 00b87d7442c69e95 programs/mods/qlog.fpr
 ep v1.0 f5a7c81840106100 programs/mods/svc.fpr
-uart v2.1 8753d4509634e17a programs/mods/sysep.fpr
+uart v3.0 cdee34460c2ad81a programs/mods/sysep.fpr
 timer v2.0 38fa906125d48580 programs/mods/sysep.fpr
 mods/timefmt v1.0 39dff276efd647a1 programs/system.fpr
 mods/qlog v2.8 9264cdf0b73fc85b programs/system.fpr

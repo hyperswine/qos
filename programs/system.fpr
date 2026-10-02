@@ -1019,7 +1019,8 @@ main =
   # deadline; the namespace knows who owns which url; System.qa's own
   # endpoints claim theirs (mods/sysep.fpr).  Only then is there a console.
   dsk = device "blk";
-  usvc = spawnUart me;
+  uarts = spawnUarts me board;
+  usvc = firstOf uarts;
   tsvc = spawnTimer Unit;
   ns = AC.spawnWith (AC.Dynamic 64) EP.namespace;
   _ = claimRoot me ns (AC.spawnWith (AC.Dynamic 64) (EP.lister ns));
@@ -1028,6 +1029,7 @@ main =
          True  -> { has = False, act = 0, uart = usvc, timer = tsvc, ns = ns }
        | False -> { has = True, act = spawnStore dsk, uart = usvc, timer = tsvc, ns = ns };
   _ = SysEp.boot me ns usvc tsvc clk st;
+  _ = SysEp.claimUarts me ns uarts 0;   # /services/uart/<n>, one per device
   con = (usvc, ns);
   _ = putLn con "";
   _ = putLn con "QOS System.qa  --  bootstrap";
@@ -1056,9 +1058,22 @@ main =
 # -- the display endpoint included -- may enqueue tx.  The one 16550 is
 # console + keyboard, and this actor is its only driver: nothing else in
 # System.qa touches a register.
-spawnUart : Int -> Int .
-spawnUart me =
-  a = spawn UartM.actor;
+# the board's UARTs: (device name, PLIC source) each; the virt machine
+# has one.  Adding a second is one entry here, and /services/uart/1.
+board = ("uart", 10) :: Nil.
+spawnUarts : unsafe Int -> List (String, Int) -> List Int .
+spawnUarts me bd = case bd of
+    Nil -> Nil
+  | d :: r -> spawnUartOn me d :: spawnUarts me r.
+spawnUartOn : Int -> (String, Int) -> Int .
+spawnUartOn me d =
+  (nm, irq) = d;
+  spawnUart me nm irq.
+firstOf : List Int -> Int .
+firstOf l = case l of Nil -> 0 | u :: r -> u.
+spawnUart : Int -> String -> Int -> Int .
+spawnUart me nm irq =
+  a = spawn (UartM.actorOn nm irq);
   r1 = uartCall me a UartM.UOpen;
   r2 = uartCall me a (UartM.UBuf 8192);
   r3 = uartCall me a UartM.UArm;         # interrupts: rx pushed to the keyboard endpoint, tx drained on THRE
