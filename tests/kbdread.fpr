@@ -1,0 +1,60 @@
+# kbdread.fpr -- the keyboard endpoint's HELD read (mods/sysep.fpr): a
+# read of /services/keyboard waits for a byte from UART.qa and answers it;
+# the next read gets the next byte; a poll with nothing queued answers 0.
+#
+#   make qos-app PROG=tests/kbdread.fpr
+#   (printf 'wxyz'; sleep 3; printf 'ab'; sleep 2) | (cd qos && ./qosp --yes ../app.qa)
+# Expected: kbdread: seq=wxyz00 first=97 second=98 poll=0 HOLDS
+
+unsafe program.
+
+EP = use "../programs/mods/ep".
+SE = use "../programs/mods/sysep".
+UM = use "../programs/mods/uart".
+AC = use "std/actor".
+IInt = EP.IInt.
+
+ucall : Int -> Int -> _ -> Unit .
+ucall me a msg =
+  _ = send a (me, msg);
+  r = receiveFrom me a;
+  Unit.
+
+polls : unsafe Int -> (Int, Int) -> Int -> Int -> Int .
+polls me pp 0 acc = acc.
+polls me pp n acc =
+  k = key (EP.read me pp 0);
+  _ = Sys.sleepUs 1000;
+  polls me pp (n - 1) (acc + k).
+
+key r = case r of Ok v -> (case v of IInt k -> k | o -> 0 - 2) | Err e -> 0 - 1.
+
+main =
+  me = myself 0;
+  cl = device "clint";
+  clk = reg32 cl 49144;
+  usvc = spawn UM.actor;
+  _ = ucall me usvc UM.UOpen;
+  _ = ucall me usvc (UM.UBuf 8192);
+  _ = ucall me usvc UM.UShare;
+  ns = AC.spawnWith (AC.Dynamic 64) EP.namespace;
+  _ = EP.register me ns "/" (AC.spawnWith (AC.Dynamic 64) (EP.lister ns));
+  st = { has = False, act = 0, uart = usvc, timer = 0, ns = ns };
+  _ = SE.boot me ns usvc 0 clk st;
+  ep = case EP.open me ns "/services/keyboard" "read" of Ok e -> e | Err e -> error "kbdread: open: {e}";
+  pp = case EP.open me ns "/services/keyboard/poll" "read" of Ok e -> e | Err e -> error "kbdread: open poll: {e}";
+  seq = pollSeq me pp 6 "";           # bytes queued BEFORE the first poll come out one per poll
+  z = polls me pp 400 0;             # the launcher's shape: many polls before a held read
+  a = key (EP.read me ep 0);
+  b = key (EP.read me ep 0);
+  _ = EP.close me ep;
+  p = key (EP.readOnce me ns "/services/keyboard/poll");
+  verdict = case a == 97 and b == 98 and p == 0 and EP.strEq seq "wxyz00" of True -> "HOLDS" | False -> "FAILED";
+  "kbdread: seq={seq} first={a} second={b} poll={p} {verdict}".
+
+pollSeq : unsafe Int -> (Int, Int) -> Int -> String -> String .
+pollSeq me pp 0 acc = acc.
+pollSeq me pp n acc =
+  k = key (EP.read me pp 0);
+  _ = Sys.sleepUs 20000;
+  pollSeq me pp (n - 1) (strcat acc (case k == 0 of True -> "0" | False -> chr k)).

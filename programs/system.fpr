@@ -26,46 +26,27 @@
 # device register -- it says `svcReadKey caps` and `svcWriteLine caps s`.
 # ============================================================================
 
-# ---- console over raw MMIO (registers threaded, made once in main) ----------
-
-isOdd v = Int.mod v 2 == 1.
-
-putc : unsafe (Int, Int) -> Int -> Unit .
-putc con c =
-  (lsr, dat) = con;
-  putcW lsr dat c.
-putcW : unsafe Int -> Int -> Int -> Unit .
-putcW lsr dat c = putcV lsr dat c (read lsr).
-putcV : unsafe Int -> Int -> Int -> Int -> Unit .
-putcV lsr dat c v =
-  case isOdd (v / 32) of
-    True -> write dat c
-  | False -> putcW lsr dat c.
+# ---- the console: UART.qa's client, through System.qa's own endpoints --------
+# con = (uart, ns): the UART service actor -- writes go to it, chunked
+# against its outgoing budget by mods/sysep.fpr's consoleWrite -- and the
+# namespace: a key is a read of /services/keyboard, the endpoint UART.qa
+# pushes received bytes to.  System.qa touches no 16550 register.  The
+# driver is mods/uart.fpr, and this is its client like any app's.
 
 puts : unsafe (Int, Int) -> String -> Unit .
-puts con s = putsFrom con s 0 (strlen s).
-putsFrom : unsafe (Int, Int) -> String -> Int -> Int -> Unit .
-putsFrom con s i n =
-  case i >= n of
-    True -> Unit
-  | False -> putc con (charAt s i) >> putsFrom con s (i + 1) n.
-
+puts con s = (u, ns) = con; SysEp.consoleWrite (myself 0) u s.
+putc : unsafe (Int, Int) -> Int -> Unit .
+putc con c = puts con (chr c).
 nl : unsafe (Int, Int) -> Unit .
-nl con = putc con 13 >> putc con 10.
+nl con = puts con (strcat (chr 13) (chr 10)).
 putLn : unsafe (Int, Int) -> String -> Unit .
 putLn con s = puts con s >> nl con.
 
 getc : unsafe Int -> (Int, Int) -> Int .
-getc me con =
-  (lsr, dat) = con;
-  getcW me lsr dat.
-getcW : unsafe Int -> Int -> Int -> Int .
-getcW me lsr dat = getcV me lsr dat (read lsr).
-getcV : unsafe Int -> Int -> Int -> Int -> Int .
-getcV me lsr dat v =
-  case isOdd v of
-    True -> read dat
-  | False -> yield me >> getcW me lsr dat.
+getc me con = (u, ns) = con; getcRes (EP.readOnce me ns "/services/keyboard").
+getcRes r = case r of
+    Ok v -> (case v of IInt k -> k | o -> error "system: the keyboard answered without a key")
+  | Err e -> error "system: keyboard: {e}".
 
 # ---- runtime-resolvable modules --------------------------------------------
 # Modules System.qa is willing to resolve BY URL at runtime.  The alias
@@ -89,7 +70,7 @@ IInt = EP.IInt.
 IStr = EP.IStr.
 IFn  = EP.IFn.
 IErr = EP.IErr.
-QLog    = use "mods/qlog#25f2d194977c496c".
+QLog    = use "mods/qlog#9264cdf0b73fc85b".
 UartM   = use "mods/uart".
 TimerM  = use "mods/timer".
 MK      = use "mods/matrixkpd".
@@ -341,6 +322,32 @@ persistPerms1 io aid req reqG opt optG =
 
 mkCaps con me clk granted aid st = Caps con me clk granted aid st.
 
+# the handles the svc* helpers below use: opened ONCE, at the builtin
+# launch, so a write or a read is one round trip to the owner (an app that
+# opens its own pays the same); (0, 0) when not granted, and Svc then faults
+# by name.  The record is st plus five fields: row-typed, nothing ripples.
+capsWithEps : unsafe Caps -> Caps .
+capsWithEps caps =
+  Caps con me clk granted aid st = caps;
+  Caps con me clk granted aid (withEps me st granted).
+withEps : unsafe Int -> _ -> List (String, String) -> _ .
+withEps me st granted =
+  { has = st.has, act = st.act, uart = st.uart, timer = st.timer, ns = st.ns,
+    disp = epOf me st.ns granted "/services/display" "write",
+    line = epOf me st.ns granted "/services/display/line" "write",
+    kbd = epOf me st.ns granted "/services/keyboard" "read",
+    poll = epOf me st.ns granted "/services/keyboard/poll" "read",
+    clock = epOf me st.ns granted "/services/clock" "read" }.
+epOf : unsafe Int -> Int -> List (String, String) -> String -> String -> (Int, Int) .
+epOf me ns granted url mode = case EP.covered granted url mode of
+    False -> (0, 0)
+  | True -> (case EP.open me ns url mode of Ok ep -> ep | Err e -> (0, 0)).
+stDisp st = st.disp.
+stLine st = st.line.
+stKbd st = st.kbd.
+stPoll st = st.poll.
+stClock st = st.clock.
+
 capCon (Caps c _ _ _ _ _) = c.
 capMe  (Caps _ m _ _ _ _) = m.
 capClk (Caps _ _ k _ _ _) = k.
@@ -369,17 +376,38 @@ anyPerm g url mode =
 expectU r = case r of IUnit -> Unit | IErr e -> error e | _ -> Unit.
 expectI r = case r of IInt v -> v | IErr e -> error e | _ -> 0 - 1.
 
-svcWrite caps s = expectU (Svc.write caps "/services/display" (IStr s)).
-svcWriteLn caps s = expectU (Svc.write caps "/services/display/line" (IStr s)).
+svcWrite : Caps -> String -> Unit .
+svcWrite caps s = expectU (fastW caps (stDisp (capSt caps)) "/services/display" (IStr s)).
+svcWriteLn : Caps -> String -> Unit .
+svcWriteLn caps s = expectU (fastW caps (stLine (capSt caps)) "/services/display/line" (IStr s)).
 
-svcReadKey caps = expectI (Svc.read caps "/services/keyboard").
+svcReadKey : Caps -> Int .
+svcReadKey caps = expectI (fastR caps (stKbd (capSt caps)) "/services/keyboard").
+
+# one round trip on a handle the launch opened; the whole open/op/close
+# through Svc when it opened none
+fastW : Caps -> (Int, Int) -> String -> IoV -> IoV .
+fastW caps ep url v =
+  (o, h) = ep;
+  case o == 0 of
+    True -> Svc.write caps url v
+  | False -> epVal (EP.write (capMe caps) ep v).
+fastR : Caps -> (Int, Int) -> String -> IoV .
+fastR caps ep url =
+  (o, h) = ep;
+  case o == 0 of
+    True -> Svc.read caps url
+  | False -> epVal (EP.read (capMe caps) ep 0).
+epVal r = case r of Ok v -> v | Err e -> IErr e.
 
 # nonblocking key poll (0 = none waiting): what makes an app DYNAMIC --
 # it can tick a clock or animate between keystrokes instead of parking
 # in getc.  Same capability as svcReadKey.
-svcPollKey caps = expectI (Svc.read caps "/services/keyboard/poll").
+svcPollKey : Caps -> Int .
+svcPollKey caps = expectI (fastR caps (stPoll (capSt caps)) "/services/keyboard/poll").
 
-svcClock caps = expectI (Svc.read caps "/services/clock").
+svcClock : Caps -> Int .
+svcClock caps = expectI (fastR caps (stClock (capSt caps)) "/services/clock").
 
 # /services/modules: URL-addressed module resolution (the URL method).
 # url is "<hash>/<fn>"; the answer is (1, fn) or (0, 0) -- a miss is
@@ -598,7 +626,7 @@ keepGranted perms bs =
 runEntry : unsafe (Int, Int) -> String -> Manifest.Man -> Caps -> Unit .
 runEntry con qa m caps =
   case strEq (manMode m) "process" of
-    True -> Sys.bindApp (manId m) >> runProcess con qa (capsBlob caps)
+    True -> Sys.bindApp (manId m) >> runProcess con qa caps
   | False -> runBuiltin con (manEntry m) caps.
 
 # "appid\nurl mode\n" per grant
@@ -613,7 +641,7 @@ capsBlob caps = Manifest.capsBlob (capId caps) (capGranted caps).
 runBuiltin : unsafe (Int, Int) -> String -> Caps -> Unit .
 runBuiltin con entry caps =
   case strEq entry "launcher_main" of
-    True -> launcher_main caps
+    True -> launcher_main (capsWithEps caps)
   | False -> putLn con (strcat entry ": not a builtin; ship it as loadMode = process").
 
 # QAR2: the container work stays HERE (the Loader does the dirty work; C
@@ -626,32 +654,56 @@ runBuiltin con entry caps =
 # archive, the extents [IMAGE offset, length, RELOC offset, length], LOAD's
 # numbers [base, entry, execsz, rwoff, memsz] and the capability blob.  The image is relocatable (linked
 # at 0); the placer puts it in a block from the buddy and moves it there
-# (docs/2026-10-01-PROCESS-IMAGES.md).
-Sys.placeImageAt : String -> List Int -> List Int -> String -> (Int, String, Int) .
+# (docs/2026-10-01-PROCESS-IMAGES.md).  The pid is the launcher's, reserved
+# before placement so the namespace already holds the process's grants.
+Sys.placeImageAt : String -> List Int -> List Int -> String -> Int -> (Int, String, Int) .
+Sys.reservePid : Unit -> Int .
+Sys.bindNs : Int -> Unit .
 
-runProcess : unsafe (Int, Int) -> String -> String -> Unit .
-runProcess con qa blob =
+runProcess : unsafe (Int, Int) -> String -> Caps -> Unit .
+runProcess con qa caps =
   case QAR.sectionBytes qa "LOAD" of
     Err e -> putLn con (strcat "No LOAD section in this .qa: " e)
   | Ok load -> case QAR.extent qa "IMAGE" of
       Err e -> putLn con (strcat "No IMAGE section in this .qa: " e)
     | Ok r -> (case QAR.extent qa "RELOC" of
         Err e -> putLn con "process load failed: no RELOC section (an image linked for a fixed slot): rebuild it with tools/build-process-app.sh"
-      | Ok rel -> runProcessAt con qa (QaImg.parse load) r rel blob).
+      | Ok rel -> runProcessAt con qa (QaImg.parse load) r rel caps).
 
-runProcessAt : unsafe (Int, Int) -> String -> Result QaImg.Img String -> (Int, Int) -> (Int, Int) -> String -> Unit .
-runProcessAt con qa parsed r rel blob =
+runProcessAt : unsafe (Int, Int) -> String -> Result QaImg.Img String -> (Int, Int) -> (Int, Int) -> Caps -> Unit .
+runProcessAt con qa parsed r rel caps =
   (ipos, iln) = r;
   case parsed of
     Err e -> putLn con (strcat "process load failed: " e)
-  | Ok m -> runProcessChecked con qa (QaImg.check m iln) ipos iln rel blob.
+  | Ok m -> runProcessChecked con qa (QaImg.check m iln) ipos iln rel caps.
 
-runProcessChecked : unsafe (Int, Int) -> String -> Result QaImg.Img String -> Int -> Int -> (Int, Int) -> String -> Unit .
-runProcessChecked con qa checked ioff iln rel blob =
+runProcessChecked : unsafe (Int, Int) -> String -> Result QaImg.Img String -> Int -> Int -> (Int, Int) -> Caps -> Unit .
+runProcessChecked con qa checked ioff iln rel caps =
   (rpos, rln) = rel;
   case checked of
     Err e -> putLn con (strcat "process load failed: " e)
-  | Ok m -> runProcessLoaded con (Sys.placeImageAt qa (ioff :: iln :: rpos :: rln :: Nil) (QaImg.nums m) blob).
+  | Ok m -> runProcessLoaded con (placeGranted con qa (ioff :: iln :: rpos :: rln :: Nil) (QaImg.nums m) caps).
+
+# the process's pid is reserved first and its grants recorded in the
+# namespace under it, so an open from its first instruction on is judged
+# by what the user granted; the storage grant is scoped to its own stream
+placeGranted : unsafe (Int, Int) -> String -> List Int -> List Int -> Caps -> (Int, String, Int) .
+placeGranted con qa exts nums caps =
+  (u, ns) = con;
+  pid = Sys.reservePid Unit;
+  _ = case EP.grant (capMe caps) ns pid (scopeGrants (capId caps) (capGranted caps)) of
+      Ok n -> Unit
+    | Err e -> putLn con (strcat "process grants not recorded: " e);
+  Sys.placeImageAt qa exts nums (capsBlob caps) pid.
+scopeGrants : unsafe String -> List (String, String) -> List (String, String) .
+scopeGrants id g = case g of
+    Nil -> Nil
+  | p :: r -> sgStep id r p.
+sgStep : unsafe String -> List (String, String) -> (String, String) -> List (String, String) .
+sgStep id r p = case p of (u, m) ->
+  (case strEq u "/services/storage" of
+     True -> ("/services/storage/kv/{id}", m)
+   | False -> (u, m)) :: scopeGrants id r.
 
 runProcessLoaded : unsafe (Int, Int) -> (Int, String, Int) -> Unit .
 runProcessLoaded con res =
@@ -957,28 +1009,29 @@ cfgGo lns key =
 main : unsafe Unit .
 main =
   me = myself 0;
-  u = device "uart";
   cl = device "clint";
-  con = (reg8 u 5, reg8 u 0);
   clk = reg32 cl 49144;                  # CLINT mtime low word
 
   _ = Sys.init Unit; # buddy_init the process arena -- see docs/PROCESS-LOADING.md
-  _ = putLn con "";
-  _ = putLn con "QOS System.qa  --  bootstrap";
-  _ = putLn con "----------------------------";
 
-  # ---- storage: the default setup HAS a disk; boot degrades without one ----
+  # ---- the services first: the console itself is one of them ----------------
+  # UART.qa owns the UART (opened, armed, shared); Timer.qa the CLINT
+  # deadline; the namespace knows who owns which url; System.qa's own
+  # endpoints claim theirs (mods/sysep.fpr).  Only then is there a console.
   dsk = device "blk";
   usvc = spawnUart me;
   tsvc = spawnTimer Unit;
-  # the namespace: every url System.qa serves is claimed by its owner at
-  # boot (mods/sysep.fpr); a listing is a read of "<prefix>/" (the lister)
   ns = AC.spawnWith (AC.Dynamic 64) EP.namespace;
   _ = claimRoot me ns (AC.spawnWith (AC.Dynamic 64) (EP.lister ns));
+  _ = Sys.bindNs ns;                     # a loaded process's Sys.ns
   st = case blkPages dsk == 0 of
          True  -> { has = False, act = 0, uart = usvc, timer = tsvc, ns = ns }
        | False -> { has = True, act = spawnStore dsk, uart = usvc, timer = tsvc, ns = ns };
-  _ = SysEp.boot me ns con clk usvc tsvc st;
+  _ = SysEp.boot me ns usvc tsvc clk st;
+  con = (usvc, ns);
+  _ = putLn con "";
+  _ = putLn con "QOS System.qa  --  bootstrap";
+  _ = putLn con "----------------------------";
   io = Io4 con me clk st;
   _ = bootBeat io con;
   startup = configGet systemConfig "startup";
@@ -997,17 +1050,19 @@ main =
 # storage lives on hart 1 when there is one, so it keeps serving while
 # hart 0 is inside a synchronous process run (the syscall channel
 # depends on this); bound into C for the trampoline.
-# UART.qa on the SYSTEM tier: spawned unarmed (rx stays the keyboard
-# service's; the one 16550 is console + keyboard here) and SHARED, so
-# any capability-holder routed through /services/uart may enqueue tx.
-# System.qa is the privileged owner and speaks the raw RPC -- the
-# linear phase-typed client (std/uart.fpr) is the APP surface.
+# UART.qa on the SYSTEM tier: opened, ARMED (the receive interrupt pushes
+# bytes to the keyboard endpoint, which subscribed; the transmit drains on
+# THRE) and SHARED, so any capability-holder routed through /services/uart
+# -- the display endpoint included -- may enqueue tx.  The one 16550 is
+# console + keyboard, and this actor is its only driver: nothing else in
+# System.qa touches a register.
 spawnUart : Int -> Int .
 spawnUart me =
   a = spawn UartM.actor;
   r1 = uartCall me a UartM.UOpen;
   r2 = uartCall me a (UartM.UBuf 8192);
-  r3 = uartCall me a UartM.UShare;
+  r3 = uartCall me a UartM.UArm;         # interrupts: rx pushed to the keyboard endpoint, tx drained on THRE
+  r4 = uartCall me a UartM.UShare;
   a.
 # the send is checked and the wait answers: a UART service that refused
 # its configuration or ended is a named panic at boot, not a hang

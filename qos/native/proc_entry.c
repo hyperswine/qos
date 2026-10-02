@@ -60,9 +60,16 @@ typedef struct {
   uw pid;
   void (*on_exit)(void);
   void *root;           /* OUT: the root actor, so the launcher waits for its result alone */
+  void *ns;             /* the namespace actor (mods/ep.fpr), or 0 */
 } fpr_shared_boot_t;
 
 static V g_reply;
+static V g_ns;
+/* Sys.ns 0 -> the namespace actor: the one handle a process is given, and
+ * everything else it reaches is a url opened there (its grants were
+ * recorded under its pid before it ran).  0 when the kernel bound none. */
+static V h_sys_ns(V d) { (void)d; return g_ns ? g_ns : TAG(0); }
+FPR_FN(fpr_g_Sys_x2ens, h_sys_ns, 1);
 static void (*g_on_exit)(void);
 extern V fpr_fn_main(void);
 extern V fpr_prim_fn_str(V v); /* runtime.c: render, same as print */
@@ -126,6 +133,7 @@ V fpr_process_entry(void *heap_base, uw heap_size, fpr_grant_t (*grow)(uw want_b
     g_syscall = syscall_fn;
     g_reply = (V)sb->reply;
     g_on_exit = sb->on_exit;
+    g_ns = (V)sb->ns;
     fpr_sched = sb->sched;
     /* OUR OWN statics window: the shared span (heap_lo..heap_hi)
      * covers the slot this image is loaded into, but our code/rodata/

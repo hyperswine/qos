@@ -1,0 +1,77 @@
+# epproc.fpr -- a loaded PROCESS reaching the namespace (mods/ep.fpr).
+#
+# A process image carries its own runtime and is handed ONE actor handle at
+# launch: the namespace (Sys.ns).  Everything it touches is a url opened
+# there, judged by the grants its manifest asked for and the user allowed
+# -- recorded under its pid by the launcher before its first instruction:
+#
+#   display   /services/display/line   written: the text shows on the console
+#   clock     /services/clock          read: a positive mtime
+#   pins      /pins/1                  NOT granted: refused by name
+#   storage   /services/storage/kv/<id>  its own stream (the launcher scoped
+#             the "/services/storage" grant to it): written, read back
+#
+#   tools/epproc-check.sh    (QEMU virt, 2 harts; the launcher's prompts
+#                             are answered on stdin)
+# Expected, printed by the launcher:
+#   process exited: epproc: display=ok clock=ok ungranted=not granted: /pins/1 (read) kv=ok
+
+unsafe program.
+
+EP = use "../programs/mods/ep".
+
+Sys.ns : Int -> Int .
+Sys.caps : Int -> String .
+IStr = EP.IStr. IInt = EP.IInt.
+
+main =
+  me = myself 0;
+  ns = Sys.ns 0;
+  id = firstLine (Sys.caps 0);
+  d = case EP.writeOnce me ns "/services/display/line" (IStr "epproc: hello through the namespace") of
+      Ok v -> "ok"
+    | Err e -> e;
+  c = case EP.readOnce me ns "/services/clock" of
+      Ok v -> clockOk v
+    | Err e -> e;
+  p = case EP.open me ns "/pins/1" "read" of
+      Ok ep -> "opened"
+    | Err e -> e;
+  k = kv me ns id;
+  "epproc: display={d} clock={c} ungranted={p} kv={k}".
+
+clockOk v = case v of
+    IInt t -> (case t > 0 of True -> "ok" | False -> "zero")
+  | o -> "wrong shape".
+
+kv : unsafe Int -> Int -> String -> String .
+kv me ns id = case EP.open me ns "/services/storage/kv/{id}" "rw" of
+    Err e -> e
+  | Ok ep -> kv2 me ep.
+kv2 : unsafe Int -> (Int, Int) -> String .
+kv2 me ep =
+  w = EP.write me ep (IStr "hello");
+  r = EP.read me ep 0;
+  _ = EP.close me ep;
+  case r of
+    Ok v -> kvHas v
+  | Err e -> e.
+kvHas v = case v of
+    IStr s -> (case contains s "hello" of True -> "ok" | False -> "miss ({s})")
+  | o -> "wrong shape".
+
+firstLine : unsafe String -> String .
+firstLine s = flGo s 0.
+flGo : unsafe String -> Int -> String .
+flGo s i = case i >= strlen s of
+    True -> s
+  | False -> (case charAt s i == 10 of True -> substr s 0 i | False -> flGo s (i + 1)).
+
+contains : unsafe String -> String -> Bool .
+contains s sub = coGo s sub 0.
+coGo : unsafe String -> String -> Int -> Bool .
+coGo s sub i = case i + strlen sub > strlen s of
+    True -> False
+  | False -> (case EP.strEq (substr s i (strlen sub)) sub of
+      True -> True
+    | False -> coGo s sub (i + 1)).

@@ -7,7 +7,7 @@
 # and Svc.write (the compatibility surface every app still calls) resolve
 # through the namespace like anybody else.
 #
-#   /services/display, /services/display/line   write IStr -> the console
+#   /services/display, /services/display/line   write IStr -> UART.qa
 #   /services/keyboard, /services/keyboard/poll  read -> IInt key (held / 0)
 #   /services/clock                              read -> IInt mtime
 #   /services/modules/<hash>/<fn>                read -> IFn (a miss is Err)
@@ -16,6 +16,15 @@
 #   /services/timer                              write IInt ms: TFire to the
 #                                                CLIENT's mailbox when due
 #   /pins/<n>, /pins/<n>/mode                    read level / write level, mode
+#
+# UART.qa OWNS THE UART.  The display and keyboard endpoints are its
+# clients: a write is UWrite to the service (chunked against its outgoing
+# budget, UFlush when it is full), and received bytes reach the keyboard
+# endpoint as the service's URx pushes (it subscribed with USub; the
+# service is armed, so on native the bytes arrive on the receive
+# interrupt), with a UGet poll while a read is held for the Portable tier,
+# which has no interrupts.  No endpoint touches a 16550 register; the one
+# place that does is the driver, mods/uart.fpr.
 #
 # The keyboard is the one with a held read: a Read on /services/keyboard
 # waits for a key, and a Close of that handle answers it Err "closed" (the
@@ -34,11 +43,13 @@ Open = EP.Open. Read = EP.Read. Write = EP.Write. Close = EP.Close.
 Opened = EP.Opened. Refused = EP.Refused.
 
 # ---- boot: every endpoint, claimed ------------------------------------------
-# st is the services record {has, act, uart, timer, ns}.
-boot : unsafe Int -> Int -> (Int, Int) -> Int -> Int -> Int -> _ -> Unit .
-boot me ns con clk usvc tsvc st =
-  _ = claim me ns "/services/display" (spawnD (EP.simple EP.noRead (dispW con)));
-  _ = claim me ns "/services/keyboard" (spawnD (keyboard con));
+# usvc is UART.qa (opened, armed, shared by System.qa), tsvc Timer.qa, clk
+# the CLINT mtime register, st the services record {has, act, uart,
+# timer, ns}.
+boot : unsafe Int -> Int -> Int -> Int -> Int -> _ -> Unit .
+boot me ns usvc tsvc clk st =
+  _ = claim me ns "/services/display" (spawnD (EP.simple EP.noRead (dispW usvc)));
+  _ = claim me ns "/services/keyboard" (spawnD (keyboard usvc));
   _ = claim me ns "/services/clock" (spawnD (EP.simple (clockR clk) EP.noWrite));
   _ = claim me ns "/services/modules" (spawnD (EP.simple modR EP.noWrite));
   _ = claim me ns "/services/storage" (spawnD (EP.simple (kvR st) (kvW st)));
@@ -52,18 +63,43 @@ claim me ns url a = case EP.register me ns url a of
     Ok n -> Unit
   | Err e -> error "system: could not claim {url}: {e}".
 
-# ---- the console -------------------------------------------------------------
-dispW : unsafe (Int, Int) -> Int -> Int -> String -> EP.IoV -> Result EP.IoV String .
-dispW con me client url v = case v of
-    IStr s -> dispPut con url s
+# ---- the console: UART.qa's client -------------------------------------------
+# write all of s: chunks against the service's outgoing budget; a chunk
+# the budget cannot take (UOkI 0) waits for the drain (UFlush) and goes
+# again.  Console loss (no service, a service that ended) is not an
+# error here: the caller keeps running, as it would without a console.
+consoleWrite : unsafe Int -> Int -> String -> Unit .
+consoleWrite me u s = case u == 0 of
+    True -> Unit
+  | False -> cwGo me u s 0 (strlen s).
+cwGo : unsafe Int -> Int -> String -> Int -> Int -> Unit .
+cwGo me u s i n = case i >= n of
+    True -> Unit
+  | False -> cwChunk me u s i n (case n - i > 1024 of True -> 1024 | False -> n - i).
+cwChunk : unsafe Int -> Int -> String -> Int -> Int -> Int -> Unit .
+cwChunk me u s i n k = case uartRpc me u (UM.UWrite (substr s i k)) of
+    UM.UOkI a -> (case a == 0 of
+        True -> cwFlush me u s i n
+      | False -> cwGo me u s (i + a) n)
+  | o -> Unit.
+cwFlush : unsafe Int -> Int -> String -> Int -> Int -> Unit .
+cwFlush me u s i n = case uartRpc me u UM.UFlush of
+    UM.UOk -> cwGo me u s i n
+  | o -> Unit.
+
+dispW : unsafe Int -> Int -> Int -> String -> EP.IoV -> Result EP.IoV String .
+dispW usvc me client url v = case v of
+    IStr s -> dispPut usvc me url s
   | o -> Err "/services/display wants IStr".
-dispPut : unsafe (Int, Int) -> String -> String -> Result EP.IoV String .
-dispPut con url s =
-  _ = SV.puts con s;
-  _ = case EP.strEq (EP.segAfter url 18) "line" of
-      True -> SV.nl con
-    | False -> Unit;
-  Ok IUnit.
+dispPut : unsafe Int -> Int -> String -> String -> Result EP.IoV String .
+dispPut usvc me url s = case usvc == 0 of
+    True -> Err "no uart service"
+  | False ->
+      _ = consoleWrite me usvc s;
+      _ = case EP.strEq (EP.segAfter url 18) "line" of
+          True -> consoleWrite me usvc (strcat (chr 13) (chr 10))
+        | False -> Unit;
+      Ok IUnit.
 
 # ---- the clock ---------------------------------------------------------------
 clockR clk me client url = Ok (IInt (read clk)).
@@ -79,7 +115,8 @@ modRes r = case r of (ok, f) ->
 
 # ---- storage: "/services/storage/kv/<id>" -> apps/<id>/<id>.kv ------------------
 # The id is in the url, and the url an app can reach is built by its
-# capability (svc.fpr's kvScope): naming another app's stream stays
+# capability (svc.fpr's kvScope) or granted to its pid by the launcher
+# (system.fpr scopeGrants): naming another app's stream stays
 # structurally impossible for a routed caller.
 kvR : unsafe _ -> Int -> Int -> String -> Result EP.IoV String .
 kvR st me client url = kvOn st me url "" 3.
@@ -154,66 +191,98 @@ pinSet url x =
     | False -> Pin.write n x;
   Ok IUnit.
 
-# ---- the keyboard: a held read, cancelled by Close ------------------------------
-# hs: (h, url, client); pend: (from, id, h) of the one held read (h 0: none).
-# With a read held the actor polls the line-status register and gives its
-# hart away between polls, taking other requests as they come (receiveNow);
-# with nothing held it parks in receive.
-keyboard : unsafe (Int, Int) -> Int -> a .
-keyboard con me = kLoop con me Nil 1 (0, 0, 0).
-kLoop : unsafe (Int, Int) -> Int -> List (Int, String, Int) -> Int -> (Int, Int, Int) -> a .
-kLoop con me hs next pend =
+# ---- the keyboard: UART.qa's subscriber, a held read, cancelled by Close -----------
+# hs: (h, url, client); pend: (from, id, h) of the one held read (h 0:
+# none); rxq: bytes received and not yet taken, oldest first.  Bytes
+# arrive as URx pushes from the service (the receive interrupt, on
+# native).  With a read held and the queue empty the actor also polls the
+# service (UGet, the Portable tier) once a millisecond, taking requests as
+# they come (receiveNow); with nothing held it parks in receive.
+# The pushes arrive through a SUBSCRIBER actor of the keyboard's own, not
+# straight from UART.qa: the service's replies to UGet and its URx pushes
+# would otherwise share one sender, and a push queued before a reply would
+# be read as the reply (receiveFromRes takes the next message FROM the
+# service).  By sender they never mix.
+keyboard : unsafe Int -> Int -> a .
+keyboard usvc me =
+  _ = case usvc == 0 of
+      True -> UM.UOk
+    | False -> uartRpc me usvc (UM.USub (spawnD (kbdSub me)));
+  kLoop usvc me Nil 1 (0, 0, 0) "".
+kbdSub : unsafe Int -> Int -> a .
+kbdSub kbd me =
+  m = receive me;
+  _ = send kbd m;
+  kbdSub kbd me.
+kLoop : unsafe Int -> Int -> List (Int, String, Int) -> Int -> (Int, Int, Int) -> String -> a .
+kLoop usvc me hs next pend rxq =
   (pf, pi, ph) = pend;
   case ph == 0 of
-    True -> kTurn con me hs next pend (receive me)
-  | False -> kPoll con me hs next pend.
-kPoll : unsafe (Int, Int) -> Int -> List (Int, String, Int) -> Int -> (Int, Int, Int) -> a .
-kPoll con me hs next pend =
+    True -> kTake usvc me hs next pend rxq (receive me)
+  | False -> kServe usvc me hs next pend rxq.
+# a held read: answer from the queue, else poll the service, else wait
+kServe : unsafe Int -> Int -> List (Int, String, Int) -> Int -> (Int, Int, Int) -> String -> a .
+kServe usvc me hs next pend rxq =
   (pf, pi, ph) = pend;
-  k = SV.pollKey con;
-  case k > 0 of
-    True -> AC.reply (pf, pi) (Ok (IInt k)) >> kLoop con me hs next (0, 0, 0)
-  | False -> kIdle con me hs next pend (receiveNow me).
-kIdle : unsafe (Int, Int) -> Int -> List (Int, String, Int) -> Int -> (Int, Int, Int) -> _ -> a .
-kIdle con me hs next pend r = case r of
-    Ok m -> kTurn con me hs next pend m
-  | Err e -> yield me >> kLoop con me hs next pend.
-kTurn : unsafe (Int, Int) -> Int -> List (Int, String, Int) -> Int -> (Int, Int, Int) -> _ -> a .
-kTurn con me hs next pend m =
-  (from, id, q) = m;
-  kMsg con me hs next pend (from, id) from q.
-kMsg : unsafe (Int, Int) -> Int -> List (Int, String, Int) -> Int -> (Int, Int, Int) -> (Int, Int) -> Int -> EP.Ep -> a .
-kMsg con me hs next pend ret from q = case q of
-    Open url mode -> AC.reply ret (Opened next) >> kLoop con me ((next, strcat url "", from) :: hs) (next + 1) pend
-  | Read h n -> kRead con me hs next pend ret h (EP.hFind hs h)
-  | Write h v -> AC.reply ret (Err "/services/keyboard is read-only") >> kLoop con me hs next pend
-  | Close h -> kClose con me hs next pend ret h.
-kRead : unsafe (Int, Int) -> Int -> List (Int, String, Int) -> Int -> (Int, Int, Int) -> (Int, Int) -> Int -> (String, Int) -> a .
-kRead con me hs next pend ret h b =
+  q2 = case strlen rxq == 0 of
+      True -> kPollUart me usvc
+    | False -> rxq;
+  case strlen q2 == 0 of
+    True -> kIdle usvc me hs next pend q2 (receiveNow me)
+  | False -> AC.reply (pf, pi) (Ok (IInt (charAt q2 0))) >> kLoop usvc me hs next (0, 0, 0) (substr q2 1 (strlen q2 - 1)).
+kPollUart : Int -> Int -> String .
+kPollUart me usvc = case usvc == 0 of
+    True -> ""
+  | False -> (case uartRpc me usvc UM.UGet of
+      UM.UOkS s -> strcat s ""
+    | o -> "").
+kIdle : unsafe Int -> Int -> List (Int, String, Int) -> Int -> (Int, Int, Int) -> String -> _ -> a .
+kIdle usvc me hs next pend rxq r = case r of
+    Ok m -> kTake usvc me hs next pend rxq m
+  | Err e -> Sys.sleepUs 1000 >> kLoop usvc me hs next pend rxq.
+# a message: a request envelope, or the service's push
+kTake : unsafe Int -> Int -> List (Int, String, Int) -> Int -> (Int, Int, Int) -> String -> _ -> a .
+kTake usvc me hs next pend rxq m = case m of
+    (from, id, q) -> kMsg usvc me hs next pend rxq (from, id) from q
+  | push -> kPush usvc me hs next pend rxq push.
+kPush : unsafe Int -> Int -> List (Int, String, Int) -> Int -> (Int, Int, Int) -> String -> UM.URx -> a .
+kPush usvc me hs next pend rxq push = case push of
+    UM.URx s -> kLoop usvc me hs next pend (strcat rxq s).
+kMsg : unsafe Int -> Int -> List (Int, String, Int) -> Int -> (Int, Int, Int) -> String -> (Int, Int) -> Int -> EP.Ep -> a .
+kMsg usvc me hs next pend rxq ret from q = case q of
+    Open url mode -> AC.reply ret (Opened next) >> kLoop usvc me ((next, strcat url "", from) :: hs) (next + 1) pend rxq
+  | Read h n -> kRead usvc me hs next pend rxq ret h (EP.hFind hs h)
+  | Write h v -> AC.reply ret (Err "/services/keyboard is read-only") >> kLoop usvc me hs next pend rxq
+  | Close h -> kClose usvc me hs next pend rxq ret h.
+kRead : unsafe Int -> Int -> List (Int, String, Int) -> Int -> (Int, Int, Int) -> String -> (Int, Int) -> Int -> (String, Int) -> a .
+kRead usvc me hs next pend rxq ret h b =
   (url, client) = b;
   case strlen url == 0 of
-    True -> AC.reply ret (Err "no such handle") >> kLoop con me hs next pend
+    True -> AC.reply ret (Err "no such handle") >> kLoop usvc me hs next pend rxq
   | False -> (case EP.strEq (EP.segAfter url 19) "poll" of
-      True -> AC.reply ret (Ok (IInt (SV.pollKey con))) >> kLoop con me hs next pend
-    | False -> kHold con me hs next pend ret h).
-kHold : unsafe (Int, Int) -> Int -> List (Int, String, Int) -> Int -> (Int, Int, Int) -> (Int, Int) -> Int -> a .
-kHold con me hs next pend ret h =
+      True -> kPoll usvc me hs next pend rxq ret
+    | False -> kHold usvc me hs next pend rxq ret h).
+# the nonblocking read: a queued byte, a freshly polled one, or 0
+kPoll : unsafe Int -> Int -> List (Int, String, Int) -> Int -> (Int, Int, Int) -> String -> (Int, Int) -> a .
+kPoll usvc me hs next pend rxq ret =
+  q2 = case strlen rxq == 0 of
+      True -> kPollUart me usvc
+    | False -> rxq;
+  case strlen q2 == 0 of
+    True -> AC.reply ret (Ok (IInt 0)) >> kLoop usvc me hs next pend ""
+  | False -> AC.reply ret (Ok (IInt (charAt q2 0))) >> kLoop usvc me hs next pend (substr q2 1 (strlen q2 - 1)).
+kHold : unsafe Int -> Int -> List (Int, String, Int) -> Int -> (Int, Int, Int) -> String -> (Int, Int) -> Int -> a .
+kHold usvc me hs next pend rxq ret h =
   (pf, pi, ph) = pend;
-  k = SV.pollKey con;
-  case ph != 0 of
-    True -> AC.reply ret (Err "busy: a read is already held") >> kLoop con me hs next pend
-  | False -> (case k > 0 of
-      True -> AC.reply ret (Ok (IInt k)) >> kLoop con me hs next pend
-    | False -> kHeld con me hs next ret h).
-kHeld : unsafe (Int, Int) -> Int -> List (Int, String, Int) -> Int -> (Int, Int) -> Int -> a .
-kHeld con me hs next ret h =
   (rf, ri) = ret;
-  kLoop con me hs next (rf, ri, h).
-kClose : unsafe (Int, Int) -> Int -> List (Int, String, Int) -> Int -> (Int, Int, Int) -> (Int, Int) -> Int -> a .
-kClose con me hs next pend ret h =
+  case ph != 0 of
+    True -> AC.reply ret (Err "busy: a read is already held") >> kLoop usvc me hs next pend rxq
+  | False -> kLoop usvc me hs next (rf, ri, h) rxq.
+kClose : unsafe Int -> Int -> List (Int, String, Int) -> Int -> (Int, Int, Int) -> String -> (Int, Int) -> Int -> a .
+kClose usvc me hs next pend rxq ret h =
   (pf, pi, ph) = pend;
   _ = case ph == h of
       True -> AC.reply (pf, pi) (Err "closed")
     | False -> Ok Unit;
   _ = AC.reply ret (Ok 0);
-  kLoop con me (EP.hRemove hs h) next (case ph == h of True -> (0, 0, 0) | False -> pend).
+  kLoop usvc me (EP.hRemove hs h) next (case ph == h of True -> (0, 0, 0) | False -> pend) rxq.

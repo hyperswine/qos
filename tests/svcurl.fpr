@@ -12,12 +12,19 @@ SVCM = use "../programs/mods/svc".
 EP = use "../programs/mods/ep".
 SE = use "../programs/mods/sysep".
 AC = use "std/actor".
+UM = use "../programs/mods/uart".
 Svc  = SVCM.Svc.
 IoV  = EP.IoV.
 IUnit = EP.IUnit.
 IInt = EP.IInt.
 IStr = EP.IStr.
 IErr = EP.IErr.
+
+ucall : Int -> Int -> _ -> Unit .
+ucall me a msg =
+  _ = send a (me, msg);
+  r = receiveFrom me a;
+  Unit.
 
 expect name ok = case ok of
     True -> print ("ok " + name)
@@ -35,10 +42,16 @@ main =
          :: ("/services/storage", "write")
          :: ("/nope", "read")
          :: Nil;
+  # UART.qa, opened and shared the way System.qa does: the display and
+  # keyboard endpoints are its clients
+  usvc = spawn UM.actor;
+  _ = ucall me usvc UM.UOpen;
+  _ = ucall me usvc (UM.UBuf 8192);
+  _ = ucall me usvc UM.UShare;
   ns = AC.spawnWith (AC.Dynamic 64) EP.namespace;
   _ = EP.register me ns "/" (AC.spawnWith (AC.Dynamic 64) (EP.lister ns));
-  st = { has = False, act = 0, uart = 0, timer = 0, ns = ns };
-  _ = SE.boot me ns con clk 0 0 st;
+  st = { has = False, act = 0, uart = usvc, timer = 0, ns = ns };
+  _ = SE.boot me ns usvc 0 clk st;
   caps = SVCM.Caps con me clk granted "svctest" st;
 
   # display: the write verb (and the /line sub-route)

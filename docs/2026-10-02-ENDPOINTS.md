@@ -81,7 +81,7 @@ audit says, and the contract says so too.
 namespace authorizes by the sender of a request and never by anything the
 request says.
 
-## Not done
+## Not done (as first published)
 
 - Native process images (loaded under a pid) still reach storage through
   the C syscall channel, not through the namespace; they hold no actor
@@ -94,6 +94,73 @@ request says.
   other edit, which is convergence item 4.
 - `Svc.read` and `Svc.write` pay three round trips per operation. An app
   that keeps a handle open pays one.
+
+## Later the same day: the three closed
+
+**UART.qa owns the UART.** System.qa touches no 16550 register. The
+service is opened, armed and shared at boot; the display endpoint writes
+to it (`consoleWrite`: chunks against the outgoing budget, `UFlush` when
+the budget is full), and System's own `puts`, `putLn` and `getc` are the
+same client, so the boot banner and the permission prompts go through the
+service too. The keyboard endpoint subscribes to the service through a
+subscriber actor of its own (replies to `UGet` and `URx` pushes must not
+share one sender, or a push queued first is read as the reply), queues
+what arrives, and while a read is held also polls `UGet` once a
+millisecond for the Portable tier, which has no interrupts. The console
+exists only after the services do: `con` is now `(uart, ns)`. The
+register console helpers are gone from `svc.fpr`.
+
+**A loaded process reaches the namespace.** The boot record carries the
+namespace actor (`Sys.bindNs` at boot; `Sys.ns` in the process), and the
+launcher reserves the process's pid before placement (`Sys.reservePid`,
+the fifth argument of `Sys.placeImageAt`) so its grants are in the
+namespace before its first instruction, the `/services/storage` grant
+scoped to `/services/storage/kv/<id>`. `tests/epproc.fpr`, run by
+`tools/epproc-check.sh` in the full sweep, opens the display and the
+clock, is refused `/pins/1` by name, and round-trips its own storage
+stream, all through `EP` with its own copy of the module. The C syscall
+channel stays for `Sys.storeReq`. The Portable loader records a launched
+app's manifest grants under its pid (`serveWith fs ns`) before it sends
+the app its first message.
+
+**One round trip for the launcher.** The builtin launcher opens its five
+handles once (`capsWithEps`: display, display/line, keyboard,
+keyboard/poll, clock) and `svcWrite`, `svcReadKey`, `svcPollKey` and
+`svcClock` are one `EP.write` or `EP.read` on them; `Svc` remains the
+three-trip path for an app that opened nothing. `tests/kbdread.fpr` holds
+a read, takes bytes queued before the first poll one per poll, and polls
+empty.
+
+**What it found.** Two bugs outside QOS. The compiler listed a module
+reached by two spellings (`ep` and `../programs/mods/ep`) twice in the
+unit list, so the link saw its symbols twice; units are deduplicated by
+hash now. And the runtime's arena pool override was a hart field: the
+launcher, parked in an `AC.call` inside `Sys.loopWith`, let every actor
+the hart ran meanwhile allocate into its arena, which the step's end tore
+down under them. The keyboard endpoint's queue and UART.qa's own state
+were the victims; the override is an ACB field now
+(fprisc `docs/2026-10-02-ARENA-OVERRIDE.md`). Both were invisible until
+System.qa talked to its services by message from inside the arena.
+
+Verification of this section, on this Mac, with the compiler built from
+the fprisc commit the lock pins (`4f1446e`, in a clean worktree; the
+Portable host binary itself was built earlier by the same codegen
+revision): `./qos.py test` 13 of 13 (epecho included); `./qos.py native
+--smoke` with the launcher drawing and taking keys through UART.qa;
+`tools/epproc-check.sh` with `process exited: epproc: display=ok clock=ok
+ungranted=not granted: /pins/1 (read) kv=ok`; `tools/nativeimage-check.sh`
+HOLDS; `tools/qsys-check.sh` two boots; `tests/apps.fpr` HOLD;
+`tests/kbdread.fpr` `seq=wxyz00 first=97 second=98 poll=0`;
+`tests/pathnotes.fpr`, `loaderfail`, `storerpc`, `qsysfail`, plugin
+imports, the three route tests; `./qos.py lock --check` eleven pins.
+fprisc's cases and base suites pass on the pinned commit. Modules
+re-committed: svc v3.0 (major: the register console helpers are gone),
+qlog v2.8.
+
+Not exercised: two clients holding the keyboard at once (the second is
+refused "busy"); a Portable app that opens a url through the grants the
+loader recorded (the loader path is exercised by `apps.fpr` with a
+namespace of 0, the grant message by `epecho`).
 
 ## Verification
 

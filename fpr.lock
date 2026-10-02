@@ -3,12 +3,13 @@
 # committed version (.fpr/versions.db) and content blob (.fpr/store).
 # spec  version  hash  pinned-by
 std/actor v1.0 06e72a5feec8a6d4 programs/mods/ep.fpr
-svc v2.1 cb230123cb8ab665 programs/mods/qlog.fpr
+svc v3.0 0c925c3cb42f0f77 programs/mods/qlog.fpr
 coreutil v1.1 00b87d7442c69e95 programs/mods/qlog.fpr
 ep v1.0 f5a7c81840106100 programs/mods/svc.fpr
 uart v2.1 8753d4509634e17a programs/mods/sysep.fpr
 timer v2.0 38fa906125d48580 programs/mods/sysep.fpr
 mods/timefmt v1.0 39dff276efd647a1 programs/system.fpr
-mods/qlog v2.7 25f2d194977c496c programs/system.fpr
+mods/qlog v2.8 9264cdf0b73fc85b programs/system.fpr
 mods/tui v2.1 af7fad6c6e992699 programs/system.fpr
+../programs/mods/ep v1.0 f5a7c81840106100 std/loader.fpr
 mods/tui v2.1 af7fad6c6e992699 tests/tuiframes.fpr

@@ -46,7 +46,7 @@ main =
   ns = AC.spawnWith (AC.Dynamic 64) EP.namespace;
   _ = EP.register me ns "/" (AC.spawnWith (AC.Dynamic 64) (EP.lister ns));
   st = { has = False, act = 0, uart = usvc, timer = 0, ns = ns };
-  _ = SE.boot me ns con clk usvc 0 st;
+  _ = SE.boot me ns usvc 0 clk st;
   granted = ("/services/uart", "rw") :: Nil;
   caps = Caps con me clk granted "uartroute" st;
   r1 = Svc.write caps "/services/uart" (IStr "ROUTED-UART-TX\n");

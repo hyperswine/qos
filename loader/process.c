@@ -35,6 +35,7 @@ void fpr_proc_arena_init(void) {
  * Tags: 2 append, 3 replay (the kv event-sourcing pair). */
 static V g_store_actor;   /* Sys.bindStore, at boot (0 = diskless) */
 static str_t *g_app_id;   /* Sys.bindApp, per launch */
+static V g_ns;            /* Sys.bindNs, at boot: the namespace a process reaches with Sys.ns */
 
 /* The RPC envelope is a DECLARED FPR constructor now (svc.fpr's Rpc),
  * and constructor tids are content-addressed by (unit hash, type name) —
@@ -59,6 +60,12 @@ static V g_sys_bind_app(V idv) {
 }
 FPR_FN(fpr_g_Sys_x2ebindStore, g_sys_bind_store, 2);
 FPR_FN(fpr_g_Sys_x2ebindApp, g_sys_bind_app, 1);
+/* Sys.bindNs ns: the namespace actor (mods/ep.fpr) every loaded process is
+ * handed in its boot record -- its Sys.ns -- so it opens urls like any
+ * actor on the plane, judged by the grants the launcher recorded under
+ * its pid */
+static V g_sys_bind_ns(V a) { g_ns = a; return (V)&fpr_unit; }
+FPR_FN(fpr_g_Sys_x2ebindNs, g_sys_bind_ns, 1);
 
 /* mint an Rpc constructor value (4 fields) with the bind-time tag.
  * The old scheme here — a Tup2 header carrying 4 slots — was exactly
@@ -95,6 +102,7 @@ typedef struct {
   uw pid;
   void (*on_exit)(void);
   void *root;         /* set by the process entry: its root actor (the launcher's correlation) */
+  void *ns;           /* the namespace actor, or 0 (Sys.ns in the process) */
 } shared_boot_t;
 typedef struct {
   fpr_image_t im;     /* lo/hi: the whole buddy block; owner: this record */
@@ -107,6 +115,10 @@ typedef struct {
 static fpr_sched_t g_kernel_sched;
 static int g_sched_ready;
 static uw g_next_pid = 1;
+/* Sys.reservePid: the launcher takes the pid BEFORE placement, so the
+ * namespace can hold the process's grants before its first instruction */
+static V g_sys_reserve_pid(V d) { (void)d; return TAG((sw)__atomic_fetch_add(&g_next_pid, 1, __ATOMIC_RELAXED)); }
+FPR_FN(fpr_g_Sys_x2ereservePid, g_sys_reserve_pid, 1);
 static fpr_lock_t g_img_lock; /* serializes teardown against lookups by pid */
 static void shared_on_exit(void) {} /* the root's exit; the image goes with the pid */
 
@@ -201,21 +213,23 @@ static V refuse(const char *why) {
   return mktup3v(TAG(0), (V)fpr_mkstr((const uint8_t *)why, n), TAG(0));
 }
 
-/* Sys.placeImageAt : String -> List Int -> List Int -> String -> (Int, String, Int)
+/* Sys.placeImageAt : String -> List Int -> List Int -> String -> Int -> (Int, String, Int)
  * The ARCHIVE bytes; the extents [IMAGE offset, IMAGE length, RELOC offset,
  * RELOC length] of its sections; LOAD's numbers [base, entry, execsz, rwoff,
  * memsz] as programs/mods/qaimg.fpr read them; and the capability blob.  The
  * payloads are read straight out of the .qa String's own bytes, never as
- * pre-sliced copies.  fst = 2 "running under this pid" / 0 failure; snd =
+ * pre-sliced copies; and the pid (Sys.reservePid, 0 = take the next one
+ * here).  fst = 2 "running under this pid" / 0 failure; snd =
  * the pid, or a human-readable reason; thd = the process's ROOT actor (0 on
  * failure), so the launcher waits for ITS result (receiveFromRes) and no
  * other sender's.  Argument-type errors panic, like
  * every HAL primitive; anything about the image or memory is reported
  * through the tuple, so the launcher keeps running and says what went
  * wrong. */
-static V g_sys_place_image_at(V qastr, V extv, V numsv, V capsv) {
+static V g_sys_place_image_at(V qastr, V extv, V numsv, V capsv, V pidv) {
   if (ISINT(capsv) || ((hdr_t *)capsv)->tid != T_STR)
     fpr_cpanic("Sys.placeImageAt: caps must be a String (the serialized grant blob)");
+  if (!ISINT(pidv) || UNTAG(pidv) < 0) fpr_cpanic("Sys.placeImageAt: pid must be an Int (Sys.reservePid)");
   if (ISINT(qastr) || ((hdr_t *)qastr)->tid != T_STR)
     fpr_cpanic("Sys.placeImageAt: first argument must be a String (the .qa archive bytes)");
   uw ext[4], nums[5];
@@ -254,7 +268,7 @@ static V g_sys_place_image_at(V qastr, V extv, V numsv, V capsv) {
     fpr_sched_export(&g_kernel_sched);
     g_sched_ready = 1;
   }
-  uw pid = __atomic_fetch_add(&g_next_pid, 1, __ATOMIC_RELAXED);
+  uw pid = UNTAG(pidv) ? (uw)UNTAG(pidv) : __atomic_fetch_add(&g_next_pid, 1, __ATOMIC_RELAXED);
   pi->im.lo = (char *)blk - sizeof(uw); /* the block's own header */
   pi->im.hi = (char *)blk + buddy_block_usable_size(blk);
   pi->im.pid = pid;
@@ -268,6 +282,7 @@ static V g_sys_place_image_at(V qastr, V extv, V numsv, V capsv) {
   pi->sb.pid = pid;
   pi->sb.on_exit = shared_on_exit;
   pi->sb.root = 0;
+  pi->sb.ns = (void *)g_ns;
   if (!fpr_pid_quiet) fpr_pid_quiet = image_quiet;
   /* registered BEFORE the root is spawned: from here its cells are statics
    * to the kernel, and what leaves the process is decided against its pid */
@@ -301,7 +316,7 @@ static V g_sys_place_image_at(V qastr, V extv, V numsv, V capsv) {
   return mktup3v(TAG(2), (V)fpr_mkstr((const uint8_t *)pm, pn), root);
 }
 
-FPR_FN(fpr_g_Sys_x2eplaceImageAt, g_sys_place_image_at, 4);
+FPR_FN(fpr_g_Sys_x2eplaceImageAt, g_sys_place_image_at, 5);
 
 /* Sys.init : Unit -> Unit -- must be called once, before the first
  * Sys.loadElf, by whichever image owns the process arena (System.qa's

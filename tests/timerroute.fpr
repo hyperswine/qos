@@ -35,7 +35,7 @@ main =
   ns = AC.spawnWith (AC.Dynamic 64) EP.namespace;
   _ = EP.register me ns "/" (AC.spawnWith (AC.Dynamic 64) (EP.lister ns));
   st = { has = False, act = 0, uart = 0, timer = tsvc, ns = ns };
-  _ = SE.boot me ns con clk 0 tsvc st;
+  _ = SE.boot me ns 0 tsvc clk st;
   granted = ("/services/timer", "rw") :: Nil;
   caps = Caps con me clk granted "timerroute" st;
   t0 = read clk;
