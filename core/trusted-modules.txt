@@ -24,3 +24,12 @@
 ../std/loader.fpr
 ../std/timer.fpr
 ../std/uart.fpr
+
+# Endpoint and system-owned service schemes added after the original list.
+../programs/mods/ep.fpr
+../programs/mods/sysep.fpr
+../programs/mods/services.fpr
+../programs/mods/files.fpr
+../programs/mods/graphics.fpr
+# Exact committed actor library used by ep/graphics; not blanket store trust.
+../.fpr/store/06e72a5feec8a6d4.fpr

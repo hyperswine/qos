@@ -196,7 +196,7 @@ def check_moved(image, relocs, other_elf, delta):
             raise SystemExit(f"mkqa: --check-moved: the word at 0x{o:x} moved by {b - a}, not {delta}")
 
 def build(manifest_path, elf_path, out_path, relocatable=False,
-          check_moved_elf=None, check_delta=0, with_imports=False):
+          check_moved_elf=None, check_delta=0, with_imports=False, native_abi=None):
     with open(manifest_path, "rb") as f:
         manifest = f.read()
 
@@ -219,6 +219,9 @@ def build(manifest_path, elf_path, out_path, relocatable=False,
     load = (f"base {base}\nentry {entry}\nexecsz {execsz}\n"
             f"rwoff {rwoff}\nimagesz {len(image)}\nmemsz {memsz}\n"
             f"sha {hashlib.sha256(image).hexdigest()}\n").encode()
+
+    if native_abi is not None:
+        load += f"nativeabi {native_abi}\n".encode()
 
     sections = [("MANIFEST", manifest), ("LOAD", load), ("IMAGE", image)]
     if relocatable:
@@ -257,7 +260,10 @@ if __name__ == "__main__":
     ap.add_argument("--delta", type=lambda x: int(x, 0), default=0)
     ap.add_argument("--imports", action="store_true",
                     help="write an IMPORT section from the image's __qosimp_ markers (Portable plugins)")
+    ap.add_argument("--native-abi", type=int, help="shared runtime ABI for a native process image")
     a = ap.parse_args()
+    if a.native_abi is not None and (not a.relocatable or not 1 <= a.native_abi <= 999999999):
+        ap.error("--native-abi needs --relocatable and a positive version of at most nine digits")
     if a.imports and not a.relocatable:
         ap.error("--imports needs --relocatable")
-    build(a.manifest, a.elf, a.out, a.relocatable, a.check_moved, a.delta, a.imports)
+    build(a.manifest, a.elf, a.out, a.relocatable, a.check_moved, a.delta, a.imports, a.native_abi)

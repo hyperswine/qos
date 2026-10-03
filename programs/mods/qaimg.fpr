@@ -132,3 +132,26 @@ load : unsafe String -> String -> Result Img String .
 load loadText img = case parse loadText of
     Err e -> Err e
   | Ok m -> check m (strlen img).
+
+# Native process images share runtime structs with the kernel. Portable images
+# still use nums; nativeNums includes the checked compatibility declaration.
+nativeNums : Img -> Int -> List Int .
+nativeNums m abi = base m :: entry m :: execsz m :: rwoff m :: memsz m :: abi :: Nil.
+
+nativeAbi : unsafe String -> Int .
+nativeAbi s = abiGo s 0 (strlen s) (0 - 1).
+abiGo : unsafe String -> Int -> Int -> Int -> Int .
+abiGo s i n seen | i >= n = seen.
+abiGo s i n seen = abiLine s i n seen (lineStop s i n).
+abiLine : unsafe String -> Int -> Int -> Int -> Int -> Int .
+abiLine s i n seen e = case substr s i 10 == "nativeabi " of
+    False -> abiGo s (e + 1) n seen
+  | True -> (case seen >= 0 of
+      True -> 0 - 1
+    | False -> (case e - i - 10 > 0 and e - i - 10 <= 9 of
+        True -> abiValue s e n (decimal s (i + 10) e 0 0) (e - i - 10)
+      | False -> 0 - 1)).
+abiValue : unsafe String -> Int -> Int -> (Int, Int) -> Int -> Int .
+abiValue s e n r digits = case r of (value, k) -> case k > 0 and k == digits of
+    True -> abiGo s (e + 1) n value
+  | False -> 0 - 1.

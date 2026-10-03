@@ -1,0 +1,12 @@
+unsafe program.
+Q = use "../programs/mods/qaimg".
+main =
+  valid = Q.nativeAbi "base 0\nnativeabi 1\nentry 2\n" == 1;
+  absent = Q.nativeAbi "base 0\n" == (0 - 1);
+  duplicate = Q.nativeAbi "nativeabi 1\nnativeabi 1\n" == (0 - 1);
+  huge = Q.nativeAbi "nativeabi 9223372036854775809\n" == (0 - 1);
+  negative = Q.nativeAbi "nativeabi -1\n" == (0 - 1);
+  trailing = Q.nativeAbi "nativeabi 1oops\n" == (0 - 1);
+  noValue = Q.nativeAbi "nativeabi \n" == (0 - 1);
+  verdict = if valid and absent and duplicate and huge and negative and trailing and noValue then "HOLDS" else "FAILED";
+  "nativeabi: {verdict}".

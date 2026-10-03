@@ -54,6 +54,7 @@ link() { # link <base> <out.elf>
 link 0 "build/${BASE}.elf"
 link 0x10000000 "build/${BASE}.moved.elf"
 
+NATIVE_ABI=$(python3 -c 'import re,sys; print(re.search(r"^#define FPR_NATIVE_ABI (\d+)u", open(sys.argv[1]).read(), re.M)[1])' "$RUNTIME/fpr.h")
 python3 tools/mkqa.py "$MANIFEST" "build/${BASE}.elf" -o "$OUT_QA" --relocatable \
-  --check-moved "build/${BASE}.moved.elf" --delta 0x10000000
+  --check-moved "build/${BASE}.moved.elf" --delta 0x10000000 --native-abi "$NATIVE_ABI"
 echo "wrote $OUT_QA (loadMode=process, relocatable; seed it with tools/mkdisk.py for a disk boot)"

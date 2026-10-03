@@ -33,16 +33,16 @@
 # pushes received bytes to.  System.qa touches no 16550 register.  The
 # driver is mods/uart.fpr, and this is its client like any app's.
 
-puts : unsafe (Int, Int) -> String -> Unit .
+puts : (Int, Int) -> String -> Unit .
 puts con s = (u, ns) = con; SysEp.consoleWrite (myself 0) u s.
-putc : unsafe (Int, Int) -> Int -> Unit .
+putc : (Int, Int) -> Int -> Unit .
 putc con c = puts con (chr c).
-nl : unsafe (Int, Int) -> Unit .
+nl : (Int, Int) -> Unit .
 nl con = puts con (strcat (chr 13) (chr 10)).
-putLn : unsafe (Int, Int) -> String -> Unit .
+putLn : (Int, Int) -> String -> Unit .
 putLn con s = puts con s >> nl con.
 
-getc : unsafe Int -> (Int, Int) -> Int .
+getc : Int -> (Int, Int) -> Int .
 getc me con = (u, ns) = con; getcRes (EP.readOnce me ns "/services/keyboard").
 getcRes r = case r of
     Ok v -> (case v of IInt k -> k | o -> error "system: the keyboard answered without a key")
@@ -176,7 +176,7 @@ Io4 = Type (Io4 con me clk st).
 # render one permission prompt and read y/n. `caps` here is the console +
 # reader actor needed for IO; the app-facing capability set is separate.
 # Returns True (grant) / False (deny).
-askPerm : unsafe Io4 -> String -> String -> Bool .
+askPerm : Io4 -> String -> String -> Bool .
 askPerm io url mode =
   Io4 con me clk st0 = io;
   _ = puts con "  grant ";
@@ -284,7 +284,7 @@ askOneRem io stored isReq url mode =
   | Ok b -> case and2 isReq (bNot b) of
       True -> askPerm io url mode                # required + remembered-deny
     | False -> sayRem io url mode b.
-sayRem : unsafe Io4 -> String -> String -> Bool -> Bool .
+sayRem : Io4 -> String -> String -> Bool -> Bool .
 sayRem io url mode b =
   con = ioCon io;
   _ = puts con "  grant ";
@@ -326,11 +326,11 @@ mkCaps con me clk granted aid st = Caps con me clk granted aid st.
 # launch, so a write or a read is one round trip to the owner (an app that
 # opens its own pays the same); (0, 0) when not granted, and Svc then faults
 # by name.  The record is st plus five fields: row-typed, nothing ripples.
-capsWithEps : unsafe Caps -> Caps .
+capsWithEps : Caps -> Caps .
 capsWithEps caps =
   Caps con me clk granted aid st = caps;
   Caps con me clk granted aid (withEps me st granted).
-withEps : unsafe Int -> _ -> List (String, String) -> _ .
+withEps : Int -> _ -> List (String, String) -> _ .
 withEps me st granted =
   { has = st.has, act = st.act, uart = st.uart, timer = st.timer, ns = st.ns,
     disp = epOf me st.ns granted "/services/display" "write",
@@ -338,7 +338,7 @@ withEps me st granted =
     kbd = epOf me st.ns granted "/services/keyboard" "read",
     poll = epOf me st.ns granted "/services/keyboard/poll" "read",
     clock = epOf me st.ns granted "/services/clock" "read" }.
-epOf : unsafe Int -> Int -> List (String, String) -> String -> String -> (Int, Int) .
+epOf : Int -> Int -> List (String, String) -> String -> String -> (Int, Int) .
 epOf me ns granted url mode = case EP.covered granted url mode of
     False -> (0, 0)
   | True -> (case EP.open me ns url mode of Ok ep -> ep | Err e -> (0, 0)).
@@ -682,7 +682,12 @@ runProcessChecked con qa checked ioff iln rel caps =
   (rpos, rln) = rel;
   case checked of
     Err e -> putLn con (strcat "process load failed: " e)
-  | Ok m -> runProcessLoaded con (placeGranted con qa (ioff :: iln :: rpos :: rln :: Nil) (QaImg.nums m) caps).
+  | Ok m -> runProcessLoaded con (placeGranted con qa (ioff :: iln :: rpos :: rln :: Nil) (nativeProcessNums qa m) caps).
+
+nativeProcessNums : String -> QaImg.Img -> List Int .
+nativeProcessNums qa m = case QAR.sectionBytes qa "LOAD" of
+    Ok load -> QaImg.nativeNums m (QaImg.nativeAbi load)
+  | Err e -> QaImg.nativeNums m (0 - 1).
 
 # the process's pid is reserved first and its grants recorded in the
 # namespace under it, so an open from its first instruction on is judged
@@ -705,7 +710,7 @@ sgStep id r p = case p of (u, m) ->
      True -> ("/services/storage/kv/{id}", m)
    | False -> (u, m)) :: scopeGrants id r.
 
-runProcessLoaded : unsafe (Int, Int) -> (Int, String, Int) -> Unit .
+runProcessLoaded : (Int, Int) -> (Int, String, Int) -> Unit .
 runProcessLoaded con res =
   case res of (ok, msg, root) ->
     case ok == 1 of
@@ -721,7 +726,7 @@ runProcessLoaded con res =
 # taken for the exit, and a root that dies without answering is
 # "process failed: dead actor").  Its hart serves other actors
 # meanwhile -- including the process's.
-runProcessShared : unsafe (Int, Int) -> String -> Int -> Unit .
+runProcessShared : (Int, Int) -> String -> Int -> Unit .
 runProcessShared con pidmsg root =
   _ = putLn con (strcat "launched shared (" (strcat pidmsg ")"));
   me = myself 0;
@@ -730,7 +735,7 @@ runProcessShared con pidmsg root =
   | Err e -> putLn con (strcat "process failed: " e).
 # the root's own message: main's result as Ok text (an Err would be the
 # process's own report)
-processEnded : unsafe (Int, Int) -> _ -> Unit .
+processEnded : (Int, Int) -> _ -> Unit .
 processEnded con m = case m of
     Ok s -> putLn con (strcat "process exited: " s)
   | Err e -> putLn con (strcat "process failed: " e).
@@ -1006,7 +1011,7 @@ cfgGo lns key =
 # 2. read config -> startup app id
 # 3. launch it through the SAME permission flow every app goes through
 #    (the launcher is not privileged; it asks for its perms like anyone)
-main : unsafe Unit .
+main : Unit .
 main =
   me = myself 0;
   cl = device "clint";
@@ -1113,12 +1118,12 @@ spawnStore dsk =
   _ = Sys.bindStore a (Rpc a 0 "" "");
   a.
 
-bootBeat : unsafe Io4 -> (Int, Int) -> Unit .
+bootBeat : Io4 -> (Int, Int) -> Unit .
 bootBeat io con =
   case stHas (ioSt io) of
     False -> putLn con "storage: no disk (kv + /apps overrides offline)"
   | True  -> bootBeat1 io con.
-bootBeat1 : unsafe Io4 -> (Int, Int) -> Unit .
+bootBeat1 : Io4 -> (Int, Int) -> Unit .
 bootBeat1 io con =
   r = storeRpc1 (ioMe io) (ioSt io) 3 "sys/boots" "";
   n = case r of Ok s -> strlen s + 1 | Err _ -> 1;

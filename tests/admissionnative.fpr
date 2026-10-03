@@ -1,0 +1,64 @@
+# Test kernel: a loaded process uses the plane's fixed heap admission.
+FS = use "std/fs".
+QAR = use "../programs/mods/qar".
+QaImg = use "../programs/mods/qaimg".
+
+Sys.placeImageAt : String -> List Int -> List Int -> String -> Int -> (Int, String, Int) .
+Sys.reservePid : Unit -> Int .
+Sys.images : Int -> Int .
+Sys.arenaFree : Int -> Int .
+
+# (ok, msg, root) of one placement of the archive -- root is the process's
+# root actor, whose result the test waits for by sender -- or (0, why, 0)
+# before placing
+place : String -> (Int, String, Int) .
+place qa = placeAbi qa (0 - 1).
+placeAbi : String -> Int -> (Int, String, Int) .
+placeAbi qa abi = case QAR.sectionBytes qa "LOAD" of
+    Err e -> (0, "no LOAD: {e}", 0)
+  | Ok load -> place2 qa load abi.
+place2 : String -> String -> Int -> (Int, String, Int) .
+place2 qa load abi = case QAR.extent qa "IMAGE" of
+    Err e -> (0, "no IMAGE: {e}", 0)
+  | Ok r -> (case QAR.extent qa "RELOC" of
+      Err e -> (0, "no RELOC: {e}", 0)
+    | Ok rel -> place3 qa load r rel abi).
+place3 : String -> String -> (Int, Int) -> (Int, Int) -> Int -> (Int, String, Int) .
+place3 qa load r rel abi =
+  (ipos, iln) = r;
+  (rpos, rln) = rel;
+  case QaImg.parse load of
+    Err e -> (0, "bad LOAD: {e}", 0)
+  | Ok m -> (case QaImg.check m iln of
+      Err e -> (0, "bad image: {e}", 0)
+    | Ok m2 -> Sys.placeImageAt qa (ipos :: iln :: rpos :: rln :: Nil) (if abi == (0 - 2) then QaImg.nums m2 else QaImg.nativeNums m2 (if abi < 0 then QaImg.nativeAbi load else abi)) "CkMemory\n" (Sys.reservePid Unit)).
+
+main =
+  me = myself 0;
+  fs = FS.serve (device "blk");
+  case FS.readLatest me fs "apps/CkMemory.qa" of
+    Err e -> "admissionnative: no image {e}"
+  | Ok qa -> run me qa.
+result me root = case receiveFromRes me root of Ok m -> resultOf m | Err e -> "failed: {e}".
+resultOf m = case m of Ok s -> s | Err e -> "failed: {e}".
+run : unsafe Int -> String -> String .
+run me qa =
+  images0 = Sys.images 0;
+  free0 = Sys.arenaFree 0;
+  (old, oldWhy, oldRoot) = placeAbi qa (0 - 2);
+  missing = old == 0 and oldRoot == 0 and oldWhy == "native runtime ABI missing: rebuild the process with tools/build-process-app.sh" and Sys.images 0 == images0;
+  (bad, why, rootBad) = placeAbi qa 999;
+  rejected = missing and bad == 0 and rootBad == 0 and why == "native runtime ABI mismatch: rebuild the process with tools/build-process-app.sh" and Sys.images 0 == images0;
+  (ok, msg, root) = place qa;
+  reply = case ok == 2 of True -> result me root | False -> msg;
+  _ = settle images0 400;
+  images = Sys.images 0 - images0;
+  free1 = Sys.arenaFree 0;
+  returned = free1 + 524288 >= free0;
+  correct = reply == "memoryproc: invalid=True denied=True local=True pid=True overrun=True next=True escaped=42";
+  verdict = if rejected and correct and images == 0 and returned then "HOLDS" else "FAILED";
+  "admissionnative: abi-refused={rejected} process=[{reply}] images={images} returned={returned} {verdict}".
+settle : unsafe Int -> Int -> Bool .
+settle images0 n = case Sys.images 0 == images0 of
+    True -> True
+  | False -> (case n <= 0 of True -> False | False -> Sys.sleepUs 20000 >> settle images0 (n - 1)).

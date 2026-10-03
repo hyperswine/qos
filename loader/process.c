@@ -245,11 +245,13 @@ static V g_sys_place_image_at(V qastr, V extv, V numsv, V capsv, V pidv) {
   if (!ISINT(pidv) || UNTAG(pidv) < 0) fpr_cpanic("Sys.placeImageAt: pid must be an Int (Sys.reservePid)");
   if (ISINT(qastr) || ((hdr_t *)qastr)->tid != T_STR)
     fpr_cpanic("Sys.placeImageAt: first argument must be a String (the .qa archive bytes)");
-  uw ext[4], nums[5];
+  uw ext[4], nums[6];
   if (!fpr_list_ints(extv, ext, 4))
     fpr_cpanic("Sys.placeImageAt: extents must be [image offset, image length, reloc offset, reloc length]");
-  if (!fpr_list_ints(numsv, nums, 5))
-    fpr_cpanic("Sys.placeImageAt: nums must be [base, entry, execsz, rwoff, memsz]");
+  if (!fpr_list_ints(numsv, nums, 6))
+    return refuse("native runtime ABI missing: rebuild the process with tools/build-process-app.sh");
+  if (nums[5] != FPR_NATIVE_ABI)
+    return refuse("native runtime ABI mismatch: rebuild the process with tools/build-process-app.sh");
   str_t *qa = (str_t *)qastr;
   uw ioff = ext[0], ilen = ext[1], roff = ext[2], rlen = ext[3];
   if (ioff > qa->len || ilen > qa->len - ioff)
