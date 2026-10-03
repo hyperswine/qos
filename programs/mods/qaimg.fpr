@@ -2,7 +2,9 @@
 #
 # A .qa's LOAD section is text: six `key <decimal>` lines (base, entry,
 # execsz, rwoff, imagesz, memsz), in any order, plus an optional
-# `sha <64 hex>` naming the IMAGE's sha-256 (docs/2026-07-19-QA-FORMAT.md).  This module
+# `sha <64 hex>` naming the IMAGE's sha-256 (docs/2026-07-19-QA-FORMAT.md)
+# and, for a relocatable image, `relsha <64 hex>` naming the sha-256 of its
+# RELOC and IMPORT sections together (docs/2026-10-03-PREEXISTING-FAILURES.md).  This module
 # reads it and refuses an inconsistent one.
 #
 # It used to be C (loader/qaimg.c: a hand-rolled key/decimal scanner and
@@ -19,16 +21,17 @@
 and2 a b = case a of True -> b | False -> False.
 or2 a b = case a of True -> True | False -> b.
 
-# -1 = not seen; sha "" = none claimed
-Img = Type (Img base entry execsz rwoff imagesz memsz sha).
+# -1 = not seen; sha "" / relsha "" = none claimed
+Img = Type (Img base entry execsz rwoff imagesz memsz sha relsha).
 
-base (Img a _ _ _ _ _ _) = a.
-entry (Img _ a _ _ _ _ _) = a.
-execsz (Img _ _ a _ _ _ _) = a.
-rwoff (Img _ _ _ a _ _ _) = a.
-imagesz (Img _ _ _ _ a _ _) = a.
-memsz (Img _ _ _ _ _ a _) = a.
-sha (Img _ _ _ _ _ _ a) = a.
+base (Img a _ _ _ _ _ _ _) = a.
+entry (Img _ a _ _ _ _ _ _) = a.
+execsz (Img _ _ a _ _ _ _ _) = a.
+rwoff (Img _ _ _ a _ _ _ _) = a.
+imagesz (Img _ _ _ _ a _ _ _) = a.
+memsz (Img _ _ _ _ _ a _ _) = a.
+sha (Img _ _ _ _ _ _ a _) = a.
+relsha (Img _ _ _ _ _ _ _ a) = a.
 
 # what fpr_qaimg_place takes, in its order
 nums : Img -> List Int .
@@ -73,13 +76,20 @@ line s i e sp m = case sp >= e of
 put : unsafe String -> String -> Int -> Int -> Img -> Img .
 put key s v e m = case key == "sha" of
     True -> putSha s v e m
-  | False -> putNum key (decimal s v e 0 0) m.
+  | False -> (case key == "relsha" of
+      True -> putRelSha s v e m
+    | False -> putNum key (decimal s v e 0 0) m).
 
 # exactly 64 characters claim a sha; anything else is an unknown line
 putSha s v e m =
-  Img a b c d f g _ = m;
+  Img a b c d f g _ r = m;
   case e - v >= 64 of
-    True -> Img a b c d f g (substr s v 64)
+    True -> Img a b c d f g (substr s v 64) r
+  | False -> m.
+putRelSha s v e m =
+  Img a b c d f g h _ = m;
+  case e - v >= 64 of
+    True -> Img a b c d f g h (substr s v 64)
   | False -> m.
 
 # a key with no digits after it is an unknown line, as it was in C
@@ -88,19 +98,19 @@ putNum key r m = case r of (x, k) -> case k == 0 of
   | False -> setNum key x m.
 
 setNum key x m =
-  Img a b c d f g h = m;
+  Img a b c d f g h r = m;
   case key == "base" of
-    True -> Img x b c d f g h
+    True -> Img x b c d f g h r
   | False -> (case key == "entry" of
-    True -> Img a x c d f g h
+    True -> Img a x c d f g h r
   | False -> (case key == "execsz" of
-    True -> Img a b x d f g h
+    True -> Img a b x d f g h r
   | False -> (case key == "rwoff" of
-    True -> Img a b c x f g h
+    True -> Img a b c x f g h r
   | False -> (case key == "imagesz" of
-    True -> Img a b c d x g h
+    True -> Img a b c d x g h r
   | False -> (case key == "memsz" of
-    True -> Img a b c d f x h
+    True -> Img a b c d f x h r
   | False -> m))))).
 
 complete m = and2 (base m >= 0) (and2 (entry m >= 0) (and2 (execsz m >= 0) (and2 (rwoff m >= 0) (and2 (imagesz m >= 0) (memsz m >= 0))))).
@@ -108,7 +118,7 @@ complete m = and2 (base m >= 0) (and2 (entry m >= 0) (and2 (execsz m >= 0) (and2
 # the LOAD section's text -> Img, or why not
 parse : unsafe String -> Result Img String .
 parse load =
-  m = go load 0 (strlen load) (Img (0 - 1) (0 - 1) (0 - 1) (0 - 1) (0 - 1) (0 - 1) "");
+  m = go load 0 (strlen load) (Img (0 - 1) (0 - 1) (0 - 1) (0 - 1) (0 - 1) (0 - 1) "" "");
   case complete m of
     True -> Ok m
   | False -> Err "LOAD section missing a required field".

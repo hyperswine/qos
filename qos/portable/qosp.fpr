@@ -73,6 +73,13 @@ shaGate m img = case QI.sha m == "" of
   | False -> case QI.sha m == Host.sha256 img of
       True -> Unit
     | False -> die "IMAGE sha256 mismatch (corrupt archive)".   # the wording check-all.sh names
+# `relsha <hex>`: the sha-256 of RELOC and IMPORT together, which change what
+# the image does as surely as IMAGE does (docs/2026-10-03-PREEXISTING-FAILURES.md)
+relShaGate m qa = case QI.relsha m == "" of
+    True -> Unit
+  | False -> case QI.relsha m == Host.sha256 (strcat (sectionOr qa "RELOC") (sectionOr qa "IMPORT")) of
+      True -> Unit
+    | False -> die "RELOC sha256 mismatch (corrupt archive)".
 
 # ---- the permission gate ----------------------------------------------------
 # every permission is asked (or granted, under --yes); a REQUIRED one denied
@@ -122,6 +129,7 @@ launch o =
   img = section qa "IMAGE";
   m = case QI.load (section qa "LOAD") img of Ok x -> x | Err e -> die "image load failed: {e}";
   _ = shaGate m img;
+  _ = relShaGate m qa;
   granted = append (gate man yes "required" (M.req man)) (gate man yes "optional" (M.opt man));
   _ = case Host.loadImage path (QI.sha m) img (QI.nums m) (sectionOr qa "RELOC") of Ok _ -> Unit | Err e -> die "image load failed: {e}";
   case Host.run (M.id man) (M.name man) (M.capsBlob (M.id man) granted) of

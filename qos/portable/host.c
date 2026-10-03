@@ -107,6 +107,22 @@ int64_t qosp_load_plugin(const qos_plugin_t *pl, char *err, uint64_t errcap) {
       return -1;
     }
   }
+  /* ...and its relocations and imports are what LOAD says they are */
+  if (pl->relsha.n) {
+    unsigned char d[32];
+    char hex[65];
+    unsigned char *both = malloc(pl->rel.n + pl->imp.n + 1);
+    if (!both) { snprintf(err, errcap, "out of memory"); return -1; }
+    memcpy(both, pl->rel.p, pl->rel.n);
+    memcpy(both + pl->rel.n, pl->imp.p, pl->imp.n);
+    qosp_sha256(both, pl->rel.n + pl->imp.n, d);
+    free(both);
+    for (int i = 0; i < 32; i++) snprintf(hex + 2 * i, 3, "%02x", d[i]);
+    if (!span_is(pl->relsha, hex)) {
+      snprintf(err, errcap, "plugin %.*s: RELOC sha256 mismatch (corrupt archive)", idn, id);
+      return -1;
+    }
+  }
   uintptr_t pg = (uintptr_t)getpagesize();
   uintptr_t lo = (uintptr_t)pl->base, hi = lo + pl->memsz;
   uintptr_t alo = g_arena_base, ahi = alo + g_arena_size;

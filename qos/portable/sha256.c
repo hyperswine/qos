@@ -3,7 +3,7 @@
  * host.c's plugin loader for a plugin's.  (Moved out of qa.c, the C archive
  * parser, when that was deleted: ../fprisc/docs/2026-09-19-C-REDUCTION.md.) */
 #include <stdint.h>
-#include <string.h>
+#include <stddef.h> /* freestanding: linked into apps too (appside/entry.c), so builtins, not <string.h> */
 
 static const uint32_t sha_k[64] = {
   0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
@@ -43,7 +43,7 @@ void qosp_sha256(const unsigned char *msg, uint64_t n, unsigned char out[32]) {
   for (; i + 64 <= n; i += 64) sha_block(h, msg + i);
   unsigned char tail[128] = {0};
   uint64_t r = n - i;
-  memcpy(tail, msg + i, (size_t)r);
+  __builtin_memcpy(tail, msg + i, (size_t)r);
   tail[r] = 0x80;
   uint64_t tl = (r + 9 <= 64) ? 64 : 128;
   uint64_t bits = n * 8;

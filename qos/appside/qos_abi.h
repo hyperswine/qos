@@ -19,7 +19,7 @@
 
 #include <stdint.h>
 
-#define QOS_ABI_VERSION 17u /* v17: tag 8 unloads a plugin whose process ended; v16: tag 4 publishes a plugin the app placed (no shell span); v15: copied worker disk requests */
+#define QOS_ABI_VERSION 18u /* v18: tag 4 checks RELOC and IMPORT against LOAD's relsha; v17: tag 8 unloads a plugin whose process ended; v16: tag 4 publishes a plugin the app placed (no shell span); v15: copied worker disk requests */
 
 /* ---- the address plan (linux-x86-64) --------------------------------
  * The host is linked non-PIE (default 0x400000 text); the arena is a
@@ -80,6 +80,10 @@ typedef struct {
   qos_span_t img;  /* the archive's IMAGE bytes, as shipped (the sha's subject) */
   uint64_t base;   /* v16: where the APP placed the image (64 KiB-aligned, in its arena) */
   uint64_t entry, execsz, rwoff, memsz; /* LOAD's numbers, offsets from base */
+  /* v18: what LOAD claims for RELOC || IMPORT (64 hex, or empty), and the two
+   * sections as shipped -- they change what the image does as surely as
+   * IMAGE does (docs/2026-10-03-PREEXISTING-FAILURES.md) */
+  qos_span_t relsha, rel, imp;
 } qos_plugin_t;
 /* v16: an app's export table (tools/mkexports.py): a count word, then rows
  * sorted by name.  A plugin's imports are completed from it by name. */

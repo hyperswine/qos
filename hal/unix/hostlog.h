@@ -35,7 +35,8 @@ void qos_hostlog_set_sink(void (*sink)(const char *line, uint64_t n));
  * would otherwise hold the calling hart for as long as nobody reads.  A
  * byte waits at most QOS_CONSOLE_WAIT_MS once; while the console stays
  * unwritable later bytes are dropped at once and counted, and the count is
- * logged when writing resumes. */
+ * reported when writing resumes -- on stderr only: this runs under the app's
+ * console lock, so it must never reach the sink. */
 void qos_console_putc(char c);
 
 #endif /* QOS_HOSTLOG_H */

@@ -198,10 +198,36 @@ static void plug_image_quiet(uw pid) {
 static V h_sys_images(V d) { (void)d; return TAG((sw)fpr_image_count()); }
 FPR_FN(fpr_g_Sys_x2eimages, h_sys_images, 1);
 
-/* Sys.attachImage <id> <abi> <sha> <nums> [IMAGE, RELOC, IMPORT] -> Ok "" | Err
+/* LOAD's claims, checked BEFORE anything is placed: `sha` over IMAGE and
+ * `relsha` over RELOC || IMPORT (qos/portable/sha256.c, linked into apps).  A
+ * tampered relocation list must not move a single word, so the host's own
+ * check after placement is too late to be the first one
+ * (docs/2026-10-03-PREEXISTING-FAILURES.md). */
+void qosp_sha256(const unsigned char *msg, uint64_t n, unsigned char out[32]);
+static int digest_is(qos_span_t want, const unsigned char *a, uw an, const unsigned char *b, uw bn) {
+  if (!want.n) return 1; /* nothing claimed, nothing to refuse */
+  unsigned char d[32];
+  if (bn) {
+    unsigned char *both = (unsigned char *)buddy_alloc(an + bn);
+    if (!both) return 0;
+    __builtin_memcpy(both, a, an);
+    __builtin_memcpy(both + an, b, bn);
+    qosp_sha256(both, an + bn, d);
+    buddy_free(both);
+  } else {
+    qosp_sha256(a, an, d);
+  }
+  if (want.n != 64) return 0;
+  static const char hx[] = "0123456789abcdef";
+  for (int i = 0; i < 32; i++)
+    if (want.p[2 * i] != hx[d[i] >> 4] || want.p[2 * i + 1] != hx[d[i] & 15]) return 0;
+  return 1;
+}
+
+/* Sys.attachImage <id> <abi> <sha> <relsha> <nums> [IMAGE, RELOC, IMPORT] -> Ok "" | Err
  * reason: nums is mods/qaimg.fpr's [base, entry, execsz, rwoff, memsz] (base
  * 0: relocatable); programs call Plug.attach with the .qa bytes. */
-static V h_sys_attach_image(V idv, V abiv, V shav, V numsv, V secsv) {
+static V h_sys_attach_image(V idv, V abiv, V shav, V relshav, V numsv, V secsv) {
   if (!g_syscall) return fpr_mkresult(1, "no syscall channel (standalone run)");
   uw n[5];
   if (!fpr_list_ints(numsv, n, 5)) fpr_cpanic("Sys.attachImage: nums must be [base, entry, execsz, rwoff, memsz]");
@@ -210,6 +236,10 @@ static V h_sys_attach_image(V idv, V abiv, V shav, V numsv, V secsv) {
   qos_span_t imp = list_str(secsv, 2, "Sys.attachImage: sections must be [IMAGE, RELOC, IMPORT]");
   if (n[0] != 0)
     return fpr_mkresult(1, "not a relocatable plugin (linked for a fixed slot): rebuild it");
+  if (!digest_is(span_of(shav, "Sys.attachImage: sha must be a String"), img.p, img.n, 0, 0))
+    return fpr_mkresult(1, "IMAGE sha256 mismatch (corrupt archive)");
+  if (!digest_is(span_of(relshav, "Sys.attachImage: relsha must be a String"), rel.p, rel.n, imp.p, imp.n))
+    return fpr_mkresult(1, "RELOC sha256 mismatch (corrupt archive)");
   uw memsz = n[4];
   const uw align = 64u * 1024; /* the link script's W^X page: 4 K and 16 K hosts alike */
   void *blk = buddy_alloc(sizeof(plug_image_t) + align + memsz);
@@ -228,6 +258,7 @@ static V h_sys_attach_image(V idv, V abiv, V shav, V numsv, V secsv) {
       span_of(abiv, "Sys.attachImage: abi must be a String"),
       span_of(shav, "Sys.attachImage: sha must be a String"),
       img, (uint64_t)(uintptr_t)base, n[1], n[2], n[3], memsz,
+      span_of(relshav, "Sys.attachImage: relsha must be a String"), rel, imp,
   };
   g_sysout[0] = 0;
   int64_t r = g_syscall(QOS_SYS_LOADQA, (const char *)&pl, sizeof pl, g_sysout, sizeof g_sysout);
@@ -251,7 +282,7 @@ static V h_sys_attach_image(V idv, V abiv, V shav, V numsv, V secsv) {
     return fpr_mkresult(1, "module registry full");
   return fpr_mkresult(0, "");
 }
-FPR_FN(fpr_g_Sys_x2eattachImage, h_sys_attach_image, 5);
+FPR_FN(fpr_g_Sys_x2eattachImage, h_sys_attach_image, 6);
 
 /* Sys.compile <profile> <source> -> Ok asm | Err reason: the host-
  * side fpr compiler server, reached over the syscall channel (tag 7,

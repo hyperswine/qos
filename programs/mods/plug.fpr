@@ -22,7 +22,7 @@ QI  = use "qaimg".
 # IMPORT].  The app places the plugin in its own heap, moves it there and
 # completes its imports by name (docs/2026-10-01-IMPORT-TABLE.md); the host
 # only makes its code executable.
-Sys.attachImage : String -> String -> String -> List Int -> List String -> Result String String .
+Sys.attachImage : String -> String -> String -> String -> List Int -> List String -> Result String String .
 
 attach : String -> Result String String .
 attach qa = case M.parseQa qa of
@@ -48,4 +48,4 @@ attachImp man load img rel r = case r of
 # an inconsistent LOAD is refused HERE, by name, before anything is placed
 attachChecked man img rel imp r = case r of
     Err e -> Err e
-  | Ok m -> Sys.attachImage (M.id man) (M.abi man) (QI.sha m) (QI.nums m) (img :: rel :: imp :: Nil).
+  | Ok m -> Sys.attachImage (M.id man) (M.abi man) (QI.sha m) (QI.relsha m) (QI.nums m) (img :: rel :: imp :: Nil).

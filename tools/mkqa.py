@@ -223,15 +223,22 @@ def build(manifest_path, elf_path, out_path, relocatable=False,
     if native_abi is not None:
         load += f"nativeabi {native_abi}\n".encode()
 
+    # RELOC: little-endian u32 offsets of the address words to move by the
+    # load address (the image is linked at 0).  IMPORT: one text line per
+    # slot or placeholder the loader fills from the running image's export
+    # table, by NAME.  Both change what the image does as surely as IMAGE
+    # does, so LOAD claims their sha-256 too: `relsha` = sha256(RELOC ||
+    # IMPORT), checked beside `sha` (docs/2026-10-03-PREEXISTING-FAILURES.md).
+    reloc_b = b"".join(struct.pack("<I", o) for o in relocs) if relocatable else b""
+    import_b = "".join(r + "\n" for r in imps).encode() if with_imports else b""
+    if relocatable:
+        load += f"relsha {hashlib.sha256(reloc_b + import_b).hexdigest()}\n".encode()
+
     sections = [("MANIFEST", manifest), ("LOAD", load), ("IMAGE", image)]
     if relocatable:
-        # RELOC: little-endian u32 offsets of the address words to move by
-        # the load address (the image is linked at 0)
-        sections.append(("RELOC", b"".join(struct.pack("<I", o) for o in relocs)))
+        sections.append(("RELOC", reloc_b))
     if with_imports:
-        # IMPORT: one text line per slot or placeholder the loader fills
-        # from the running image's export table, by NAME
-        sections.append(("IMPORT", "".join(r + "\n" for r in imps).encode()))
+        sections.append(("IMPORT", import_b))
     off = 0
     table_lines = []
     for name, blob in sections:

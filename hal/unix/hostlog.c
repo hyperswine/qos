@@ -45,20 +45,32 @@ void qos_hostlog(const char *fmt, ...) {
 #endif
 static int console_stalled;            /* the last byte found fd 1 unwritable */
 static unsigned long console_dropped;  /* bytes dropped since writing last resumed */
+/* The console's own notes go to stderr ONLY.  qos_console_putc runs inside
+ * the app's console echo (fpr_logput holds fpr_con_lock around hal_putc), so
+ * a note through qos_hostlog would call the app's sink -- fpr_logput again,
+ * on the same thread -- which spins for ever on the lock it already holds.
+ * That was the "panic last words" hang: a panic echoed, the console
+ * stalled or recovered mid-line, and the panic record was never written
+ * (docs/2026-10-03-PREEXISTING-FAILURES.md).  The header's law applies:
+ * nothing that runs under the app's locks may reach the sink. */
+static void console_note(const char *fmt, unsigned long v) {
+  fprintf(stderr, fmt, v);
+  fputc('\n', stderr);
+}
 void qos_console_putc(char c) {
   struct pollfd p = {1, POLLOUT, 0};
   int r = poll(&p, 1, console_stalled ? 0 : QOS_CONSOLE_WAIT_MS);
   if (r > 0 && (p.revents & POLLOUT)) {
     if (console_stalled) {
       console_stalled = 0;
-      qos_hostlog("[qosp] console writable again: %lu byte(s) dropped while it was not", console_dropped);
+      console_note("[qosp] console writable again: %lu byte(s) dropped while it was not", console_dropped);
       console_dropped = 0;
     }
     ssize_t w = write(1, &c, 1);
     (void)w; /* console loss is not an image error */
     return;
   }
-  if (!console_stalled) qos_hostlog("[qosp] console not writable within %d ms: dropping output until it is", QOS_CONSOLE_WAIT_MS);
+  if (!console_stalled) console_note("[qosp] console not writable within %lu ms: dropping output until it is", (unsigned long)QOS_CONSOLE_WAIT_MS);
   console_stalled = 1;
   console_dropped++;
 }

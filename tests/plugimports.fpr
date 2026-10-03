@@ -7,7 +7,9 @@
 #     (there is no shell stamp, and no address it was built for), and its
 #     exports run;
 #   - plugneeds.qa imports a name no app exports, and is refused by name
-#     before anything of it runs.
+#     before anything of it runs;
+#   - plugtamp.qa is plugmini.qa with a RELOC byte flipped: refused by LOAD's
+#     relsha before anything is placed (docs/2026-10-03-PREEXISTING-FAILURES.md).
 #
 # Expected: "plugimports: plugmini under a second shell: 40+2=42;
 # plugneeds: the plugin needs ..., which this app does not export HOLDS"
@@ -24,9 +26,11 @@ main =
     Err e -> "plugimports: apps/plugmini.qa not on the disk ({e})"
   | Ok mini -> (case QL.readLatest dsk h "apps/plugneeds.qa" of
       Err e -> "plugimports: apps/plugneeds.qa not on the disk ({e})"
-    | Ok needs -> run mini needs).
+    | Ok needs -> (case QL.readLatest dsk h "apps/plugtamp.qa" of
+        Err e -> "plugimports: apps/plugtamp.qa not on the disk ({e})"
+      | Ok tamp -> run mini needs tamp)).
 
-run mini needs =
+run mini needs tamp =
   n0 = Mod.plugs 0;
   first = case Plug.attach mini of
       Err e -> "plugmini refused: {e}"
@@ -34,9 +38,12 @@ run mini needs =
   second = case Plug.attach needs of
       Ok u -> "plugneeds ATTACHED"
     | Err e -> e;
-  ok = has first "40+2=42" and has second "the plugin needs " and has second "which this app does not export";
+  third = case Plug.attach tamp of
+      Ok u -> "plugtamp ATTACHED"
+    | Err e -> e;
+  ok = has first "40+2=42" and has second "the plugin needs " and has second "which this app does not export" and has third "RELOC sha256 mismatch";
   verdict = case ok of True -> "HOLDS" | False -> "FAILED";
-  "plugimports: {first}; plugneeds: {second} {verdict}".
+  "plugimports: {first}; plugneeds: {second}; plugtamp: {third} {verdict}".
 
 call n0 =
   (f, add) = Mod.findAt n0 "plugAdd";
