@@ -1,0 +1,5 @@
+# The first graphical boot profile. GUI plugins are discovered from apps/index.
+name = "Main"
+entry = "programs/main.fpr"
+apps = ["apps/clock.fpr", "apps/logs.fpr", "apps/browser.fpr",
+        "apps/disk.fpr"]

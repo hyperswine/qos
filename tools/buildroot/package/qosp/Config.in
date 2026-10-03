@@ -1,0 +1,74 @@
+config BR2_PACKAGE_QOSP
+	bool "qosp (QOS Portable)"
+	depends on BR2_PACKAGE_HAS_LIBEGL
+	depends on BR2_PACKAGE_HAS_LIBGLES
+	depends on BR2_TOOLCHAIN_HAS_THREADS
+	help
+	  QOS Portable: the host that runs ONE FP-RISC .qa image over a
+	  Linux kernel, with the EGL/GLES gfx tier (qos/Makefile's
+	  `portable-es`).  It draws into an offscreen ES 3.1 FBO under
+	  surfaceless EGL and puts each frame on the monitor through a
+	  KMS dumb buffer, so it needs no X server and no compositor --
+	  only a DRM device and Mesa.
+
+	  This package does not download anything.  It builds the qos
+	  checkout you point it at, with Buildroot's own cross compiler,
+	  by calling that tree's `fpr`.
+
+comment "qosp needs a toolchain w/ threads, and EGL + OpenGL ES"
+	depends on !BR2_PACKAGE_HAS_LIBEGL || !BR2_PACKAGE_HAS_LIBGLES || \
+		!BR2_TOOLCHAIN_HAS_THREADS
+
+if BR2_PACKAGE_QOSP
+
+config BR2_PACKAGE_QOSP_QOS_DIR
+	string "the qos checkout"
+	default "$(BR2_EXTERNAL_QOSP_PATH)/../.."
+	help
+	  The QOS working tree to build.  The default is the one this
+	  external tree lives in.
+
+config BR2_PACKAGE_QOSP_FPRISC_DIR
+	string "the fprisc checkout"
+	default ""
+	help
+	  The FP-RISC working tree whose `fpr` compiles qosp.  Empty
+	  means the sibling ../fprisc of the qos checkout, which is the
+	  rule the rest of the build already follows.
+
+	  `fpr` must already be BUILT there: it is a Haskell program and
+	  is deliberately not a Buildroot host package.
+
+config BR2_PACKAGE_QOSP_APP
+	string "the .qa image to host"
+	default ""
+	help
+	  The application this image exists to run, installed as
+	  /usr/share/qosp/app.qa.  Empty means <qos>/app.qa, which is
+	  what `make qos-app PROG=...` writes.
+
+config BR2_PACKAGE_QOSP_AUTOSTART
+	bool "start it at boot on tty1"
+	default y
+	help
+	  Install an init script that runs the image on tty1 as soon as
+	  the system is up -- the appliance the Pi target is for.  The
+	  serial console keeps its own getty either way, so there is
+	  always a shell to debug from.
+
+config BR2_PACKAGE_QOSP_MAIN_PROFILE
+	bool "boot the graphical Main Profile"
+	default n
+	help
+	  Install the paged GUI shell and its seeded onboard application disk.
+	  Build the artifacts with tools/main-profile.py on the target architecture
+	  first, then set the directory below. Existing persistent disks are kept.
+
+config BR2_PACKAGE_QOSP_MAIN_DIR
+	string "Main Profile artifact directory"
+	depends on BR2_PACKAGE_QOSP_MAIN_PROFILE
+	default ""
+	help
+	  Directory containing main.qa and Main.disk from tools/main-profile.py.
+
+endif

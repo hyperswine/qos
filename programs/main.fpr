@@ -1,0 +1,5 @@
+# Main Profile: graphical boot entry. The disk supplies onboard .qa tiles.
+#: host gl
+unsafe program.
+Shell = use "mods/guishell".
+main = Shell.main.

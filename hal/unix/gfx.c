@@ -34,7 +34,8 @@
  * (the kernel's 3-byte PS/2-style aggregate — works on a Linux console
  * with no window system at all; absent in containers/ssh, in which case
  * inputPoll simply never reports mouse events).  Events:
- *   (1, byte, 0)  key    (2, dx, dy)  mouse move    (3, buttons, 0)
+ *   (1, byte, 0) key   (2, dx, dy) relative move   (3, buttons, 0)
+ *   (7, x, y) desktop pointer in framebuffer coordinates, top-left origin
  */
 #include "fpr.h"
 #include "hostlog.h"
@@ -383,10 +384,17 @@ static void gfx_char_cb(GLFWwindow *window, unsigned int codepoint) {
   gfx_event_push(1, codepoint, 0);
 }
 
+static void gfx_pointer_position(GLFWwindow *window, double x, double y) {
+  int w, h;
+  glfwGetWindowSize(window, &w, &h);
+  if (w > 0 && h > 0)
+    gfx_event_push(7, (int64_t)(x * G.w / w), (int64_t)(y * G.h / h));
+}
+
 static void gfx_cursor_cb(GLFWwindow *window, double x, double y) {
-  (void)window;
   if (gfx_have_cursor) gfx_event_push(2, (int64_t)(x - gfx_cursor_x), (int64_t)(gfx_cursor_y - y));
   gfx_cursor_x = x; gfx_cursor_y = y; gfx_have_cursor = 1;
+  gfx_pointer_position(window, x, y);
 }
 
 /* the wheel: kind 6, a = vertical notches x10 (a trackpad's fractions
@@ -397,8 +405,11 @@ static void gfx_scroll_cb(GLFWwindow *window, double xoff, double yoff) {
 }
 
 static void gfx_mouse_cb(GLFWwindow *window, int button, int action, int mods) {
-  (void)window; (void)mods;
+  (void)mods;
   if (button >= 0 && button < 31) {
+    double x, y;
+    glfwGetCursorPos(window, &x, &y);
+    gfx_pointer_position(window, x, y);
     if (action == GLFW_PRESS) gfx_mouse_buttons |= 1 << button;
     else if (action == GLFW_RELEASE) gfx_mouse_buttons &= ~(1 << button);
     gfx_event_push(3, gfx_mouse_buttons, 0);

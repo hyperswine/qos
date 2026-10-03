@@ -1,4 +1,7 @@
+unsafe program.
 # clock root: module-table carrier only
 A = use "../programs/mods/clockapp".
-main : unsafe Unit .
-main = A.appMeta 0.
+main : Unit .
+main =
+  _ = A.appMeta 0;
+  Unit.

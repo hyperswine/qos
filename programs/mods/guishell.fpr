@@ -1,0 +1,251 @@
+# A small Main Profile shell over the existing System/Graphics and appkit ABI.
+# Cooperative app plugins run inside this shell; this is not process isolation.
+unsafe module.
+QS = use "qsys".
+GX = use "graphics".
+EP = use "ep".
+AK = use "appkit".
+S2 = use "scene2d".
+FS = use "std/fs".
+AC = use "std/actor".
+MV = use "std/mvu".
+
+Box = S2.Box. Lbl = S2.Lbl.
+Row = S2.Row. Col = S2.Col. Pad = S2.Pad. Gap = S2.Gap.
+W = S2.W. H = S2.H. Grow = S2.Grow. Fs = S2.Fs.
+Bg = S2.Bg. Fg = S2.Fg. Round = S2.Round. Center = S2.Center. Mid = S2.Mid.
+Tile = Type (Tile id title hint table).
+width = 960. height = 600. pageSize = 6.
+ink = (940, 950, 990). dim = (530, 610, 750).
+accent = (380, 800, 980).
+
+count Nil = 0.
+count (_ :: r) = 1 + count r.
+cat Nil ys = ys.
+cat (x :: r) ys = x :: cat r ys.
+at (x :: r) 0 = x.
+at (x :: r) n = at r (n - 1).
+at Nil n = Tile "" "" "" (0 - 1).
+clamp lo hi n | n < lo = lo.
+clamp lo hi n | n > hi = hi.
+clamp lo hi n = n.
+pages ts = (count ts + pageSize - 1) / pageSize.
+
+shortcuts = [Tile "clock" "Clock" "A moment of calm" (0 - 1),
+             Tile "files" "Files" "Explore your onboard URLs" (0 - 2),
+             Tile "logs" "Logs" "See what QOS is doing" (0 - 3),
+             Tile "about" "About QOS" "Small language. Open system." (0 - 4)].
+installed me st apps = case st == 0 of
+    True -> Nil
+  | False -> case FS.readLatest me st "apps/index" of
+      Err _ -> Nil
+    | Ok s -> diskTiles (AK.lines s) apps.
+diskTiles Nil apps = Nil.
+diskTiles (id :: rest) apps = diskTile id apps :: diskTiles rest apps.
+diskTile id Nil = Tile id id "Archive could not be attached" (0 - 100).
+diskTile id (QS.App aid name ti :: rest) = case id == aid of
+    True -> Tile id name "Onboard .qa application" ti
+  | False -> diskTile id rest.
+
+# The existing appkit contract: resolution stays scoped to the archive's table.
+has ti name =
+  (ok, f) = Mod.findAt ti name;
+  ok == 1.
+gui ti = has ti "appInit" and has ti "appUpdate" and has ti "appTree" and has ti "appVals".
+export ti name =
+  (ok, f) = Mod.findAt ti name;
+  f.
+envOf q tiles mt =
+  QS.Qsys ns st vfs log apps = q;
+  (log, mt, (titles tiles, ns)).
+titles Nil = Nil.
+titles (Tile id title hint ti :: r) = title :: titles r.
+
+init env = {page = 0, selected = 0, active = 0, inner = 0, status = "Ready when you are", snap = 0}.
+staticKey m = 0.
+staticView vp m = 0.
+done m = "shell ended".
+subscriptions port m = MV.SPort port :: subs m.
+subs m = [MV.STick 100, MV.SKeys].
+update me env (MV.EKey 16) m | m.active == 0 = (m, [MV.MQuit]).
+update me env (MV.EKey k) m = (key env k m, Nil).
+update me env (MV.EMsg "quit" _) m = (m, [MV.MQuit]).
+update me env ev m = (m, Nil).
+key env 1 m =
+  _ = print "shell: home";
+  {m | active = 0, status = "Welcome home", snap = m.snap + 1}.
+key env 25 m =
+  _ = print "shell: snapshot {m.snap + 1}";
+  {m | snap = m.snap + 1}.
+key env k m | k >= 1000000 = pointer env k m.
+key env k m | m.active != 0 = appKey env k m.
+key env 106 m = select env m (m.selected + 1).
+key env 105 m = select env m (m.selected - 1).
+key env 108 m = select env m (m.selected + 3).
+key env 103 m = select env m (m.selected - 3).
+key env 109 m = page env m 1.
+key env 104 m = page env m (0 - 1).
+key env 28 m = openTile env m.
+key env 57 m = openTile env m.
+key env k m = m.
+select env m n =
+  (q, tiles, mt) = env;
+  s = clamp 0 (count tiles - 1) n;
+  {m | selected = s, page = s / pageSize}.
+page env m delta =
+  (q, tiles, mt) = env;
+  p = clamp 0 (pages tiles - 1) (m.page + delta);
+  _ = print "shell: page {p + 1}";
+  {m | page = p, selected = p * pageSize}.
+
+# Pointer adapter emits bounded virtual coordinates. A press launches, a move
+# selects. The service only delivers input while this shell has graphics focus.
+pointer env k m =
+  press = k >= 2000000;
+  pos = k - (case press of True -> 2000000 | False -> 1000000);
+  x = pos % width; y = pos / width;
+  case m.active != 0 of
+    True -> (case press and y >= 530 of True -> key env 1 m | False -> m)
+  | False -> pointerHome env m press x y.
+pointerHome env m press x y | y >= 530 =
+  case press of True -> page env m (case x < width / 2 of True -> 0 - 1 | False -> 1) | False -> m.
+pointerHome env m press x y | x < 42 or x >= 918 or y < 140 or y >= 476 = m.
+pointerHome env m press x y =
+  col = (x - 42) / 296; row = (y - 140) / 178;
+  case (x - 42) % 296 >= 284 or (y - 140) % 178 >= 158 of
+    True -> m
+  | False ->
+      (q, ts, mt) = env;
+      n = m.page * pageSize + row * 3 + col;
+      case n >= count ts of True -> m | False ->
+        m2 = {m | selected = n};
+        case press of True -> openTile env m2 | False -> m2.
+
+openTile env m =
+  (q, tiles, mt) = env;
+  Tile id title hint ti = at tiles m.selected;
+  _ = print "shell: open {id}";
+  case ti == 0 - 100 of
+    True -> {m | status = "Cannot open {id}: archive load was refused"}
+  | False -> case ti < 0 of
+      True -> {m | active = ti, status = title}
+    | False -> case gui ti of
+        False -> {m | status = "Cannot open {id}: this .qa has no appkit GUI entry"}
+      | True ->
+          inner = (export ti "appInit") (myself 0) (envOf q tiles mt);
+          {m | active = ti + 1, inner = inner, status = title}.
+appKey env k m | m.active < 0 = m.
+appKey env k m =
+  (q, tiles, mt) = env;
+  inner = (export (m.active - 1) "appUpdate") (myself 0) (envOf q tiles mt) k m.inner;
+  {m | inner = inner}.
+
+text s c size = Lbl [Fs size, Fg c] s.
+spacer = Box [Grow] Nil.
+header = Box [Row, H 82, Mid, Gap 20]
+  [Box [Col, Gap 7] [text "QOS" ink 34, text "MAIN PROFILE" dim 12], spacer,
+   text "Your space, ready." accent 16].
+color n = case n % 4 of
+    0 -> (230, 580, 900)
+  | 1 -> (290, 750, 590)
+  | 2 -> (690, 470, 900)
+  | _ -> (920, 570, 350).
+tile ts m n | n >= count ts = Box [W 284, H 158] Nil.
+tile ts m n =
+  Tile id title hint ti = at ts n;
+  Box [Col, W 284, H 158, Pad 15, Gap 8, Round 20,
+       Bg (case n == m.selected of True -> (130, 210, 320) | False -> (65, 98, 155))]
+    [Box [Row, Gap 13, Mid]
+      [Box [W 56, H 56, Round 16, Bg (color n), Center, Mid]
+        [text (substr title 0 1) ink 28], text title ink 21],
+     text hint dim 13,
+     text (case ti == 0 - 100 of True -> ".QA REFUSED" | False ->
+       case ti < 0 of True -> "SHORTCUT" | False -> ".QA APP") accent 11].
+grid ts m =
+  base = m.page * pageSize;
+  Box [Col, Gap 20]
+    [Box [Row, Gap 12] [tile ts m base, tile ts m (base + 1), tile ts m (base + 2)],
+     Box [Row, Gap 12] [tile ts m (base + 3), tile ts m (base + 4), tile ts m (base + 5)]].
+home ts m = Box [Col, W width, H height, Pad 42, Gap 16, Bg (18, 30, 60)]
+  [header, grid ts m, spacer,
+   Box [Row, Mid] [text "< PREVIOUS" dim 13, spacer,
+     text "PAGE {m.page + 1} / {pages ts}" ink 14, spacer, text "NEXT >" dim 13],
+   text m.status accent 13].
+sheet title body = Box [Col, W width, H height, Pad 42, Gap 24, Bg (18, 30, 60)]
+  [header, Box [Col, Grow, Pad 26, Gap 20, Round 24, Bg (65, 98, 155)]
+    (text title ink 30 :: body), text "ESC OR CLICK HERE TO GO HOME     P SNAPSHOT" dim 14].
+builtin self env m =
+  (q, tiles, mt) = env;
+  QS.Qsys ns st vfs log apps = q;
+  builtinTree self ns mt m.active.
+builtinTree self ns mt a | a == 0 - 1 = sheet "Take your time" [text (AK.clockStr mt) ink 70, text "QOS runtime clock" dim 17].
+builtinTree self ns mt a | a == 0 - 2 = sheet "Files & services" [text "The onboard namespace" accent 17, text (AK.vfsRead self ns "/") ink 14].
+builtinTree self ns mt a | a == 0 - 3 = sheet "System log" [text (QS.joinNl (Sys.logSnap 0)) ink 14].
+builtinTree self ns mt a = sheet "Welcome to QOS" [text "An actor system, written in FP-RISC." ink 20,
+       text "Apps come from the onboard disk. Shortcuts live here." dim 16,
+       text "ARROWS select   ENTER open   PGUP / PGDN pages" accent 16,
+       text "Mouse: move to select, click to open." accent 16].
+view self env vp m =
+  (q, tiles, mt) = env;
+  tree = case m.active == 0 of
+      True -> home tiles m
+    | False -> case m.active < 0 of
+        True -> builtin self env m
+      | False -> (export (m.active - 1) "appTree") (width, height);
+  (es, slots) = S2.buildW (width, height) tree;
+  vals = case m.active > 0 of
+      True -> (export (m.active - 1) "appVals") self (envOf q tiles mt) m.inner
+    | False -> Nil;
+  # The overlay walks text as well as geometry every frame. The 3D static
+  # mesh cache does not retain proportional glyphs, so UI belongs here.
+  (S2.sceneAt height Nil Nil, (cat es (S2.dyns slots vals), S2.camAt height), m.snap).
+
+input graphics w h me = inputLoop graphics w h me (width / 2) (height / 2) 0.
+inputLoop graphics w h me x y buttons =
+  (from, MV.Poll _) = receive me;
+  ev = MV.svcCall me graphics (MV.Poll 0);
+  (kind, a, b) = ev;
+  _ = drop ev;
+  inputEvent graphics w h me from x y buttons kind a b.
+inputEvent graphics w h me from x y buttons 2 dx dy =
+  xx = clamp 0 (width - 1) (x + dx * width / w);
+  yy = clamp 0 (height - 1) (y - dy * height / h);
+  _ = send from (4, 1000000 + yy * width + xx, 1);
+  _ = Sys.poolReset 0;
+  inputLoop graphics w h me xx yy buttons.
+inputEvent graphics w h me from x y buttons 7 px py =
+  xx = clamp 0 (width - 1) (px * width / w);
+  yy = clamp 0 (height - 1) (py * height / h);
+  _ = send from (4, 1000000 + yy * width + xx, 1);
+  _ = Sys.poolReset 0;
+  inputLoop graphics w h me xx yy buttons.
+inputEvent graphics w h me from x y buttons 3 next _ =
+  code = case band next 1 != 0 and band buttons 1 == 0 of
+      True -> (4, 2000000 + y * width + x, 1)
+    | False -> (4, 0, 0);
+  _ = send from code;
+  _ = Sys.poolReset 0;
+  inputLoop graphics w h me x y next.
+inputEvent graphics w h me from x y buttons kind a b =
+  _ = send from (kind, a, b);
+  _ = Sys.poolReset 0;
+  inputLoop graphics w h me x y buttons.
+
+main = run "qos-shell".
+run tag =
+  me = myself 0;
+  q = QS.bootSized me width height;
+  QS.Qsys ns st vfs log apps = q;
+  tiles = cat shortcuts (installed me st apps);
+  mt = reg32 (device "clint") 49144;
+  ep = case GX.attach me ns tag of Ok v -> v | Err e -> error "shell graphics: {e}";
+  (graphics, h) = ep;
+  (w, hh) = MV.svcCall me graphics (MV.Dims 0);
+  inp = spawn (input graphics w hh);
+  _ = print "shell: Main Profile ready ({count tiles} shortcuts, {pages tiles} pages)";
+  port = spawn MV.port;
+  cfg = {env = (q, tiles, mt), mt = mt, tick = 333330, input = inp, render = graphics};
+  app = MV.MApp init update staticKey staticView view done (subscriptions port);
+  result = MV.run me cfg app;
+  _ = EP.close me ep;
+  result.

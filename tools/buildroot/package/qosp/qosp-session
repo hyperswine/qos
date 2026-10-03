@@ -1,0 +1,53 @@
+#!/bin/sh
+# qosp-session -- run this image's one application.
+#
+# An image built from tools/buildroot exists to run a single .qa, so the
+# policy that would otherwise be a shell history lives here: where the
+# application is, where its disk is kept across reboots, and where its
+# assets are.  Everything is overridable from the environment, so the
+# same script serves the boot-time appliance and a hand-run session.
+set -e
+
+SHARE=${QOSP_SHARE:-/usr/share/qosp}
+RUNNER=${QOSP_BIN:-/usr/bin/qosp}
+APP=${QOSP_APP:-$SHARE/app.qa}
+STATE=${QOSP_STATE:-/var/lib/qosp}
+
+[ -f "$APP" ] || { echo "qosp-session: no application at $APP" >&2; exit 1; }
+
+mkdir -p "$STATE"
+
+# Main Profile's initial onboard apps. Never overwrite the writable disk on
+# subsequent boots; archive installation and user state survive restart.
+if [ -f "$SHARE/Main.disk" ] && [ -z "${FPR_DISK:-}" ]; then
+	[ -f "$STATE/Main.disk" ] || cp "$SHARE/Main.disk" "$STATE/Main.disk"
+	FPR_DISK="$STATE/Main.disk"
+	export FPR_DISK
+fi
+
+# The scanout probe happens ONCE, at startup, so a display that appears a
+# moment later is a display the application never sees -- it would render
+# offscreen for the rest of its life.  The drivers this image cares about
+# are built in, so the card is normally there before userspace is; this is
+# for the case where something legitimately arrives late (a module loaded
+# by mdev, a monitor probed slowly).  Bounded, and never fatal: with no
+# display at all, rendering offscreen is the correct answer and qosp says
+# so in its log.
+if [ -z "${QOSP_NO_WAIT_DRI:-}" ]; then
+	n=0
+	while [ ! -e /dev/dri/card0 ] && [ $n -lt 50 ]; do
+		n=$((n + 1))
+		sleep 0.1
+	done
+fi
+# the QLOG disk qosp creates on first run and reads back on every one after
+[ -n "${FPR_DISK:-}" ] || FPR_DISK="$STATE/qosp.disk"
+export FPR_DISK
+
+# meshes, textures and music, when the image was built with any
+if [ -d /usr/share/qosp/assets ] && [ -z "${FPR_ASSETS:-}" ]; then
+	FPR_ASSETS=/usr/share/qosp/assets
+	export FPR_ASSETS
+fi
+
+exec "$RUNNER" --yes "$APP" "$@"

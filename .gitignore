@@ -2,6 +2,8 @@
 *.zip
 *.qa
 qosp
+!tools/buildroot/package/qosp/
+!tools/buildroot/package/qosp/**
 *.disk
 qosp-gl
 qosp-es

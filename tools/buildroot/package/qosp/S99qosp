@@ -1,0 +1,36 @@
+#!/bin/sh
+# S99qosp -- the appliance: the application comes up with the system.
+#
+# It runs on tty1, which is where the DRM scanout puts its frames, and
+# NOT on the console -- the serial console keeps its getty so there is
+# always a shell to debug from.  Its own output goes to a log rather
+# than over the picture.
+
+TTY=${QOSP_TTY:-/dev/tty1}
+LOG=/var/log/qosp.log
+PIDFILE=/var/run/qosp.pid
+
+start() {
+	printf 'Starting qosp: '
+	# a minimal rootfs may have neither, and a failed redirect here would
+	# mean the appliance silently does not come up
+	mkdir -p "$(dirname "$LOG")" "$(dirname "$PIDFILE")"
+	[ -c "$TTY" ] || TTY=/dev/console
+	setsid /usr/bin/qosp-session <"$TTY" >>"$LOG" 2>&1 &
+	echo $! > "$PIDFILE"
+	echo "OK (on ${TTY}, log ${LOG})"
+}
+
+stop() {
+	printf 'Stopping qosp: '
+	[ -f "$PIDFILE" ] && kill "$(cat "$PIDFILE")" 2>/dev/null
+	rm -f "$PIDFILE"
+	echo OK
+}
+
+case "$1" in
+	start) start ;;
+	stop) stop ;;
+	restart|reload) stop; sleep 1; start ;;
+	*) echo "usage: $0 {start|stop|restart}"; exit 1 ;;
+esac

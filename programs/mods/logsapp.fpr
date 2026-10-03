@@ -41,6 +41,7 @@ sevPath 0 = "/logs/normal".
 sevPath 1 = "/logs/warns".
 sevPath 2 = "/logs/errors".
 sevPath 3 = "/logs/host".
+sevPath sev = error "logs: invalid severity {sev}".
 
 appVals self env sev =
   sn = Sys.logSnap sev;

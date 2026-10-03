@@ -1220,6 +1220,7 @@ SMOKE = [
     ("endpoints",         "tests/epecho.fpr",   "qosp", "epecho: HOLDS"),
     ("files shared",      "tests/filessvc.fpr", "qosp", "filessvc: HOLDS"),
     ("graphics shared",   "tests/gfxshare.fpr", "qosp", "gfxshare: HOLDS"),
+    ("GUI shell controls", "tests/guishell.fpr", "qosp", "guishell: HOLDS"),
     ("mvu engine",        "tests/mvutick.fpr",  "qosp", "4 statics builds"),
     ("display O(1)",      "tests/tuiframes.fpr", "qosp", "TUIFRAMES HOLD"),
     ("disk v2",           "tests/qdisk2.fpr",   "qosp", "torn=True"),
@@ -1305,7 +1306,7 @@ def cmd_clean(a):
 INSTALL_TREE = [
     "qos.py", "dependency.mk", "release.toml", "README.md", "docs", "fprisc.lock.json",
     "Makefile", "qos-app.mk", "std", "programs", "tools", "models", "targets",
-    "apps", "tests", ".fpr", "fpr.lock", "hal", "loader", "core",
+    "apps", "profiles", "tests", ".fpr", "fpr.lock", "hal", "loader", "core",
     "qos/Makefile", "qos/native", "qos/appside", "qos/portable", "qos/tests-host", "qos/qosp", "qos/qosp-gl",
 ]
 INSTALL_SKIP = shutil.ignore_patterns("*.o", "*.hi", "*.qa", "*.disk", "*.img", "build", "dist-newstyle",

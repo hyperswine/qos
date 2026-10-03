@@ -1,0 +1,55 @@
+# Pointer protocol, empty/partial grids, page clamps and refusal behavior.
+#: expect guishell: HOLDS
+unsafe program.
+S = use "../programs/mods/guishell".
+QS = use "../programs/mods/qsys".
+MV = use "std/mvu".
+check True = Unit.
+check False = error "guishell: invariant failed".
+source events me =
+  (from, MV.Poll _) = receive me;
+  case events of
+    Nil -> _ = send from (0, 0, 0); source Nil me
+  | e :: r -> _ = send from e; source r me.
+poll me a = MV.svcCall me a (MV.Poll 0).
+main =
+  me = myself 0;
+  q = QS.Qsys 0 0 0 0 Nil;
+  ts = S.cat S.shortcuts [S.Tile "bad" "bad" "refused" (0 - 100),
+       S.Tile "x" "x" "refused" (0 - 100), S.Tile "last" "last" "refused" (0 - 100)];
+  env = (q, ts, 0);
+  m = S.init env;
+  p = S.page env m 100;
+  _ = check (p.page == 1 and p.selected == 6);
+  first = S.page env m (0 - 10);
+  _ = check (first.page == 0);
+  emptySlot = S.pointer env (2000000 + 350 * 960 + 450) p;
+  _ = check (emptySlot.selected == 6 and emptySlot.active == 0);
+  gap = S.pointer env (2000000 + 180 * 960 + 330) m;
+  _ = check (gap.selected == 0 and gap.active == 0);
+  clock = S.pointer env (2000000 + 180 * 960 + 80) m;
+  _ = check (clock.active == 0 - 1);
+  home = S.pointer env (2000000 + 560 * 960 + 80) clock;
+  _ = check (home.active == 0);
+  refused = S.openTile env {m | selected = 4};
+  _ = check (refused.active == 0 and strlen refused.status > 0);
+  be = spawn (source [(2, 0 - 400, 120), (3, 1, 0), (3, 1, 0), (3, 0, 0), (3, 1, 0), (2, 5000, 5000), (7, 80, 180), (3, 0, 0), (3, 1, 0)]);
+  inp = spawn (S.input be 960 600);
+  (k, code, v) = poll me inp;
+  _ = check (k == 4 and code == 1000000 + 180 * 960 + 80);
+  (k2, press, v2) = poll me inp;
+  _ = check (press == 2000000 + 180 * 960 + 80);
+  (k3, noRepeat, v3) = poll me inp;
+  _ = check (v3 == 0);
+  _ = poll me inp;
+  (k4, again, v4) = poll me inp;
+  _ = check (again == press);
+  (k5, bounded, v5) = poll me inp;
+  _ = check (bounded == 1000000 + 959);
+  (k6, absolute, v6) = poll me inp;
+  _ = check (absolute == 1000000 + 180 * 960 + 80);
+  _ = poll me inp;
+  (k7, absolutePress, v7) = poll me inp;
+  _ = check (absolutePress == press);
+  _ = check (S.pages S.shortcuts == 1);
+  "guishell: HOLDS".

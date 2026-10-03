@@ -13,6 +13,17 @@ git clone https://github.com/hyperswine/fprisc ../fprisc   # a sibling needs no 
 ./qos.py run programs/interactive_desktop_gl.fpr
 ```
 
+Try the graphical Main Profile shell with its onboard apps:
+
+```sh
+python3 tools/main-profile.py --run
+```
+
+It opens a paged shortcut grid. Click or use arrows and Enter to open; Escape
+returns home, Page Up/Down changes pages, and Q exits from home. See the
+[Main Profile guide](docs/2026-10-03-GUI-SHELL.md) for boot-image wiring and
+the current prototype's application contract.
+
 One path names the fprisc checkout, found in this order: `--fprisc DIR` on an
 invocation, `$FPRISC_ROOT` in the shell, `fprisc.path` in this tree (what
 `./qos.py fprisc DIR` writes; it is ignored by git), then a sibling `../fprisc`.

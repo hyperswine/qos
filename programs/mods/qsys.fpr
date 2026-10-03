@@ -356,6 +356,10 @@ aiStep r a = case a of App aid anm ati ->
 # storage 0, no apps, the namespace still serves /logs.
 
 boot me = boot2 me (blkPages (device "blk")).
+bootSized me w h =
+  st = case blkPages (device "blk") == 0 of True -> 0 | False -> spawnD (QL.actor (device "blk"));
+  apps = case st == 0 of True -> Nil | False -> attachAll me st;
+  bootWireSized w h me st apps.
 boot2 me n = case n == 0 of
     True -> bootNoDisk me
   | False -> bootDisk me.
@@ -367,6 +371,8 @@ bootDisk me =
   bootWire me st (attachAll me st).
 bootWire : unsafe Int -> Int -> List App -> Qsys .
 bootWire me st apps =
+  bootWireSized 0 0 me st apps.
+bootWireSized w h me st apps =
   ns = spawnD EP.namespace;
   _ = claim me ns "/" (spawnD (EP.lister ns));
   logA = spawnD logActor;
@@ -378,7 +384,7 @@ bootWire me st apps =
   # the display, when this host has one: Graphics.qa owns it; programs
   # open sessions at /services/graphics/<tag> (mods/graphics.fpr)
   _ = case glHas 0 == 1 of
-      True -> claim me ns "/services/graphics" (spawnD (GX.service 0 0 GL.glBackend Nil))
+      True -> claim me ns "/services/graphics" (spawnD (GX.service w h GL.glBackend Nil))
     | False -> Unit;
   _ = claimApps me ns appsA apps;
   _ = case st == 0 of

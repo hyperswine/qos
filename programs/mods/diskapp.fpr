@@ -53,6 +53,7 @@ dkPad (x :: r) n = x :: dkPad r (n - 1).
 
 # newest records last; keep the tail that fits
 dkTail l n | dkLen l <= n = l.
+dkTail Nil n = Nil.
 dkTail (x :: r) n = dkTail r n.
 
 appVals self env st =
