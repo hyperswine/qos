@@ -44,7 +44,7 @@ RV64 reload test or browser/GL reload integration. The old loader/livereload
 modules remain for existing consumers and replay, including their global-newest
 baseline limitation. The new adapter uses an explicit per-module baseline.
 
-The compiler pin is `372b1783bf4b4c4563233dcfb2d8aca8efe3f811`, containing the shared runner, checked commit
+The compiler pin is `18e62845a381516e34296e0630be4dc33963d71e`, containing the shared runner, checked commit
 interfaces, checked runtime module interfaces and version-aware source identity
 matching. Unrelated untracked files in
 the compiler checkout are excluded from this milestone.
@@ -57,3 +57,11 @@ Base suite passed. The full QOS check-all sweep was not run.
 
 The identity-aware increment passed the complete FP-RISC Base suite and shared
 MVU runner variants, plus real QOS reload/refusal tests on one/four harts.
+
+POSIX attachment and the production shared MVU clock are now implemented in
+[POSIX-RELOAD](../../fprisc/docs/2026-10-04-POSIX-RELOAD.md). QOS's MVU driver
+uses its timer HAL through `Sys.mtime` rather than reading cfg.mt directly;
+units and pacing remain unchanged. Current sibling-compiler tests pass real
+QOS reloads on one/four harts and focused MVU/LiveView smoke (2/2). This new
+compiler milestone is committed and pinned, including native module attachment
+and the production clock.
