@@ -1,0 +1,33 @@
+# Explicit development bridge: daemon source watch -> durable QOS publication
+# -> owned MVU event port. Register NAME=FILE with qos.py run --watch-module.
+CP = use "std/compile".
+P = use "std/qpublication".
+AC = use "std/actor".
+MV = use "std/mvu".
+
+# Initial creation for an app/editor that owns source strings. No registry writes.
+publishSource me publisher name from source = case CP.publication name source of
+    Err why -> Err why
+  | Ok CP.Same -> Err "development publication: expected a package"
+  | Ok (CP.Built package) -> published me publisher from package.
+published me publisher from package =
+  info = {name = package.name, from = from, to = package.hash, version = package.version};
+  case P.publish me publisher info package.qa of Err why -> Err why | Ok archive -> Ok info.
+
+watchFrom publisher name known me port = Ok (AC.spawnWith (AC.Dynamic 64) (watch publisher name known port "")).
+watch : unsafe Int -> String -> String -> Int -> String -> Int -> Unit .
+watch publisher name known port lastError me =
+  _ = Sys.sleepUs 300000;
+  step = poll me publisher name known port;
+  state = case step of
+      Ok next -> {known = next, why = ""}
+    | Err why -> _ = case why == lastError of True -> Unit | False -> print "development reload refused: {why}"; {known = known, why = why};
+  fresh = AC.boundary me {publisher = publisher, name = name, known = state.known, port = port, why = state.why};
+  watch fresh.publisher fresh.name fresh.known fresh.port fresh.why me.
+poll me publisher name known port = case CP.watchVersion name known of
+    Err why -> Err why
+  | Ok CP.Same -> Ok known
+  | Ok (CP.Built package) -> notify me publisher known port package.
+notify me publisher known port package = case published me publisher known package of
+    Err why -> Err why
+  | Ok info -> _ = AC.sendOrDie port (MV.EReload (MV.copyReload info)); Ok info.to.

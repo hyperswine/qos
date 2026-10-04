@@ -1,0 +1,77 @@
+#: expect development publication: old=20 new=30 state=kept owned=stopped PASS
+unsafe program.
+FS = use "std/fs".
+P = use "std/qpublication".
+D = use "std/devreload".
+CP = use "std/compile".
+LR = use "std/mvureload".
+Plug = use "../programs/mods/plug".
+MV = use "std/mvu".
+S = use "std/string".
+SVC = use "../programs/mods/svc".
+Sys.alive : Int -> Bool .
+ok r = case r of Ok x -> x | Err why -> error why.
+source = "mathOp v = v * 2.\n".
+main =
+  me = myself 0;
+  fs = FS.serve (device "blk");
+  px = spawn (uploadProxy fs False);
+  pub = ok (P.serve me px);
+  first = ok (D.publishSource me pub "math" "" source);
+  baseline = Mod.plugs 0;
+  _ = ok (Plug.attach (ok (FS.readLatest me fs (P.imageKey first))));
+  old = LR.bindAt baseline "mathOp";
+  # Malformed package replies are loud, and compiler failure publishes nothing.
+  _ = case CP.packageBytes "bad" of Err why -> Unit | Ok x -> error "bad header accepted";
+  _ = case D.publishSource me pub "math" first.to "mathOp v = missing v.\n" of Err why -> Unit | Ok x -> error "broken source published";
+  _ = case ok (P.start me fs) == 1 of True -> Unit | False -> error "broken source changed journal";
+  rd = spawn renderer;
+  cfg = {env = {fs = fs, table = baseline, op = old}, mt = 0, tick = 100000, input = 0, render = rd};
+  app = MV.MApp init update key view vals done subs;
+  _ = print "development ready: old=20";
+  _ = ok (MV.runWatched me cfg app reload (starter pub first.to));
+  handles = receive me;
+  (port, worker) = handles;
+  _ = case Sys.alive port or Sys.alive worker of True -> error "development watcher survived" | False -> Unit;
+  _ = case old 10 == 20 and ok (P.start me fs) == 2 of True -> Unit | False -> error "old code or publication count changed";
+  _ = kill rd;
+  _ = kill pub;
+  _ = kill px;
+  "development publication: old=20 new=30 state=kept owned=stopped PASS".
+starter pub known parent port =
+  worker = ok (D.watchFrom pub "math" known parent port);
+  _ = send parent (port, worker);
+  Ok worker.
+init env = {acc = 7, ticks = 0}.
+update me env ev model = case ev of
+    MV.ETick -> (case model.ticks > 10000 of True -> error "development timeout" | False -> ({model | ticks = model.ticks + 1}, Nil))
+  | MV.EReload info -> (case model.acc == 7 and env.op 10 == 30 of True -> (model, MV.MQuit :: Nil) | False -> error "state or code lost")
+  | MV.EReloadRefused info why -> error why
+  | _ -> (model, Nil).
+subs model = MV.STick 10 :: Nil.
+key model = 0.
+view vp model = 0.
+vals self env vp model = env.op 10.
+done model = "development model kept".
+reload me info env = case LR.loadPublished me env.fs env.table info of
+    Err why -> Err why
+  | Ok table -> Ok {env | table = table, op = LR.bindAt table "mathOp"}.
+renderer me =
+  message = receive me;
+  (from, q) = message;
+  _ = case q of
+      MV.Dims u -> send from (80, 24)
+    | MV.Poll u -> send from (0, 0, 0)
+    | MV.Render st vs sc fr -> send from (0, 0);
+  renderer me.
+
+# Fail exactly the first advertisement of v1.1; the same frozen image must
+# be retried without advancing the watcher baseline or adding extra records.
+uploadProxy fs denied me =
+  message = receive me;
+  SVC.Rpc caller tag key bytes = message;
+  reject = not denied and tag == 2 and key == P.journal Unit and S.contains "\tv1.1\t" bytes;
+  _ = case reject of
+      True -> print "development upload: injected journal refusal" >> send caller (Err "injected upload failure")
+    | False -> send caller (FS.rpc me fs tag key bytes);
+  uploadProxy fs (denied or reject) me.

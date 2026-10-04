@@ -71,12 +71,15 @@ import argparse
 import os
 import re
 import shutil
+import signal
 import json
 import stat
 import subprocess
 import sys
 import time
+import tempfile
 from pathlib import Path
+from contextlib import contextmanager, nullcontext
 from typing import NoReturn
 
 ROOT = Path(__file__).resolve().parent
@@ -376,6 +379,51 @@ def cmd_build(a):
     say(f"build done in {time.time() - t0:.1f}s")
 
 
+def stop_fprd(process):
+    # Own the daemon's process group, including a make/compiler subprocess.
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    try:
+        process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid, signal.SIGKILL)
+        process.wait()
+
+
+def interrupt_run(signum, frame):
+    raise KeyboardInterrupt
+
+
+@contextmanager
+def compiler_session(registrations):
+    # Short private socket paths also work from deeply nested workspaces.
+    with tempfile.TemporaryDirectory(prefix="qos-fprd-", dir="/tmp") as directory:
+        sock = str(Path(directory) / "compiler.sock")
+        daemon_log = WS.build / f"fprd-{os.getpid()}.log"
+        previous_handler = signal.signal(signal.SIGTERM, interrupt_run)
+        process = None
+        try:
+            say(f"fprd: compiler daemon on {sock}")
+            with daemon_log.open("w") as output:
+                process = subprocess.Popen(
+                    [sys.executable, "tools/fprd.py", sock,
+                     *[arg for item in registrations for arg in ("--watch", item)]],
+                    cwd=ROOT, env={**os.environ, "FPRD_BUILD": str(WS.build)},
+                    stdout=output, stderr=subprocess.STDOUT, start_new_session=True)
+            deadline = time.monotonic() + 5
+            while not Path(sock).exists() and process.poll() is None and time.monotonic() < deadline:
+                time.sleep(0.05)
+            if not Path(sock).exists() or process.poll() is not None:
+                die("compiler daemon failed to start: " + daemon_log.read_text())
+            yield sock
+        finally:
+            if process:
+                stop_fprd(process)
+            signal.signal(signal.SIGTERM, previous_handler)
+
+
 def cmd_run(a):
     t0 = time.time()
     prog = resolve_prog(a.prog)
@@ -423,23 +471,19 @@ def cmd_run(a):
         say("qosp.disk: fresh")
     # `#: fprd` (or --fprd): the program compiles/packages at runtime
     # through Sys.compile, so start the host compiler daemon for the run
-    fprd_proc = None
-    if a.fprd or "fprd" in d:
-        sock = str(WS.build / f"fprd-{os.getpid()}.sock")
-        say(f"fprd: compiler daemon on {rel(sock)}")
-        fprd_proc = subprocess.Popen(
-            [sys.executable, "tools/fprd.py", sock], cwd=ROOT, env={**os.environ, "FPRD_BUILD": str(WS.build)},
-            stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
-        env["FPRD_SOCK"] = sock
-        time.sleep(0.8)
-    say(f"{host}: {prog}" + (f"  (port {a.port})" if a.port else ""))
-    # the host runs IN the workspace: qosp.disk and qos-store/ (the
-    # app's durable state) are the project's, not the toolchain's
-    try:
+    watch_registrations = []
+    for item in getattr(a, "watch_module", []):
+        name, separator, path = item.partition("=")
+        if not separator or not re.fullmatch(r"[a-z][a-z0-9_]{0,15}", name) or not path:
+            die("--watch-module requires NAME=FILE (name: lowercase, max 16 characters)")
+        watch_registrations.append(name + "=" + str(Path(path).expanduser().resolve()))
+    needs_compiler = a.fprd or watch_registrations or "fprd" in d
+    with compiler_session(watch_registrations) if needs_compiler else nullcontext(None) as sock:
+        if sock:
+            env["FPRD_SOCK"] = sock
+        say(f"{host}: {prog}" + (f"  (port {a.port})" if a.port else ""))
+        # The host runs in the workspace; the app's state stays there.
         rc = run_scan([str(QOS / host), "--yes", str(qa)], cwd=WS.out, env=env, expect=expect)
-    finally:
-        if fprd_proc:
-            fprd_proc.terminate()
     say(f"total {time.time() - t0:.1f}s")
 
     return rc
@@ -1386,6 +1430,7 @@ def main():
     p.add_argument("--plugin", action="append", help="build this .fpr as a plugin module and seed it onto a fresh disk (repeatable; overrides the program's `#: plugins` line)")
     p.add_argument("--no-plugins", action="store_true", help="ignore the program's `#: plugins` line")
     p.add_argument("--disk", help="run against this existing QLOG image (FPR_DISK)")
+    p.add_argument("--watch-module", action="append", default=[], metavar="NAME=FILE", help="start the compiler daemon with a watched source module (repeatable)")
     p.add_argument("--fprd", action="store_true", help="start the host compiler daemon for the run (Sys.compile / CP.plugin)")
     p.set_defaults(f=cmd_run)
 

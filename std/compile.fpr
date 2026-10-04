@@ -38,3 +38,21 @@ qosApp src = Sys.compile "qos-portable" src.
 bareMetal src = Sys.compile "bare-metal" src.
 
 plugin slot id src = Sys.compile "plugin:{slot}:{id}" src.
+
+# Checked version + frozen package. Built has compiler identity, version, bytes.
+S = use "std/string".
+Reply = Type (Same | Built package).
+publication name source = packageReply (Sys.compile "publication:{name}" source).
+watchVersion name known = packageReply (Sys.compile "watch:{name}:{known}" "").
+packageReply result = case result of Err why -> Err why | Ok bytes -> packageBytes bytes.
+packageBytes bytes = case bytes == "same\n" of
+    True -> Ok Same
+  | False -> packageHeader bytes (strIndexOf "\n" bytes).
+packageHeader bytes at = case at < 0 of
+    True -> Err "compile publication: missing package header"
+  | False -> packageFields (substr bytes (at + 1) (strlen bytes - at - 1)) (S.split "\t" (substr bytes 0 at)).
+packageFields qa fields = case fields of
+    name :: version :: hash :: Nil -> (case strlen name > 0 and strlen version > 0 and strlen hash == 16 and strlen qa > 0 of
+      True -> Ok (Built {name = name, version = version, hash = hash, qa = qa})
+    | False -> Err "compile publication: invalid package fields")
+  | _ -> Err "compile publication: invalid package header".

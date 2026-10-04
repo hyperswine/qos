@@ -70,10 +70,13 @@ Journal snapshots and polling currently cost O(history); compaction/checkpoints
 are future work. Cleanup covers orderly runner exit, not an arbitrary panic or
 external kill. Native RV64 publication and power-loss fault injection have not
 been executed. No automatic whole-program restart, environment generation,
-rejected-version rebasing or image reclamation is added here. Host source watching
-still builds host modules; bridging development builds/uploads into this QOS
-producer API remains separate tooling work.
+rejected-version rebasing or image reclamation is added here. Host `fpr watch` still builds host modules. The Portable development bridge uses
+its own explicit daemon registration and this QOS producer API, documented below.
 
 The final two-boot publication leg and existing real plugin/type/contract reload
 checks passed on one/four Portable harts. FP-RISC full Base passed after the
 shared runner changes; full QOS check-all was not rerun for this milestone.
+
+The Portable development build/upload bridge is now implemented separately in
+[development publication](2026-10-04-DEVELOPMENT-PUBLICATION.md), including
+registered source saves, checked frozen packages and retry after upload failure.

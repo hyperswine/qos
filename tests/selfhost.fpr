@@ -30,11 +30,11 @@ CP = use "std/compile".
 FS = use "std/fs".
 LD = use "std/loader".
 
-srcV1 = "editLine s = s.\neditName u = \"self.v1\".".
+srcV1 = "editLine : String -> String .\neditLine s = s.\neditName u = \"self.v1\".".
 
 # no string interpolation inside the embedded source (keeps escaping
 # honest): v2 capitalizes via strcat/chr instead of a {..} splice
-srcV2 = "editLine s = case strlen s == 0 of True -> s | False -> (chr (upC (charAt s 0))) + (substr s 1 (strlen s - 1)).\nupC c = case c >= 97 of True -> upD c | False -> c.\nupD c = case c <= 122 of True -> c - 32 | False -> c.\neditName u = \"self.v2\".".
+srcV2 = "editLine : String -> String .\neditLine s = case strlen s == 0 of True -> s | False -> (chr (upC (charAt s 0))) + (substr s 1 (strlen s - 1)).\nupC c = case c >= 97 of True -> upD c | False -> c.\nupD c = case c <= 122 of True -> c - 32 | False -> c.\neditName u = \"self.v2\".".
 
 srcBad = "editLine a b = a.\neditName u = \"self.bad\".".
 
