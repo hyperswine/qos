@@ -12,3 +12,19 @@ expired since now ticks parks parkLimit = case Word.eq since (w 0) of
     True -> yes (ge parks parkLimit)
   | False -> yes (ge (case Word.eq now (w 0) of True -> w 0 | False -> Word.sub now since) ticks).
 yes b = case b of True -> 1 | False -> 0.
+
+# Recovery commands interpreted by the driver under its atomic ownership
+# protocol. Completed DMA wins over timeout; a resetting owner cannot be
+# replaced. 0 park, 1 reclaim completed orphan, 2 reserve reset, 3 refuse wait.
+waiting : Int -> Bool -> Bool -> Bool -> Int .
+waiting 1 completed resetDue waitDue = case completed of
+    True -> 1
+  | False -> case resetDue of True -> 2 | False -> 0.
+waiting other completed resetDue waitDue = case waitDue of True -> 3 | False -> 0.
+
+# 0 park, 1 confirmed reset, 2 reset budget exhausted. A zero probe budget
+# cannot confirm anything; a ready device on the last allowed probe can.
+resetStep : Word -> Int -> Int -> Int .
+resetStep status attempt limit = case attempt >= limit of
+    True -> 2
+  | False -> case Word.eq status (w 0) of True -> 1 | False -> 0.

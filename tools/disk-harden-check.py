@@ -53,5 +53,28 @@ with tempfile.TemporaryDirectory(prefix='qos-disk-harden-') as d:
                 assert 'fast=True' in out and 'disk offline' in out, out
                 print(f'Native disk: virtio v{2 if modern else 1}, {harts} hart(s), timeout/reset/cancellation/offline HOLDS', flush=True)
 
+        # Kill the resetting actor before and after writing reset status.
+        # A partial reset must never leave a permanently resetting queue or
+        # publish its DMA storage for reuse.
+        fixture = (ROOT / 'tests/diskresetcancel.fpr').read_text()
+        for phase in (1, 2):
+            source = tmp / f'diskresetcancel-{phase}.fpr'
+            source.write_text(fixture.replace('main = cancelReset 1.', f'main = cancelReset {phase}.'))
+            kernel = tmp / f'resetcancel-{phase}.elf'
+            run(['make', '-s', 'native', f'SYSTEM={source}', f'KERNEL={kernel}', f'BUILD={tmp}/cancel-{phase}',
+                 'NATIVE_CFLAGS_EXTRA=-DQOS_BLK_TEST -DBLK_DEADLINE_TICKS=3000000ULL'], cwd=ROOT / 'qos')
+            for modern in (False, True):
+                for harts in (1, 2):
+                    disk = tmp / f'cancel-{phase}-{modern}-{harts}.disk'
+                    run(['python3', ROOT / 'tools/mkdisk.py', disk, '8'])
+                    args = ['qemu-system-riscv64', '-machine', 'virt', '-smp', str(harts), '-m', '256M', '-nographic', '-bios', 'none',
+                            '-kernel', kernel, '-drive', f'file={disk},if=none,format=raw,id=hd0', '-device', 'virtio-blk-device,drive=hd0']
+                    if modern:
+                        args += ['-global', 'virtio-mmio.force-legacy=false']
+                    p = run(args, timeout=40)
+                    want = f'diskresetcancel: phase={phase} timed=True pending=True cancelled=True refused=True reserved=True fast=True HOLDS'
+                    assert want in p.stdout, p.stdout + p.stderr
+                    print(f'Native reset cancellation: phase {phase}, virtio v{2 if modern else 1}, {harts} hart(s) HOLDS', flush=True)
+
     else:
         print('Native disk: SKIP (needs RV64 compiler and QEMU)')

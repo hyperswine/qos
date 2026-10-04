@@ -82,6 +82,19 @@ static V check(V unit) {
         int want = since ? elapsed >= ticks : parks >= limit;
         CHECK(qos_blk_expired(since, now, ticks, parks, limit) == want);
       }
+  for (int orphan = 0; orphan <= 2; orphan++)
+    for (int completed = 0; completed <= 1; completed++)
+      for (int reset_due = 0; reset_due <= 1; reset_due++)
+        for (int wait_due = 0; wait_due <= 1; wait_due++) {
+          int want = orphan == 1 ? (completed ? 1 : reset_due ? 2 : 0) : (wait_due ? 3 : 0);
+          CHECK(qos_blk_waiting(orphan, completed, reset_due, wait_due) == want);
+        }
+  for (int attempt = 0; attempt <= 3; attempt++)
+    for (int limit = 0; limit <= 3; limit++)
+      for (unsigned status = 0; status <= 15; status++) {
+        int want = attempt >= limit ? 2 : status == 0 ? 1 : 0;
+        CHECK(qos_blk_reset_step(status, attempt, limit) == want);
+      }
   return TAG(0);
 }
 FPR_FN(fpr_g_virtioCheck, check, 1);

@@ -61,3 +61,33 @@ or confirmed reset, including cancellation while reset is parked. C must keep
 the cleanup hook and reservation mechanics until the replacement owns those
 lifetimes. TCP/ARP actor migration, shared descriptor layouts, pins, IRQ routing
 and runtime-service bootstrap remain later slices.
+
+## Recovery policy follow-up (2026-10-04)
+
+The pure `blockpolicy.waiting` transition table now selects park, reclaim a
+completed orphan, reserve reset, or refuse an over-budget wait. Completion has
+priority over timeout; an existing reset owner cannot be replaced. The raw
+`resetStep` function decides confirmed status versus polling budget exhaustion.
+C interprets these commands with the existing atomics and DMA operations.
+Deadline values and polling configuration remain C settings, not live policy.
+
+The reset path had no cancellation cleanup. Killing an actor parked while
+resetting could leave orphan state 2 and the busy flag set forever; later
+requests waited three deadlines rather than receiving immediate offline refusal.
+A reset owner now registers a cleanup before it can park. On cancellation it
+publishes offline before clearing orphan state and retains busy/DMA backing.
+It does not release or reuse a potentially active or partially rebuilt queue.
+Successful reset clears the hook before publishing recovered ownership.
+
+The memory-backed differential additionally checks all 24 waiting decisions
+and 256 reset-step combinations. `tests/diskresetcancel.fpr` is run before and
+after the reset-status write, with each boundary on virtio v1/v2 and one/two
+harts. All eight boots prove killed-owner failure, fast later refusal and
+retained offline/busy state. Removing only the reset cleanup in a temporary
+control build makes the same phase-1 fixture report `reserved=False fast=False
+FAILED`; the log is `/tmp/qos-c2-reset-negative/negative.log`.
+
+The full disk-hardening runner passed Portable, four normal native recovery
+boots and these eight cancellation boots. Raw differentials passed one/two
+harts. RV32 fallback compilation and production-object absence of test entry
+points were also checked. No full repository sweep or hardware run is claimed.

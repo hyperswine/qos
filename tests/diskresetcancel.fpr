@@ -1,0 +1,35 @@
+# Test both reset-owner cancellation boundaries on fresh native disks.
+blkTestStall : Unit -> Int .
+blkTestHoldReset : Int -> Int .
+blkTestResetPending : Unit -> Int .
+blkTestNow : Unit -> Int .
+blkTestReserved : Unit -> Int .
+disk u = device "blk".
+writer boss self = send boss (blkWrite (disk Unit) 3 "stalls") >> Unit.
+reader boss self = send boss (blkRead (disk Unit) 3) >> Unit.
+awaitReset : (n : Int | measure n) -> Bool .
+awaitReset n = case blkTestResetPending Unit > 0 of
+    True -> True
+  | False -> case n <= 0 of
+      True -> False
+    | False -> _ = Sys.sleepUs 1000; awaitReset (n - 1).
+dead r = case r of Err e -> e == "dead actor" | Ok v -> False.
+cancelReset phase =
+  me = myself 0;
+  _ = blkWrite (disk Unit) 3 "before";
+  _ = blkTestStall Unit;
+  a = spawn (writer me);
+  timed = dead (receiveFromRes me a);
+  _ = blkTestHoldReset phase;
+  b = spawn (reader me);
+  pending = awaitReset 2000;
+  _ = kill b;
+  cancelled = dead (receiveFromRes me b);
+  start = blkTestNow Unit;
+  c = spawn (reader me);
+  refused = dead (receiveFromRes me c);
+  reserved = blkTestReserved Unit == 1;
+  fast = blkTestNow Unit - start < 200000;
+  verdict = case timed and pending and cancelled and refused and reserved and fast of True -> "HOLDS" | False -> "FAILED";
+  "diskresetcancel: phase={phase} timed={timed} pending={pending} cancelled={cancelled} refused={refused} reserved={reserved} fast={fast} {verdict}".
+main = cancelReset 1.
