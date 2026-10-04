@@ -1,0 +1,2 @@
+# Unrelated live module: a reload must compare with its own stored baseline.
+otherUnit u = "unrelated".

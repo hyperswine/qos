@@ -1,82 +1,100 @@
-# livereload.fpr -- hot module swap, THE SERVICE WAY (docs/PATHS.md §6):
-# the app touches no device and reads no records itself.  It spawns the
-# two interpreters -- Files (std.fs, the log's one writer) and the
-# Loader (std.loader, the only thing that turns apps/<id>.qa records
-# into live code) -- and everything after that is messages:
-#
-#   1. LD.load "mathv1": the loader reads the record, passes the shell
-#      abi, import + arity gates, attaches, RECORDS the chain as
-#      sys/live.  A worker actor binds mathOp and folds requests into
-#      its own accumulator (the state that must survive).
-#   2. LD.load "mathv2" + a Reload nudge: the SAME worker re-binds --
-#      next request computes with v2, accumulator intact.  Because the
-#      loader wrote sys/live, this swap would also survive a reboot
-#      (tests/sysdisk.fpr proves that property).
-#   3. LD.load "mathbad" (arity drift) is REFUSED by the gate, detached,
-#      never recorded; the worker keeps running v2.
-#
-# std/livereload.fpr remains the LOW-LEVEL tier (its header carries the
-# reload-safety rules the compiler guarantees); std.loader is the
-# intended surface, and this test now exercises it.
-#
-#   ./qos.py run tests/livereload.fpr
-#: plugins tests/mathv1.fpr tests/mathv2.fpr tests/mathbad.fpr
+# Reloads are MVU events. App update ignores successful reload events; the
+# runner replaces env.math between turns, and model.acc stays in one actor.
+# The unrelated attachment proves the gate uses the module's own baseline.
+#: plugins tests/mathv1.fpr tests/mathv2.fpr tests/mathbad.fpr tests/mathother.fpr
 #: expect livereload: v1: 20 22 | v2 (same actor, acc kept): 30 | bad: refused | still v2: 36 | acc=108
-
+unsafe program.
 FS = use "std/fs".
 LD = use "std/loader".
+LR = use "std/mvureload".
+MV = use "std/mvu".
 
-Nudge = Type (Reload url).
+init env = {acc = 0, count = 0, r1 = 0, r2 = 0, r3 = 0, r4 = 0, refused = 0, saved = env.math.op, port = env.port}.
+update me env ev m = case ev of
+    MV.EMsg tag arg -> onMsg env m tag
+  | MV.EReloadRefused info why -> ({m | refused = m.refused + 1}, Nil)
+  | other -> (m, Nil).
+onMsg env m tag = case tag == "quit" of
+    True -> (m, MV.MQuit :: Nil)
+  | False -> calc env m.
+calc env m =
+  n = case m.count of 1 -> 11 | 3 -> 12 | other -> 10;
+  r = env.math.op n;
+  next = {m | acc = m.acc + r, count = m.count + 1};
+  (remember next r, Nil).
+remember m r = case m.count of
+    1 -> {m | r1 = r}
+  | 2 -> {m | r2 = r}
+  | 3 -> {m | r3 = r}
+  | n -> {m | r4 = r}.
+subs m = MV.SEvents m.port :: Nil.
+key m = 0.
+statics vp m = 0.
+vals self env vp m = env.math.op 10.
+done m =
+  _ = print "registry: {Mod.plugs 0} old closure: {m.saved 10}";
+  bad = case m.refused == 1 of True -> "refused" | False -> "ACCEPTED?!";
+  "livereload: v1: {m.r1} {m.r2} | v2 (same actor, acc kept): {m.r3} | bad: {bad} | still v2: {m.r4} | acc={m.acc}".
 
-# ---- the worker: state in the loop args, code behind a bound fn ------------
-worker : unsafe _ -> Int -> a .
-worker f me = wloop f me 0.
-wloop : unsafe _ -> Int -> Int -> a .
-wloop f me acc =
-  m = receive me;
-  case m of
-    (from, v) -> wcalc f me acc from v
-  | u -> wloop (LD.bind "mathOp") me acc.
-         # ^ re-bind; the ACCUMULATOR rides through
-wcalc : unsafe _ -> Int -> Int -> Int -> Int -> a .
-wcalc f me acc from v =
-  r = f v;
-  _ = send from (r, acc + r);
-  wloop f me (acc + r).
-
-askW : Int -> Int -> Int -> (Int, Int) .
-askW me w v =
-  _ = send w (me, v);
-  reply = receiveFrom me w;
-  (r, a) = reply;
-  (r, a).
-
-expectOk what r = case r of
-    Ok i -> i
-  | Err e -> error "livereload {what}: {e}".
-
+# Platform adapter returns a fully rebuilt env; update never calls the loader.
+reload me info env = case info.name == "math" of
+    False -> Err "unknown live module"
+  | True -> reloadMath me info env.
+reloadMath me info env = case info.from == env.hash of
+    False -> Err "stale module version"
+  | True -> replaced info env (LR.load me env.fs info.to env.table).
+replaced info env r = case r of
+    Err why -> Err why
+  | Ok table -> Ok {env | table = table, hash = info.to, math = {op = LR.bindAt table "mathOp"}}.
+info from to = {name = "math", from = from, to = to, version = "test"}.
+# In this fixture from/to are archive IDs, not certified content hashes.
+# Real watcher-to-image identity checking is a subsequent implementation step.
+render p me =
+  message = receive me;
+  (from, q) = message;
+  renderMsg p me from q.
+renderMsg p me from q = case q of
+    MV.Dims u -> send from (80, 24) >> render p me
+  | MV.Poll u -> send from (0, 0, 0) >> render p me
+  | MV.Render st vs sc fr -> renderFrame p me from vs fr.
+renderFrame p me from vs fr =
+  expected = case fr == 0 of True -> 20 | False -> 30;
+  _ = case vs == expected of True -> 0 | False -> error "render kept old module";
+  _ = queueNext p fr;
+  _ = MV.portSync me p;
+  _ = send from (0, 0);
+  render p me.
+queueNext p fr = case fr of
+    0 -> send p (MV.EReload (info "mathv1" "mathv2")) >> send p (MV.EMsg "add" "")
+  | 1 -> send p (MV.EReload (info "mathv2" "mathbad")) >> send p (MV.EMsg "add" "")
+  | n -> send p (MV.EMsg "quit" "").
+expectOk r = case r of Ok i -> i | Err why -> error why.
 main =
   me = myself 0;
   fs = FS.serve (device "blk");
   ld = LD.serve fs;
+  baseline = expectOk (LD.load me ld "mathv1");
+  # Keep an unrelated table between math versions: newest is not baseline.
+  _ = expectOk (rawOther me fs);
+  _ = expectRefused "missing image" (LR.load me fs "no-such-image" baseline);
+  _ = expectRefused "missing baseline" (LR.load me fs "mathv2" 9999);
+  _ = case Mod.plugs 0 == 2 of True -> 0 | False -> error "failed preflight attached code";
+  port = spawn MV.eventsPort;
+  _ = send port (MV.EMsg "add" "");
+  _ = send port (MV.EMsg "add" "");
+  rd = spawn (render port);
+  cfg = {env = {fs = fs, table = baseline, hash = "mathv1", math = {op = LR.bindAt baseline "mathOp"}, port = port},
+         mt = reg32 (device "clint") 49144, tick = 0, input = 0, render = rd};
+  app = MV.MApp init update key statics vals done subs;
+  result = MV.runLive me cfg app reload;
+  _ = kill rd;
+  _ = kill port;
+  result.
+Plug = use "../programs/mods/plug".
+rawOther me fs = case FS.readLatest me fs "apps/mathother.qa" of
+    Err why -> Err why
+  | Ok qa -> Plug.attach qa.
 
-  # 1. v1 out of the store, through the loader's gates; worker binds
-  _ = expectOk "load v1" (LD.load me ld "mathv1");
-  w = spawn (worker (LD.bind "mathOp"));
-  (r1, a1) = askW me w 10;
-  (r2, a2) = askW me w 11;
-
-  # 2. the hot swap: one message to the loader, one nudge to the worker
-  _ = expectOk "load v2" (LD.load me ld "mathv2");
-  _ = send w (Reload "mathv2");
-  (r3, a3) = askW me w 10;
-
-  # 3. the impostor: refused, detached, never recorded; v2 stays bound
-  bad = LD.load me ld "mathbad";
-  badS = case bad of
-      Ok i -> "ACCEPTED?!"
-    | Err e -> "refused";
-  (r4, a4) = askW me w 12;
-
-  _ = kill w;
-  "livereload: v1: {r1} {r2} | v2 (same actor, acc kept): {r3} | bad: {badS} | still v2: {r4} | acc={a4}".
+expectRefused label r = case r of
+    Err why -> print "{label}: refused"
+  | Ok i -> error "{label}: unexpectedly accepted".

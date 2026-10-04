@@ -1,0 +1,10 @@
+# QOS adapter for MVU.runLive: store retrieval and image attachment only.
+# Policy (attach/gate/scoped binding) lives in FP-RISC std/reload.
+# This path does not write sys/live: replay remains the existing loader policy.
+FS = use "fs".
+Plug = use "../programs/mods/plug".
+Reload = use "std/reload".
+load me fs archive baseline = case FS.readLatest me fs "apps/{archive}.qa" of
+    Err why -> Err "reload store: {why}"
+  | Ok qa -> Reload.attachAt baseline Plug.attach qa.
+bindAt table name = Reload.bindAt table name.
