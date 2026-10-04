@@ -1,0 +1,4 @@
+virtioCheck : Unit -> Int .
+main = case virtioCheck Unit of
+    0 -> print "virtio: probe, features, queue parity and refusal HOLDS"
+  | n -> error "virtio differential failed at check {n}".

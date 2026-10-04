@@ -101,3 +101,4 @@ Source-adjacent READMEs under `tools/` stay beside the tools they explain.
 | 2026-10-03 | [PREEXISTING-FAILURES.md](2026-10-03-PREEXISTING-FAILURES.md) | Five check-all failures fixed: a log sink re-entering itself (panic record hang), RELOC/IMPORT now covered by LOAD's relsha (apps and plugins, checked before placement), Sol spawnHeap, mlpipe's Numeric, the dedup ratchet |
 | 2026-10-03 | [NATIVE-INTEGRITY.md](2026-10-03-NATIVE-INTEGRITY.md) | ABI-2 SDK repin, signed recursion integration, native IMAGE/RELOC/IMPORT integrity gates and failure injections before image allocation |
 | 2026-10-04 | [MVU-RELOAD.md](2026-10-04-MVU-RELOAD.md) | First object-level MVU reload integration, real plugins with scoped baseline checks, failure paths and remaining certification/replay work |
+| 2026-10-04 | [VIRTIO-POLICY.md](2026-10-04-VIRTIO-POLICY.md) | Shared raw RV64 virtio initialization, exact block deadline policy and differential/failure-path verification |

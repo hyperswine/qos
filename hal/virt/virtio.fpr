@@ -1,0 +1,66 @@
+# Shared virtio-mmio initialization. Allocation-free RV64 library; the
+# caller owns queue memory and device-specific DMA/completion lifetimes.
+profile builtin.
+Reg = Layout { value : U32 }.
+w n = Word.fromInt n.
+reg base off = Reg.at (Addr.add base off).
+read base off = _ = Mem.fence Unit; v = Reg.value (reg base off); _ = Mem.fence Unit; v.
+write base off v = _ = Mem.fence Unit; _ = Reg.setValue (reg base off) v; Mem.fence Unit.
+
+# probeAt also supports a memory-backed register bank in the differential test.
+probeAt : Addr -> Int -> Int -> Int -> Addr .
+probeAt base slots stride device = scan base slots stride device 0.
+scan : unsafe Addr -> Int -> Int -> Int -> Int -> Addr .
+scan base slots stride device i = case i >= slots of
+    True -> Addr.null Unit
+  | False -> candidate base slots stride device i (Addr.add base (i * stride)).
+candidate : unsafe Addr -> Int -> Int -> Int -> Int -> Addr -> Addr .
+candidate base slots stride device i at = case Word.eq (read at 0) (w 1953655158) and Word.eq (read at 8) (w device) of
+    True -> versioned base slots stride device i at (Word.toInt (read at 4))
+  | False -> scan base slots stride device (i + 1).
+versioned : unsafe Addr -> Int -> Int -> Int -> Int -> Addr -> Int -> Addr .
+versioned base slots stride device i at version = case version == 1 or version == 2 of
+    True -> at
+  | False -> scan base slots stride device (i + 1).
+probe : Int -> Addr .
+probe device = probeAt (Addr.fromWord (w 268439552)) 8 4096 device.
+
+# Reset is separate: recovery must confirm reset before reusing DMA memory.
+negotiate : Addr -> Word -> Int .
+negotiate base lowMask =
+  _ = write base 112 (w 1);
+  _ = write base 112 (w 3);
+  _ = write base 20 (w 0);
+  low = read base 16;
+  _ = write base 36 (w 0);
+  _ = write base 32 (Word.and low lowMask);
+  case Word.eq (read base 4) (w 2) of
+    True -> modern base
+  | False -> _ = write base 40 (w 4096); 1.
+modern base =
+  _ = write base 20 (w 1);
+  high = read base 16;
+  _ = write base 36 (w 1);
+  _ = write base 32 (Word.and high (w 1));
+  _ = write base 112 (w 11);
+  case Word.bitTest (read base 112) 3 of True -> 1 | False -> 0.
+
+# Queue layout is desc + avail in the first page, used in the second.
+# The caller clears it before setup. Return refusal before queue publication.
+queue : Addr -> Int -> Int -> Addr -> Int .
+queue base index size memory =
+  _ = write base 48 (w index);
+  case size > 0 and Word.toInt (read base 52) >= size of
+    True -> queueSize base size memory
+  | False -> 0.
+queueSize base size memory =
+  _ = write base 56 (w size);
+  case Word.eq (read base 4) (w 1) of
+    True -> _ = write base 60 (w 4096); _ = write base 64 (Word.shr (Addr.toWord memory) 12); 1
+  | False -> _ = address base 128 memory;
+             _ = address base 144 (Addr.add memory (size * 16));
+             _ = address base 160 (Addr.add memory 4096);
+             _ = write base 68 (w 1); 1.
+address base off ptr = bits = Addr.toWord ptr; _ = write base off bits; write base (off + 4) (Word.shr bits 32).
+ready : Addr -> Unit .
+ready base = write base 112 (w (case Word.eq (read base 4) (w 2) of True -> 15 | False -> 7)).

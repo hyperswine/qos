@@ -28,6 +28,9 @@
  *   guest 10.0.2.15, gateway 10.0.2.2, MAC from device config space.
  */
 #include "fpr.h"
+#if __riscv_xlen == 64
+#include "virtio.h"
+#endif
 
 /* ---- tiny freestanding helpers ---------------------------------------- */
 typedef uint8_t u8; typedef uint16_t u16; typedef uint32_t u32; typedef uint64_t u64;
@@ -124,6 +127,9 @@ static void vq_setup(int qi, vq_t *q) {
   nset(q->mem, 0, sizeof(q->mem));
   q->last_used = 0;
   q->avail_shadow = 0;
+#if __riscv_xlen == 64
+  if (!qos_virtio_queue(nic, qi, QSZ, q->mem)) fpr_cpanic("net: queue too small");
+#else
   wr(R_QSEL, qi);
   if (rr(R_QNUMMAX) < QSZ) fpr_cpanic("net: queue too small");
   wr(R_QNUM, QSZ);
@@ -137,6 +143,7 @@ static void vq_setup(int qi, vq_t *q) {
     wr(R_QUSEDLO, (u32)u);  wr(R_QUSEDHI, (u32)(u >> 32));
     wr(R_QREADY, 1);
   }
+#endif
 }
 
 static void rx_post(int i) {
@@ -153,6 +160,26 @@ static void rx_post(int i) {
   wr(R_QNOTIFY, 0);
 }
 
+#if __riscv_xlen == 64
+static int net_probe(void) {
+  nic = qos_virtio_probe(1);
+  if (!nic) return 0;
+  nic_version = rr(R_VERSION);
+  wr(R_STATUS, 0);
+  if (!qos_virtio_negotiate(nic, F_NET_MAC)) fpr_cpanic("net: FEATURES_OK refused");
+  vhdr_len = nic_version == 2 ? 12 : 10;
+  for (int b = 0; b < 6; b++) our_mac[b] = ((volatile u8 *)nic)[R_CONFIG + b];
+  vq_setup(0, &q_rx); vq_setup(1, &q_tx);
+  qos_virtio_ready(nic);
+  for (int b = 0; b < QSZ; b++) rx_post(b);
+  nputs("[net] virtio-net v"); hal_putc('0' + nic_version);
+  nputs(" slot "); hal_putc('0' + ((uintptr_t)nic - VIRTIO_SLOT0) / VIRTIO_STRIDE);
+  nputs(" mac ");
+  for (int b = 0; b < 6; b++) { nputhex(our_mac[b], 2); if (b < 5) hal_putc(':'); }
+  nputs("\n");
+  return 1;
+}
+#else
 static int net_probe(void) {
   for (int i = 0; i < VIRTIO_NSLOTS; i++) {
     volatile u32 *base = (volatile u32 *)(VIRTIO_SLOT0 + i * VIRTIO_STRIDE);
@@ -201,6 +228,7 @@ static int net_probe(void) {
   nic = 0;
   return 0;
 }
+#endif
 
 /* ---- the transmit buffer: one owner, a parked wait for completion -------
  * tx_buf holds one frame.  A sender takes it (tx_take), builds the frame,

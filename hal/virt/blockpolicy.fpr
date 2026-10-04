@@ -1,0 +1,14 @@
+# First block-policy slice: exact deadline decisions, no clock, allocation,
+# scheduling or device effects here. DMA ownership/reset remain with the caller.
+profile builtin.
+w n = Word.fromInt n.
+# Int has fewer bits than Word. Compare the top two bits separately rather
+# than truncating an unsigned clock/elapsed value into a signed tagged Int.
+high x = Word.toInt (Word.shr x 62).
+low x = Word.toInt (Word.and x (Word.not (Word.shl (w 3) 62))).
+ge a b = case high a == high b of True -> low a >= low b | False -> high a > high b.
+expired : Word -> Word -> Word -> Word -> Word -> Int .
+expired since now ticks parks parkLimit = case Word.eq since (w 0) of
+    True -> yes (ge parks parkLimit)
+  | False -> yes (ge (case Word.eq now (w 0) of True -> w 0 | False -> Word.sub now since) ticks).
+yes b = case b of True -> 1 | False -> 0.

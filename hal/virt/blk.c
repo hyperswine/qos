@@ -40,6 +40,9 @@
  * every later request is refused at once.
  */
 #include "fpr.h"
+#if __riscv_xlen == 64
+#include "virtio.h"
+#endif
 
 typedef uint8_t u8; typedef uint16_t u16; typedef uint32_t u32; typedef uint64_t u64;
 
@@ -155,9 +158,14 @@ static V h_blkTestNow(V u) { (void)u; return TAG((sw)(hal_mtime() / 10)); }
 FPR_FN(fpr_g_blkTestNow, h_blkTestNow, 1);
 #endif
 
-static uint64_t blk_elapsed(uint64_t since) {
+static int blk_expired(uint64_t since, uint64_t parks, uint64_t ticks, uint64_t park_limit) {
   uint64_t now = hal_mtime();
-  return (since && now) ? now - since : 0;
+#if __riscv_xlen == 64
+  return qos_blk_expired(since, now, ticks, parks, park_limit);
+#else
+  uint64_t elapsed = (since && now) ? now - since : 0;
+  return since ? elapsed >= ticks : parks >= park_limit;
+#endif
 }
 
 /* a killed owner: the request stays in flight, its buffers reserved */
@@ -205,7 +213,7 @@ static void blk_lock(void) {
           wr(R_INTACK, 3);
           __atomic_store_n(&blk_busy, 0, __ATOMIC_RELEASE);
         }
-      } else if ((blk_since ? blk_elapsed(blk_since) >= BLK_DEADLINE_TICKS : parks >= BLK_DEADLINE_PARKS) &&
+      } else if (blk_expired(blk_since, parks, BLK_DEADLINE_TICKS, BLK_DEADLINE_PARKS) &&
                  __atomic_compare_exchange_n(&blk_orphan, &abandoned, 2, 0, __ATOMIC_ACQ_REL, __ATOMIC_RELAXED)) {
         /* the orphan is past the deadline: the device stalled */
         if (blk_reset()) {
@@ -221,7 +229,7 @@ static void blk_lock(void) {
         }
         continue;
       }
-    } else if (t0 ? blk_elapsed(t0) >= 3 * BLK_DEADLINE_TICKS : parks >= 3 * BLK_DEADLINE_PARKS) {
+    } else if (blk_expired(t0, parks, 3 * BLK_DEADLINE_TICKS, 3 * BLK_DEADLINE_PARKS)) {
       /* a live owner has its own deadline, after which the buffers become
        * an orphan's; waiting three deadlines means something is wrong */
       fpr_actor_fail("blk: waited three deadlines for the disk -- request refused");
@@ -240,6 +248,9 @@ static void vq_setup(void) {
   for (u32 i = 0; i < sizeof(q.mem); i++) q.mem[i] = 0;
   q.last_used = 0;
   q.avail_shadow = 0;
+#if __riscv_xlen == 64
+  if (!qos_virtio_queue(blk, 0, QSZ, q.mem)) fpr_cpanic("blk: queue too small");
+#else
   wr(R_QSEL, 0);
   if (rr(R_QNUMMAX) < QSZ) fpr_cpanic("blk: queue too small");
   wr(R_QNUM, QSZ);
@@ -253,11 +264,18 @@ static void vq_setup(void) {
     wr(R_QUSEDLO, (u32)u);  wr(R_QUSEDHI, (u32)(u >> 32));
     wr(R_QREADY, 1);
   }
+#endif
 }
 
 /* bring a reset device up: status handshake, features, the queue, DRIVER_OK
  * (boot, and recovery after a stalled request).  0 = the device refused */
 static int blk_init(void) {
+#if __riscv_xlen == 64
+  if (!qos_virtio_negotiate(blk, 0)) return 0;
+  vq_setup();
+  qos_virtio_ready(blk);
+  return 1;
+#else
   wr(R_STATUS, ST_ACK);
   wr(R_STATUS, ST_ACK | ST_DRIVER);
   wr(R_DRVFEATSEL, 0);
@@ -275,8 +293,25 @@ static int blk_init(void) {
   vq_setup();
   wr(R_STATUS, ST_ACK | ST_DRIVER | (blk_version == 2 ? ST_FEAT_OK : 0) | ST_DRIVER_OK);
   return 1;
+#endif
 }
 
+#if __riscv_xlen == 64
+static int blk_probe(void) {
+  blk = qos_virtio_probe(2);
+  if (!blk) return 0;
+  blk_version = rr(R_VERSION);
+  wr(R_STATUS, 0);
+  if (!blk_init()) fpr_cpanic("blk: FEATURES_OK refused");
+  blk_sectors = 0;
+  for (int b = 7; b >= 0; b--)
+    blk_sectors = (blk_sectors << 8) | ((volatile u8 *)blk)[R_CONFIG + b];
+  bputs("[blk] virtio-blk v"); hal_putc('0' + blk_version);
+  bputs(" slot "); hal_putc('0' + ((uintptr_t)blk - VIRTIO_SLOT0) / VIRTIO_STRIDE);
+  bputs(", "); bputdec(blk_sectors / SEC_PER_PAGE); bputs(" pages of 4096 bytes\n");
+  return 1;
+}
+#else
 static int blk_probe(void) {
   for (int i = 0; i < VIRTIO_NSLOTS; i++) {
     blk = (volatile u32 *)(VIRTIO_SLOT0 + i * VIRTIO_STRIDE);
@@ -305,6 +340,7 @@ static int blk_probe(void) {
   blk = 0;
   return 0;
 }
+#endif
 
 /* one page transfer through the 3-descriptor chain; the caller holds the
  * lock.  On return the transfer is complete and the status good; every
@@ -338,7 +374,7 @@ static void blk_rw(u64 page, int is_write) {
   for (;;) {
     FENCE();
     if (QUSED->idx != before) break;
-    if (start ? blk_elapsed(start) >= BLK_DEADLINE_TICKS : ++parks >= BLK_DEADLINE_PARKS) {
+    if (blk_expired(start, start ? parks : ++parks, BLK_DEADLINE_TICKS, BLK_DEADLINE_PARKS)) {
       /* the device may still DMA into the buffers: they stay reserved (an
        * orphan) until it completes or a later caller resets it */
       fpr_actor_cleanup_clear(&blk_busy);

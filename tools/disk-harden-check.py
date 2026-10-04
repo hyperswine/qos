@@ -37,13 +37,21 @@ with tempfile.TemporaryDirectory(prefix='qos-disk-harden-') as d:
         kernel = tmp / 'stall.elf'; disk = tmp / 'native.disk'
         run(['make', '-s', 'native', f'SYSTEM={ROOT}/tests/diskstall.fpr', f'KERNEL={kernel}', f'BUILD={tmp}/native',
              'NATIVE_CFLAGS_EXTRA=-DQOS_BLK_TEST -DBLK_DEADLINE_TICKS=3000000ULL'], cwd=ROOT / 'qos')
-        run(['python3', ROOT / 'tools/mkdisk.py', disk, '8'])
-        p = run(['qemu-system-riscv64', '-machine', 'virt', '-smp', '2', '-m', '256M', '-nographic', '-bios', 'none',
-                 '-kernel', kernel, '-drive', f'file={disk},if=none,format=raw,id=hd0',
-                 '-device', 'virtio-blk-device,drive=hd0'], timeout=60)
-        out = p.stdout
-        assert 'diskstall: stalled=Err dead actor after-reset=before rewrite=rewrit cancel=afterk' in out and out.rstrip().endswith('HOLDS'), out + p.stderr
-        assert 'fast=True' in out and 'disk offline' in out, out
-        print('Native disk: stalled owner fail-stops, reset past the deadline, killed owner, failed reset -> offline -> refused: PASS')
+        for modern in (False, True):
+            for harts in (1, 2):
+                # Fresh state: this test deliberately leaves the disk offline.
+                disk = tmp / f'native-v{2 if modern else 1}-{harts}.disk'
+                run(['python3', ROOT / 'tools/mkdisk.py', disk, '8'])
+                args = ['qemu-system-riscv64', '-machine', 'virt', '-smp', str(harts), '-m', '256M', '-nographic', '-bios', 'none',
+                        '-kernel', kernel, '-drive', f'file={disk},if=none,format=raw,id=hd0',
+                        '-device', 'virtio-blk-device,drive=hd0']
+                if modern:
+                    args += ['-global', 'virtio-mmio.force-legacy=false']
+                p = run(args, timeout=60)
+                out = p.stdout
+                assert 'diskstall: stalled=Err dead actor after-reset=before rewrite=rewrit cancel=afterk' in out and out.rstrip().endswith('HOLDS'), out + p.stderr
+                assert 'fast=True' in out and 'disk offline' in out, out
+                print(f'Native disk: virtio v{2 if modern else 1}, {harts} hart(s), timeout/reset/cancellation/offline HOLDS', flush=True)
+
     else:
         print('Native disk: SKIP (needs RV64 compiler and QEMU)')
