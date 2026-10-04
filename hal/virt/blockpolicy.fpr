@@ -1,5 +1,6 @@
 # First block-policy slice: exact deadline decisions, no clock, allocation,
-# scheduling or device effects here. DMA ownership/reset remain with the caller.
+# scheduling or device effects here. Ownership transitions are interpreted by
+# the caller using one atomic state; physical DMA/reset effects remain there.
 profile builtin.
 w n = Word.fromInt n.
 # Int has fewer bits than Word. Compare the top two bits separately rather
@@ -14,10 +15,11 @@ expired since now ticks parks parkLimit = case Word.eq since (w 0) of
 yes b = case b of True -> 1 | False -> 0.
 
 # Recovery commands interpreted by the driver under its atomic ownership
-# protocol. Completed DMA wins over timeout; a resetting owner cannot be
-# replaced. 0 park, 1 reclaim completed orphan, 2 reserve reset, 3 refuse wait.
+# protocol. State: 0 idle, 1 held, 2 orphan, 3 reclaiming, 4 resetting,
+# 5 offline. Completed DMA wins over timeout; a recovering owner cannot be
+# replaced. Command: 0 park, 1 reclaim, 2 reset, 3 refuse wait.
 waiting : Int -> Bool -> Bool -> Bool -> Int .
-waiting 1 completed resetDue waitDue = case completed of
+waiting 2 completed resetDue waitDue = case completed of
     True -> 1
   | False -> case resetDue of True -> 2 | False -> 0.
 waiting other completed resetDue waitDue = case waitDue of True -> 3 | False -> 0.
@@ -33,3 +35,32 @@ resetStep status attempt limit = case attempt >= limit of
 # and a waiter multiplier. Mechanism C retains the same RV32 guards.
 budgetValid : Int -> Int -> Int -> Int .
 budgetValid us probes factor = yes (us >= 1 and us <= 60000000 and probes >= 1 and probes <= 100000 and factor >= 1 and factor <= 64).
+
+# Events: 0 acquire, 1 abandon, 2 claim completion, 3 claim reset,
+# 4 finish recovery, 5 failed/cancelled recovery, 6 release completed request,
+# 7 return a claim whose pre-CAS observations became stale.
+# A successful CAS grants exclusive effects to a claimant. Reclaiming retains
+# DMA until used-ring acknowledgement; resetting retains it through reset and
+# queue reinitialization. Offline is absorbing. Invalid events cannot release
+# another owner's DMA; invalid state values quarantine instead.
+ownership : Int -> Int -> Int .
+ownership 0 0 = 1.
+ownership 1 1 = 2.
+ownership 2 2 = 3.
+ownership 2 3 = 4.
+ownership 3 4 = 0.
+ownership 3 5 = 5.
+ownership 4 4 = 0.
+ownership 4 5 = 5.
+ownership 1 6 = 0.
+ownership 3 7 = 2.
+ownership 4 7 = 2.
+ownership state event = if state >= 0 and state <= 5 then state else 5.
+
+# Re-read completion/deadline facts AFTER the claim CAS: another waiter may
+# have recovered and abandoned a new request between observation and CAS.
+# 0 return to orphan, 1 acknowledge completion, 2 perform reset.
+claimStep : Int -> Bool -> Bool -> Int .
+claimStep 3 completed resetDue = if completed then 1 else 0.
+claimStep 4 completed resetDue = case completed of True -> 0 | False -> if resetDue then 2 else 0.
+claimStep state completed resetDue = 0.

@@ -2,6 +2,7 @@
  * Fake MMIO tests the raw C ABI without requiring a particular QEMU slot. */
 #include "fpr.h"
 #include "../../hal/virt/virtio.h"
+#include "../../hal/virt/blockpolicy.h"
 static uint32_t banks[8][1024], expected[1024];
 static unsigned char queue_memory[8192] __attribute__((aligned(4096)));
 #define CHECK(test) do { if (!(test)) return TAG(__LINE__); } while (0)
@@ -82,13 +83,31 @@ static V check(V unit) {
         int want = since ? elapsed >= ticks : parks >= limit;
         CHECK(qos_blk_expired(since, now, ticks, parks, limit) == want);
       }
-  for (int orphan = 0; orphan <= 2; orphan++)
+  for (int state = 0; state <= 5; state++)
     for (int completed = 0; completed <= 1; completed++)
       for (int reset_due = 0; reset_due <= 1; reset_due++)
         for (int wait_due = 0; wait_due <= 1; wait_due++) {
-          int want = orphan == 1 ? (completed ? 1 : reset_due ? 2 : 0) : (wait_due ? 3 : 0);
-          CHECK(qos_blk_waiting(orphan, completed, reset_due, wait_due) == want);
+          int want = state == 2 ? (completed ? 1 : reset_due ? 2 : 0) : (wait_due ? 3 : 0);
+          CHECK(qos_blk_waiting(state, completed, reset_due, wait_due) == want);
         }
+  /* Independent transition matrix: rows are states, columns are events.
+   * No malformed event releases ownership; offline has no outgoing edge. */
+  static const int transitions[6][8] = {
+    {1,0,0,0,0,0,0,0}, {1,2,1,1,1,1,0,1}, {2,2,3,4,2,2,2,2},
+    {3,3,3,3,0,5,3,2}, {4,4,4,4,0,5,4,2}, {5,5,5,5,5,5,5,5}
+  };
+  for (int state = -1; state <= 6; state++)
+    for (int event = -1; event <= 8; event++) {
+      int valid = state >= 0 && state <= 5;
+      int want = !valid ? 5 : event < 0 || event > 7 ? state : transitions[state][event];
+      CHECK(qos_blk_ownership(state, event) == want);
+    }
+  for (int state = -1; state <= 6; state++)
+    for (int completed = 0; completed <= 1; completed++)
+      for (int due = 0; due <= 1; due++) {
+        int want = state == 3 && completed ? 1 : state == 4 && !completed && due ? 2 : 0;
+        CHECK(qos_blk_claim_step(state, completed, due) == want);
+      }
   for (int attempt = 0; attempt <= 3; attempt++)
     for (int limit = 0; limit <= 3; limit++)
       for (unsigned status = 0; status <= 15; status++) {

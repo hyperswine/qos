@@ -294,3 +294,61 @@ failed initialization and no-disk matrix remains covered. Portable qsys's
 two plugin/persistence boots and the complete disk-hardening suite (including
 eight reset-owner cancellation boots) pass. No full repository sweep or
 hardware verification is claimed.
+
+## Atomic ownership with pure recovery policy (2026-10-05)
+
+RV64 now takes ownership transitions from the allocation-free
+`hal/virt/blockpolicy.fpr` `ownership` table. `blk.c` replaces independent
+busy/orphan/offline flags with one atomic 32-bit ownership word. Idle, held,
+orphan, reclaiming, resetting and offline are explicit states. Idle-to-held
+CAS admits a request or non-parking budget update; a completed request releases
+held ownership, while a timeout or owner cancellation produces an orphan.
+Only a successful orphan claim grants completion acknowledgement or reset
+work. Reclaiming and resetting retain the DMA reservation until acknowledgement
+or confirmed reset plus queue reinitialization finishes. Failed/cancelled
+recovery atomically publishes offline, which has no outgoing transition.
+Invalid events preserve ownership; an invalid state value is quarantined.
+
+The waiting table now consumes these ownership states. After claiming an
+orphan, the driver rereads used-ring completion and deadline facts under its
+exclusive reservation. The pure `claimStep` table decides acknowledgement,
+reset, or return to orphan. This closes an observation-before-CAS race: another
+waiter could reclaim an earlier completed orphan and abandon a new incomplete
+request before the stale waiter wins its CAS. Its old completion observation
+must never free the newer request's DMA. A retry retains backing and performs
+no device reset or queue publication. Completion continues to win over reset.
+
+The recovery cleanup hook now covers both reset and completion acknowledgement.
+Cancellation in either claimed state leaves storage offline and reserved;
+waiters retain their finite configured allowance, and budget configuration
+refuses recovering/offline states. Actor death notification can precede
+cleanup execution; the cancellation fixture checks the later refused request
+and completed offline publication, rather than treating notification alone as
+cleanup completion. The offline diagnostic now names unfinished recovery,
+covering acknowledgement cancellation as well as failed reset.
+
+C remains the effect interpreter: atomic ownership publication, fences,
+cleanup registration, MMIO reset/status polling, queue acknowledgement and
+DMA memory. RV32 retains C decision fallbacks and 32-bit atomic ownership.
+This moves the ownership/recovery decisions, not the hardware mechanisms or
+the reset polling loop. No block namespace/cancel/drain protocol, physical
+online restart command, singleton enforcement, TCP/ARP migration or hardware
+verification is added here.
+
+Validation:
+- `tools/virtio-check.py`: two RV64 raw ABI differentials against independent
+  C references, including every ownership state/event, invalid inputs,
+  post-claim fact combination, wait/reset/budget boundaries and register setup.
+- `tools/block-ownership-check.py`: eight matching one/two-hart native boots
+  across virtio v1/v2. Late completion is reclaimed without reset, cancellation
+  during acknowledgement leaves DMA reserved/offline, and a controlled stale
+  claim race resets the newer incomplete orphan rather than releasing it.
+  A temporary raw policy mutation that skips completion revalidation is
+  rejected by that race fixture. RV32/RV64 production objects compile, test
+  hooks are absent, and RV32 needs neither raw RV64 policy symbols nor an
+  atomic support library. RV32 execution is not claimed.
+- The four native block-service budget/refusal/recovery boots and full disk
+  hardening suite, including eight reset cancellation boots, pass. Their
+  harnesses now build `HARTS` to match each QEMU `-smp` configuration.
+- The Qlog routing suite passes its two Portable runs and 24 native boots,
+  including stable Files recovery and actual loaded-process storage syscalls.

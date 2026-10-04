@@ -15,15 +15,17 @@ if not shutil.which('qemu-system-riscv64') or not shutil.which('riscv64-unknown-
     raise SystemExit('Native block service: prerequisites missing (RV64 compiler and QEMU required)')
 with tempfile.TemporaryDirectory(prefix='qos-block-service-') as d:
     temp = Path(d)
-    kernel = temp / 'service.elf'
-    run(['make', '-s', 'native', f'SYSTEM={ROOT}/tests/blockservice.fpr', f'KERNEL={kernel}', f'BUILD={temp}/build',
-         'NATIVE_CFLAGS_EXTRA=-DQOS_BLK_TEST -DBLK_DEADLINE_TICKS=3000000ULL'], cwd=ROOT / 'qos')
+    kernels = {}
+    for harts in (1, 2):
+        kernels[harts] = temp / f'service-{harts}.elf'
+        run(['make', '-s', 'native', f'SYSTEM={ROOT}/tests/blockservice.fpr', f'KERNEL={kernels[harts]}', f'BUILD={temp}/build-{harts}',
+             f'HARTS={harts}', 'NATIVE_CFLAGS_EXTRA=-DQOS_BLK_TEST -DBLK_DEADLINE_TICKS=3000000ULL'], cwd=ROOT / 'qos')
     for modern in (False, True):
         for harts in (1, 2):
             disk = temp / f'service-{modern}-{harts}.disk'
             run(['python3', ROOT / 'tools/mkdisk.py', disk, '8'])
             args = ['qemu-system-riscv64', '-machine', 'virt', '-smp', harts, '-m', '256M', '-nographic',
-                    '-bios', 'none', '-kernel', kernel, '-drive', f'file={disk},if=none,format=raw,id=hd0',
+                    '-bios', 'none', '-kernel', kernels[harts], '-drive', f'file={disk},if=none,format=raw,id=hd0',
                     '-device', 'virtio-blk-device,drive=hd0']
             if modern:
                 args += ['-global', 'virtio-mmio.force-legacy=false']

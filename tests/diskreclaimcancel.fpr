@@ -1,0 +1,46 @@
+# A late completion must be reclaimed without reset. Cancellation while
+# acknowledging it must reserve the queue and publish offline atomically.
+blkTestStall : Unit -> Int .
+blkTestCompleteOrphan : Unit -> Int .
+blkTestHoldReset : Int -> Int .
+blkTestResetPending : Unit -> Int .
+blkTestReserved : Unit -> Int .
+blkTestNow : Unit -> Int .
+blkBudgetSet : (Int, Int, Int, Int) -> Int .
+disk u = device "blk".
+reader boss self = send boss (blkRead (disk Unit) 3) >> Unit.
+dead r = case r of Err why -> why == "dead actor" | Ok v -> False.
+awaitReclaim : (n : Int | measure n) -> Bool .
+awaitReclaim n = if blkTestResetPending Unit == 3 then True else if n <= 0 then False else _ = Sys.sleepUs 1000; awaitReclaim (n - 1).
+main =
+  me = myself 0;
+  configured = blkBudgetSet (0, 100000, 20, 1) == 1;
+  _ = blkWrite (disk Unit) 3 "before";
+  _ = blkTestStall Unit;
+  a = spawn (reader me);
+  timed = dead (receiveFromRes me a);
+  completed = blkTestCompleteOrphan Unit == 1;
+  recovered = substr (blkRead (disk Unit) 3) 0 6 == "before";
+  released = blkBudgetSet (1, 100000, 20, 1) == 2;
+  _ = blkTestStall Unit;
+  a2 = spawn (reader me);
+  timed2 = dead (receiveFromRes me a2);
+  completed2 = blkTestCompleteOrphan Unit == 1;
+  _ = blkTestHoldReset 3;
+  b = spawn (reader me);
+  pending = awaitReclaim 2000;
+  busy = blkBudgetSet (2, 100000, 20, 1) == -2;
+  start = blkTestNow Unit;
+  waiter = spawn (reader me);
+  waited = dead (receiveFromRes me waiter);
+  elapsed = blkTestNow Unit - start;
+  bounded = elapsed >= 100000 and elapsed < 250000;
+  _ = kill b;
+  cancelled = dead (receiveFromRes me b);
+  start2 = blkTestNow Unit;
+  refused = dead (receiveFromRes me (spawn (reader me)));
+  fast = blkTestNow Unit - start2 < 50000;
+  reserved = blkTestReserved Unit == 1;
+  offlineConfig = blkBudgetSet (2, 100000, 20, 1) == -4;
+  holds = configured and timed and completed and recovered and released and timed2 and completed2 and pending and busy and waited and bounded and cancelled and reserved and offlineConfig and refused and fast;
+  "diskreclaimcancel: timed={timed} completed={completed} recovered={recovered} released={released} timed2={timed2} completed2={completed2} pending={pending} busy={busy} waited={waited} bounded={bounded} cancelled={cancelled} reserved={reserved} offlineConfig={offlineConfig} refused={refused} fast={fast} {if holds then "HOLDS" else "FAILED"}".

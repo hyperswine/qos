@@ -34,16 +34,18 @@ with tempfile.TemporaryDirectory(prefix='qos-disk-harden-') as d:
     print('Portable disk: a stalled disk fail-stops the storage actor (its client gets Err), a late caller, refuses while stalled, recovers: PASS')
 
     if shutil.which('qemu-system-riscv64') and shutil.which('riscv64-unknown-elf-gcc'):
-        kernel = tmp / 'stall.elf'; disk = tmp / 'native.disk'
-        run(['make', '-s', 'native', f'SYSTEM={ROOT}/tests/diskstall.fpr', f'KERNEL={kernel}', f'BUILD={tmp}/native',
-             'NATIVE_CFLAGS_EXTRA=-DQOS_BLK_TEST -DBLK_DEADLINE_TICKS=3000000ULL'], cwd=ROOT / 'qos')
+        kernels = {}
+        for harts in (1, 2):
+            kernels[harts] = tmp / f'stall-{harts}.elf'
+            run(['make', '-s', 'native', f'SYSTEM={ROOT}/tests/diskstall.fpr', f'KERNEL={kernels[harts]}', f'BUILD={tmp}/native-{harts}',
+                 f'HARTS={harts}', 'NATIVE_CFLAGS_EXTRA=-DQOS_BLK_TEST -DBLK_DEADLINE_TICKS=3000000ULL'], cwd=ROOT / 'qos')
         for modern in (False, True):
             for harts in (1, 2):
                 # Fresh state: this test deliberately leaves the disk offline.
                 disk = tmp / f'native-v{2 if modern else 1}-{harts}.disk'
                 run(['python3', ROOT / 'tools/mkdisk.py', disk, '8'])
                 args = ['qemu-system-riscv64', '-machine', 'virt', '-smp', str(harts), '-m', '256M', '-nographic', '-bios', 'none',
-                        '-kernel', kernel, '-drive', f'file={disk},if=none,format=raw,id=hd0',
+                        '-kernel', kernels[harts], '-drive', f'file={disk},if=none,format=raw,id=hd0',
                         '-device', 'virtio-blk-device,drive=hd0']
                 if modern:
                     args += ['-global', 'virtio-mmio.force-legacy=false']
@@ -60,15 +62,17 @@ with tempfile.TemporaryDirectory(prefix='qos-disk-harden-') as d:
         for phase in (1, 2):
             source = tmp / f'diskresetcancel-{phase}.fpr'
             source.write_text(fixture.replace('main = cancelReset 1.', f'main = cancelReset {phase}.'))
-            kernel = tmp / f'resetcancel-{phase}.elf'
-            run(['make', '-s', 'native', f'SYSTEM={source}', f'KERNEL={kernel}', f'BUILD={tmp}/cancel-{phase}',
-                 'NATIVE_CFLAGS_EXTRA=-DQOS_BLK_TEST -DBLK_DEADLINE_TICKS=3000000ULL'], cwd=ROOT / 'qos')
+            kernels = {}
+            for harts in (1, 2):
+                kernels[harts] = tmp / f'resetcancel-{phase}-{harts}.elf'
+                run(['make', '-s', 'native', f'SYSTEM={source}', f'KERNEL={kernels[harts]}', f'BUILD={tmp}/cancel-{phase}-{harts}',
+                     f'HARTS={harts}', 'NATIVE_CFLAGS_EXTRA=-DQOS_BLK_TEST -DBLK_DEADLINE_TICKS=3000000ULL'], cwd=ROOT / 'qos')
             for modern in (False, True):
                 for harts in (1, 2):
                     disk = tmp / f'cancel-{phase}-{modern}-{harts}.disk'
                     run(['python3', ROOT / 'tools/mkdisk.py', disk, '8'])
                     args = ['qemu-system-riscv64', '-machine', 'virt', '-smp', str(harts), '-m', '256M', '-nographic', '-bios', 'none',
-                            '-kernel', kernel, '-drive', f'file={disk},if=none,format=raw,id=hd0', '-device', 'virtio-blk-device,drive=hd0']
+                            '-kernel', kernels[harts], '-drive', f'file={disk},if=none,format=raw,id=hd0', '-device', 'virtio-blk-device,drive=hd0']
                     if modern:
                         args += ['-global', 'virtio-mmio.force-legacy=false']
                     p = run(args, timeout=40)

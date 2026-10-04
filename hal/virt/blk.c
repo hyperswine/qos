@@ -40,6 +40,7 @@
  * every later request is refused at once.
  */
 #include "fpr.h"
+#include "blockpolicy.h"
 #if __riscv_xlen == 64
 #include "virtio.h"
 #endif
@@ -136,7 +137,7 @@ static u8 bstatus __attribute__((aligned(16)));
 #endif
 /* Configuration publication is separate from DMA ownership. Only an idle
  * queue accepts replacement; no configuration operation parks or allocates
- * while holding busy. Readers use a sequence snapshot of atomic 32-bit cells
+ * while holding its reservation. Readers use atomic 32-bit sequence snapshots
  * (also available on RV32). An orphan retains its submission's budget. */
 static unsigned cfg_seq, cfg_deadline_us = BLK_DEADLINE_TICKS / 10,
                 cfg_reset_probes = 1000, cfg_wait_factor = 3;
@@ -164,15 +165,58 @@ static blk_budget blk_active_budget(void) {
   return b;
 }
 
-/* busy: the DMA buffers belong to a request (held by its owner, or by an
- * orphan).  orphan: 1 = the owner is gone and the device may still be
- * using the buffers; 2 = one waiter is resetting the device.  offline: a
- * reset did not bring the device back. */
-static unsigned blk_busy, blk_orphan, blk_offline;
+/* One atomic ownership word. Every non-idle state reserves the DMA backing;
+ * offline is terminal. Only a successful policy transition grants effects. */
+static unsigned blk_owner;
+static unsigned blk_state_get(void) {
+  return __atomic_load_n(&blk_owner, __ATOMIC_ACQUIRE);
+}
+static unsigned blk_next(unsigned state, unsigned event) {
+#if __riscv_xlen == 64
+  return (unsigned)qos_blk_ownership(state, event);
+#else
+  /* RV32 mechanism fallback, held to the same transition reference. */
+  if (state == BLK_IDLE && event == BLK_ACQUIRE) return BLK_HELD;
+  if (state == BLK_HELD && event == BLK_ABANDON) return BLK_ORPHAN;
+  if (state == BLK_ORPHAN && event == BLK_RECLAIM) return BLK_RECLAIMING;
+  if (state == BLK_ORPHAN && event == BLK_RESET) return BLK_RESETTING;
+  if ((state == BLK_RECLAIMING || state == BLK_RESETTING) && event == BLK_FINISH) return BLK_IDLE;
+  if ((state == BLK_RESETTING || state == BLK_RECLAIMING) && event == BLK_RECOVERY_FAILED) return BLK_OFFLINE;
+  if (state == BLK_HELD && event == BLK_RELEASE) return BLK_IDLE;
+  if ((state == BLK_RECLAIMING || state == BLK_RESETTING) && event == BLK_RETRY) return BLK_ORPHAN;
+  return state <= BLK_OFFLINE ? state : BLK_OFFLINE;
+#endif
+}
+static int blk_change(unsigned expected, unsigned event) {
+  unsigned next = blk_next(expected, event);
+  if (next == expected) return 0;
+  return __atomic_compare_exchange_n(&blk_owner, &expected, next, 0,
+                                     __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
+}
 static u16 blk_before;
 static uint64_t blk_since; /* mtime the request in flight was submitted */
 
 #ifdef QOS_BLK_TEST
+static unsigned blk_test_claim, blk_test_resets;
+static V h_blkTestClaim(V command) {
+  unsigned value = (unsigned)UNTAG(command);
+  if (value == 1 || value == 3)
+    __atomic_store_n(&blk_test_claim, value, __ATOMIC_RELEASE);
+  return TAG(__atomic_load_n(&blk_test_claim, __ATOMIC_ACQUIRE));
+}
+FPR_FN(fpr_g_blkTestClaim, h_blkTestClaim, 1);
+static V h_blkTestResetCount(V u) {
+  (void)u; return TAG(__atomic_load_n(&blk_test_resets, __ATOMIC_ACQUIRE));
+}
+FPR_FN(fpr_g_blkTestResetCount, h_blkTestResetCount, 1);
+static void blk_test_pause_claim(void) {
+  unsigned armed = 1;
+  if (!__atomic_compare_exchange_n(&blk_test_claim, &armed, 2, 0,
+                                   __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) return;
+  while (__atomic_load_n(&blk_test_claim, __ATOMIC_ACQUIRE) == 2)
+    fpr_actor_sleep_us(100);
+  __atomic_store_n(&blk_test_claim, 0, __ATOMIC_RELEASE);
+}
 /* test-only (never in an ordinary build): withhold the doorbell of the
  * next request (a device that never completes it), and make the next
  * reset fail to come back */
@@ -189,12 +233,11 @@ static V h_blkTestHoldReset(V phase) { blk_test_hold_reset = (unsigned)UNTAG(pha
 static V h_blkTestResetPending(V u) {
   (void)u; return TAG(__atomic_load_n(&blk_test_reset_pending, __ATOMIC_ACQUIRE));
 }
-static V h_blkTestBusy(V u) { (void)u; return TAG(__atomic_load_n(&blk_busy, __ATOMIC_ACQUIRE)); }
+static V h_blkTestBusy(V u) { (void)u; return TAG(blk_state_get() != BLK_IDLE); }
 FPR_FN(fpr_g_blkTestBusy, h_blkTestBusy, 1);
 static V h_blkTestReserved(V u) {
   (void)u;
-  return TAG(__atomic_load_n(&blk_busy, __ATOMIC_ACQUIRE) &&
-             __atomic_load_n(&blk_offline, __ATOMIC_ACQUIRE));
+  return TAG(blk_state_get() == BLK_OFFLINE);
 }
 FPR_FN(fpr_g_blkTestHoldReset, h_blkTestHoldReset, 1);
 FPR_FN(fpr_g_blkTestResetPending, h_blkTestResetPending, 1);
@@ -205,6 +248,20 @@ static void blk_test_pause_reset(unsigned phase) {
   __atomic_store_n(&blk_test_reset_pending, phase, __ATOMIC_RELEASE);
   for (;;) fpr_actor_sleep_us(100);
 }
+/* Deliver a previously suppressed notify only after its owner is gone.
+ * Wait for actual device completion, leaving the orphan claim to the driver. */
+static V h_blkTestCompleteOrphan(V u) {
+  (void)u;
+  if (blk_state_get() != BLK_ORPHAN) return TAG(0);
+  wr(R_QNOTIFY, 0);
+  for (unsigned i = 0; i < 5000; i++) {
+    FENCE();
+    if (QUSED->idx != blk_before) return TAG(1);
+    fpr_actor_sleep_us(100);
+  }
+  return TAG(0);
+}
+FPR_FN(fpr_g_blkTestCompleteOrphan, h_blkTestCompleteOrphan, 1);
 /* the machine clock, in microseconds (10 MHz CLINT) */
 static V h_blkTestNow(V u) { (void)u; return TAG((sw)(hal_mtime() / 10)); }
 FPR_FN(fpr_g_blkTestNow, h_blkTestNow, 1);
@@ -223,18 +280,18 @@ static int blk_expired(uint64_t since, uint64_t parks, uint64_t ticks, uint64_t 
 /* a killed owner: the request stays in flight, its buffers reserved */
 static void blk_abandon(void *unused) {
   (void)unused;
-  __atomic_store_n(&blk_orphan, 1, __ATOMIC_RELEASE);
+  (void)blk_change(BLK_HELD, BLK_ABANDON);
 }
 
 static int blk_init(void);
 
-/* A reset owner can park or be killed. Keep all DMA backing reserved and
- * publish OFFLINE before leaving resetting state; later callers never reuse
+/* A recovery owner can park or be killed. Keep all DMA backing reserved by
+ * atomically replacing RESETTING/RECLAIMING with OFFLINE; later callers never reuse
  * a partially rebuilt queue. Restart/reprobe is a separate administrative act. */
-static void blk_reset_abandon(void *unused) {
+static void blk_recovery_abandon(void *unused) {
   (void)unused;
-  __atomic_store_n(&blk_offline, 1, __ATOMIC_RELEASE);
-  __atomic_store_n(&blk_orphan, 0, __ATOMIC_RELEASE);
+  unsigned state = blk_state_get();
+  (void)blk_change(state, BLK_RECOVERY_FAILED);
 }
 
 static int blk_reset_step(u32 status, int attempt, int limit) {
@@ -250,6 +307,9 @@ static int blk_reset_step(u32 status, int attempt, int limit) {
  * Only then is the queue rebuilt and the buffers free.  1 = the device is
  * back. */
 static int blk_reset(void) {
+#ifdef QOS_BLK_TEST
+  __atomic_fetch_add(&blk_test_resets, 1, __ATOMIC_RELAXED);
+#endif
   wr(R_STATUS, 0);
 #ifdef QOS_BLK_TEST
   blk_test_pause_reset(2);
@@ -276,55 +336,85 @@ static int blk_reset(void) {
   return blk_init();
 }
 
+/* The observation that selected a claim can be stale (an orphan-state ABA).
+ * Revalidate DMA facts under exclusive ownership before effects or release. */
+static int blk_claim_step(unsigned state, uint64_t parks) {
+  FENCE();
+  int completed = QUSED->idx != blk_before;
+  blk_budget budget = blk_active_budget();
+  int reset_due = !completed && blk_expired(blk_since, parks, blk_budget_ticks(budget), blk_budget_parks(budget));
+#if __riscv_xlen == 64
+  return qos_blk_claim_step(state, completed, reset_due);
+#else
+  return state == BLK_RECLAIMING ? (completed ? 1 : 0) :
+         state == BLK_RESETTING && !completed && reset_due ? 2 : 0;
+#endif
+}
+
 static void blk_lock(void) {
   blk_budget waiting_budget = blk_budget_get();
   uint64_t t0 = hal_mtime();
   uint64_t parks = 0;
   for (;;) {
-    if (__atomic_load_n(&blk_offline, __ATOMIC_ACQUIRE))
-      fpr_actor_fail("blk: the disk is offline (a stalled request could not be reset) -- request refused");
-    unsigned free = 0;
-    if (__atomic_compare_exchange_n(&blk_busy, &free, 1, 0, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)) break;
+    if (blk_state_get() == BLK_OFFLINE)
+      fpr_actor_fail("blk: the disk is offline (recovery did not finish) -- request refused");
+    if (blk_change(BLK_IDLE, BLK_ACQUIRE)) break;
     /* A killed or timed-out owner cannot release DMA storage before the
      * device is done with it: completion, or a confirmed reset. */
-    unsigned orphan = __atomic_load_n(&blk_orphan, __ATOMIC_ACQUIRE);
+    unsigned state = blk_state_get();
     FENCE();
-    int completed = orphan == 1 && QUSED->idx != blk_before;
-    int reset_due = orphan == 1 && !completed && blk_expired(blk_since, parks, blk_budget_ticks(blk_active_budget()), blk_budget_parks(blk_active_budget()));
-    int wait_due = orphan != 1 && blk_expired(t0, parks, waiting_budget.factor * blk_budget_ticks(waiting_budget), waiting_budget.factor * blk_budget_parks(waiting_budget));
+    int completed = state == BLK_ORPHAN && QUSED->idx != blk_before;
+    int reset_due = state == BLK_ORPHAN && !completed && blk_expired(blk_since, parks, blk_budget_ticks(blk_active_budget()), blk_budget_parks(blk_active_budget()));
+    int wait_due = state != BLK_ORPHAN && blk_expired(t0, parks, waiting_budget.factor * blk_budget_ticks(waiting_budget), waiting_budget.factor * blk_budget_parks(waiting_budget));
 #if __riscv_xlen == 64
-    int action = qos_blk_waiting(orphan, completed, reset_due, wait_due);
+    int action = qos_blk_waiting(state, completed, reset_due, wait_due);
 #else
-    int action = orphan == 1 ? (completed ? 1 : reset_due ? 2 : 0) : (wait_due ? 3 : 0);
+    int action = state == BLK_ORPHAN ? (completed ? 1 : reset_due ? 2 : 0) : (wait_due ? 3 : 0);
 #endif
     if (action == 1 || action == 2) {
-      unsigned abandoned = 1;
+#ifdef QOS_BLK_TEST
+      blk_test_pause_claim();
+#endif
       if (action == 1) {
-        if (__atomic_compare_exchange_n(&blk_orphan, &abandoned, 0, 0, __ATOMIC_ACQ_REL, __ATOMIC_RELAXED)) {
+        if (blk_change(BLK_ORPHAN, BLK_RECLAIM)) {
+          if (blk_claim_step(BLK_RECLAIMING, parks) != 1) {
+            (void)blk_change(BLK_RECLAIMING, BLK_RETRY);
+            continue;
+          }
+          if (!fpr_actor_cleanup_set(blk_recovery_abandon, &blk_owner)) {
+            blk_recovery_abandon(0);
+            fpr_actor_fail("blk: could not own reclaim cleanup -- disk offline");
+          }
+#ifdef QOS_BLK_TEST
+          blk_test_pause_reset(3);
+#endif
           q.last_used = QUSED->idx;
           wr(R_INTACK, 3);
-          __atomic_store_n(&blk_busy, 0, __ATOMIC_RELEASE);
+          fpr_actor_cleanup_clear(&blk_owner);
+          (void)blk_change(BLK_RECLAIMING, BLK_FINISH);
         }
-      } else if (__atomic_compare_exchange_n(&blk_orphan, &abandoned, 2, 0, __ATOMIC_ACQ_REL, __ATOMIC_RELAXED)) {
+      } else if (blk_change(BLK_ORPHAN, BLK_RESET)) {
+        if (blk_claim_step(BLK_RESETTING, parks) != 2) {
+          (void)blk_change(BLK_RESETTING, BLK_RETRY);
+          continue;
+        }
         /* the orphan is past the deadline: the device stalled */
-        if (!fpr_actor_cleanup_set(blk_reset_abandon, &blk_orphan)) {
-          blk_reset_abandon(0);
+        if (!fpr_actor_cleanup_set(blk_recovery_abandon, &blk_owner)) {
+          blk_recovery_abandon(0);
           fpr_actor_fail("blk: could not own reset cleanup -- disk offline");
         }
 #ifdef QOS_BLK_TEST
         blk_test_pause_reset(1);
 #endif
         int recovered = blk_reset();
-        fpr_actor_cleanup_clear(&blk_orphan);
+        fpr_actor_cleanup_clear(&blk_owner);
         if (recovered) {
           bputs("[blk] the device stalled on an abandoned request; reset, that request was dropped\n");
-          __atomic_store_n(&blk_orphan, 0, __ATOMIC_RELEASE);
-          __atomic_store_n(&blk_busy, 0, __ATOMIC_RELEASE);
+          (void)blk_change(BLK_RESETTING, BLK_FINISH);
         } else {
           /* still possibly DMA-ing: the buffers stay reserved for good */
           bputs("[blk] the device stalled and did not come back from reset: disk offline\n");
-          __atomic_store_n(&blk_offline, 1, __ATOMIC_RELEASE);
-          __atomic_store_n(&blk_orphan, 0, __ATOMIC_RELEASE);
+          (void)blk_change(BLK_RESETTING, BLK_RECOVERY_FAILED);
           fpr_actor_fail("blk: the device stalled and did not come back from reset -- disk offline");
         }
         continue;
@@ -340,11 +430,11 @@ static void blk_lock(void) {
   blk_budget acquired = blk_budget_get();
   __atomic_store_n(&active_deadline_us, acquired.us, __ATOMIC_RELEASE);
   __atomic_store_n(&active_reset_probes, acquired.probes, __ATOMIC_RELEASE);
-  fpr_actor_cleanup_set(blk_abandon, &blk_busy);
+  fpr_actor_cleanup_set(blk_abandon, &blk_owner);
 }
 static void blk_unlock(void) {
-  fpr_actor_cleanup_clear(&blk_busy);
-  __atomic_store_n(&blk_busy, 0, __ATOMIC_RELEASE);
+  fpr_actor_cleanup_clear(&blk_owner);
+  (void)blk_change(BLK_HELD, BLK_RELEASE);
 }
 
 static void vq_setup(void) {
@@ -480,8 +570,8 @@ static void blk_rw(u64 page, int is_write) {
     if (blk_expired(start, start ? parks : ++parks, blk_budget_ticks(blk_active_budget()), blk_budget_parks(blk_active_budget()))) {
       /* the device may still DMA into the buffers: they stay reserved (an
        * orphan) until it completes or a later caller resets it */
-      fpr_actor_cleanup_clear(&blk_busy);
-      __atomic_store_n(&blk_orphan, 1, __ATOMIC_RELEASE);
+      fpr_actor_cleanup_clear(&blk_owner);
+      (void)blk_change(BLK_HELD, BLK_ABANDON);
       fpr_actor_fail("blk: request timed out (the device stalled); its buffers stay reserved until it completes or is reset");
     }
     fpr_actor_sleep_us(200);
@@ -566,13 +656,11 @@ static V h_blkBudgetSet(V request) {
 #else
   if (us < 1 || us > 60000000 || probes < 1 || probes > 100000 || factor < 1 || factor > 64) return TAG(-1);
 #endif
-  if (__atomic_load_n(&blk_offline, __ATOMIC_ACQUIRE)) return TAG(-4);
-  unsigned free = 0;
-  if (!__atomic_compare_exchange_n(&blk_busy, &free, 1, 0, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)) return TAG(-2);
+  if (blk_state_get() == BLK_OFFLINE) return TAG(-4);
+  if (!blk_change(BLK_IDLE, BLK_ACQUIRE)) return TAG(blk_state_get() == BLK_OFFLINE ? -4 : -2);
   int code = 0;
   unsigned seq = __atomic_load_n(&cfg_seq, __ATOMIC_SEQ_CST);
-  if (__atomic_load_n(&blk_offline, __ATOMIC_ACQUIRE)) code = -4;
-  else if (version < 0 || (uw)version != seq / 2 || seq >= 0x7ffffffcU) code = -3;
+  if (version < 0 || (uw)version != seq / 2 || seq >= 0x7ffffffcU) code = -3;
   else {
     __atomic_store_n(&cfg_seq, seq + 1, __ATOMIC_SEQ_CST);
     __atomic_store_n(&cfg_deadline_us, (unsigned)us, __ATOMIC_SEQ_CST);
@@ -581,7 +669,7 @@ static V h_blkBudgetSet(V request) {
     __atomic_store_n(&cfg_seq, seq + 2, __ATOMIC_SEQ_CST);
     code = (seq + 2) / 2;
   }
-  __atomic_store_n(&blk_busy, 0, __ATOMIC_RELEASE);
+  (void)blk_change(BLK_HELD, BLK_RELEASE);
   return TAG(code);
 }
 FPR_FN(fpr_g_blkBudgetGet, h_blkBudgetGet, 1);

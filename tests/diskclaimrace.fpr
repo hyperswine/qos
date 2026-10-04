@@ -1,0 +1,35 @@
+# Pause one waiter between its completion observation and claim CAS. Another
+# waiter reclaims that orphan, then a new incomplete orphan occupies the queue.
+# The stale completion decision must not release the new request's DMA.
+blkTestStall : Unit -> Int .
+blkTestCompleteOrphan : Unit -> Int .
+blkTestClaim : Int -> Int .
+blkTestResetCount : Unit -> Int .
+blkBudgetSet : (Int, Int, Int, Int) -> Int .
+disk u = device "blk".
+reader boss self = send boss (blkRead (disk Unit) 3) >> Unit.
+dead r = case r of Err why -> why == "dead actor" | Ok v -> False.
+awaitClaim : (n : Int | measure n) -> Bool .
+awaitClaim n = if blkTestClaim 0 == 2 then True else if n <= 0 then False else _ = Sys.sleepUs 1000; awaitClaim (n - 1).
+main =
+  me = myself 0;
+  configured = blkBudgetSet (0, 100000, 20, 2) == 1;
+  _ = blkWrite (disk Unit) 3 "before";
+  _ = blkTestStall Unit;
+  a = spawn (reader me);
+  timed = dead (receiveFromRes me a);
+  completed = blkTestCompleteOrphan Unit == 1;
+  _ = blkTestClaim 1;
+  stale = spawn (reader me);
+  paused = awaitClaim 2000;
+  fresh = substr (blkRead (disk Unit) 3) 0 6 == "before";
+  _ = blkTestStall Unit;
+  a2 = spawn (reader me);
+  timed2 = dead (receiveFromRes me a2);
+  noReset = blkTestResetCount Unit == 0;
+  _ = blkTestClaim 3;
+  recovered = case receiveFromRes me stale of Ok page -> substr page 0 6 == "before" | Err why -> False;
+  resetNew = blkTestResetCount Unit == 1;
+  idle = blkBudgetSet (1, 100000, 20, 2) == 2;
+  holds = configured and timed and completed and paused and fresh and timed2 and noReset and recovered and resetNew and idle;
+  "diskclaimrace: timed={timed} completed={completed} paused={paused} fresh={fresh} timed2={timed2} noReset={noReset} recovered={recovered} resetNew={resetNew} idle={idle} {if holds then "HOLDS" else "FAILED"}".
