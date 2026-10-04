@@ -34,15 +34,19 @@ codegen revision 36 and native process ABI 3. Notes now declares its intended
 string-only edit interface in both versions. The native integrity test rejects
 the previous ABI 2 before allocation and still runs valid vector processes.
 
-Metadata uses archive IDs as test version labels; end-to-end content-hash
-identity checking is still needed before watcher-driven adoption. There is no
+The version-aware adapter now checks event `from`/`to` against compiled root
+source identities, keeping archive addressing separate. See
+[reload identity](../../fprisc/docs/2026-10-04-RELOAD-IDENTITY.md). The real MVU
+fixture uses these source hashes and covers stale-event refusal before retrieval
+and wrong-image rollback. Production watching/publication is still open. There is no
 new replay path, POSIX attachment implementation, image reclamation, native
 RV64 reload test or browser/GL reload integration. The old loader/livereload
 modules remain for existing consumers and replay, including their global-newest
 baseline limitation. The new adapter uses an explicit per-module baseline.
 
-The compiler pin is `7aff71770cd42420569e64a173ac462f9989d308`, containing the shared runner, checked commit
-interfaces and checked runtime module interfaces. Unrelated untracked files in
+The compiler pin is `372b1783bf4b4c4563233dcfb2d8aca8efe3f811`, containing the shared runner, checked commit
+interfaces, checked runtime module interfaces and version-aware source identity
+matching. Unrelated untracked files in
 the compiler checkout are excluded from this milestone.
 
 Executed verification for this milestone: real plugin reload and checked
@@ -50,3 +54,6 @@ contract/specialization patches passed on one/four harts; Notes passed; native
 integrity/vector process checks passed on one/two harts with both virtio
 variants; focused MVU and multi-client LiveView smoke passed. FP-RISC's complete
 Base suite passed. The full QOS check-all sweep was not run.
+
+The identity-aware increment passed the complete FP-RISC Base suite and shared
+MVU runner variants, plus real QOS reload/refusal tests on one/four harts.

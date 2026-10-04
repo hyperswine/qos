@@ -9,7 +9,7 @@ LD = use "std/loader".
 LR = use "std/mvureload".
 MV = use "std/mvu".
 
-init env = {acc = 0, count = 0, r1 = 0, r2 = 0, r3 = 0, r4 = 0, refused = 0, saved = env.math.op, port = env.port}.
+init env = {acc = 0, count = 0, r1 = 0, r2 = 0, r3 = 0, r4 = 0, refused = 0, saved = env.math.op, port = env.port, images = env.images}.
 update me env ev m = case ev of
     MV.EMsg tag arg -> onMsg env m tag
   | MV.EReloadRefused info why -> refused m info why
@@ -40,37 +40,38 @@ done m =
 reload me info env = case info.name == "math" of
     False -> Err "unknown live module"
   | True -> reloadMath me info env.
-reloadMath me info env = case info.from == env.hash of
-    False -> Err "stale module version"
-  | True -> replaced info env (LR.load me env.fs info.to env.table).
+reloadMath me info env =
+  image = imageFor env.images info.to;
+  replaced info env (LR.loadVersion me env.fs image.archive env.table info.from info.to).
 replaced info env r = case r of
     Err why -> Err why
   | Ok table -> Ok {env | table = table, hash = info.to, math = {op = LR.bindAt table "mathOp"}}.
-info from to = {name = "math", from = from, to = to, version = "test"}.
-# In this fixture from/to are archive IDs, not certified content hashes.
-# Real watcher-to-image identity checking is a subsequent implementation step.
-render p me =
+info images from to =
+  old = archiveFor images from;
+  new = archiveFor images to;
+  {name = "math", from = old.hash, to = new.hash, version = "0.1.0"}.
+render p images me =
   message = receive me;
   (from, q) = message;
-  renderMsg p me from q.
-renderMsg p me from q = case q of
-    MV.Dims u -> send from (80, 24) >> render p me
-  | MV.Poll u -> send from (0, 0, 0) >> render p me
-  | MV.Render st vs sc fr -> renderFrame p me from vs fr.
-renderFrame p me from vs fr =
+  renderMsg p images me from q.
+renderMsg p images me from q = case q of
+    MV.Dims u -> send from (80, 24) >> render p images me
+  | MV.Poll u -> send from (0, 0, 0) >> render p images me
+  | MV.Render st vs sc fr -> renderFrame p images me from vs fr.
+renderFrame p images me from vs fr =
   expected = case fr == 0 of True -> 20 | False -> 30;
   _ = case vs == expected of True -> 0 | False -> error "render kept old module";
-  _ = queueNext p fr;
+  _ = queueNext p images fr;
   _ = MV.portSync me p;
   _ = send from (0, 0);
-  render p me.
-queueNext p fr = case fr of
-    0 -> send p (MV.EReload (info "mathv1" "mathv2")) >> send p (MV.EMsg "add" "")
-  | 1 -> send p (MV.EReload (info "mathv2" "mathbad")) >>
-           send p (MV.EReload (info "mathv2" "mathtypebad")) >>
-           send p (MV.EReload (info "mathv2" "mathcontractbad")) >>
-           send p (MV.EReload (info "mathv2" "mathboundbad")) >>
-           send p (MV.EReload (info "mathv2" "mathopaquebad")) >>
+  render p images me.
+queueNext p images fr = case fr of
+    0 -> send p (MV.EReload (info images "mathv1" "mathv2")) >> send p (MV.EMsg "add" "")
+  | 1 -> send p (MV.EReload (info images "mathv2" "mathbad")) >>
+           send p (MV.EReload (info images "mathv2" "mathtypebad")) >>
+           send p (MV.EReload (info images "mathv2" "mathcontractbad")) >>
+           send p (MV.EReload (info images "mathv2" "mathboundbad")) >>
+           send p (MV.EReload (info images "mathv2" "mathopaquebad")) >>
            send p (MV.EMsg "add" "")
   | n -> send p (MV.EMsg "quit" "").
 expectOk r = case r of Ok i -> i | Err why -> error why.
@@ -81,14 +82,21 @@ main =
   baseline = expectOk (LD.load me ld "mathv1");
   # Keep an unrelated table between math versions: newest is not baseline.
   _ = expectOk (rawOther me fs);
+  images = {archive = "mathv1", hash = Mod.hashAt baseline} ::
+           identify me fs "mathv2" :: identify me fs "mathbad" ::
+           identify me fs "mathtypebad" :: identify me fs "mathcontractbad" ::
+           identify me fs "mathboundbad" :: identify me fs "mathopaquebad" :: Nil;
+  v1 = archiveFor images "mathv1";
+  _ = expectWhy "stale source" "reload: stale module identity" (LR.loadVersion me fs "no-such-image" baseline "stale" v1.hash);
+  _ = expectWhy "wrong image" "reload: candidate module identity mismatch" (LR.loadVersion me fs "mathv2" baseline v1.hash v1.hash);
   _ = expectRefused "missing image" (LR.load me fs "no-such-image" baseline);
   _ = expectRefused "missing baseline" (LR.load me fs "mathv2" 9999);
   _ = case Mod.plugs 0 == 2 of True -> 0 | False -> error "failed preflight attached code";
   port = spawn MV.eventsPort;
   _ = send port (MV.EMsg "add" "");
   _ = send port (MV.EMsg "add" "");
-  rd = spawn (render port);
-  cfg = {env = {fs = fs, table = baseline, hash = "mathv1", math = {op = LR.bindAt baseline "mathOp"}, port = port},
+  rd = spawn (render port images);
+  cfg = {env = {fs = fs, table = baseline, hash = Mod.hashAt baseline, images = images, math = {op = LR.bindAt baseline "mathOp"}, port = port},
          mt = reg32 (device "clint") 49144, tick = 0, input = 0, render = rd};
   app = MV.MApp init update key statics vals done subs;
   result = MV.runLive me cfg app reload;
@@ -105,11 +113,34 @@ expectRefused label r = case r of
   | Ok i -> error "{label}: unexpectedly accepted".
 
 refused m info why =
-  expected = case info.to of
+  image = imageFor m.images info.to;
+  expected = case image.archive of
       "mathbad" -> "arity changed for an export"
     | "mathopaquebad" -> "new export has no checked interface"
     | other -> "checked type, contract or ABI changed for an export";
   _ = case why == "reload: incompatible, refused: {expected}" of
-      True -> print "{info.to}: {expected}"
+      True -> print "{image.archive}: {expected}"
     | False -> error "unexpected refusal for {info.to}: {why}";
   ({m | refused = m.refused + 1}, Nil).
+
+# Test-only producer catalog: read actual compiled roots by temporary attachment.
+# A production publisher obtains these identities from compiler output.
+identify me fs id =
+  before = Mod.plugs 0;
+  _ = expectOk (rawImage me fs id);
+  hash = Mod.hashAt before;
+  _ = Mod.detachLast Unit;
+  {archive = id, hash = hash}.
+rawImage me fs id = case FS.readLatest me fs "apps/{id}.qa" of
+    Err why -> Err why
+  | Ok qa -> Plug.attach qa.
+archiveFor images id = case images of
+    Nil -> error "missing test archive {id}"
+  | image :: rest -> archiveNext image rest id.
+archiveNext image rest id = case image.archive == id of True -> image | False -> archiveFor rest id.
+imageFor images hash = case images of
+    Nil -> error "missing test identity {hash}"
+  | image :: rest -> imageNext image rest hash.
+imageNext image rest hash = case image.hash == hash of True -> image | False -> imageFor rest hash.
+expectWhy label why r = case r of Err actual -> exactWhy label why actual | Ok u -> error "{label}: accepted".
+exactWhy label why actual = case why == actual of True -> print "{label}: refused" | False -> error actual.

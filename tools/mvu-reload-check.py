@@ -12,6 +12,7 @@ for harts in ('1', '4'):
     assert p.returncode == 0, out
     for expected in (RESULT, 'registry: 3 old closure: 20',
                      'missing image: refused', 'missing baseline: refused',
+                     'stale source: refused', 'wrong image: refused',
                      'mathbad: arity changed for an export',
                      'mathtypebad: checked type, contract or ABI changed for an export',
                      'mathcontractbad: checked type, contract or ABI changed for an export',

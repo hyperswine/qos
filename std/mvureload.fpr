@@ -8,3 +8,13 @@ load me fs archive baseline = case FS.readLatest me fs "apps/{archive}.qa" of
     Err why -> Err "reload store: {why}"
   | Ok qa -> Reload.attachAt baseline Plug.attach qa.
 bindAt table name = Reload.bindAt table name.
+
+# Watcher/event adapter path: verify source identity before retrieval and again
+# before adoption. Archive addressing is platform policy, independent of hashes.
+loadVersion me fs archive baseline from to = case Reload.preflightVersionAt baseline from to of
+    Err why -> Err why
+  | Ok u -> versionBytes baseline from to (FS.readLatest me fs "apps/{archive}.qa").
+versionBytes baseline from to r = case r of
+    Err why -> Err "reload store: {why}"
+  | Ok qa -> Reload.attachVersionAt baseline from to Plug.attach qa.
+identityAt table = Mod.hashAt table.
