@@ -1,0 +1,135 @@
+#: plugins tests/mathv1.fpr tests/mathv2.fpr
+#: expect publication: old=20 new=30 rows=2 owned=stopped PASS
+unsafe program.
+FS = use "std/fs".
+P = use "std/qpublication".
+C = use "std/reloadcatalog".
+LR = use "std/mvureload".
+Plug = use "../programs/mods/plug".
+MV = use "std/mvu".
+SVC = use "../programs/mods/svc".
+AC = use "std/actor".
+S = use "std/string".
+Sys.alive : Int -> Bool .
+ok r = case r of Ok x -> x | Err why -> error why.
+refused label r = case r of Err why -> refusalWhy label why | Ok x -> error "{label}: accepted".
+refusalWhy label why =
+  expected = case label of
+      "image" -> "publication image: injected image write"
+    | "journal" -> "publication journal: injected journal write"
+    | "read" -> "injected storage read failure"
+    | "malformed" -> "watch: malformed publication row"
+    | "collision" -> "publication: immutable image collision"
+    | "stale" -> "publication: stale predecessor"
+    | "delimiter" -> "publication: invalid identity, version or image"
+    | _ -> why;
+  _ = case why == expected and (label != "invalid archive" or S.startsWith "publication image:" why) of True -> Unit | False -> error "{label}: wrong refusal: {why}";
+  print "{label}: refused".
+identify qa =
+  n = Mod.plugs 0;
+  _ = ok (Plug.attach qa);
+  h = Mod.hashAt n;
+  _ = Mod.detachLast Unit;
+  h.
+info from to version = {name = "math", from = from, to = to, version = version}.
+# A Files proxy injects failures at each publication boundary.
+proxy fs mode me =
+  m = receive me;
+  SVC.Rpc caller tag url bytes = m;
+  _ = send caller (proxyReply fs mode me tag url bytes);
+  proxy fs mode me.
+proxyReply fs mode me tag url bytes = case mode of
+    "read" -> Err "injected storage read failure"
+  | "malformed" -> Ok "invalid row\n"
+  | "image" -> (case tag == 2 and url != P.journal Unit of True -> Err "injected image write" | False -> FS.rpc me fs tag url bytes)
+  | "journal" -> (case tag == 2 and url == P.journal Unit of True -> Err "injected journal write" | False -> FS.rpc me fs tag url bytes)
+  | _ -> FS.rpc me fs tag url bytes.
+failPublish me fs mode candidate qa =
+  px = spawn (proxy fs mode);
+  pub = ok (P.serve me px);
+  _ = refused mode (P.publish me pub candidate qa);
+  _ = kill pub;
+  _ = kill px;
+  Unit.
+main =
+  me = myself 0;
+  fs = FS.serve (device "blk");
+  qa1 = ok (FS.readLatest me fs "apps/mathv1.qa");
+  qa2 = ok (FS.readLatest me fs "apps/mathv2.qa");
+  h1 = identify qa1;
+  h2 = identify qa2;
+  first = info "" h1 "v1.0";
+  second = info h1 h2 "v1.1";
+  rows = ok (P.start me fs);
+  _ = case rows == 0 of True -> firstBoot me fs first second qa1 qa2 | False -> Unit;
+  pub = ok (P.serve me fs);
+  _ = ok (P.publish me pub second qa2);
+  _ = refused "collision" (P.publish me pub second qa1);
+  _ = refused "stale" (P.publish me pub (info "stale" "other" "v1.2") qa2);
+  _ = refused "delimiter" (P.publish me pub {second | name = "bad/name"} qa2);
+  _ = case ok (P.start me fs) == 2 of True -> Unit | False -> error "duplicate changed journal";
+  _ = refused "invalid archive" (P.publish me pub (info h2 "invalid" "v1.2") "invalid qa");
+  _ = case S.contains "url-records=2" (ok (FS.stats me fs (P.journal Unit))) and S.contains "url-records=1" (ok (FS.stats me fs (P.imageKey second))) of True -> Unit | False -> error "duplicate or retry rewrote records";
+  _ = kill pub;
+  baseline = Mod.plugs 0;
+  _ = ok (Plug.attach (ok (FS.readLatest me fs (P.imageKey first))));
+  old = LR.bindAt baseline "mathOp";
+  input = spawn MV.eventsPort;
+  _ = send input (MV.EMsg "add" "");
+  _ = MV.portSync me input;
+  rd = spawn renderer;
+  env = {fs = fs, table = baseline, op = old, port = input};
+  cfg = {env = env, mt = 0, tick = 10000, input = 0, render = rd};
+  app = MV.MApp init update key view vals done subs;
+  _ = ok (MV.runWatched me cfg app reload (starter fs));
+  handles = receive me;
+  (port, worker) = handles;
+  _ = case Sys.alive port or Sys.alive worker of True -> error "watcher survived runner" | False -> Unit;
+  _ = case old 10 == 20 of True -> Unit | False -> error "old code changed";
+  _ = kill input;
+  _ = kill rd;
+  "publication: old=20 new=30 rows=2 owned=stopped PASS".
+init env = {acc = 0, frames = 0, port = env.port}.
+update me env ev model = case ev of
+    MV.EMsg tag arg -> ({model | acc = model.acc + env.op 1}, Nil)
+  | MV.ETick -> (case model.frames > 5000 of True -> error "publication worker timed out" | False -> ({model | frames = model.frames + 1}, Nil))
+  | MV.EReload info -> (case env.op 10 == 30 and model.acc == 2 of True -> (model, MV.MQuit :: Nil) | False -> error "state or code did not survive")
+  | MV.EReloadRefused info why -> error why
+  | _ -> (model, Nil).
+subs model = MV.STick 1 :: MV.SEvents model.port :: Nil.
+key model = 0.
+view vp model = 0.
+vals self env vp model = env.op 10.
+done model = "owned publication runner".
+reload me info env = case LR.loadPublished me env.fs env.table info of
+    Err why -> Err why
+  | Ok table -> Ok {env | table = table, op = LR.bindAt table "mathOp"}.
+starter fs parent port =
+  worker = ok (P.watchFrom fs "math" 1 parent port);
+  _ = send parent (port, worker);
+  Ok worker.
+renderer me =
+  message = receive me;
+  (from, q) = message;
+  _ = case q of
+      MV.Dims u -> send from (80, 24)
+    | MV.Poll u -> send from (0, 0, 0)
+    | MV.Render st vs sc fr -> send from (0, 0);
+  renderer me.
+firstBoot me fs first second qa1 qa2 =
+  pub = ok (P.serve me fs);
+  _ = ok (P.publish me pub first qa1);
+  _ = kill pub;
+  _ = failPublish me fs "image" second qa2;
+  _ = case ok (P.start me fs) == 1 of True -> Unit | False -> error "image failure advertised";
+  _ = failPublish me fs "journal" second qa2;
+  _ = case ok (P.start me fs) == 1 of True -> Unit | False -> error "journal failure advertised";
+  # Image survived the journal failure and is reusable on retry.
+  _ = ok (FS.readLatest me fs (P.imageKey second));
+  px = spawn (proxy fs "read");
+  _ = refused "read" (P.serve me px);
+  _ = kill px;
+  px2 = spawn (proxy fs "malformed");
+  _ = refused "malformed" (P.serve me px2);
+  _ = kill px2;
+  Unit.

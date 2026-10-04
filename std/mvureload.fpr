@@ -18,3 +18,11 @@ versionBytes baseline from to r = case r of
     Err why -> Err "reload store: {why}"
   | Ok qa -> Reload.attachVersionAt baseline from to Plug.attach qa.
 identityAt table = Mod.hashAt table.
+
+# Published identities map to immutable archives, never mutable app aliases.
+Publication = use "std/qpublication".
+loadPublished me fs baseline info = case Reload.preflightVersionAt baseline info.from info.to of
+    Err why -> Err why
+  | Ok u -> case Publication.imageFor me fs info.name info.to of
+      Err why -> Err why
+    | Ok archive -> loadVersion me fs archive baseline info.from info.to.

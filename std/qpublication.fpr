@@ -1,0 +1,114 @@
+# Ready .qa publication through Files/qlog. One publisher owns this journal;
+# no other actor may append its catalog or change its immutable archive keys.
+FS = use "std/fs".
+AC = use "std/actor".
+C = use "std/reloadcatalog".
+S = use "std/string".
+L = use "std/list".
+MV = use "std/mvu".
+M = use "../programs/mods/manifest".
+QAR = use "../programs/mods/qar".
+QI = use "../programs/mods/qaimg".
+
+Request = Type (Publish info bytes).
+journal u = "sys/reload/publications".
+archive info = "live/{info.name}/{info.to}".
+imageKey info = "apps/{archive info}.qa".
+# Only a missing key is an empty catalog; storage errors are never emptiness.
+snapshot me fs = missingEmpty (FS.readLatest me fs (journal Unit)).
+missingEmpty r = case r of
+    Ok text -> Ok text
+  | Err why -> (case why == "no such file" of True -> Ok "" | False -> Err why).
+serve me fs = case snapshot me fs of
+    Err why -> Err why
+  | Ok text -> case C.parse text "" 0 of
+      Err why -> Err why
+    | Ok parsed -> Ok (AC.spawnWith (AC.Dynamic 64) (publisher fs text)).
+publish me actor info bytes = flat (AC.call me actor (Publish info bytes)).
+flat result = case result of Ok inner -> inner | Err why -> Err "publisher: {why}".
+publisher : unsafe Int -> String -> Int -> Unit .
+publisher fs text me =
+  msg = receive me;
+  (from, rid, borrowed) = msg;
+  request = keep borrowed;
+  _ = drop msg;
+  Publish info bytes = request;
+  result = publishOne me fs text info bytes;
+  next = case result of Ok updated -> updated | Err why -> text;
+  _ = AC.reply (from, rid) (case result of Ok updated -> Ok (archive info) | Err why -> Err why);
+  fresh = AC.boundary me (fs, next);
+  publisherNext fresh me.
+publisherNext pair me = (fs, text) = pair; publisher fs text me.
+# Reject delimiter injection, empty identities, stale publishers and collisions.
+validField s = strlen s > 0 and not (S.contains "\t" s) and not (S.contains "\n" s) and not (S.contains "\r" s).
+validName s = validField s and not (S.contains "/" s) and not (S.contains " " s) and s != "." and s != "..".
+publishOne me fs text info bytes = case validName info.name and validName info.to and validField info.version and strlen bytes > 0 of
+    False -> Err "publication: invalid identity, version or image"
+  | True -> case ready bytes of
+      Err why -> Err "publication image: {why}"
+    | Ok u -> case C.parse text info.name 0 of
+        Err why -> Err why
+      | Ok parsed -> publishChecked me fs text info bytes parsed.
+publishChecked me fs text info bytes parsed =
+  (cursor, candidates) = parsed;
+  last = latest candidates "";
+  case last == info.to or last == info.from of
+    False -> Err "publication: stale predecessor"
+  | True -> case immutable me fs info bytes of
+      Err why -> Err why
+    | Ok u -> case last == info.to of
+        True -> Ok text
+      | False -> advertise me fs text info.
+latest : unsafe List C.Candidate -> String -> String .
+latest candidates acc = case candidates of
+    Nil -> acc
+  | c :: rest -> info = C.identity c; latest rest info.to.
+immutable me fs info bytes = case FS.readLatest me fs (imageKey info) of
+    Ok existing -> (case existing == bytes of True -> Ok Unit | False -> Err "publication: immutable image collision")
+  | Err why -> case why == "no such file" of
+      True -> (case FS.append me fs (imageKey info) bytes of Ok u -> Ok Unit | Err why -> Err "publication image: {why}")
+    | False -> Err "publication image read: {why}".
+advertise me fs text info =
+  next = "{text}{info.name}\t{info.version}\t{info.from}\t{info.to}\t{archive info}\n";
+  case FS.append me fs (journal Unit) next of
+    Ok u -> Ok next
+  | Err why -> Err "publication journal: {why}".
+poll me fs name cursor = case snapshot me fs of Err why -> Err why | Ok text -> C.parse text name cursor.
+start me fs = case snapshot me fs of Err why -> Err why | Ok text -> catalogSize (C.parse text "" 0).
+catalogSize r = case r of Err why -> Err why | Ok pair -> (cursor, candidates) = pair; Ok cursor.
+# Caller may pass this starter directly to MV.runWatched; runner owns worker.
+watchFrom fs name cursor me port = Ok (AC.spawnWith (AC.Dynamic 64) (watch fs name cursor port)).
+watch : unsafe Int -> String -> Int -> Int -> Int -> Unit .
+watch fs name cursor port me =
+  _ = Sys.sleepUs 300000;
+  result = poll me fs name cursor;
+  next = case result of Err why -> cursor | Ok pair -> deliver me port pair;
+  fresh = AC.boundary me {fs = fs, name = name, cursor = next, port = port};
+  watch fresh.fs fresh.name fresh.cursor fresh.port me.
+deliver me port pair =
+  (cursor, candidates) = pair;
+  _ = forward me port candidates;
+  cursor.
+forward : unsafe Int -> Int -> List C.Candidate -> Unit .
+forward me port candidates = case candidates of
+    Nil -> Unit
+  | c :: rest -> info = C.identity c; _ = AC.sendOrDie port (MV.EReload (MV.copyReload info)); forward me port rest.
+imageFor me fs name hash = case poll me fs name 0 of
+    Err why -> Err why
+  | Ok pair -> (cursor, candidates) = pair; findImage hash candidates.
+findImage : unsafe String -> List C.Candidate -> Result String String .
+findImage hash candidates = case candidates of
+    Nil -> Err "publication: image not published"
+  | c :: rest -> info = C.identity c; case info.to == hash of True -> Ok (C.image c) | False -> findImage hash rest.
+
+# Pure archive checks do not attach code or mutate the runtime registry.
+# Cryptographic IMAGE/RELOC checks and root identity remain loader gates.
+ready qa = case M.parseQa qa of Err why -> Err why | Ok man -> readyLoad qa (QAR.sectionBytes qa "LOAD").
+readyLoad qa r = case r of Err why -> Err why | Ok load -> readyImage qa load (QAR.sectionBytes qa "IMAGE").
+readyImage qa load r = case r of Err why -> Err why | Ok image -> readyLayout qa (QI.load load image).
+readyLayout qa r = case r of
+    Err why -> Err why
+  | Ok layout -> case strlen (QI.sha layout) == 64 and strlen (QI.relsha layout) == 64 of
+      False -> Err "publication: missing image or relocation digest"
+    | True -> readyRel qa (QAR.sectionBytes qa "RELOC").
+readyRel qa r = case r of Err why -> Err why | Ok reloc -> case QAR.sectionBytes qa "IMPORT" of Err why -> Err why | Ok imports -> Ok Unit.
