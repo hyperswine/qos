@@ -1,0 +1,59 @@
+# Native virt block service. Correlated, serialized requests; 64 slots per sender channel.
+# The creator is the cooperative administrator: Configure checks the call
+# envelope's return actor. This is a convention inside one trusted image,
+# not an unforgeable capability or the namespace/process authorization gate.
+AC = use "std/actor".
+blkBudgetGet : Unit -> (Int, Int, Int, Int) .
+blkBudgetSet : (Int, Int, Int, Int) -> Int .
+Request = Type (Capacity | Read Int | Write Int String | GetBudget | Configure (Int, Int, Int, Int)).
+Reply = Type (Pages Int | Page String | Written Int | Budget (Int, Int, Int, Int)).
+# budget tuple: expected/current version, deadline us, reset probes, wait factor.
+serve : unsafe Int -> Int -> Int .
+serve admin dev = AC.spawnWith (AC.Static 64) (actor admin dev).
+call : Int -> Int -> Request -> Result Reply String .
+call me service q = flatten (AC.call me service q).
+flatten : Result (Result Reply String) String -> Result Reply String .
+flatten r = case r of Ok reply -> reply | Err why -> Err "block service: {why}".
+actor : unsafe Int -> Int -> Int -> Unit .
+actor admin dev me =
+  msg = receive me;
+  (from, rid, borrowed) = msg;
+  q = keep borrowed;
+  _ = drop msg;
+  result = dispatch me admin dev from q;
+  _ = AC.reply (from, rid) result;
+  fresh = AC.boundary me (admin, dev);
+  again fresh me.
+again : unsafe (Int, Int) -> Int -> Unit .
+again pair me = (admin, dev) = pair; actor admin dev me.
+dispatch : Int -> Int -> Int -> Int -> Request -> Result Reply String .
+dispatch me admin dev from q = case q of
+    GetBudget -> Ok (Budget (blkBudgetGet Unit))
+  | Configure policy -> if from == admin then configured policy (blkBudgetSet policy) else Err "block: configuration requires administrator"
+  | other -> worker = AC.spawnWith (AC.Static 1) (io dev); flattenIO (AC.call me worker other).
+configured policy code = case code >= 0 of
+    True -> (v, us, probes, factor) = policy; Ok (Budget (code, us, probes, factor))
+  | False -> Err (budgetError code).
+budgetError code = if code == -1 then "block: invalid budget" else if code == -2 then "block: device busy" else if code == -3 then "block: stale budget version" else "block: device offline".
+
+flattenIO : Result (Result Reply String) String -> Result Reply String .
+flattenIO r = case r of Ok reply -> reply | Err why -> Err "block device: {why}".
+io : Int -> Int -> Unit .
+io dev me =
+  msg = receive me;
+  (from, rid, borrowed) = msg;
+  q = keep borrowed;
+  _ = drop msg;
+  result = operate dev q;
+  _ = AC.reply (from, rid) result;
+  Unit.
+operate dev q = case q of
+    Capacity -> Ok (Pages (blkPages dev))
+  | Read p -> readOne dev p
+  | Write p bytes -> writeOne dev p bytes
+  | other -> Err "block: invalid I/O request".
+readOne dev p = if validPage dev p then Ok (Page (blkRead dev p)) else Err "block: page out of range".
+writeOne dev p bytes = if not (validPage dev p) then Err "block: page out of range" else if strlen bytes > 4096 then Err "block: payload exceeds one page" else written dev p bytes.
+written dev p bytes = _ = blkWrite dev p bytes; Ok (Written (strlen bytes)).
+
+validPage dev p = p >= 0 and p < blkPages dev.

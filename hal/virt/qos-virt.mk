@@ -28,5 +28,5 @@ QOS_VIRT_HAL += $(BUILD)/qos-virtio.s
 
 $(BUILD)/qos-blockpolicy.s: $(QOS_HAL)/virt/blockpolicy.fpr $(FPRC)
 	@mkdir -p $(BUILD)
-	"$(FPRC)" --profile=bare-metal-builtin --arc --raw --lib --export=expired:qos_blk_expired,waiting:qos_blk_waiting,resetStep:qos_blk_reset_step $< $@ >/dev/null
+	"$(FPRC)" --profile=bare-metal-builtin --arc --raw --lib --export=expired:qos_blk_expired,waiting:qos_blk_waiting,resetStep:qos_blk_reset_step,budgetValid:qos_blk_budget_valid $< $@ >/dev/null
 QOS_VIRT_HAL += $(BUILD)/qos-blockpolicy.s

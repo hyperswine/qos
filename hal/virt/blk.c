@@ -1,4 +1,4 @@
-/* blk.c — the disk HAL module: virtio-blk, PAGE-granular, policy-free.
+/* blk.c — virtio-blk page transfers and DMA ownership mechanism.
  *
  * The contract is deliberately dumb: the disk is an array of 4 KiB PAGES
  * (8 virtio sectors each), read and written whole. No log, no records, no
@@ -134,7 +134,35 @@ static u8 bstatus __attribute__((aligned(16)));
 #ifndef BLK_DEADLINE_TICKS
 #define BLK_DEADLINE_TICKS 50000000ULL
 #endif
-#define BLK_DEADLINE_PARKS (BLK_DEADLINE_TICKS / 2000ULL)
+/* Configuration publication is separate from DMA ownership. Only an idle
+ * queue accepts replacement; no configuration operation parks or allocates
+ * while holding busy. Readers use a sequence snapshot of atomic 32-bit cells
+ * (also available on RV32). An orphan retains its submission's budget. */
+static unsigned cfg_seq, cfg_deadline_us = BLK_DEADLINE_TICKS / 10,
+                cfg_reset_probes = 1000, cfg_wait_factor = 3;
+typedef struct { unsigned version, us, probes, factor; } blk_budget;
+static unsigned active_deadline_us, active_reset_probes;
+static blk_budget blk_budget_get(void) {
+  blk_budget b;
+  unsigned end;
+  do {
+    b.version = __atomic_load_n(&cfg_seq, __ATOMIC_SEQ_CST);
+    if (b.version & 1) continue;
+    b.us = __atomic_load_n(&cfg_deadline_us, __ATOMIC_SEQ_CST);
+    b.probes = __atomic_load_n(&cfg_reset_probes, __ATOMIC_SEQ_CST);
+    b.factor = __atomic_load_n(&cfg_wait_factor, __ATOMIC_SEQ_CST);
+    end = __atomic_load_n(&cfg_seq, __ATOMIC_SEQ_CST);
+    if (end == b.version) { b.version /= 2; return b; }
+  } while (1);
+}
+static uint64_t blk_budget_ticks(blk_budget b) { return (uint64_t)b.us * 10; }
+static uint64_t blk_budget_parks(blk_budget b) { return ((uint64_t)b.us + 199) / 200; }
+static blk_budget blk_active_budget(void) {
+  blk_budget b = {0};
+  b.us = __atomic_load_n(&active_deadline_us, __ATOMIC_ACQUIRE);
+  b.probes = __atomic_load_n(&active_reset_probes, __ATOMIC_ACQUIRE);
+  return b;
+}
 
 /* busy: the DMA buffers belong to a request (held by its owner, or by an
  * orphan).  orphan: 1 = the owner is gone and the device may still be
@@ -148,15 +176,19 @@ static uint64_t blk_since; /* mtime the request in flight was submitted */
 /* test-only (never in an ordinary build): withhold the doorbell of the
  * next request (a device that never completes it), and make the next
  * reset fail to come back */
-static unsigned blk_test_stall, blk_test_reset_fails, blk_test_hold_reset, blk_test_reset_pending;
+static unsigned blk_test_stall, blk_test_reset_fails, blk_test_hold_reset, blk_test_reset_pending, blk_test_reset_delay;
 static V h_blkTestStall(V u) { (void)u; blk_test_stall = 1; return TAG(0); }
 static V h_blkTestResetFails(V u) { (void)u; blk_test_reset_fails = 1; return TAG(0); }
 FPR_FN(fpr_g_blkTestStall, h_blkTestStall, 1);
 FPR_FN(fpr_g_blkTestResetFails, h_blkTestResetFails, 1);
+static V h_blkTestResetDelay(V n) { blk_test_reset_delay = (unsigned)UNTAG(n); return TAG(0); }
+FPR_FN(fpr_g_blkTestResetDelay, h_blkTestResetDelay, 1);
 static V h_blkTestHoldReset(V phase) { blk_test_hold_reset = (unsigned)UNTAG(phase); return TAG(0); }
 static V h_blkTestResetPending(V u) {
   (void)u; return TAG(__atomic_load_n(&blk_test_reset_pending, __ATOMIC_ACQUIRE));
 }
+static V h_blkTestBusy(V u) { (void)u; return TAG(__atomic_load_n(&blk_busy, __ATOMIC_ACQUIRE)); }
+FPR_FN(fpr_g_blkTestBusy, h_blkTestBusy, 1);
 static V h_blkTestReserved(V u) {
   (void)u;
   return TAG(__atomic_load_n(&blk_busy, __ATOMIC_ACQUIRE) &&
@@ -221,13 +253,21 @@ static int blk_reset(void) {
   blk_test_pause_reset(2);
 #endif
   int confirmed = 0;
+  int limit = blk_active_budget().probes;
   for (int i = 0;; i++) {
-    int step = blk_reset_step(rr(R_STATUS), i, 1000);
+    /* Exhaustion is decided before another MMIO probe. */
+    if (blk_reset_step(1, i, limit) == 2) break;
+    u32 status = rr(R_STATUS);
+#ifdef QOS_BLK_TEST
+    if ((unsigned)i < blk_test_reset_delay) status = 1;
+#endif
+    int step = blk_reset_step(status, i, limit);
     if (step == 1) { confirmed = 1; break; }
     if (step == 2) break;
     fpr_actor_sleep_us(100);
   }
 #ifdef QOS_BLK_TEST
+  blk_test_reset_delay = 0;
   if (blk_test_reset_fails) { blk_test_reset_fails = 0; confirmed = 0; }
 #endif
   if (!confirmed) return 0;
@@ -235,6 +275,7 @@ static int blk_reset(void) {
 }
 
 static void blk_lock(void) {
+  blk_budget waiting_budget = blk_budget_get();
   uint64_t t0 = hal_mtime();
   uint64_t parks = 0;
   for (;;) {
@@ -247,8 +288,8 @@ static void blk_lock(void) {
     unsigned orphan = __atomic_load_n(&blk_orphan, __ATOMIC_ACQUIRE);
     FENCE();
     int completed = orphan == 1 && QUSED->idx != blk_before;
-    int reset_due = orphan == 1 && !completed && blk_expired(blk_since, parks, BLK_DEADLINE_TICKS, BLK_DEADLINE_PARKS);
-    int wait_due = orphan != 1 && blk_expired(t0, parks, 3 * BLK_DEADLINE_TICKS, 3 * BLK_DEADLINE_PARKS);
+    int reset_due = orphan == 1 && !completed && blk_expired(blk_since, parks, blk_budget_ticks(blk_active_budget()), blk_budget_parks(blk_active_budget()));
+    int wait_due = orphan != 1 && blk_expired(t0, parks, waiting_budget.factor * blk_budget_ticks(waiting_budget), waiting_budget.factor * blk_budget_parks(waiting_budget));
 #if __riscv_xlen == 64
     int action = qos_blk_waiting(orphan, completed, reset_due, wait_due);
 #else
@@ -289,11 +330,14 @@ static void blk_lock(void) {
     } else if (action == 3) {
       /* a live owner has its own deadline, after which the buffers become
        * an orphan's; waiting three deadlines means something is wrong */
-      fpr_actor_fail("blk: waited three deadlines for the disk -- request refused");
+      fpr_actor_fail("blk: exhausted the configured waiting budget for the disk -- request refused");
     }
     parks++;
     fpr_actor_sleep_us(200);
   }
+  blk_budget acquired = blk_budget_get();
+  __atomic_store_n(&active_deadline_us, acquired.us, __ATOMIC_RELEASE);
+  __atomic_store_n(&active_reset_probes, acquired.probes, __ATOMIC_RELEASE);
   fpr_actor_cleanup_set(blk_abandon, &blk_busy);
 }
 static void blk_unlock(void) {
@@ -431,7 +475,7 @@ static void blk_rw(u64 page, int is_write) {
   for (;;) {
     FENCE();
     if (QUSED->idx != before) break;
-    if (blk_expired(start, start ? parks : ++parks, BLK_DEADLINE_TICKS, BLK_DEADLINE_PARKS)) {
+    if (blk_expired(start, start ? parks : ++parks, blk_budget_ticks(blk_active_budget()), blk_budget_parks(blk_active_budget()))) {
       /* the device may still DMA into the buffers: they stay reserved (an
        * orphan) until it completes or a later caller resets it */
       fpr_actor_cleanup_clear(&blk_busy);
@@ -496,3 +540,47 @@ static V h_blkWrite(V d, V pv, V sv) {
 FPR_FN(fpr_g_blkPages, h_blkPages, 1);
 FPR_FN(fpr_g_blkRead, h_blkRead, 2);
 FPR_FN(fpr_g_blkWrite, h_blkWrite, 3);
+
+/* Native-only policy mechanism. (version, deadline microseconds, reset probes,
+ * waiter factor). Negative configure codes: invalid -1, busy -2, stale -3,
+ * offline -4. Admission/authority and their messages live in std/block.fpr. */
+static V h_blkBudgetGet(V u) {
+  (void)u;
+  blk_budget b = blk_budget_get();
+  hdr_t *t = (hdr_t *)fpr_alloc(8 + 4 * sizeof(V));
+  t->tid = T_TUP4; t->var = 0;
+  V *fields = (V *)((char *)t + 8);
+  fields[0] = TAG(b.version); fields[1] = TAG(b.us);
+  fields[2] = TAG(b.probes); fields[3] = TAG(b.factor);
+  return (V)t;
+}
+static V h_blkBudgetSet(V request) {
+  if (ISINT(request) || TID(request) != T_TUP4) return TAG(-1);
+  V *fields = (V *)((char *)request + 8);
+  for (int i = 0; i < 4; i++) if (!ISINT(fields[i])) return TAG(-1);
+  sw version = UNTAG(fields[0]), us = UNTAG(fields[1]), probes = UNTAG(fields[2]), factor = UNTAG(fields[3]);
+#if __riscv_xlen == 64
+  if (!qos_blk_budget_valid(us, probes, factor)) return TAG(-1);
+#else
+  if (us < 1 || us > 60000000 || probes < 1 || probes > 100000 || factor < 1 || factor > 64) return TAG(-1);
+#endif
+  if (__atomic_load_n(&blk_offline, __ATOMIC_ACQUIRE)) return TAG(-4);
+  unsigned free = 0;
+  if (!__atomic_compare_exchange_n(&blk_busy, &free, 1, 0, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)) return TAG(-2);
+  int code = 0;
+  unsigned seq = __atomic_load_n(&cfg_seq, __ATOMIC_SEQ_CST);
+  if (__atomic_load_n(&blk_offline, __ATOMIC_ACQUIRE)) code = -4;
+  else if (version < 0 || (uw)version != seq / 2 || seq >= 0x7ffffffcU) code = -3;
+  else {
+    __atomic_store_n(&cfg_seq, seq + 1, __ATOMIC_SEQ_CST);
+    __atomic_store_n(&cfg_deadline_us, (unsigned)us, __ATOMIC_SEQ_CST);
+    __atomic_store_n(&cfg_reset_probes, (unsigned)probes, __ATOMIC_SEQ_CST);
+    __atomic_store_n(&cfg_wait_factor, (unsigned)factor, __ATOMIC_SEQ_CST);
+    __atomic_store_n(&cfg_seq, seq + 2, __ATOMIC_SEQ_CST);
+    code = (seq + 2) / 2;
+  }
+  __atomic_store_n(&blk_busy, 0, __ATOMIC_RELEASE);
+  return TAG(code);
+}
+FPR_FN(fpr_g_blkBudgetGet, h_blkBudgetGet, 1);
+FPR_FN(fpr_g_blkBudgetSet, h_blkBudgetSet, 1);

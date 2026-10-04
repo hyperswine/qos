@@ -4,6 +4,7 @@ blkTestHoldReset : Int -> Int .
 blkTestResetPending : Unit -> Int .
 blkTestNow : Unit -> Int .
 blkTestReserved : Unit -> Int .
+blkBudgetSet : (Int, Int, Int, Int) -> Int .
 disk u = device "blk".
 writer boss self = send boss (blkWrite (disk Unit) 3 "stalls") >> Unit.
 reader boss self = send boss (blkRead (disk Unit) 3) >> Unit.
@@ -16,6 +17,7 @@ awaitReset n = case blkTestResetPending Unit > 0 of
 dead r = case r of Err e -> e == "dead actor" | Ok v -> False.
 cancelReset phase =
   me = myself 0;
+  configured = blkBudgetSet (0, 100000, 20, 1) == 1;
   _ = blkWrite (disk Unit) 3 "before";
   _ = blkTestStall Unit;
   a = spawn (writer me);
@@ -23,6 +25,12 @@ cancelReset phase =
   _ = blkTestHoldReset phase;
   b = spawn (reader me);
   pending = awaitReset 2000;
+  busy = blkBudgetSet (1, 200000, 30, 3) == -2;
+  waitStart = blkTestNow Unit;
+  waiter = spawn (reader me);
+  waitRefused = dead (receiveFromRes me waiter);
+  waitElapsed = blkTestNow Unit - waitStart;
+  waitBudget = waitElapsed >= 100000 and waitElapsed < 250000;
   _ = kill b;
   cancelled = dead (receiveFromRes me b);
   start = blkTestNow Unit;
@@ -30,6 +38,6 @@ cancelReset phase =
   refused = dead (receiveFromRes me c);
   reserved = blkTestReserved Unit == 1;
   fast = blkTestNow Unit - start < 200000;
-  verdict = case timed and pending and cancelled and refused and reserved and fast of True -> "HOLDS" | False -> "FAILED";
-  "diskresetcancel: phase={phase} timed={timed} pending={pending} cancelled={cancelled} refused={refused} reserved={reserved} fast={fast} {verdict}".
+  verdict = case configured and busy and waitRefused and waitBudget and timed and pending and cancelled and refused and reserved and fast of True -> "HOLDS" | False -> "FAILED";
+  "diskresetcancel: phase={phase} timed={timed} pending={pending} cancelled={cancelled} refused={refused} wait={waitRefused} budget={waitBudget} busy={busy} reserved={reserved} fast={fast} {verdict}".
 main = cancelReset 1.

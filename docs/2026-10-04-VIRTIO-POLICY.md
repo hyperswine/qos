@@ -91,3 +91,85 @@ The full disk-hardening runner passed Portable, four normal native recovery
 boots and these eight cancellation boots. Raw differentials passed one/two
 harts. RV32 fallback compilation and production-object absence of test entry
 points were also checked. No full repository sweep or hardware run is claimed.
+
+## Configurable budgets and block protocol (2026-10-04)
+
+`std/block.fpr` is an opt-in native service. `serve admin dev` starts one
+serial request loop, with 64 mailbox slots **per sender channel**. `call`
+uses `std/actor` correlation and returns `Result Reply String`:
+
+| Request | Successful reply |
+| --- | --- |
+| `Capacity` | `Pages n` (4096-byte pages) |
+| `Read page` | `Page bytes` (4096 bytes) |
+| `Write page bytes` | `Written n` (accepted bytes, zero-padded on disk) |
+| `GetBudget` | `Budget (version, deadlineUs, resetProbes, waitFactor)` |
+| `Configure (expectedVersion, deadlineUs, resetProbes, waitFactor)` | `Budget` with the incremented version |
+
+The request deadline is 1..60,000,000 microseconds, the reset budget is
+1..100,000 status probes, and the waiter allowance is 1..64 request deadlines.
+RV64 admission bounds live in raw `blockpolicy.budgetValid`; RV32 retains C
+validation. Polling remains a mechanism setting: 200us for requests/waiters,
+100us between reset probes. Defaults remain 5s, 1000 probes and factor 3;
+`BLK_DEADLINE_TICKS` still overrides the initial deadline in test builds.
+There is no persistence across reboot and no online restart command.
+
+C's `blkBudgetSet` publishes a versioned configuration only while it can
+reserve an idle queue. Invalid, stale, busy (including orphan/reset ownership)
+and offline updates are refused without changing the version or fields.
+Atomic 32-bit cells and a sequence snapshot prevent torn configuration reads
+on both word sizes. A DMA owner snapshots deadline/reset budget on acquisition;
+an orphan keeps that budget through recovery. A waiter snapshots its own wait
+allowance when it begins waiting. Configuration never parks or allocates while
+holding the queue reservation. `blkBudgetGet` allocates its tuple only after
+taking the snapshot, without owning DMA storage.
+
+The service rejects out-of-range pages and oversized writes before invoking
+HAL I/O. Each capacity/read/write is executed by one short-lived worker. A HAL
+fail-stop becomes `Err "block device: dead actor"`, while the service remains
+available for budget queries and further requests. Invalid page, size, policy,
+stale-version, busy, offline and mailbox-full conditions have distinct errors.
+Returned device errors do not assert that a timed-out write never reached disk.
+Queued requests have no additional queue-age deadline: their HAL wait/transfer
+budgets begin when the worker runs.
+
+The creator's actor ID is checked against the Configure request's return actor.
+This is cooperative authority within a trusted image: a forged envelope or a
+raw HAL call can bypass it. Process/namespace grants remain a separate boundary.
+A client that dies after admission does not cancel the accepted write; the
+worker finishes or times out, and replies to dead clients are discarded.
+There is no transaction rollback, flush/durability guarantee, explicit cancel
+request, service stop/drain protocol or global mailbox memory bound.
+
+This is a protocol and configuration slice, not the completed Phase 2 move.
+Qlog/filesystems still call the legacy block primitives; the system bootstrap
+has not installed a unique block service or a namespace endpoint. C still
+owns descriptors, queue atomics, cleanup registration, reset effects and offline
+publication. Routing legacy users through one service and moving ownership
+transitions above the driver remain follow-ups.
+
+Verification for this slice:
+
+- `tools/block-service-check.py` passed four real disk boots: virtio v1/v2,
+  one/two harts. The fixture checks exact invalid/stale/authority/page/size
+  errors, version preservation, active/orphan configuration refusal, page
+  round trip, a measured 100ms timeout instead of the 300ms initial deadline,
+  service survival, per-sender mailbox overload and stale-reply draining,
+  caller death after DMA admission, recovery, configured reset-probe exhaustion
+  (20 probes recovers after one delayed status; one probe takes it offline),
+  later fast refusal and live budget queries while offline.
+- The full `tools/disk-harden-check.py` passed its Portable leg, four normal
+  native boots and eight reset-owner cancellation boots. Both held-reset
+  boundaries additionally refuse reconfiguration and make a competing waiter
+  exhaust the configured one-deadline/100ms allowance rather than 300ms.
+  Cancellation still retains DMA storage and later callers are refused fast.
+- `tools/virtio-check.py` passed one/two harts, adding 125 admission endpoint
+  and out-of-range combinations across the raw ABI.
+- `tools/epproc-check.sh` passed the normal launcher/loaded process storage
+  round trip with the extended raw unit. The new service itself is a native
+  kernel-library test, not a process namespace service or Portable feature.
+- Production RV64 and fallback RV32 block objects compile. The production
+  object has no test hooks; RV32 has no unresolved atomic-library helper.
+  Python/shell syntax and Git whitespace checks passed. The service leg is
+  included in `check-all.sh`; a full check-all sweep and hardware run were
+  not performed.

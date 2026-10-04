@@ -95,6 +95,14 @@ static V check(V unit) {
         int want = attempt >= limit ? 2 : status == 0 ? 1 : 0;
         CHECK(qos_blk_reset_step(status, attempt, limit) == want);
       }
+  /* Admission endpoints and out-of-range values cross the exported C ABI. */
+  long us[] = {-1, 0, 1, 60000000, 60000001};
+  long probes[] = {-1, 0, 1, 100000, 100001};
+  long factors[] = {-1, 0, 1, 64, 65};
+  for (int i = 0; i < 5; i++) for (int j = 0; j < 5; j++) for (int k = 0; k < 5; k++) {
+    int want = i >= 2 && i <= 3 && j >= 2 && j <= 3 && k >= 2 && k <= 3;
+    CHECK(qos_blk_budget_valid(us[i], probes[j], factors[k]) == want);
+  }
   return TAG(0);
 }
 FPR_FN(fpr_g_virtioCheck, check, 1);

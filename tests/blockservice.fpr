@@ -1,0 +1,76 @@
+B = use "../std/block".
+S = use "std/string".
+blkTestStall : Unit -> Int .
+blkTestNow : Unit -> Int .
+blkTestResetDelay : Int -> Int .
+blkBudgetSet : (Int, Int, Int, Int) -> Int .
+blkTestBusy : Unit -> Int .
+errorIs why r = case r of Err text -> text == why | other -> False.
+budget r = case r of Ok (B.Budget p) -> p | other -> (-1, -1, -1, -1).
+page r = case r of Ok (B.Page bytes) -> substr bytes 0 6 | other -> "error".
+written r = case r of Ok (B.Written n) -> n | other -> -1.
+unauthorized : Int -> Int -> Int -> Unit .
+unauthorized boss svc self = _ = send boss (errorIs "block: configuration requires administrator" (B.call self svc (B.Configure (1, 200000, 20, 2)))); Unit.
+client svc self = _ = B.call self svc (B.Write 3 "stalls"); Unit.
+# A raw owner demonstrates admission refusal while DMA is in flight.
+rawWriter boss self = _ = send boss (blkWrite (device "blk") 3 "stalls"); Unit.
+awaitBusy : (n : Int | measure n) -> Bool .
+awaitBusy n = if n <= 0 then False else if blkTestBusy Unit == 1 then True else _ = Sys.sleepUs 100; awaitBusy (n - 1).
+fill : (n : Int | measure n) -> Int -> Int -> Int .
+fill n me svc = if n <= 0 then 0 else case send svc (me, 0, B.GetBudget) of
+    Err why -> 0
+  | Ok u -> 1 + fill (n - 1) me svc.
+awaitDrain : (n : Int | measure n) -> Int -> Int -> Bool .
+awaitDrain n me svc = if n <= 0 then False else case B.call me svc B.GetBudget of
+    Ok reply -> True
+  | Err why -> _ = Sys.sleepUs 1000; awaitDrain (n - 1) me svc.
+main : unsafe String .
+main =
+  me = myself 0;
+  svc = B.serve me (device "blk");
+  initial = budget (B.call me svc B.GetBudget);
+  bad = errorIs "block: invalid budget" (B.call me svc (B.Configure (0, 0, 20, 2)));
+  set = budget (B.call me svc (B.Configure (0, 100000, 20, 2)));
+  stale = errorIs "block: stale budget version" (B.call me svc (B.Configure (0, 200000, 30, 3)));
+  unchanged = budget (B.call me svc B.GetBudget) == set;
+  child = spawn (unauthorized me svc);
+  auth = case receiveFromRes me child of Ok v -> v | other -> False;
+  outOfRange = errorIs "block: page out of range" (B.call me svc (B.Read -1));
+  oversized = errorIs "block: payload exceeds one page" (B.call me svc (B.Write 3 (S.repeat 4097 "x")));
+  write = written (B.call me svc (B.Write 3 "before"));
+  read = page (B.call me svc (B.Read 3));
+  _ = blkTestStall Unit;
+  owner = spawn (rawWriter me);
+  pending = awaitBusy 500;
+  busy = blkBudgetSet (1, 200000, 30, 3) == -2;
+  _ = receiveFromRes me owner;
+  reserved = blkBudgetSet (1, 200000, 30, 3) == -2;
+  _ = blkTestResetDelay 1;
+  recovered = page (B.call me svc (B.Read 3));
+  _ = blkTestStall Unit;
+  t0 = blkTestNow Unit;
+  timeout = errorIs "block device: dead actor" (B.call me svc (B.Write 3 "stalls"));
+  elapsed = blkTestNow Unit - t0;
+  timed = elapsed >= 100000 and elapsed < 250000;
+  alive = budget (B.call me svc B.GetBudget) == set;
+  after = page (B.call me svc (B.Read 3));
+  _ = blkTestStall Unit;
+  gone = spawn (client svc);
+  accepted = awaitBusy 500;
+  queued = fill 70 me svc;
+  overload = errorIs "block service: mailbox full" (B.call me svc B.GetBudget);
+  _ = kill gone;
+  drained = awaitDrain 200 me svc;
+  cancelled = page (B.call me svc (B.Read 3)) == "before";
+  _ = blkTestStall Unit;
+  set2 = budget (B.call me svc (B.Configure (1, 100000, 1, 2)));
+  _ = blkTestResetDelay 1;
+  _ = B.call me svc (B.Write 3 "stalls");
+  offline = errorIs "block device: dead actor" (B.call me svc (B.Read 3));
+  t1 = blkTestNow Unit;
+  refused = errorIs "block device: dead actor" (B.call me svc (B.Read 3));
+  fast = blkTestNow Unit - t1 < 50000;
+  liveOffline = budget (B.call me svc B.GetBudget) == set2;
+  offlineConfig = errorIs "block: device offline" (B.call me svc (B.Configure (2, 200000, 30, 3)));
+  holds = initial == (0, 300000, 1000, 3) and pending and accepted and queued > 0 and drained and overload and set2 == (2, 100000, 1, 2) and cancelled and offline and refused and fast and liveOffline and offlineConfig and bad and set == (1, 100000, 20, 2) and stale and unchanged and auth and outOfRange and oversized and write == 6 and read == "before" and busy and reserved and recovered == "before" and timeout and timed and alive and after == "before";
+  "blockservice: invalid={bad} stale={stale} unchanged={unchanged} auth={auth} range={outOfRange} size={oversized} busy={busy} reserved={reserved} timeout={timeout} timed={timed} alive={alive} overload={overload} cancelled={cancelled} offline={offline} refused={refused} fast={fast} liveOffline={liveOffline} offlineConfig={offlineConfig} after={after} {if holds then "HOLDS" else "FAILED"}".

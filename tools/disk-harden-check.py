@@ -72,7 +72,7 @@ with tempfile.TemporaryDirectory(prefix='qos-disk-harden-') as d:
                     if modern:
                         args += ['-global', 'virtio-mmio.force-legacy=false']
                     p = run(args, timeout=40)
-                    want = f'diskresetcancel: phase={phase} timed=True pending=True cancelled=True refused=True reserved=True fast=True HOLDS'
+                    want = f'diskresetcancel: phase={phase} timed=True pending=True cancelled=True refused=True wait=True budget=True busy=True reserved=True fast=True HOLDS'
                     assert want in p.stdout, p.stdout + p.stderr
                     print(f'Native reset cancellation: phase {phase}, virtio v{2 if modern else 1}, {harts} hart(s) HOLDS', flush=True)
 

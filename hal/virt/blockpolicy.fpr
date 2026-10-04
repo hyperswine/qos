@@ -28,3 +28,8 @@ resetStep : Word -> Int -> Int -> Int .
 resetStep status attempt limit = case attempt >= limit of
     True -> 2
   | False -> case Word.eq status (w 0) of True -> 1 | False -> 0.
+
+# Admission bounds: finite request (<=60s), reset probes (<=10s at 100us),
+# and a waiter multiplier. Mechanism C retains the same RV32 guards.
+budgetValid : Int -> Int -> Int -> Int .
+budgetValid us probes factor = yes (us >= 1 and us <= 60000000 and probes >= 1 and probes <= 100000 and factor >= 1 and factor <= 64).
