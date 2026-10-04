@@ -1,0 +1,4 @@
+# Same-arity replacement must be refused by the checked interface gate.
+mathOp : unsafe Int -> Int .
+mathOp v = case v <= 0 of True -> 0 | False -> mathOp (v - 1).
+mathName u = "refused".

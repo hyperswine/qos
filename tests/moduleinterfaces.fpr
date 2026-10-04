@@ -1,0 +1,26 @@
+#: plugins tests/mathcertv1.fpr tests/mathcertv2.fpr tests/mathspecv1.fpr tests/mathspecv2.fpr
+#: expect checked contracts: old=20 new=30 registry=4
+unsafe program.
+FS = use "std/fs".
+LD = use "std/loader".
+LR = use "std/mvureload".
+Plug = use "../programs/mods/plug".
+ok r = case r of Ok i -> i | Err why -> error why.
+main =
+  me = myself 0;
+  fs = FS.serve (device "blk");
+  ld = LD.serve fs;
+  old = ok (LD.load me ld "mathcertv1");
+  new = ok (LR.load me fs "mathcertv2" old);
+  op1 = LR.bindAt old "mathOp";
+  op2 = LR.bindAt new "mathOp";
+  specOld = ok (fresh me fs "mathspecv1");
+  specNew = ok (LR.load me fs "mathspecv2" specOld);
+  specOp = LR.bindAt specNew "mathOp";
+  _ = case specOp 10 == 30 of True -> Unit | False -> error "specialized patch failed";
+  print "checked contracts: old={op1 10} new={op2 10} registry={Mod.plugs 0}".
+
+fresh me fs id = case FS.readLatest me fs "apps/{id}.qa" of
+    Err why -> Err why
+  | Ok qa -> placed (Plug.attach qa).
+placed r = case r of Err why -> Err why | Ok u -> Ok (Mod.plugs 0 - 1).

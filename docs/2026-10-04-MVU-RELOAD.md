@@ -21,15 +21,32 @@ renderer results across frames, and calls an old saved v1 function after v2
 is active. `tools/mvu-reload-check.py` runs it on one/four harts and checks state,
 registry count, old closure and refusals. `check-all.sh` invokes that tool.
 
-Compatibility remains arity/export-only. Metadata uses archive IDs as test
-version labels; certified interfaces and content-hash identity are still needed
-before automatic watcher-driven patch adoption. There is no new replay path,
-POSIX attachment implementation, image reclamation, native RV64 reload test or
-browser/GL reload integration. The old loader/livereload modules remain for
-existing consumers and replay. The compiler pin identifies FP-RISC revision `9f4ce57`, containing the shared
-runner and checked inferred commit interfaces. See
-[CHECKED-INTERFACES](../../fprisc/docs/2026-10-04-CHECKED-INTERFACES.md): patch
-classification now retains checked types, nominal identities and complete
-written contracts. The runtime image gate remains export/arity-only; this does
-not yet certify loaded plugin images. The real plugin tests passed on one/four
-harts with this checker, and the focused MVU/browser smoke checks passed 2/2.
+The runtime now compares checked inferred types, full written contracts and
+compiler/runtime ABI context for trusted compiled images. Same-arity type,
+precondition and work-bound changes refuse, as do unsafe/uncertified exports.
+Unchanged checked contracts and private specialization changes can reload.
+Scoped binding resolves root exports, so dependency names cannot impersonate
+them. See [runtime interfaces](../../fprisc/docs/2026-10-04-RUNTIME-INTERFACES.md)
+for the schema, trust boundary and regression coverage.
+
+The image schema requires rebuilding plugins and hosts together: FP-RISC
+codegen revision 36 and native process ABI 3. Notes now declares its intended
+string-only edit interface in both versions. The native integrity test rejects
+the previous ABI 2 before allocation and still runs valid vector processes.
+
+Metadata uses archive IDs as test version labels; end-to-end content-hash
+identity checking is still needed before watcher-driven adoption. There is no
+new replay path, POSIX attachment implementation, image reclamation, native
+RV64 reload test or browser/GL reload integration. The old loader/livereload
+modules remain for existing consumers and replay, including their global-newest
+baseline limitation. The new adapter uses an explicit per-module baseline.
+
+The compiler pin is `7aff71770cd42420569e64a173ac462f9989d308`, containing the shared runner, checked commit
+interfaces and checked runtime module interfaces. Unrelated untracked files in
+the compiler checkout are excluded from this milestone.
+
+Executed verification for this milestone: real plugin reload and checked
+contract/specialization patches passed on one/four harts; Notes passed; native
+integrity/vector process checks passed on one/two harts with both virtio
+variants; focused MVU and multi-client LiveView smoke passed. FP-RISC's complete
+Base suite passed. The full QOS check-all sweep was not run.

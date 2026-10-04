@@ -60,7 +60,7 @@ def native_checks(out):
     original=out/'CkVector.qa'
     run(['tools/build-process-app.sh','tests/vectorproc.fpr',manifest,original])
     sections=unpack(original.read_bytes())
-    assert b'nativeabi 2\n' in sections['LOAD'], sections['LOAD']
+    assert b'nativeabi 3\n' in sections['LOAD'], sections['LOAD']
     assert sections['IMAGE'] and sections['RELOC'] and not sections.get('IMPORT',b'')
     archives=[original]
     variants={}
@@ -72,7 +72,7 @@ def native_checks(out):
         changed=dict(sections)
         changed['LOAD']=b''.join(row+b'\n' for row in changed['LOAD'].splitlines() if not row.startswith(key))
         variants[name]=changed
-    changed=dict(sections);changed['LOAD']=changed['LOAD'].replace(b'nativeabi 2\n',b'nativeabi 1\n');variants['OldAbi']=changed
+    changed=dict(sections);changed['LOAD']=changed['LOAD'].replace(b'nativeabi 3\n',b'nativeabi 2\n');variants['OldAbi']=changed
     changed=dict(sections);changed['IMPORT']=b'c 0 8 fpr_missing\n'
     digest=hashlib.sha256(changed['RELOC']+changed['IMPORT']).hexdigest().encode()
     changed['LOAD']=b''.join((b'relsha '+digest if row.startswith(b'relsha ') else row)+b'\n' for row in changed['LOAD'].splitlines())

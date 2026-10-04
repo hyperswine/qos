@@ -279,7 +279,7 @@ static V h_sys_attach_image(V idv, V abiv, V shav, V relshav, V numsv, V secsv) 
   if (!fpr_pid_quiet) fpr_pid_quiet = plug_image_quiet;
   fpr_image_add(&pi->im);
   if (fpr_mod_attach((const uw *)(uintptr_t)r))
-    return fpr_mkresult(1, "module registry full");
+    return fpr_mkresult(1, "module table has an unsupported interface schema (rebuild plugin)");
   return fpr_mkresult(0, "");
 }
 FPR_FN(fpr_g_Sys_x2eattachImage, h_sys_attach_image, 6);

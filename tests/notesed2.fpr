@@ -2,6 +2,7 @@
 # arities.  The edit now CAPITALIZES the first letter instead of
 # appending a newline -- the visible behavior change the live reload
 # must deliver mid-run, same Model, same actor.
+editLine : String -> String .
 editLine s = case strlen s == 0 of
     True -> s
   | False -> "{upA (charAt s 0)}{substr s 1 (strlen s - 1)}".

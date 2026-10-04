@@ -1,0 +1,3 @@
+# Same-arity replacement must be refused by the checked interface gate.
+mathOp v = strlen v.
+mathName u = "refused".

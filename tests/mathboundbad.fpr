@@ -1,0 +1,4 @@
+# Same-arity replacement must be refused by the checked interface gate.
+mathOp : (v : Int) -> Int | work mathOp <= 20 .
+mathOp v = v * 3.
+mathName u = "refused".

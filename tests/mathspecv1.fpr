@@ -1,0 +1,3 @@
+# Private callback lifts and specialization clones do not become public exports.
+apply f v = f v.
+mathOp v = apply (fn x -> x * 2) v.

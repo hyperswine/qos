@@ -1,0 +1,4 @@
+# Stable checked precondition and work bound across a behavior-only patch.
+mathOp : (v : Int | v >= 0) -> Int | work mathOp <= 20 .
+mathOp v = v * 3.
+mathName u = "certified".
