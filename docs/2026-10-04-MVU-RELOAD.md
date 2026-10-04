@@ -26,5 +26,10 @@ version labels; certified interfaces and content-hash identity are still needed
 before automatic watcher-driven patch adoption. There is no new replay path,
 POSIX attachment implementation, image reclamation, native RV64 reload test or
 browser/GL reload integration. The old loader/livereload modules remain for
-existing consumers and replay. The compiler pin identifies FP-RISC revision `03f4a38`, which contains the
-shared runner and attachment gate.
+existing consumers and replay. The compiler pin identifies FP-RISC revision `9f4ce57`, containing the shared
+runner and checked inferred commit interfaces. See
+[CHECKED-INTERFACES](../../fprisc/docs/2026-10-04-CHECKED-INTERFACES.md): patch
+classification now retains checked types, nominal identities and complete
+written contracts. The runtime image gate remains export/arity-only; this does
+not yet certify loaded plugin images. The real plugin tests passed on one/four
+harts with this checker, and the focused MVU/browser smoke checks passed 2/2.
