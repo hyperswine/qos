@@ -36,24 +36,48 @@ static void sha_block(uint32_t h[8], const unsigned char *p) {
   }
   h[0]+=a; h[1]+=b; h[2]+=c; h[3]+=d; h[4]+=e; h[5]+=f; h[6]+=g; h[7]+=hh;
 }
-void qosp_sha256(const unsigned char *msg, uint64_t n, unsigned char out[32]) {
-  uint32_t h[8] = {0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
-                   0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19};
-  uint64_t i = 0;
-  for (; i + 64 <= n; i += 64) sha_block(h, msg + i);
-  unsigned char tail[128] = {0};
-  uint64_t r = n - i;
-  __builtin_memcpy(tail, msg + i, (size_t)r);
-  tail[r] = 0x80;
-  uint64_t tl = (r + 9 <= 64) ? 64 : 128;
-  uint64_t bits = n * 8;
-  for (int k = 0; k < 8; k++) tail[tl - 1 - k] = (unsigned char)(bits >> (8 * k));
-  sha_block(h, tail);
-  if (tl == 128) sha_block(h, tail + 64);
-  for (int k = 0; k < 8; k++) {
-    out[4*k]   = (unsigned char)(h[k] >> 24);
-    out[4*k+1] = (unsigned char)(h[k] >> 16);
-    out[4*k+2] = (unsigned char)(h[k] >> 8);
-    out[4*k+3] = (unsigned char)(h[k]);
+typedef struct {
+  uint32_t h[8];
+  uint64_t bytes;
+  size_t used;
+  unsigned char block[64];
+} sha_ctx;
+static void sha_feed(sha_ctx *c, const unsigned char *p, uint64_t n) {
+  c->bytes += n;
+  while (n) {
+    if (!c->used && n >= 64) {
+      sha_block(c->h, p); p += 64; n -= 64;
+    } else {
+      size_t take = n < 64 - c->used ? (size_t)n : 64 - c->used;
+      __builtin_memcpy(c->block + c->used, p, take);
+      c->used += take; p += take; n -= take;
+      if (c->used == 64) { sha_block(c->h, c->block); c->used = 0; }
+    }
   }
+}
+/* Hash disjoint spans as one byte sequence without concatenation storage.
+ * Native loading checks RELOC || IMPORT before requesting any image block. */
+void qosp_sha256_pair(const unsigned char *a, uint64_t an,
+                      const unsigned char *b, uint64_t bn, unsigned char out[32]) {
+  sha_ctx c = {{0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
+                0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19}, 0, 0, {0}};
+  sha_feed(&c, a, an);
+  sha_feed(&c, b, bn);
+  unsigned char tail[128] = {0};
+  __builtin_memcpy(tail, c.block, c.used);
+  tail[c.used] = 0x80;
+  uint64_t tl = (c.used + 9 <= 64) ? 64 : 128;
+  uint64_t bits = c.bytes * 8;
+  for (int k = 0; k < 8; k++) tail[tl - 1 - k] = (unsigned char)(bits >> (8 * k));
+  sha_block(c.h, tail);
+  if (tl == 128) sha_block(c.h, tail + 64);
+  for (int k = 0; k < 8; k++) {
+    out[4*k]   = (unsigned char)(c.h[k] >> 24);
+    out[4*k+1] = (unsigned char)(c.h[k] >> 16);
+    out[4*k+2] = (unsigned char)(c.h[k] >> 8);
+    out[4*k+3] = (unsigned char)(c.h[k]);
+  }
+}
+void qosp_sha256(const unsigned char *msg, uint64_t n, unsigned char out[32]) {
+  qosp_sha256_pair(msg, n, 0, 0, out);
 }

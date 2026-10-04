@@ -3,7 +3,7 @@ FS = use "std/fs".
 QAR = use "../programs/mods/qar".
 QaImg = use "../programs/mods/qaimg".
 
-Sys.placeImageAt : String -> List Int -> List Int -> String -> Int -> (Int, String, Int) .
+Sys.placeImageAt : String -> List Int -> List Int -> String -> Int -> (String, String) -> (Int, String, Int) .
 Sys.reservePid : Unit -> Int .
 Sys.images : Int -> Int .
 Sys.arenaFree : Int -> Int .
@@ -31,7 +31,7 @@ place3 qa load r rel abi =
     Err e -> (0, "bad LOAD: {e}", 0)
   | Ok m -> (case QaImg.check m iln of
       Err e -> (0, "bad image: {e}", 0)
-    | Ok m2 -> Sys.placeImageAt qa (ipos :: iln :: rpos :: rln :: Nil) (if abi == (0 - 2) then QaImg.nums m2 else QaImg.nativeNums m2 (if abi < 0 then QaImg.nativeAbi load else abi)) "CkMemory\n" (Sys.reservePid Unit)).
+    | Ok m2 -> Sys.placeImageAt qa (ipos :: iln :: rpos :: rln :: 0 :: 0 :: Nil) (if abi == (0 - 2) then QaImg.nums m2 else QaImg.nativeNums m2 (if abi < 0 then QaImg.nativeAbi load else abi)) "CkMemory\n" (Sys.reservePid Unit) (QaImg.sha m2, QaImg.relsha m2)).
 
 main =
   me = myself 0;

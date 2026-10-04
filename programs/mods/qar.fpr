@@ -86,3 +86,9 @@ sectionSliceAt qa pos len = Ok (substr qa pos len).
 
 manifestOf : unsafe String -> Result String String .
 manifestOf qa = sectionBytes qa "MANIFEST".
+
+# Optional section absence is empty; malformed tables/extents remain errors.
+optionalExtent : unsafe String -> String -> Result (Int, Int) String .
+optionalExtent qa name = case extent qa name of
+    Ok r -> Ok r
+  | Err e -> case e == "no such section" of True -> Ok (0, 0) | False -> Err e.

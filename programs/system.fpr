@@ -651,12 +651,14 @@ runBuiltin con entry caps =
 # goes to the placer by (offset, length) ONLY, never as a sliced String.
 #
 # The placer is this file's own foreign primitive (loader/process.c): the
-# archive, the extents [IMAGE offset, length, RELOC offset, length], LOAD's
-# numbers [base, entry, execsz, rwoff, memsz] and the capability blob.  The image is relocatable (linked
+# archive, IMAGE/RELOC/IMPORT extents, LOAD's six numbers including nativeabi,
+# the capability blob, pid and (sha, relsha). Hash preflight precedes grants;
+# placement repeats the gate before allocating. The image is relocatable (linked
 # at 0); the placer puts it in a block from the buddy and moves it there
 # (docs/2026-10-01-PROCESS-IMAGES.md).  The pid is the launcher's, reserved
 # before placement so the namespace already holds the process's grants.
-Sys.placeImageAt : String -> List Int -> List Int -> String -> Int -> (Int, String, Int) .
+Sys.placeImageAt : String -> List Int -> List Int -> String -> Int -> (String, String) -> (Int, String, Int) .
+Sys.checkImage : String -> List Int -> List Int -> String -> String -> Result Unit String .
 Sys.reservePid : Unit -> Int .
 Sys.bindNs : Int -> Unit .
 
@@ -682,7 +684,16 @@ runProcessChecked con qa checked ioff iln rel caps =
   (rpos, rln) = rel;
   case checked of
     Err e -> putLn con (strcat "process load failed: " e)
-  | Ok m -> runProcessLoaded con (placeGranted con qa (ioff :: iln :: rpos :: rln :: Nil) (nativeProcessNums qa m) caps).
+  | Ok m -> case QAR.optionalExtent qa "IMPORT" of
+      Err e -> putLn con "process load failed: {e}"
+    | Ok imp -> (bpos, bln) = imp; runProcessVerified con qa m (ioff :: iln :: rpos :: rln :: bpos :: bln :: Nil) caps.
+
+runProcessVerified : unsafe (Int, Int) -> String -> QaImg.Img -> List Int -> Caps -> Unit .
+runProcessVerified con qa m exts caps =
+  nums = nativeProcessNums qa m;
+  case Sys.checkImage qa exts nums (QaImg.sha m) (QaImg.relsha m) of
+    Err e -> putLn con "process load failed: {e}"
+  | Ok u -> runProcessLoaded con (placeGranted con qa exts nums (QaImg.sha m) (QaImg.relsha m) caps).
 
 nativeProcessNums : String -> QaImg.Img -> List Int .
 nativeProcessNums qa m = case QAR.sectionBytes qa "LOAD" of
@@ -692,14 +703,13 @@ nativeProcessNums qa m = case QAR.sectionBytes qa "LOAD" of
 # the process's pid is reserved first and its grants recorded in the
 # namespace under it, so an open from its first instruction on is judged
 # by what the user granted; the storage grant is scoped to its own stream
-placeGranted : unsafe (Int, Int) -> String -> List Int -> List Int -> Caps -> (Int, String, Int) .
-placeGranted con qa exts nums caps =
+placeGranted : unsafe (Int, Int) -> String -> List Int -> List Int -> String -> String -> Caps -> (Int, String, Int) .
+placeGranted con qa exts nums sha relsha caps =
   (u, ns) = con;
   pid = Sys.reservePid Unit;
-  _ = case EP.grant (capMe caps) ns pid (scopeGrants (capId caps) (capGranted caps)) of
-      Ok n -> Unit
-    | Err e -> putLn con (strcat "process grants not recorded: " e);
-  Sys.placeImageAt qa exts nums (capsBlob caps) pid.
+  case EP.grant (capMe caps) ns pid (scopeGrants (capId caps) (capGranted caps)) of
+    Ok n -> Sys.placeImageAt qa exts nums (capsBlob caps) pid (sha, relsha)
+  | Err e -> (0, "process grants not recorded: {e}", 0).
 scopeGrants : unsafe String -> List (String, String) -> List (String, String) .
 scopeGrants id g = case g of
     Nil -> Nil

@@ -15,6 +15,7 @@ echo "== fprc =="                && (make -s fpr) || { echo "** LEG FAILED"; tou
 echo "== baseline compile gates: graphics-independent, explicit LiveView safety and dynamic-slot refusal ==" && (python3 tools/baseline-compile-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
 echo "== disk suspension: one-hart progress, abandoned requests and copied buffers ==" && (python3 tools/disk-suspend-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
 echo "== disk hardening: deadlines, stalled devices, reset, offline refusal, overload refusal (native + Portable) ==" && (python3 tools/disk-harden-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
+echo "== native image integrity: corrupt sections and missing digests refuse before allocation ==" && (python3 tools/native-integrity-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
 echo "== initial memory admission: routed native process, refusal and reclamation ==" && (sh tools/admission-check.sh) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
 echo "== native runtime ABI parser: missing, malformed, duplicate and oversized declarations ==" && (./qos.py run tests/nativeabi.fpr --expect "nativeabi: HOLDS") || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
 echo "== audit failure injections: native TX stall/orphan, full console pipe, native process storage refusal and fail-stop ==" && (python3 tools/failure-injections-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }

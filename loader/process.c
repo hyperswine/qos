@@ -226,45 +226,91 @@ static V refuse(const char *why) {
   return mktup3v(TAG(0), (V)fpr_mkstr((const uint8_t *)why, n), TAG(0));
 }
 
-/* Sys.placeImageAt : String -> List Int -> List Int -> String -> Int -> (Int, String, Int)
- * The ARCHIVE bytes; the extents [IMAGE offset, IMAGE length, RELOC offset,
- * RELOC length] of its sections; LOAD's numbers [base, entry, execsz, rwoff,
- * memsz] as programs/mods/qaimg.fpr read them; and the capability blob.  The
- * payloads are read straight out of the .qa String's own bytes, never as
- * pre-sliced copies; and the pid (Sys.reservePid, 0 = take the next one
- * here).  fst = 2 "running under this pid" / 0 failure; snd =
- * the pid, or a human-readable reason; thd = the process's ROOT actor (0 on
- * failure), so the launcher waits for ITS result (receiveFromRes) and no
- * other sender's.  Argument-type errors panic, like
- * every HAL primitive; anything about the image or memory is reported
- * through the tuple, so the launcher keeps running and says what went
- * wrong. */
-static V g_sys_place_image_at(V qastr, V extv, V numsv, V capsv, V pidv) {
-  if (ISINT(capsv) || ((hdr_t *)capsv)->tid != T_STR)
-    fpr_cpanic("Sys.placeImageAt: caps must be a String (the serialized grant blob)");
-  if (!ISINT(pidv) || UNTAG(pidv) < 0) fpr_cpanic("Sys.placeImageAt: pid must be an Int (Sys.reservePid)");
-  if (ISINT(qastr) || ((hdr_t *)qastr)->tid != T_STR)
-    fpr_cpanic("Sys.placeImageAt: first argument must be a String (the .qa archive bytes)");
-  uw ext[4], nums[6];
-  if (!fpr_list_ints(extv, ext, 4))
-    fpr_cpanic("Sys.placeImageAt: extents must be [image offset, image length, reloc offset, reloc length]");
+void qosp_sha256_pair(const unsigned char *, uint64_t, const unsigned char *, uint64_t, unsigned char[32]);
+
+static int digest_is(V wantv, const unsigned char *a, uw an, const unsigned char *b, uw bn) {
+  if (ISINT(wantv) || TID(wantv) != T_STR) fpr_cpanic("native image digest must be a String");
+  str_t *want = (str_t *)wantv;
+  if (want->len != 64) return 0;
+  unsigned char digest[32];
+  qosp_sha256_pair(a, an, b, bn, digest);
+  static const char hex[] = "0123456789abcdef";
+  for (uw i = 0; i < 32; i++)
+    if (want->bytes[2*i] != hex[digest[i] >> 4] || want->bytes[2*i+1] != hex[digest[i] & 15]) return 0;
+  return 1;
+}
+
+/* Shared by launcher preflight and placement itself. No image backing,
+ * publication or execution can happen until this gate succeeds. Hashes are
+ * integrity claims supplied from LOAD, not signatures or authorization. */
+static const char *check_image(V qastr, V extv, V numsv, V shav, V relshav, uw ext[6], uw nums[6]) {
+  if (ISINT(qastr) || TID(qastr) != T_STR) fpr_cpanic("native image archive must be a String");
+  if (!fpr_list_ints(extv, ext, 6))
+    return "native image extents must cover IMAGE, RELOC and IMPORT";
   if (!fpr_list_ints(numsv, nums, 6))
-    return refuse("native runtime ABI missing: rebuild the process with tools/build-process-app.sh");
+    return "native runtime ABI missing: rebuild the process with tools/build-process-app.sh";
   if (nums[5] != FPR_NATIVE_ABI)
-    return refuse("native runtime ABI mismatch: rebuild the process with tools/build-process-app.sh");
+    return "native runtime ABI mismatch: rebuild the process with tools/build-process-app.sh";
+  str_t *qa = (str_t *)qastr;
+  for (uw i = 0; i < 6; i += 2)
+    if (ext[i] > qa->len || ext[i+1] > qa->len - ext[i]) return "native image section outside archive";
+  if (nums[0] != 0)
+    return "not a relocatable image (linked for a fixed slot): rebuild it with tools/build-process-app.sh";
+  if (!nums[4] || ext[1] > nums[4] || nums[2] > ext[1] || nums[1] >= nums[2] || nums[3] > nums[4])
+    return "native image LOAD spans inconsistent";
+  if (!digest_is(shav, qa->bytes + ext[0], ext[1], 0, 0))
+    return "IMAGE sha256 mismatch (corrupt archive or missing digest)";
+  if (!digest_is(relshav, qa->bytes + ext[2], ext[3], qa->bytes + ext[4], ext[5]))
+    return "RELOC sha256 mismatch (corrupt archive or missing digest)";
+  if (ext[5]) return "native process IMPORT is unsupported: rebuild a self-contained process";
+  return 0;
+}
+
+/* Preflight before the launcher reserves a pid or records permission grants.
+ * Placement repeats the gate so direct callers cannot skip integrity checks. */
+static V g_sys_check_image(V qa, V extv, V numsv, V sha, V relsha) {
+  uw ext[6], nums[6];
+  const char *bad = check_image(qa, extv, numsv, sha, relsha, ext, nums);
+  if (bad) return fpr_mkresult(1, bad);
+  hdr_t *ok = (hdr_t *)fpr_alloc(8 + sizeof(V));
+  ok->tid = T_RESULT; ok->var = 0;
+  *(V *)((char *)ok + 8) = (V)&fpr_unit;
+  return (V)ok;
+}
+FPR_FN(fpr_g_Sys_x2echeckImage, g_sys_check_image, 5);
+
+#ifdef QOS_PROCESS_TEST
+static uw test_image_allocs;
+static V g_test_image_allocs(V unit) { (void)unit; return TAG(test_image_allocs); }
+FPR_FN(fpr_g_Sys_x2etestImageAllocs, g_test_image_allocs, 1);
+#endif
+
+/* Sys.placeImageAt qa [IMAGE off,len, RELOC off,len, IMPORT off,len]
+ * [base,entry,execsz,rwoff,memsz,nativeabi] caps pid (sha,relsha)
+ * -> (2, pid description, root actor), or (0, refusal, 0).
+ * Digest failures return before any image buddy request or publication. */
+static V g_sys_place_image_at(V qastr, V extv, V numsv, V capsv, V pidv, V digests) {
+  if (ISINT(digests) || TID(digests) != T_TUP2) fpr_cpanic("Sys.placeImageAt: digests must be a pair");
+  V shav = *(V *)((char *)digests + 8), relshav = *(V *)((char *)digests + 8 + sizeof(V));
+  if (ISINT(capsv) || TID(capsv) != T_STR) fpr_cpanic("Sys.placeImageAt: caps must be a String");
+  if (!ISINT(pidv) || UNTAG(pidv) < 0) fpr_cpanic("Sys.placeImageAt: pid must be an Int");
+  uw ext[6], nums[6];
+  const char *invalid = check_image(qastr, extv, numsv, shav, relshav, ext, nums);
+  if (invalid) return refuse(invalid);
   str_t *qa = (str_t *)qastr;
   uw ioff = ext[0], ilen = ext[1], roff = ext[2], rlen = ext[3];
-  if (ioff > qa->len || ilen > qa->len - ioff)
-    fpr_cpanic("Sys.placeImageAt: the IMAGE extent is out of range for this archive");
-  if (roff > qa->len || rlen > qa->len - roff)
-    fpr_cpanic("Sys.placeImageAt: the RELOC extent is out of range for this archive");
-  if (nums[0] != 0)
-    return refuse("not a relocatable image (linked for a fixed slot): rebuild it with tools/build-process-app.sh");
   uw memsz = nums[4];
+  uw idlen = g_app_id ? g_app_id->len : 0;
+  if (idlen > ~(uw)0 - sizeof(proc_image_t) - 15)
+    return refuse("native image identifier size out of range");
+  uw head = (sizeof(proc_image_t) + idlen + 15) & ~(uw)15;
+  if (head > ~(uw)0 - 4096 || memsz > ~(uw)0 - head - 4096)
+    return refuse("native image memory size out of range");
+#ifdef QOS_PROCESS_TEST
+  test_image_allocs++;
+#endif
 
   /* the block: the record, then the image at the next 4 KiB boundary */
-  uw idlen = g_app_id ? g_app_id->len : 0;
-  uw head = (sizeof(proc_image_t) + idlen + 15) & ~(uw)15;
   void *blk = buddy_alloc(head + 4096 + memsz);
   if (!blk) return refuse("no memory for the image");
   proc_image_t *pi = (proc_image_t *)blk;
@@ -331,7 +377,7 @@ static V g_sys_place_image_at(V qastr, V extv, V numsv, V capsv, V pidv) {
   return mktup3v(TAG(2), (V)fpr_mkstr((const uint8_t *)pm, pn), root);
 }
 
-FPR_FN(fpr_g_Sys_x2eplaceImageAt, g_sys_place_image_at, 5);
+FPR_FN(fpr_g_Sys_x2eplaceImageAt, g_sys_place_image_at, 6);
 
 /* Sys.init : Unit -> Unit -- must be called once, before the first
  * Sys.loadElf, by whichever image owns the process arena (System.qa's

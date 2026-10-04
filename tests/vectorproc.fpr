@@ -1,0 +1,17 @@
+unsafe program.
+P = {x:F64,y:F64}.
+R = {p:P,n:Int}.
+build x = Vec.push x (Vec.new Unit).
+receiveRows : unsafe Int -> Vector R.
+receiveRows me = receive me.
+step scale acc x = acc + scale*x.
+main =
+  (x,v) = Vec.at 0 (build 2.5); _ = Vec.free v;
+  me = myself 0;
+  rows = build {p={x=3.5,y=4.5},n=7};
+  echo = spawn (fn self -> (who,vec) = receive self; send who vec);
+  _ = send echo (me,rows);
+  back = receiveRows me;
+  (r,b2) = Vec.at 0 back; _ = Vec.free b2;
+  (s,w) = Vec.fold (step 2) 1 (Vec.iota 10); _ = Vec.free w;
+  "vectorproc: generic={x} nested={r.p.x},{r.p.y},{r.n} fold={s}".

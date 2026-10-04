@@ -1,0 +1,50 @@
+# Real placement gate: corrupted archives never reserve an image block.
+FS = use "std/fs".
+QAR = use "../programs/mods/qar".
+QI = use "../programs/mods/qaimg".
+Sys.checkImage : String -> List Int -> List Int -> String -> String -> Result Unit String.
+Sys.placeImageAt : String -> List Int -> List Int -> String -> Int -> (String,String) -> (Int,String,Int).
+Sys.images : Int -> Int.
+Sys.testImageAllocs : Unit -> Int.
+
+prepare qa =
+  Ok load = QAR.sectionBytes qa "LOAD";
+  Ok m = QI.parse load;
+  Ok image = QAR.extent qa "IMAGE";
+  Ok reloc = QAR.extent qa "RELOC";
+  Ok import = QAR.optionalExtent qa "IMPORT";
+  (i,n) = image; (r,rn) = reloc; (b,bn) = import;
+  (i :: n :: r :: rn :: b :: bn :: Nil, QI.nativeNums m (QI.nativeAbi load), QI.sha m, QI.relsha m).
+checkBad : Int -> Int -> String -> String -> Bool.
+checkBad me fs id reason =
+  Ok qa = FS.readLatest me fs "apps/{id}.qa";
+  (exts,nums,sha,relsha) = prepare qa;
+  images = Sys.images 0; attempts = Sys.testImageAllocs Unit;
+  pre = case Sys.checkImage qa exts nums sha relsha of Err e -> e == reason | Ok u -> False;
+  (ok,why,root) = Sys.placeImageAt qa exts nums "CkVector\n" 0 (sha,relsha);
+  good = pre and ok == 0 and why == reason and root == 0 and Sys.images 0 == images and Sys.testImageAllocs Unit == attempts;
+  _ = print "nativeintegrity: {id} refused={good}";
+  good.
+result me root = case receiveFromRes me root of Ok m -> (case m of Ok s -> s | Err e -> "failed: {e}") | Err e -> "failed: {e}".
+settle : unsafe Int -> Bool.
+settle n | Sys.images 0 == 0 = True.
+settle n | n <= 0 = False.
+settle n = Sys.sleepUs 20000 >> settle (n - 1).
+main =
+  me = myself 0; fs = FS.serve (device "blk");
+  image = checkBad me fs "BadImage" "IMAGE sha256 mismatch (corrupt archive or missing digest)";
+  reloc = checkBad me fs "BadReloc" "RELOC sha256 mismatch (corrupt archive or missing digest)";
+  import = checkBad me fs "BadImport" "RELOC sha256 mismatch (corrupt archive or missing digest)";
+  noSha = checkBad me fs "NoSha" "IMAGE sha256 mismatch (corrupt archive or missing digest)";
+  noRel = checkBad me fs "NoRelSha" "RELOC sha256 mismatch (corrupt archive or missing digest)";
+  old = checkBad me fs "OldAbi" "native runtime ABI mismatch: rebuild the process with tools/build-process-app.sh";
+  validImport = checkBad me fs "WithImport" "native process IMPORT is unsupported: rebuild a self-contained process";
+  Ok qa = FS.readLatest me fs "apps/CkVector.qa";
+  (exts,nums,sha,relsha) = prepare qa;
+  unitOk = case Sys.checkImage qa exts nums sha relsha of Ok Unit -> True | _ -> False;
+  (ok,msg,root) = Sys.placeImageAt qa exts nums "CkVector\n" 0 (sha,relsha);
+  reply = case ok == 2 of True -> result me root | False -> msg;
+  ended = settle 400;
+  good = unitOk and image and reloc and import and noSha and noRel and old and validImport and ended and reply == "vectorproc: generic=2.5 nested=3.5,4.5,7 fold=91" and Sys.testImageAllocs Unit == 1;
+  verdict = if good then "HOLDS" else "FAILED";
+  "nativeintegrity: process=[{reply}] images={Sys.images 0} allocations={Sys.testImageAllocs Unit} {verdict}".
