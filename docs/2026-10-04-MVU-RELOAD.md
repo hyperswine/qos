@@ -44,7 +44,7 @@ RV64 reload test or browser/GL reload integration. The old loader/livereload
 modules remain for existing consumers and replay, including their global-newest
 baseline limitation. The new adapter uses an explicit per-module baseline.
 
-The compiler pin is `18e62845a381516e34296e0630be4dc33963d71e`, containing the shared runner, checked commit
+The compiler pin is `d5d0b4694b4d1e902a107b2e1baec8ebea9f156d`, containing the shared runner, checked commit
 interfaces, checked runtime module interfaces and version-aware source identity
 matching. Unrelated untracked files in
 the compiler checkout are excluded from this milestone.
@@ -65,3 +65,13 @@ units and pacing remain unchanged. Current sibling-compiler tests pass real
 QOS reloads on one/four harts and focused MVU/LiveView smoke (2/2). This new
 compiler milestone is committed and pinned, including native module attachment
 and the production clock.
+
+## Host publication and watching
+
+The compiler pin also includes `fpr publish`, `fpr watch`, and `std/watch` for
+immutable POSIX image publication and typed MVU notifications. Its targeted
+publication suite passed on one/four harts, including real runner adoption and
+failure recovery. See [publication contracts](../../fprisc/docs/2026-10-04-PUBLICATION-WATCH.md).
+
+QOS app-store/qlog publication and watcher delivery into the shared runner remain
+the next platform step. The host journal is not a `.qa` distribution format.
