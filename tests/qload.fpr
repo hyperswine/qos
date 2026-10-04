@@ -20,9 +20,9 @@ main =
   n = blkPages dsk;
   case n == 0 of
     True -> "qload: no disk (host could not open qosp.disk)"
-  | False -> load dsk (QL.ensure dsk).
+  | False -> load dsk (QL.ensure (QL.direct dsk)).
 
-load dsk h = load2 dsk (QL.readLatest dsk h "apps/plugmini.qa").
+load dsk h = load2 dsk (QL.readLatest (QL.direct dsk) h "apps/plugmini.qa").
 load2 dsk r =
   case r of
     Err e -> "qload: apps/plugmini.qa not on the disk ({e}) -- seed it: make -C qos disk-seed QAS=../plugmini.qa"

@@ -13,6 +13,7 @@
 #
 #   tools/disk-harden-check.py runs it
 FS = use "std/fs".
+B = use "std/blockio".
 dsk u = device "blk".
 reader : Int -> Int -> Int -> Unit .
 reader boss p self = send boss (substr (blkRead (dsk 0) p) 0 5) >> Unit.
@@ -20,11 +21,12 @@ writer : Int -> Int -> String -> Int -> Unit .
 writer boss p text self = send boss (blkWrite (dsk 0) p text) >> Unit.
 outcome r = case r of Ok v -> "Ok {v}" | Err e -> "Err {e}".
 
-main : String .
+main : unsafe String .
 main =
   me = myself 0;
-  fs = FS.serve (dsk 0);
-  r0 = outcome (FS.readLatest me fs "notes/x");
+  block = B.serve me (dsk 0);
+  r0 = outcome (FS.startBlock me block);
+  alive = case B.capacity me block of Ok n -> n > 0 | Err why -> False;
   _ = Sys.sleepUs 900000;
   a = spawn (reader me 0);
   r1 = outcome (receiveFromRes me a);
@@ -35,5 +37,5 @@ main =
   r3 = outcome (receiveFromRes me c);
   d = spawn (reader me 1);
   r4 = outcome (receiveFromRes me d);
-  verdict = if r0 == "Err storage service: dead actor" and r1 == "Err dead actor" and r2 == "Err dead actor" and r3 == "Ok 5" and r4 == "Ok fresh" then "HOLDS" else "FAILED";
-  "diskstallp: storage={r0} timeout={r1} refused={r2} write={r3} read={r4} {verdict}".
+  verdict = if alive and r0 == "Err storage service: dead actor" and r1 == "Err dead actor" and r2 == "Err dead actor" and r3 == "Ok 5" and r4 == "Ok fresh" then "HOLDS" else "FAILED";
+  "diskstallp: storage={r0} alive={alive} timeout={r1} refused={r2} write={r3} read={r4} {verdict}".

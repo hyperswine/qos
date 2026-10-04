@@ -1,0 +1,15 @@
+B = use "../std/blockio".
+FS = use "../std/fs".
+text r = case r of Ok value -> value | Err why -> "error".
+unsupported r = case r of Err why -> why == "block: native budgets unsupported" | Ok v -> False.
+main : unsafe String .
+main =
+  me = myself 0;
+  block = B.serve me (device "blk");
+  query = unsupported (B.call me block B.GetBudget);
+  config = unsupported (B.call me block (B.Configure (0, 100000, 20, 2)));
+  started = FS.startBlock me block;
+  fs = case started of Ok owner -> owner | Err why -> error "portable start: {why}";
+  write = case FS.append me fs "test/portable" "routed" of Ok v -> True | Err why -> False;
+  read = text (FS.readLatest me fs "test/portable");
+  "blockportable: query={query} config={config} write={write} read={read} {if query and config and write and read == "routed" then "HOLDS" else "FAILED"}".

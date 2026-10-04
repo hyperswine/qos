@@ -64,67 +64,67 @@ main =
   | False -> run dsk n.
 
 run dsk np =
-  h0 = QL.ensure dsk;
-  boot = QL.countRecs dsk h0 "qd2/boots" + 1;
-  h1 = QL.appendRec dsk h0 "QREC" "qd2/boots" "b";
-  m0 = QL.metaOr dsk h1;
+  h0 = QL.ensure (QL.direct dsk);
+  boot = QL.countRecs (QL.direct dsk) h0 "qd2/boots" + 1;
+  h1 = QL.appendRec (QL.direct dsk) h0 "QREC" "qd2/boots" "b";
+  m0 = QL.metaOr (QL.direct dsk) h1;
 
   # ---- bulk: three chunks, one record (2 pages, not 6) ----------------------
   hBulk0 = h1;
-  h2 = QL.appendBulk dsk h1 (("qd2/bk{boot}", "alpha") ::
+  h2 = QL.appendBulk (QL.direct dsk) h1 (("qd2/bk{boot}", "alpha") ::
                              (("qd2/bk{boot}", "beta") ::
                               (("qd2/other{boot}", "gamma") :: Nil)));
   bulkPg = (h2 - hBulk0) == 2;
-  bl = okOr (QL.readLatest dsk h2 "qd2/bk{boot}") "(err)";
-  br = QL.replayAll dsk h2 "qd2/bk{boot}";
-  bn = QL.countRecs dsk h2 "qd2/bk{boot}";
-  bo = okOr (QL.readLatest dsk h2 "qd2/other{boot}") "(err)";
+  bl = okOr (QL.readLatest (QL.direct dsk) h2 "qd2/bk{boot}") "(err)";
+  br = QL.replayAll (QL.direct dsk) h2 "qd2/bk{boot}";
+  bn = QL.countRecs (QL.direct dsk) h2 "qd2/bk{boot}";
+  bo = okOr (QL.readLatest (QL.direct dsk) h2 "qd2/other{boot}") "(err)";
 
   # ---- hashes: verify, corrupt one payload page, heal it --------------------
   hHv = h2;
-  h3 = QL.appendRec dsk h2 "QREC" "qd2/hv{boot}" "check-me";
-  v1 = isOk (QL.verifyLog dsk h3);
+  h3 = QL.appendRec (QL.direct dsk) h2 "QREC" "qd2/hv{boot}" "check-me";
+  v1 = isOk (QL.verifyLog (QL.direct dsk) h3);
   _ = blkWrite dsk (hHv + 1) "corrupted!";
-  v2 = isErr (QL.verifyLog dsk h3);
+  v2 = isErr (QL.verifyLog (QL.direct dsk) h3);
   _ = blkWrite dsk (hHv + 1) "check-me";
-  v3 = isOk (QL.verifyLog dsk h3);
+  v3 = isOk (QL.verifyLog (QL.direct dsk) h3);
 
   # ---- compact: tombstoned data + its tombstone vanish, idempotently --------
-  h4 = QL.appendRec dsk h3 "QREC" "qd2/tmp{boot}" "junkjunk";
-  h5 = QL.appendRec dsk h4 "QDEL" "qd2/tmp{boot}" "";
-  h6 = QL.compact dsk h5;
+  h4 = QL.appendRec (QL.direct dsk) h3 "QREC" "qd2/tmp{boot}" "junkjunk";
+  h5 = QL.appendRec (QL.direct dsk) h4 "QDEL" "qd2/tmp{boot}" "";
+  h6 = QL.compact (QL.direct dsk) h5;
   cShrunk = h6 == (h5 - 3);
-  h7 = QL.compact dsk h6;
+  h7 = QL.compact (QL.direct dsk) h6;
   cIdem = h7 == h6;
-  root = mRoot (QL.metaOr dsk h7);
+  root = mRoot (QL.metaOr (QL.direct dsk) h7);
   cRoot = root > 0;
-  cDead = isErr (QL.readLatest dsk h7 "qd2/tmp{boot}");
-  cLive = QL.strEq (okOr (QL.readLatest dsk h7 "qd2/bk{boot}") "(err)") "beta";
-  cReplay = QL.strEq (QL.replayAll dsk h7 "qd2/bk{boot}") "alphabeta";
-  cVerify = isOk (QL.verifyLog dsk h7);
+  cDead = isErr (QL.readLatest (QL.direct dsk) h7 "qd2/tmp{boot}");
+  cLive = QL.strEq (okOr (QL.readLatest (QL.direct dsk) h7 "qd2/bk{boot}") "(err)") "beta";
+  cReplay = QL.strEq (QL.replayAll (QL.direct dsk) h7 "qd2/bk{boot}") "alphabeta";
+  cVerify = isOk (QL.verifyLog (QL.direct dsk) h7);
 
   # ---- swap: the circular buffer wraps onto the partition start -------------
-  mS = QL.metaOr dsk h7;
+  mS = QL.metaOr (QL.direct dsk) h7;
   d = mDataEnd mS;
-  _ = QL.sbW dsk (mWithSwapHead mS (np - 1));
-  w1 = QL.swapWrite dsk "one";
-  w2 = QL.swapWrite dsk "two";
+  _ = QL.sbW (QL.direct dsk) (mWithSwapHead mS (np - 1));
+  w1 = QL.swapWrite (QL.direct dsk) "one";
+  w2 = QL.swapWrite (QL.direct dsk) "two";
   sw1 = w1 == (np - 1);
   sw2 = w2 == d;
-  swCur = mSwapHead (QL.metaOr dsk h7) == (d + 1);
-  swBack = QL.strEq (substr (QL.swapRead dsk d) 0 3) "two";
+  swCur = mSwapHead (QL.metaOr (QL.direct dsk) h7) == (d + 1);
+  swBack = QL.strEq (substr (QL.swapRead (QL.direct dsk) d) 0 3) "two";
 
   # ---- bounds: an append past dataEnd is refused ----------------------------
-  mF = QL.metaOr dsk h7;
-  _ = QL.sbW dsk (mWithDataEnd mF (h7 + 1));
-  fullOk = isErr (QL.appendRes dsk h7 "QREC" "qd2/full{boot}" "x");
-  _ = QL.sbW dsk mF;
+  mF = QL.metaOr (QL.direct dsk) h7;
+  _ = QL.sbW (QL.direct dsk) (mWithDataEnd mF (h7 + 1));
+  fullOk = isErr (QL.appendRes (QL.direct dsk) h7 "QREC" "qd2/full{boot}" "x");
+  _ = QL.sbW (QL.direct dsk) mF;
 
   # ---- torn append: commit flag 0 is detected and rolled back ---------------
-  _ = QL.sbW dsk (mTorn (QL.metaOr dsk h7));
-  hT = QL.ensure dsk;
+  _ = QL.sbW (QL.direct dsk) (mTorn (QL.metaOr (QL.direct dsk) h7));
+  hT = QL.ensure (QL.direct dsk);
   tornOk = case hT == h7 of
-             True -> mCommit (QL.metaOr dsk h7) == 1
+             True -> mCommit (QL.metaOr (QL.direct dsk) h7) == 1
            | False -> False;
 
   "qdisk2: boot #{boot} v={mVer m0} d={mDataEnd m0}/{np} bulk[2pg={bulkPg} latest={bl} replay={br} n={bn} other={bo}] hash[ok={v1} corrupt={v2} healed={v3}] compact[shrunk={cShrunk} idem={cIdem} root>0={cRoot} dead={cDead} live={cLive} replay={cReplay} verify={cVerify}] swap[wrap={sw1} over={sw2} cur={swCur} read={swBack}] full={fullOk} torn={tornOk} head={h7}".

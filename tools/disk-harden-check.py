@@ -30,7 +30,7 @@ with tempfile.TemporaryDirectory(prefix='qos-disk-harden-') as d:
     p = run([host, '--yes', tmp / 'stall.qa'], cwd=tmp, timeout=60,
             env={'FPR_HARTS': '2', 'FPR_DISK': str(tmp / 'stall.disk'), 'QOS_BLK_TEST_DELAY_US': '800000',
                  'QOS_BLK_TEST_DELAY_READS': '2', 'QOS_BLK_DEADLINE_MS': '300'})
-    assert 'diskstallp: storage=Err storage service: dead actor timeout=Err dead actor refused=Err dead actor write=Ok 5 read=Ok fresh HOLDS' in p.stdout, p.stdout + p.stderr
+    assert 'diskstallp: storage=Err storage service: dead actor alive=True timeout=Err dead actor refused=Err dead actor write=Ok 5 read=Ok fresh HOLDS' in p.stdout, p.stdout + p.stderr
     print('Portable disk: a stalled disk fail-stops the storage actor (its client gets Err), a late caller, refuses while stalled, recovers: PASS')
 
     if shutil.which('qemu-system-riscv64') and shutil.which('riscv64-unknown-elf-gcc'):

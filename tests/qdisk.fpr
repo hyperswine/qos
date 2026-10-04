@@ -43,18 +43,18 @@ main =
 
 run : unsafe Device -> Int -> String .
 run dsk n =
-  h0 = QL.ensure dsk;                                # formats a blank disk
-  boot = QL.countRecs dsk h0 "qdisk/boots" + 1;      # the two-boot proof
-  h1 = QL.appendRec dsk h0 "QREC" "qdisk/boots" "b";
+  h0 = QL.ensure (QL.direct dsk);                                # formats a blank disk
+  boot = QL.countRecs (QL.direct dsk) h0 "qdisk/boots" + 1;      # the two-boot proof
+  h1 = QL.appendRec (QL.direct dsk) h0 "QREC" "qdisk/boots" "b";
   big = rep "0123456789abcdef" 320;                  # 5120 B = 2 payload pages
-  h2 = QL.appendRec dsk h1 "QREC" "qdisk/big{boot}" big;
-  h3 = QL.appendRec dsk h2 "QREC" "qdisk/kv{boot}" "hello ";
-  h4 = QL.appendRec dsk h3 "QREC" "qdisk/kv{boot}" "world";
-  lat = okOr (QL.readLatest dsk h4 "qdisk/kv{boot}") "(err)";
-  all = QL.replayAll dsk h4 "qdisk/kv{boot}";
-  bigBack = okOr (QL.readLatest dsk h4 "qdisk/big{boot}") "";
+  h2 = QL.appendRec (QL.direct dsk) h1 "QREC" "qdisk/big{boot}" big;
+  h3 = QL.appendRec (QL.direct dsk) h2 "QREC" "qdisk/kv{boot}" "hello ";
+  h4 = QL.appendRec (QL.direct dsk) h3 "QREC" "qdisk/kv{boot}" "world";
+  lat = okOr (QL.readLatest (QL.direct dsk) h4 "qdisk/kv{boot}") "(err)";
+  all = QL.replayAll (QL.direct dsk) h4 "qdisk/kv{boot}";
+  bigBack = okOr (QL.readLatest (QL.direct dsk) h4 "qdisk/big{boot}") "";
   bigOk = case strlen bigBack == 5120 of
             True -> QL.strEq bigBack big
           | False -> False;
-  idx = okOr (QL.readLatest dsk h4 "apps/index") "(unseeded)";
+  idx = okOr (QL.readLatest (QL.direct dsk) h4 "apps/index") "(unseeded)";
   "qdisk: boot #{boot} on {n} pages; latest={lat} replay={all} big5120={bigOk} apps/index=[{oneLine idx}] head={h4}".

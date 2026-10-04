@@ -173,3 +173,80 @@ Verification for this slice:
   Python/shell syntax and Git whitespace checks passed. The service leg is
   included in `check-all.sh`; a full check-all sweep and hardware run were
   not performed.
+
+## Qlog and bootstrap routing (2026-10-04)
+
+The shared protocol and serial request loop now live in `std/blockio.fpr`.
+`std/block.fpr` composes that loop with native budget query/update callbacks.
+Import `blockio` for request/reply constructors and clients, and `block` for the
+native factory. Portable uses the same page protocol and explicitly returns
+`Err "block: native budgets unsupported"` for its budget requests; it links no
+virt budget primitives and retains the host disk tier's deadlines.
+
+Qlog v3.0 (`f556a08d099fbe45`) takes an explicit `PageSource`: `direct device`
+for standalone format/corruption tools, or `routed blockActor` for service I/O.
+Every Qlog read, write and capacity path uses that adapter, including metadata,
+append, bulk, replay, verification, compaction and swap. Pure page APIs require
+this adapter now; the low-level callers in-tree were migrated. `actor device`
+remains a compatibility composition that creates a private block service;
+`actorWith (routed blockActor)` uses the system-owned service. `FS.serveBlock`
+and `FS.startBlock` compose Files on an existing block owner; the latter waits
+for Qlog initialization/index scan via a stats request and returns a Result.
+
+On a routed page error Qlog logs the reason and kills itself. Its RPC clients
+receive the existing storage-service dead-actor error. It cannot continue
+with an old head/index after a possibly partial append. The block service
+survives, and its request worker retains the DMA cleanup lifetime. Starting
+another Qlog actor on the same service runs `ensure` and scans the committed
+log again. Incoming storage requests are kept/copied before nested block calls,
+so receiving block replies cannot invalidate a borrowed client payload.
+
+Native System.qa creates one block actor before querying capacity or starting
+Qlog, and hands that actor to Qlog. With multiple configured harts the block
+actor, its page workers and Qlog stay on hart 1, which can serve storage while
+hart 0 synchronously runs a loaded process. On a one-hart kernel they use hart 0.
+The existing C storage syscall binding is published only after Qlog answers
+its readiness request. Failed initialization leaves storage offline and the
+launcher usable; failed boot-record replay/append no longer prints an online
+boot count. Portable `qsys` and `services` composition likewise create a block
+owner first and wait for storage readiness before advertising it or attaching
+apps. Application Files/namespace/Rpc contracts remain unchanged.
+
+Publication order was shared block protocol, Qlog major version, native
+factory, then consumer pins and regenerated lock. `blockio.v1.0` is
+`17e531c2046076a6`; native `block.v1.0` is `70a7bd3df3e2b6b7`. All 22 pins
+resolve from the local store. The interface comparison needed exact trust
+entries for previously shipped Qlog/Svc blobs, whose source paths were already
+trusted; no blanket store trust was added.
+
+Verification:
+
+- `tools/qlog-routing-check.py`: two Portable runs and 18 real native boots.
+  Native kernels are separately compiled with `HARTS=1/2` to match QEMU's
+  `-smp`, rather than pinning work to an absent configured hart. Across virtio
+  v1/v2 the tests prove a failed append after pending metadata AND its header
+  land (checked on disk), storage-actor death, block-service survival, rollback
+  and restart without the uncommitted value, later append/replay/hash checks,
+  and fast propagation of block-service death. The actual System.qa boots
+  twice per disk with increasing persisted counters, stays offline on a
+  stalled first metadata read, and boots without a disk. Both Portable runs
+  exercise readiness, routed page I/O and native-budget refusal.
+- Full disk hardening passes Portable startup failure with a surviving block
+  service, four native request/recovery boots and eight held-reset cancellation
+  boots. The existing four block-budget/protocol boots also pass.
+- `tools/qsys-check.sh` passes two Portable boots with plugin reads and
+  increasing persistent notes. `tools/epproc-check.sh` passes actual native
+  process namespace/storage access. `tools/plugimports-check.sh` passes ABI
+  refusal and corrupt-archive checks through the updated direct adapter.
+- Qdisk and Qdisk2 both pass two Portable boots, including bulk, deliberate
+  corruption/healing, compaction, swap wrap, full-log refusal and torn recovery.
+  RV32 compilation, production absence of injection hooks, lock, syntax and
+  whitespace checks are checked separately. No full check-all sweep,
+  hardware run or performance claim is made.
+
+Remaining boundary: no automatic Qlog restart or rebinding after a later
+failure, no block namespace endpoint/cancel/drain protocol, and no enforcement
+of a process-wide singleton against explicit standalone factories/raw callers.
+C still owns DMA/queue reservation, reset effects, cancellation cleanup and
+physical offline publication. Those ownership transitions are the next
+migration, beyond this routing checkpoint.

@@ -33,3 +33,7 @@
 ../programs/mods/graphics.fpr
 # Exact committed actor library used by ep/graphics; not blanket store trust.
 ../.fpr/store/06e72a5feec8a6d4.fpr
+# Previously shipped Qlog/Svc interfaces, checked when minting the routed
+# Qlog major version. Exact immutable identities, matching source trust above.
+../.fpr/store/9264cdf0b73fc85b.fpr
+../.fpr/store/0c925c3cb42f0f77.fpr

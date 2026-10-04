@@ -16,6 +16,7 @@ echo "== baseline compile gates: graphics-independent, explicit LiveView safety 
 echo "== disk suspension: one-hart progress, abandoned requests and copied buffers ==" && (python3 tools/disk-suspend-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
 echo "== virtio raw policy: register programming and full-word deadlines against C ==" && (python3 tools/virtio-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
 echo "== native block service: configurable budgets and failure isolation ==" && (python3 tools/block-service-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
+echo "== Qlog and bootstrap block routing ==" && (python3 tools/qlog-routing-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
 echo "== disk hardening: deadlines, stalled devices, reset, offline refusal, overload refusal (native + Portable) ==" && (python3 tools/disk-harden-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
 echo "== native image integrity: corrupt sections and missing digests refuse before allocation ==" && (python3 tools/native-integrity-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
 echo "== initial memory admission: routed native process, refusal and reclamation ==" && (sh tools/admission-check.sh) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }

@@ -21,12 +21,12 @@ has s sub = strIndexOf sub s >= 0.
 
 main =
   dsk = device "blk";
-  h = QL.ensure dsk;
-  case QL.readLatest dsk h "apps/plugmini.qa" of
+  h = QL.ensure (QL.direct dsk);
+  case QL.readLatest (QL.direct dsk) h "apps/plugmini.qa" of
     Err e -> "plugimports: apps/plugmini.qa not on the disk ({e})"
-  | Ok mini -> (case QL.readLatest dsk h "apps/plugneeds.qa" of
+  | Ok mini -> (case QL.readLatest (QL.direct dsk) h "apps/plugneeds.qa" of
       Err e -> "plugimports: apps/plugneeds.qa not on the disk ({e})"
-    | Ok needs -> (case QL.readLatest dsk h "apps/plugtamp.qa" of
+    | Ok needs -> (case QL.readLatest (QL.direct dsk) h "apps/plugtamp.qa" of
         Err e -> "plugimports: apps/plugtamp.qa not on the disk ({e})"
       | Ok tamp -> run mini needs tamp)).
 

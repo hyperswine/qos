@@ -70,7 +70,9 @@ IInt = EP.IInt.
 IStr = EP.IStr.
 IFn  = EP.IFn.
 IErr = EP.IErr.
-QLog    = use "mods/qlog#9264cdf0b73fc85b".
+QLog    = use "mods/qlog#f556a08d099fbe45".
+Block = use "std/block#70a7bd3df3e2b6b7".
+BlockIO = use "std/blockio#17e531c2046076a6".
 UartM   = use "mods/uart".
 TimerM  = use "mods/timer".
 MK      = use "mods/matrixkpd".
@@ -1021,7 +1023,7 @@ cfgGo lns key =
 # 2. read config -> startup app id
 # 3. launch it through the SAME permission flow every app goes through
 #    (the launcher is not privileged; it asks for its perms like anyone)
-main : Unit .
+main : unsafe Unit .
 main =
   me = myself 0;
   cl = device "clint";
@@ -1040,9 +1042,13 @@ main =
   ns = AC.spawnWith (AC.Dynamic 64) EP.namespace;
   _ = claimRoot me ns (AC.spawnWith (AC.Dynamic 64) (EP.lister ns));
   _ = Sys.bindNs ns;                     # a loaded process's Sys.ns
-  st = case blkPages dsk == 0 of
-         True  -> { has = False, act = 0, uart = usvc, timer = tsvc, ns = ns }
-       | False -> { has = True, act = spawnStore dsk, uart = usvc, timer = tsvc, ns = ns };
+  # Keep the block service and every I/O worker off a hart synchronously
+  # running a loaded process, just like the storage actor.
+  diskHart = case Sys.harts Unit > 1 of True -> 1 | False -> 0;
+  block = Block.serveOn diskHart me dsk;
+  pages = bootBlockPages me block;
+  store = case pages == 0 of True -> 0 | False -> spawnStore block;
+  st = {has = store != 0, act = store, uart = usvc, timer = tsvc, ns = ns};
   _ = SysEp.boot me ns usvc tsvc clk st;
   _ = SysEp.claimUarts me ns uarts 0;   # /services/uart/<n>, one per device
   con = (usvc, ns);
@@ -1120,22 +1126,34 @@ claimRoot me ns lst = case EP.register me ns "/" lst of
     Ok n -> Unit
   | Err e -> error "system: could not claim / ({e})".
 
-spawnStore dsk =
+bootBlockPages me block = case BlockIO.capacity me block of
+    Ok n -> n
+  | Err why -> error "system: block service startup: {why}".
+spawnStore block =
   a = case Sys.harts Unit > 1 of
-        True -> spawnOn 1 (QLog.actor dsk)
-      | False -> spawn (QLog.actor dsk);
-  # the Rpc tid is content-addressed; hand C a prototype to read it from
-  _ = Sys.bindStore a (Rpc a 0 "" "");
-  a.
+        True -> spawnOn 1 (QLog.actorWith (QLog.routed block))
+      | False -> spawn (QLog.actorWith (QLog.routed block));
+  # Wait for ensure + index scan before binding the process syscall route.
+  # A startup failure leaves storage offline instead of publishing a dead owner.
+  ready = AC.sendAwait (myself 0) a (Rpc (myself 0) 5 "" "");
+  storeReady a ready.
+storeReady a ready = case ready of
+    Ok (Ok stats) -> _ = Sys.bindStore a (Rpc a 0 "" ""); a
+  | Ok (Err why) -> storeUnavailable why
+  | Err why -> storeUnavailable why.
+storeUnavailable why = _ = Sys.logAt 2 "system: storage startup failed: {why}"; 0.
 
 bootBeat : Io4 -> (Int, Int) -> Unit .
 bootBeat io con =
   case stHas (ioSt io) of
-    False -> putLn con "storage: no disk (kv + /apps overrides offline)"
+    False -> putLn con "storage: offline (kv + /apps overrides offline)"
   | True  -> bootBeat1 io con.
 bootBeat1 : Io4 -> (Int, Int) -> Unit .
 bootBeat1 io con =
   r = storeRpc1 (ioMe io) (ioSt io) 3 "sys/boots" "";
-  n = case r of Ok s -> strlen s + 1 | Err _ -> 1;
-  _ = storeRpc1 (ioMe io) (ioSt io) 2 "sys/boots" "b";
-  putLn con "storage: disk online -- boot #{n} on this log".
+  case r of
+    Err why -> putLn con "storage: boot replay failed ({why})"
+  | Ok s -> bootRecord io con (strlen s + 1).
+bootRecord io con n = case storeRpc1 (ioMe io) (ioSt io) 2 "sys/boots" "b" of
+    Err why -> putLn con "storage: boot append failed ({why})"
+  | Ok u -> putLn con "storage: disk online -- boot #{n} on this log".

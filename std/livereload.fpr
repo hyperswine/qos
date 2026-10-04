@@ -89,7 +89,7 @@ LRMsg = Type (LiveReload url).
 load : unsafe _ -> Int -> String -> Result Int String .
 load dsk head id =
   before = Mod.plugs 0;
-  bytes = QL.readLatest dsk head ("apps/" + id + ".qa");
+  bytes = QL.readLatest (QL.direct dsk) head ("apps/" + id + ".qa");
   case bytes of
     Err e -> Err ("store: " + e)
   | Ok b -> loadAttach before b.

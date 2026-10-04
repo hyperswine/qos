@@ -6,8 +6,9 @@
 # module versions (apps/<id>.qa), system state (sys/*), user files,
 # kv event logs -- is a named record on it, and every consumer speaks
 # MESSAGES to the service instead of touching the device.  This module
-# is the client half: system composition opens the device once and hands
-# it to `serve`; applications use `connect me namespace` and never open it.
+# is the client half: system composition passes its block owner to
+# `startBlock`; applications use `connect me namespace`. `serve device`
+# remains the standalone compatibility composition.
 #
 #   me = myself 0;
 #   fs = FS.connect me namespace;
@@ -20,7 +21,7 @@
 # payloads are first-class -- records are length-carried end to end.
 # ============================================================================
 
-QL = use "../programs/mods/qlog".
+QL = use "../programs/mods/qlog#f556a08d099fbe45".
 SVC = use "../programs/mods/svc".
 AC = use "std/actor".
 EP = use "../programs/mods/ep".
@@ -28,6 +29,12 @@ EP = use "../programs/mods/ep".
 # spawn the service on a device the caller opened; the returned actor
 # handle IS the filesystem from here on
 serve dev = AC.spawnWith (AC.Dynamic 64) (QL.actor dev).
+# Compose Files on the system's existing block service.
+serveBlock block = AC.spawnWith (AC.Dynamic 64) (QL.actorWith (QL.routed block)).
+startBlock : unsafe Int -> Int -> Result Int String .
+startBlock me block = readyBlock me (serveBlock block).
+readyBlock : unsafe Int -> Int -> Result Int String .
+readyBlock me fs = case stats me fs "" of Ok value -> Ok fs | Err why -> Err why.
 
 # the send is checked, and a Files service that refused the request or has
 # ended is an Err like any other storage failure -- never a caller left

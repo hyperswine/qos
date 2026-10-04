@@ -1,0 +1,41 @@
+# Routed page requests must not let Qlog continue a partial append with an
+# obsolete in-memory index. Restart rescans/rolls back on the same service.
+FS = use "../std/fs".
+B = use "../std/blockio".
+Native = use "../std/block".
+QL = use "../programs/mods/qlog#f556a08d099fbe45".
+blkTestStallNth : Int -> Int .
+blkTestNow : Unit -> Int .
+ok r = case r of Ok v -> True | Err why -> False.
+text r = case r of Ok v -> v | Err why -> "error".
+dead r = case r of Err why -> why == "storage service: dead actor" | Ok v -> False.
+metadata r = case r of Ok (B.Page bytes) -> QL.sbMeta bytes | Err why -> Err why | other -> Err "bad page".
+headOf r = case r of Ok (QL.Meta h v w c d sw mr) -> h | Err why -> -1.
+pending r = case r of Ok (QL.Meta h v w c d sw mr) -> w == 1 and c == 0 | Err why -> False.
+page r = case r of Ok (B.Page bytes) -> bytes | other -> "error".
+main : unsafe String .
+main =
+  me = myself 0;
+  hart = if Sys.harts Unit > 1 then 1 else 0;
+  block = Native.serveOn hart me (device "blk");
+  _ = B.call me block (B.Configure (0, 100000, 20, 2));
+  fs = FS.serveBlock block;
+  before = ok (FS.append me fs "test/value" "before");
+  head = headOf (metadata (B.call me block (B.Read 0)));
+  # Pending metadata + record header land; its first payload page stalls.
+  _ = blkTestStallNth 4;
+  aborted = dead (FS.append me fs "test/value" "stalls");
+  stale = dead (FS.readLatest me fs "test/value");
+  alive = ok (B.call me block B.GetBudget);
+  partial = pending (metadata (B.call me block (B.Read 0))) and substr (page (B.call me block (B.Read head))) 0 4 == "QREC";
+  restart = FS.serveBlock block;
+  recovered = text (FS.readLatest me restart "test/value") == "before";
+  write = ok (FS.append me restart "test/value" "next");
+  replay = text (FS.replay me restart "test/value");
+  verified = ok (FS.rpc me restart 8 "" "");
+  _ = kill block;
+  start = blkTestNow Unit;
+  lost = dead (FS.readLatest me restart "test/value");
+  fast = blkTestNow Unit - start < 50000;
+  holds = partial and before and aborted and stale and alive and recovered and write and replay == "beforenext" and verified and lost and fast;
+  "qlogblock: before={before} aborted={aborted} partial={partial} stale={stale} alive={alive} recovered={recovered} write={write} replay={replay} verified={verified} lost={lost} fast={fast} {if holds then "HOLDS" else "FAILED"}".

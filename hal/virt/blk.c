@@ -180,6 +180,8 @@ static unsigned blk_test_stall, blk_test_reset_fails, blk_test_hold_reset, blk_t
 static V h_blkTestStall(V u) { (void)u; blk_test_stall = 1; return TAG(0); }
 static V h_blkTestResetFails(V u) { (void)u; blk_test_reset_fails = 1; return TAG(0); }
 FPR_FN(fpr_g_blkTestStall, h_blkTestStall, 1);
+static V h_blkTestStallNth(V n) { blk_test_stall = (unsigned)UNTAG(n); return TAG(0); }
+FPR_FN(fpr_g_blkTestStallNth, h_blkTestStallNth, 1);
 FPR_FN(fpr_g_blkTestResetFails, h_blkTestResetFails, 1);
 static V h_blkTestResetDelay(V n) { blk_test_reset_delay = (unsigned)UNTAG(n); return TAG(0); }
 FPR_FN(fpr_g_blkTestResetDelay, h_blkTestResetDelay, 1);
@@ -468,7 +470,7 @@ static void blk_rw(u64 page, int is_write) {
   uint64_t start = hal_mtime();
   blk_since = start;
 #ifdef QOS_BLK_TEST
-  if (blk_test_stall) blk_test_stall = 0; else
+  if (!blk_test_stall || --blk_test_stall)
 #endif
   wr(R_QNOTIFY, 0);
   uint64_t parks = 0;

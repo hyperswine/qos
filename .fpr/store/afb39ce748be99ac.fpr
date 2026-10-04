@@ -1,0 +1,186 @@
+# ============================================================================
+# actor.fpr -- std.actor: the mailbox contract.
+#
+# A mailbox has a CAPACITY, chosen at spawn:
+#
+#   Static n    rings of n messages per sender channel that never grow --
+#               a bound you can reason about (WCET, a driver's queue)
+#   Dynamic n   rings that start at n and double when full, from the
+#               buddy -- a burst costs memory, never messages
+#
+# `spawn` is Static 64.  Services -- anything many actors send to --
+# spawn Dynamic; use Static only where you are sure the queue cannot
+# need to grow and want the bound.
+#
+# And `send` ANSWERS: Result Unit String.  Ok means queued; Err
+# "mailbox full" means a Static ring had no room (or a Dynamic one could
+# not grow); Err "dead actor" means the target has exited.  The runtime
+# never waits for space.  The sender chooses what a refusal means --
+# retry, back off, drop, die -- and this module carries the common
+# policies.  Most code does not call send directly: MVU, the services
+# and the drivers wrap it, and they choose.
+#
+#   AC = use "../std/actor".
+#   fs = AC.spawnWith (AC.Dynamic 64) (QL.actor dev);
+#   AC.sendOrDie who msg          # the old behaviour, explicitly
+#   AC.sendRetry me who msg 8     # yield between tries, Result back
+# ============================================================================
+
+Cap = Type (Static n | Dynamic n).
+
+spawnWith cap f = case cap of
+    Static n -> spawnCap 0 n f
+  | Dynamic n -> spawnCap 1 n f.
+spawnWithOn hart cap f = case cap of
+    Static n -> spawnCapOn hart 0 n f
+  | Dynamic n -> spawnCapOn hart 1 n f.
+
+# did it go?
+sent r = case r of Ok u -> True | Err e -> False.
+
+# a refusal is fatal here: for the places where losing the message is
+# worse than stopping (a service's own reply, a driver's one command)
+sendOrDie who m = case send who m of
+    Ok u -> u
+  | Err e -> error "send: {e}".
+
+# up to n retries with a yield between (the sender gives its hart away
+# so the receiver can drain); the last Result comes back
+sendRetry me who m 0 = send who m.
+sendRetry me who m n = case send who m of
+    Ok u -> Ok u
+  | Err e ->
+    _ = yield me;
+    sendRetry me who m (n - 1).
+
+# ---- a send that is not lost -----------------------------------------------------------
+# `send` never waits: a full mailbox REFUSES, and the answer is easy to ignore.
+# Where a lost message means somebody waits forever -- a request that expects a
+# reply, a wake-up, a welcome -- use these.  They give the hart away between
+# tries so the receiver can drain, and end only when the message is queued or
+# the receiver is dead.  (A burst of 500 sessions joining lost one in a few
+# hundred runs before std/live, std/poller and std/kvlog used them.)
+sendSure : unsafe Int -> Int -> a -> Bool .
+sendSure me who m = case send who m of
+    Ok u -> True
+  | Err why -> (case why == "dead actor" of
+      True -> False
+    | False -> _ = yield me; sendSure me who m).
+
+# the prelude's `ask`, with a request that cannot be lost
+askSure : unsafe Int -> Int -> q -> r .
+askSure me a q =
+  _ = sendSure me a (me, q);
+  receiveFrom me a.
+
+# ---- request / reply that ANSWERS ---------------------------------------------------
+# The prelude's `ask` sends (me, q) without looking at the answer and then waits
+# for the next message from the service -- for ever, if the service is gone.
+# `call` is the request/reply a caller can rely on:
+#
+#   Ok r                  the reply to THIS request
+#   Err "mailbox full"    refused: the request was never queued (callSure waits
+#                         for room instead)
+#   Err "dead actor"      refused because the service had ended, or it ended
+#                         before replying -- a caller is never left waiting
+#
+# The request is (me, id, q) with a fresh correlation id (Sys.nextId); the
+# service answers it with `reply req r`, which sends (id, r).  Only a message
+# FROM the service is taken, so an event queued by anyone else stays queued; a
+# reply whose id is not this request's belongs to an earlier request its caller
+# stopped waiting for, and is dropped rather than read as this answer.  Tuples,
+# not a declared type, so separately compiled units (QOS plugins) agree on it.
+call : unsafe Int -> Int -> q -> Result r String .
+call me a q =
+  id = Sys.nextId Unit;
+  case send a (me, id, q) of
+    Err e -> Err e
+  | Ok u -> awaitReply me a id.
+
+callSure : unsafe Int -> Int -> q -> Result r String .
+callSure me a q =
+  id = Sys.nextId Unit;
+  case sendSure me a (me, id, q) of
+    False -> Err "dead actor"
+  | True -> awaitReply me a id.
+
+# the reply to request `id` from `a`: Ok r, or Err "dead actor" once `a` has
+# ended with nothing from it left queued.  The reply is kept (copied into this
+# actor's heap) and the message released, as boundary does.
+awaitReply : unsafe Int -> Int -> Int -> Result r String .
+awaitReply me a id = case receiveFromRes me a of
+    Err e -> Err e
+  | Ok m -> replyOf me a id m.
+replyOf : unsafe Int -> Int -> Int -> (Int, r) -> Result r String .
+replyOf me a id m = case m of
+  (rid, r) -> if rid == id then replyKept m r else replyStale me a id m.
+replyKept m r =
+  v = keep r;
+  _ = drop m;
+  Ok v.
+replyStale me a id m =
+  _ = drop m;
+  awaitReply me a id.
+
+# the service half.  A server destructures the request, `(from, id, q) = m`,
+# keeps its RETURN ADDRESS `(from, id)` (two Ints: the message itself can be
+# dropped as usual), and answers with `reply (from, id) r`.  The Result says
+# whether the answer was queued (the caller may have gone, which is not the
+# service's problem).
+reply : unsafe (Int, Int) -> r -> Result Unit String .
+reply ret r = case ret of (from, id) -> send from (id, r).
+
+# the same guarantees for a wire that has no correlation id (svc's Rpc, whose
+# replies are the service's bare values): the request's send is checked, and
+# the next message FROM `a` is the answer, or Err "dead actor" once `a` has
+# ended.  Only for services that send this caller nothing but replies.
+sendAwait : unsafe Int -> Int -> m -> Result r String .
+sendAwait me a msg = case send a msg of
+    Err e -> Err e
+  | Ok u -> awaitFrom me a.
+awaitFrom : unsafe Int -> Int -> Result r String .
+awaitFrom me a = case receiveFromRes me a of
+    Err e -> Err e
+  | Ok m -> replyKept m m.
+
+# ---- the frame boundary: how a long-lived actor stays the same size ------------------
+# An actor's heap is a pool: values are not collected one by one, the WHOLE pool
+# is reclaimed when the actor dies -- or when it says so.  An actor that loops
+# forever (a server, a store, a session) therefore takes a boundary between
+# turns: its state goes to itself as a message (a deep copy, outside the pool),
+# the pool is reset, and the state comes back as the only thing alive.  Every
+# temporary of every turn since the last boundary is gone.
+#
+# AFTER a boundary use only what it returned: anything else you were holding
+# pointed into the pool that was just reset.
+boundary : unsafe Int -> a -> a .
+boundary me state =
+  _ = send me state;
+  _ = Sys.poolReset 0;
+  m = receiveFrom me me;
+  fresh = keep m;
+  _ = drop m;
+  fresh.
+
+# The same, but only when the heap has DOUBLED since the last one, so the copy
+# is paid for by the garbage it frees (amortized, as a copying collector is):
+# a store with a million keys does not copy them on every put.
+#
+#   loop me st t = case A.tidy me (st, t) of (st2, t2) -> ... loop me st3 t2
+# Tidy slack limit: `slack` is how much garbage an actor may hold beyond twice
+# its live state.  A store wants a megabyte (few boundaries); one of ten
+# thousand sessions wants a few kilobytes (small, and its state is tiny anyway).
+Tidy = Type (Tidy Int Int).
+tidy0 = Tidy 1048576 1048576.
+tidySmall = Tidy 32768 32768.
+tidy : unsafe Int -> (a, Tidy) -> (a, Tidy) .
+tidy me pair = case pair of (state, Tidy slack limit) ->
+  (if heapUsed Unit < limit then pair
+   else tidied me slack (boundary me state)).
+tidied : Int -> Int -> a -> (a, Tidy) .
+tidied me slack fresh = (fresh, Tidy slack (2 * heapUsed Unit + slack)).
+
+# Fixed local heap admission. Bytes include allocator block headers/padding;
+# mailbox, stack, outgoing messages and child actors are separate costs.
+# Err refuses the heap grant; allocation past it fail-stops the child.
+spawnWithHeap bytes f = spawnHeap bytes f.
