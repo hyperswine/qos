@@ -250,3 +250,47 @@ of a process-wide singleton against explicit standalone factories/raw callers.
 C still owns DMA/queue reservation, reset effects, cancellation cleanup and
 physical offline publication. Those ownership transitions are the next
 migration, beyond this routing checkpoint.
+
+## Stable Files owner and Qlog recovery (2026-10-05)
+
+`std/fs` v1.0 (`42407f97b02f451f`) adds a stable Files RPC actor in
+`startBlock` and `startBlockOn`. Native System.qa, Portable qsys and the
+Portable services composition publish that owner after its first Qlog
+initialization/index scan succeeds. Native binds the process storage syscall
+once to this stable address. Namespace clients also retain the same address;
+replacing Qlog needs no C pointer update or client reconnection.
+
+The owner serializes requests and keeps their payload before nested receives.
+Qlog's transport failure returns `Err "storage service: dead actor"` to the
+original caller. The owner never replays that request: its mutation may have
+committed before a lost reply. Before the next request, it creates a replacement
+on the same storage hart and block service, waits for Qlog's pending-write
+rollback/index scan, then forwards the new request. Ordinary Qlog operation
+Errors preserve the current interpreter. A failed replacement readiness check
+latches the owner offline; later requests return Errors immediately without
+spawning more interpreters. Failed initial readiness kills the unpublished
+owner and leaves bootstrap storage offline. Recovery is demand-driven, with
+one readiness attempt per failure, rather than a background crash loop.
+
+`serveBlock` and `serve device` retain the explicit standalone, unsupervised
+factories. There is still no cancel/drain/stop protocol, no child cleanup when
+an external caller kills the Files owner, and no administrative command to
+bring a physically offline disk back online. The Files status endpoint still
+reports whether an owner was published; operation Results report later
+unavailability. C retains DMA reservation, atomics/fences, reset effects and
+cancellation cleanup. Moving those ownership decisions behind an FP-RISC
+command/effect boundary is the next checkpoint; TCP/ARP and the other dated
+plan items remain open.
+
+Validation: `tools/qlog-routing-check.py` covers two Portable runs and 24
+native boots. Four new virtio v1/v2, matching one/two-hart fixtures interrupt
+an append, recover through the same Files handle, prove the failed append was
+not replayed, append/replay/verify again, then inject unconfirmed reset and
+prove latched offline refusal with DMA backing reserved. Two additional
+loaded-process boots bind the real storage syscall once, interrupt its append,
+recover/replay through that unchanged binding, preserve unrelated mailbox
+messages and reclaim process images. The existing routing, persistent boot,
+failed initialization and no-disk matrix remains covered. Portable qsys's
+two plugin/persistence boots and the complete disk-hardening suite (including
+eight reset-owner cancellation boots) pass. No full repository sweep or
+hardware verification is claimed.

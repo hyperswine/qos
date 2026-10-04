@@ -43,3 +43,4 @@ uart v3.0 cdee34460c2ad81a
 blockio v1.0 17e531c2046076a6
 block v1.0 70a7bd3df3e2b6b7
 qlog v3.0 f556a08d099fbe45
+fs v1.0 42407f97b02f451f

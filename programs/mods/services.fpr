@@ -4,7 +4,7 @@
 unsafe module.
 EP = use "ep".
 AC = use "std/actor".
-FS = use "std/fs".
+FS = use "std/fs#42407f97b02f451f".
 Block = use "std/blockio#17e531c2046076a6".
 Files = use "files".
 GX = use "graphics".

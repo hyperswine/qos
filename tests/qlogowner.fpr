@@ -1,0 +1,38 @@
+# Stable Files owner: interrupted mutations are never replayed, recovery
+# rescans committed state; unconfirmed device reset latches storage offline.
+FS = use "../std/fs".
+B = use "../std/blockio".
+Native = use "../std/block".
+blkTestStallNth : Int -> Int .
+blkTestResetFails : Unit -> Int .
+blkTestReserved : Unit -> Int .
+blkTestNow : Unit -> Int .
+ok r = case r of Ok v -> True | Err why -> False.
+text r = case r of Ok v -> v | Err why -> why.
+failed r = case r of Err why -> True | Ok v -> False.
+main : unsafe String .
+main =
+  me = myself 0;
+  hart = if Sys.harts Unit > 1 then 1 else 0;
+  block = Native.serveOn hart me (device "blk");
+  _ = B.call me block (B.Configure (0, 100000, 20, 2));
+  fs = case FS.startBlockOn hart me block of Ok a -> a | Err why -> error why;
+  before = ok (FS.append me fs "owner/value" "before");
+  _ = blkTestStallNth 4;
+  aborted = failed (FS.append me fs "owner/value" "stalls");
+  recovered = text (FS.readLatest me fs "owner/value") == "before";
+  unreplayed = text (FS.replay me fs "owner/value") == "before";
+  after = ok (FS.append me fs "owner/value" "after");
+  replay = text (FS.replay me fs "owner/value") == "beforeafter";
+  verified = ok (FS.rpc me fs 8 "" "");
+  _ = blkTestStallNth 1;
+  stopped = failed (FS.readLatest me fs "owner/value");
+  _ = blkTestResetFails Unit;
+  recoveryFailed = failed (FS.readLatest me fs "owner/value");
+  start = blkTestNow Unit;
+  offline = failed (FS.append me fs "owner/value" "refused");
+  fast = blkTestNow Unit - start < 50000;
+  reserved = blkTestReserved Unit == 1;
+  budgetOffline = (case B.call me block (B.Configure (1, 100000, 20, 2)) of Err why -> why == "block: device offline" | Ok v -> False);
+  holds = before and aborted and recovered and unreplayed and after and replay and verified and stopped and recoveryFailed and offline and fast and reserved and budgetOffline;
+  "qlogowner: before={before} aborted={aborted} recovered={recovered} unreplayed={unreplayed} after={after} replay={replay} verified={verified} stopped={stopped} recoveryFailed={recoveryFailed} offline={offline} fast={fast} reserved={reserved} budgetOffline={budgetOffline} {if holds then "HOLDS" else "FAILED"}".

@@ -1,0 +1,33 @@
+unsafe program.
+# Bind once, then keep using that syscall address across Qlog replacement.
+FS = use "std/fs".
+B = use "std/blockio".
+Native = use "std/block".
+S = use "../programs/mods/svc".
+NI = use "nativeimage".
+blkTestStallNth : Int -> Int .
+Sys.bindStore : Int -> S.Rpc -> Unit .
+Sys.bindApp : String -> Unit .
+probe me qa tag payload stall =
+  (ok, why, root) = NI.place qa;
+  _ = case ok == 2 of True -> Unit | False -> error "probe placement: {why}";
+  _ = blkTestStallNth stall;
+  _ = send root (tag, payload);
+  _ = send root (Err "unrelated");
+  NI.result me root.
+main =
+  me = myself 0;
+  block = Native.serveOn 1 me (device "blk");
+  _ = B.call me block (B.Configure (0, 100000, 20, 2));
+  fs = case FS.startBlockOn 1 me block of Ok a -> a | Err why -> error why;
+  qa = case FS.readLatest me fs "apps/StoreOwner.qa" of Ok bytes -> bytes | Err why -> error why;
+  _ = Sys.bindApp "StoreOwner";
+  _ = Sys.bindStore fs (S.Rpc fs 0 "" "");
+  before = probe me qa 2 "before" 0;
+  aborted = probe me qa 2 "stalls" 4;
+  recovered = probe me qa 3 "" 0;
+  after = probe me qa 2 "after" 0;
+  replay = probe me qa 3 "" 0;
+  freed = NI.settle 0 400;
+  holds = before == "storeownerprobe: Ok  noise=True" and aborted == "storeownerprobe: Err storage service: dead actor noise=True" and recovered == "storeownerprobe: Ok before noise=True" and after == "storeownerprobe: Ok  noise=True" and replay == "storeownerprobe: Ok beforeafter noise=True" and freed;
+  "nativeowner: before=[{before}] aborted=[{aborted}] recovered=[{recovered}] after=[{after}] replay=[{replay}] freed={freed} {if holds then "HOLDS" else "FAILED"}".

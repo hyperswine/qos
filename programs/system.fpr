@@ -70,7 +70,7 @@ IInt = EP.IInt.
 IStr = EP.IStr.
 IFn  = EP.IFn.
 IErr = EP.IErr.
-QLog    = use "mods/qlog#f556a08d099fbe45".
+FS = use "std/fs#42407f97b02f451f".
 Block = use "std/block#70a7bd3df3e2b6b7".
 BlockIO = use "std/blockio#17e531c2046076a6".
 UartM   = use "mods/uart".
@@ -1130,16 +1130,11 @@ bootBlockPages me block = case BlockIO.capacity me block of
     Ok n -> n
   | Err why -> error "system: block service startup: {why}".
 spawnStore block =
-  a = case Sys.harts Unit > 1 of
-        True -> spawnOn 1 (QLog.actorWith (QLog.routed block))
-      | False -> spawn (QLog.actorWith (QLog.routed block));
-  # Wait for ensure + index scan before binding the process syscall route.
-  # A startup failure leaves storage offline instead of publishing a dead owner.
-  ready = AC.sendAwait (myself 0) a (Rpc (myself 0) 5 "" "");
-  storeReady a ready.
-storeReady a ready = case ready of
-    Ok (Ok stats) -> _ = Sys.bindStore a (Rpc a 0 "" ""); a
-  | Ok (Err why) -> storeUnavailable why
+  hart = if Sys.harts Unit > 1 then 1 else 0;
+  # Bind the stable Files owner only after its first Qlog scan succeeds.
+  storeReady (FS.startBlockOn hart (myself 0) block).
+storeReady ready = case ready of
+    Ok a -> _ = Sys.bindStore a (Rpc a 0 "" ""); a
   | Err why -> storeUnavailable why.
 storeUnavailable why = _ = Sys.logAt 2 "system: storage startup failed: {why}"; 0.
 

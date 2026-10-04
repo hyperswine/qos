@@ -1,0 +1,11 @@
+unsafe program.
+# The loaded process uses the real C storage ABI. Kernel selects each stage
+# before the call; the process retains unrelated mailbox traffic.
+main =
+  me = myself 0;
+  command = receive me;
+  (tag, payload) = keep command;
+  _ = drop command;
+  answer = Sys.storeReq tag payload;
+  noise = case receiveNow me of Ok (Err "unrelated") -> True | _ -> False;
+  "storeownerprobe: {answer} noise={noise}".

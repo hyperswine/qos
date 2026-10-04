@@ -166,11 +166,12 @@ sw qos_store_call(uw tag, const char *pay, uw plen, char *out, uw outcap) {
    * round trip (a blocking receive frees the hart) */
   void *me = fpr_hart()->current;
   V msg = mkrpc((V)me, TAG((sw)tag), urlv, payv);
-  /* the storage actor's mailbox is Dynamic; a refusal is the machine out
+  /* The stable Files owner forwards to a replaceable Qlog interpreter.
+   * Its mailbox is Dynamic; a refusal is the machine out
    * of memory, or the actor gone -- the PROCESS hears it, the kernel runs on */
   if (!fpr_sent(fpr_send_as((uw)me, g_store_actor, msg)))
     return store_refused("storage: the storage actor refused the request", out, outcap);
-  /* the reply is the storage actor's own: Ok <its Result>, or Err "dead
+  /* the reply is the Files owner's own: Ok <its Result>, or Err "dead
    * actor" when it ended first (receiveFromRes wraps the message) */
   V w = fpr_receive_from_res_c((V)me, g_store_actor);
   V r = ((hdr_t *)w)->var == 0 ? *(V *)((char *)w + 8) : w;
