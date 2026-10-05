@@ -3,7 +3,7 @@
 FS = use "../std/fs".
 B = use "../std/blockio".
 Native = use "../std/block".
-QL = use "../programs/mods/qlog#f556a08d099fbe45".
+QL = use "../programs/mods/qlog#5c94f0ce8d592d3d".
 blkTestStallNth : Int -> Int .
 blkTestNow : Unit -> Int .
 ok r = case r of Ok v -> True | Err why -> False.

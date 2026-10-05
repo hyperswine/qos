@@ -17,14 +17,6 @@ client svc self = _ = B.call self svc (B.Write 3 "stalls"); Unit.
 rawWriter boss self = _ = send boss (blkWrite (device "blk") 3 "stalls"); Unit.
 awaitBusy : (n : Int | measure n) -> Bool .
 awaitBusy n = if n <= 0 then False else if blkTestBusy Unit == 1 then True else _ = Sys.sleepUs 100; awaitBusy (n - 1).
-fill : (n : Int | measure n) -> Int -> Int -> Int .
-fill n me svc = if n <= 0 then 0 else case send svc (me, 0, B.GetBudget) of
-    Err why -> 0
-  | Ok u -> 1 + fill (n - 1) me svc.
-awaitDrain : (n : Int | measure n) -> Int -> Int -> Bool .
-awaitDrain n me svc = if n <= 0 then False else case B.call me svc B.GetBudget of
-    Ok reply -> True
-  | Err why -> _ = Sys.sleepUs 1000; awaitDrain (n - 1) me svc.
 main : unsafe String .
 main =
   me = myself 0;
@@ -58,11 +50,10 @@ main =
   _ = blkTestStall Unit;
   gone = spawn (client svc);
   accepted = awaitBusy 500;
-  queued = fill 70 me svc;
-  overload = errorIs "block service: mailbox full" (B.call me svc B.GetBudget);
+  responsive = budget (B.call me svc B.GetBudget) == set;
   _ = kill gone;
-  drained = awaitDrain 200 me svc;
-  cancelled = page (B.call me svc (B.Read 3)) == "before";
+  ready = budget (B.call me svc B.GetBudget) == set;
+  callerDeath = page (B.call me svc (B.Read 3)) == "before";
   _ = blkTestStall Unit;
   set2 = budget (B.call me svc (B.Configure (1, 100000, 1, 2)));
   _ = blkTestResetDelay 1;
@@ -73,5 +64,5 @@ main =
   fast = blkTestNow Unit - t1 < 50000;
   liveOffline = budget (B.call me svc B.GetBudget) == set2;
   offlineConfig = errorIs "block: device offline" (B.call me svc (B.Configure (2, 200000, 30, 3)));
-  holds = initial == (0, 300000, 1000, 3) and pending and accepted and queued > 0 and drained and overload and set2 == (2, 100000, 1, 2) and cancelled and offline and refused and fast and liveOffline and offlineConfig and bad and set == (1, 100000, 20, 2) and stale and unchanged and auth and outOfRange and oversized and write == 6 and read == "before" and busy and reserved and recovered == "before" and timeout and timed and alive and after == "before";
-  "blockservice: invalid={bad} stale={stale} unchanged={unchanged} auth={auth} range={outOfRange} size={oversized} busy={busy} reserved={reserved} timeout={timeout} timed={timed} alive={alive} overload={overload} cancelled={cancelled} offline={offline} refused={refused} fast={fast} liveOffline={liveOffline} offlineConfig={offlineConfig} after={after} {if holds then "HOLDS" else "FAILED"}".
+  holds = initial == (0, 300000, 1000, 3) and pending and accepted and ready and responsive and set2 == (2, 100000, 1, 2) and callerDeath and offline and refused and fast and liveOffline and offlineConfig and bad and set == (1, 100000, 20, 2) and stale and unchanged and auth and outOfRange and oversized and write == 6 and read == "before" and busy and reserved and recovered == "before" and timeout and timed and alive and after == "before";
+  "blockservice: invalid={bad} stale={stale} unchanged={unchanged} auth={auth} range={outOfRange} size={oversized} busy={busy} reserved={reserved} timeout={timeout} timed={timed} alive={alive} responsive={responsive} callerDeath={callerDeath} offline={offline} refused={refused} fast={fast} liveOffline={liveOffline} offlineConfig={offlineConfig} after={after} {if holds then "HOLDS" else "FAILED"}".

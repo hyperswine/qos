@@ -352,3 +352,89 @@ Validation:
   harnesses now build `HARTS` to match each QEMU `-smp` configuration.
 - The Qlog routing suite passes its two Portable runs and 24 native boots,
   including stable Files recovery and actual loaded-process storage syscalls.
+
+## Block namespace and cancellation/drain (2026-10-05)
+
+`std/blockio` v2.0 (`1e7c2253c4828e32`) separates its admission actor from
+one active disposable I/O worker and a completion relay. The relay turns
+worker death into a Result without blocking the admission actor. At most 64
+additional I/O requests are admitted to its FIFO; overflow is
+`Err "block: queue full"`. This is a request-count bound, not a process-wide
+mailbox/byte bound: mailboxes still have 64 slots per sender, and asynchronous
+clients must reserve reply capacity and consume their responses. Capacity,
+budget queries, status, cancellation and drain remain responsive during I/O.
+Native budget updates still use the HAL's idle-only reservation check.
+
+The added direct protocol is:
+
+| Request | Contract |
+| --- | --- |
+| `Status` | `State mode queued active`; modes 0/1/2 mean open/draining/drained admission, not physical device health. |
+| `Cancel id` | Cancel this caller's admitted request. `Cancelled True` means it was found; False means it was no longer pending or not yet admitted. |
+| `CancelFor caller id` | The creator may cancel another caller's admitted request; other actors receive an administrator error. |
+| `Drain` | Creator-only barrier: close admission, settle the active and admitted queued requests, then return `Drained`. Repeated drain after completion is idempotent. |
+
+Queued cancellation removes the request and answers its original caller
+`Err "block: request cancelled before I/O"`. Active cancellation kills the
+worker and answers the original caller `Err "block: request cancelled (outcome
+unknown)"` when the relay settles. A write can have reached the device before
+cancellation: there is no rollback promise. The worker's DMA reservation and
+cleanup continue to follow the HAL ownership policy. Only the active relay's
+matching actor/id can finish a request; forged or obsolete completion messages
+are ignored. Caller death alone still does not cancel accepted work.
+
+`submit` returns a correlation id and `await` consumes that request's Result.
+The existing synchronous `call` remains. `std/actor` drops replies with other
+ids while awaiting a particular id: callers retaining both original and
+control results must submit asynchronously and await the original before the
+control reply. Cancellation acknowledgements confirm a protocol decision,
+not physical cleanup completion. Drain settles protocol requests, does not
+flush durability or promise hardware DMA quiescence after cancellation, and
+keeps the actor alive for queries. New page I/O is refused after closure;
+there is no resume or physical reprobe command.
+
+`mods/blockep` v1.2 (`97237492694e7b1a`) exposes the system-owned service at
+`/services/block`. Native System.qa, Portable qsys and services composition
+register it without opening another Device or starting another block owner.
+There are no default application grants to raw pages. The adapter keeps its
+own client/mode-bound handles, copies borrowed messages before nested receives,
+and reclaims turn temporaries with an actor boundary. A read-only handle
+cannot write; another actor cannot use it; close removes it. Namespace grants
+remain the process authorization gate, with the existing cooperative-image
+trust limitation. Lifecycle administration uses the direct creator protocol,
+not namespace URLs. Endpoint close does not cancel an outstanding page RPC.
+
+| Endpoint | Value |
+| --- | --- |
+| `/services/block/capacity` | Read page count (`IInt`). |
+| `/services/block/status` | Read admission mode, queued count and active flag (`IStr`). |
+| `/services/block/budget` | Read native version/deadline/probes/factor text; Portable explicitly refuses native budgets. |
+| `/services/block/pages/<decimal>` | Read exactly one page as bytes; write up to 4096 bytes and return accepted byte count. |
+
+Page numbers are parsed digit by digit against reported capacity, before
+multiplication, so malformed, signed, huge or out-of-range paths return Errors.
+Raw page operations do not coordinate Qlog transactions or indexes; this
+adapter does not enforce the filesystem's single-writer convention. Global
+singleton enforcement, Files quiesce/stop coordination, resume/reprobe, and
+TCP/ARP migration remain open. No hardware verification is claimed.
+
+Publication follows the changed constructor identities: native `std/block`
+v2.0 (`f6a778da43671433`), Qlog v4.0 (`5c94f0ce8d592d3d`), and compatible
+Files v1.1 (`ef209d6518832a06`) all pin the new dependency chain. Old committed
+versions remain intact. Exact prior Qlog/Files blobs were added to transitional
+trust solely for their publication interface comparisons; blockio/blockep
+compile with explicit schemes, without new blanket trust.
+
+Validation: `tools/block-lifecycle-check.py` passes four Portable runs and
+eight native virtio v1/v2 boots with matching one/two-hart kernels. It covers
+responsive controls during stalled I/O, the global admitted queue bound,
+queued/self/admin cancellation, original pre-I/O and unknown-outcome replies,
+authority refusal, duplicate cancellation, drain admission closure and
+idempotence, unchanged disk contents, and rejection of forged completion.
+Namespace checks cover native budgets/Portable refusal, malformed/overflow
+paths, full binary pages, payload/shape errors, app grants, handle mode/client
+binding, closed handles and drained I/O refusal. Four native budget/recovery
+boots, full disk hardening and reset-cancellation, the 24-boot Qlog routing and
+loaded-process syscall matrix, Portable plugin persistence, and shared Files
+prefix/compaction/refusal persistence checks also pass. This is focused
+verification, not a full repository sweep.

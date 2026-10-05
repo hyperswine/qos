@@ -31,7 +31,7 @@ with tempfile.TemporaryDirectory(prefix='qos-block-service-') as d:
                 args += ['-global', 'virtio-mmio.force-legacy=false']
             out = run(args, timeout=30)
             want = ('blockservice: invalid=True stale=True unchanged=True auth=True range=True size=True '
-                    'busy=True reserved=True timeout=True timed=True alive=True overload=True cancelled=True offline=True '
+                    'busy=True reserved=True timeout=True timed=True alive=True responsive=True callerDeath=True offline=True '
                     'refused=True fast=True liveOffline=True offlineConfig=True after=before HOLDS')
             assert want in out, out
             print(f'Native block service: virtio v{2 if modern else 1}, {harts} hart(s), budgets/refusal/recovery HOLDS', flush=True)

@@ -1,0 +1,66 @@
+# Queued cancellation, active cancellation, global queue bound and drain.
+unsafe program.
+B = use "../std/blockio".
+Native = use "../std/block".
+blkTestStall : Unit -> Int .
+blkTestBusy : Unit -> Int .
+err why (Err text) = why == text.
+err why other = False.
+ok (Ok value) = True.
+ok other = False.
+active (Ok (B.State 0 count True)) = True.
+active other = False.
+stateIs mode count (Ok (B.State m n busy)) = m == mode and n == count.
+stateIs mode count other = False.
+cancelled (Ok (B.Cancelled True)) = True.
+cancelled other = False.
+client boss svc me =
+  token = case B.submit me svc (B.Write 3 "cancelled") of Ok id -> id | Err why -> error why;
+  _ = send boss token;
+  result = B.await me svc token;
+  _ = send boss result;
+  Unit.
+unauthorized boss svc me =
+  a = err "block: drain requires administrator" (B.call me svc B.Drain);
+  b = err "block: cancellation requires administrator" (B.call me svc (B.CancelFor boss 0));
+  _ = send boss (a and b); Unit.
+awaitBusy : (n : Int | measure n) -> Bool .
+awaitBusy n = if blkTestBusy Unit == 1 then True else if n <= 0 then False else _ = Sys.sleepUs 100; awaitBusy (n - 1).
+fill : (n : Int | measure n) -> Int -> Int -> List Int .
+fill n me svc = if n <= 0 then Nil else id = case B.submit me svc (B.Read 3) of Ok token -> token | Err why -> error why; _ = yield me; id :: fill (n - 1) me svc.
+main =
+  me = myself 0;
+  svc = Native.serve me (device "blk");
+  _ = B.call me svc (B.Configure (0, 1000000, 20, 2));
+  _ = B.call me svc (B.Write 3 "before");
+  stranger = spawn (unauthorized me svc);
+  auth = case receiveFromRes me stranger of Ok yes -> yes | other -> False;
+  _ = blkTestStall Unit;
+  a = spawn (client me svc);
+  token = receiveFrom me a;
+  busy = awaitBusy 500;
+  _ = send svc (me, token, B.Completed (Ok (B.Written 9)));
+  responsive = active (B.call me svc B.Status);
+  queuedClient = spawn (client me svc);
+  queuedToken = receiveFrom me queuedClient;
+  queued = case B.submit me svc (B.Write 3 "queued") of Ok id -> id | Err why -> error why;
+  ids = fill 62 me svc;
+  full = case ids of Nil -> False | other -> stateIs 0 64 (B.call me svc B.Status);
+  bounded = err "block: queue full" (B.call me svc (B.Read 3));
+  queuedCancelled = cancelled (B.call me svc (B.CancelFor queuedClient queuedToken));
+  beforeIO = case receiveFromRes me queuedClient of Ok result -> err "block: request cancelled before I/O" result | other -> False;
+  removed = cancelled (B.call me svc (B.Cancel queued));
+  duplicate = case B.call me svc (B.Cancel queued) of Ok (B.Cancelled False) -> True | other -> False;
+  smaller = stateIs 0 62 (B.call me svc B.Status);
+  drainId = case B.submit me svc B.Drain of Ok id -> id | Err why -> error why;
+  draining = stateIs 1 62 (B.call me svc B.Status);
+  refused = err "block: draining" (B.call me svc (B.Write 3 "refused"));
+  stopped = cancelled (B.call me svc (B.CancelFor a token));
+  unknown = case receiveFromRes me a of Ok result -> err "block: request cancelled (outcome unknown)" result | other -> False;
+  drained = case B.await me svc drainId of Ok B.Drained -> True | other -> False;
+  closed = stateIs 2 0 (B.call me svc B.Status);
+  noIO = err "block: draining" (B.call me svc (B.Read 3));
+  repeat = case B.call me svc B.Drain of Ok B.Drained -> True | other -> False;
+  unchanged = substr (blkRead (device "blk") 3) 0 6 == "before";
+  holds = auth and busy and responsive and full and bounded and queuedCancelled and beforeIO and removed and duplicate and smaller and draining and refused and stopped and unknown and drained and closed and noIO and repeat and unchanged;
+  "blocklifecycle: auth={auth} busy={busy} responsive={responsive} full={full} bounded={bounded} queuedCancelled={queuedCancelled} beforeIO={beforeIO} removed={removed} duplicate={duplicate} smaller={smaller} draining={draining} refused={refused} stopped={stopped} unknown={unknown} drained={drained} closed={closed} noIO={noIO} repeat={repeat} unchanged={unchanged} {if holds then "HOLDS" else "FAILED"}".

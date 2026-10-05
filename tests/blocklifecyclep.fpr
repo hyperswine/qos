@@ -1,0 +1,36 @@
+# Delayed Portable read: control remains responsive, queued write never starts,
+# cancellation leaves the HAL worker to drain, and service drain stays closed.
+unsafe program.
+B = use "../std/blockio".
+err why (Err text) = why == text.
+err why other = False.
+client boss svc me =
+  token = case B.submit me svc (B.Read 3) of Ok id -> id | Err why -> error why;
+  _ = send boss token;
+  answer = B.await me svc token;
+  _ = send boss answer; Unit.
+awaitActive : (n : Int | measure n) -> Int -> Int -> Bool .
+awaitActive n me svc = case B.call me svc B.Status of
+    Ok (B.State 0 count True) -> True
+  | other -> if n <= 0 then False else _ = Sys.sleepUs 1000; awaitActive (n - 1) me svc.
+main =
+  me = myself 0;
+  svc = B.serve me (device "blk");
+  _ = B.call me svc (B.Write 3 "before");
+  reader = spawn (client me svc);
+  token = receiveFrom me reader;
+  active = awaitActive 100 me svc;
+  _ = Sys.sleepUs 10000;
+  queued = case B.submit me svc (B.Write 3 "queued") of Ok id -> id | Err why -> error why;
+  cancelled = case B.call me svc (B.Cancel queued) of Ok (B.Cancelled True) -> True | other -> False;
+  drainId = case B.submit me svc B.Drain of Ok id -> id | Err why -> error why;
+  responsive = case B.call me svc B.Status of Ok (B.State 1 0 True) -> True | other -> False;
+  refused = err "block: draining" (B.call me svc (B.Write 3 "refused"));
+  stopped = case B.call me svc (B.CancelFor reader token) of Ok (B.Cancelled True) -> True | other -> False;
+  unknown = case receiveFromRes me reader of Ok answer -> err "block: request cancelled (outcome unknown)" answer | other -> False;
+  drained = case B.await me svc drainId of Ok B.Drained -> True | other -> False;
+  closed = case B.call me svc B.Status of Ok (B.State 2 0 False) -> True | other -> False;
+  _ = Sys.sleepUs 900000;
+  unchanged = substr (blkRead (device "blk") 3) 0 6 == "before";
+  holds = active and cancelled and responsive and refused and stopped and unknown and drained and closed and unchanged;
+  "blocklifecyclep: active={active} cancelled={cancelled} responsive={responsive} refused={refused} stopped={stopped} unknown={unknown} drained={drained} closed={closed} unchanged={unchanged} {if holds then "HOLDS" else "FAILED"}".

@@ -41,10 +41,11 @@
 # (EP.grant, registered by the launcher); the shell's own actors are pid 0.
 # ============================================================================
 
-FS = use "std/fs#42407f97b02f451f".
+FS = use "std/fs#ef209d6518832a06".
 AK  = use "appkit".
-QL  = use "qlog#f556a08d099fbe45".
-Block = use "std/blockio#17e531c2046076a6".
+QL  = use "qlog#5c94f0ce8d592d3d".
+BlockEP = use "blockep#97237492694e7b1a".
+Block = use "std/blockio#1e7c2253c4828e32".
 SVC = use "svc".
 EP  = use "ep".
 Core = use "coreutil".
@@ -364,27 +365,32 @@ bootSized me w h =
   block = Block.serve me (device "blk");
   st = case blockPages me block == 0 of True -> 0 | False -> startStorage me block;
   apps = case st == 0 of True -> Nil | False -> attachAll me st;
-  bootWireSized w h me st apps.
+  bootWireSizedBlock w h me st apps block.
 blockPages me block = case Block.capacity me block of Ok n -> n | Err why -> error "system: block service startup: {why}".
 boot2 me block n = case n == 0 of
-    True -> bootNoDisk me
+    True -> _ = Sys.logAt 1 "system: no disk -- storage and apps offline"; bootWireBlock me 0 Nil block
   | False -> bootDisk me block.
 bootNoDisk me =
   _ = Sys.logAt 1 "system: no disk -- storage and apps offline";
   bootWire me 0 Nil.
 bootDisk me block =
   st = startStorage me block;
-  bootWire me st (case st == 0 of True -> Nil | False -> attachAll me st).
+  bootWireBlock me st (case st == 0 of True -> Nil | False -> attachAll me st) block.
 startStorage me block = storageReady (FS.startBlock me block).
 storageReady ready = case ready of
     Ok st -> st
   | Err why -> _ = Sys.logAt 2 "system: storage startup failed: {why}"; 0.
 bootWire : unsafe Int -> Int -> List App -> Qsys .
-bootWire me st apps =
-  bootWireSized 0 0 me st apps.
-bootWireSized w h me st apps =
+bootWire me st apps = bootWireBlock me st apps 0.
+bootWireBlock : unsafe Int -> Int -> List App -> Int -> Qsys .
+bootWireBlock me st apps block = bootWireSizedBlock 0 0 me st apps block.
+bootWireSized : unsafe Int -> Int -> Int -> Int -> List App -> Qsys .
+bootWireSized w h me st apps = bootWireSizedBlock w h me st apps 0.
+bootWireSizedBlock : unsafe Int -> Int -> Int -> Int -> List App -> Int -> Qsys .
+bootWireSizedBlock w h me st apps block =
   ns = spawnD EP.namespace;
   _ = claim me ns "/" (spawnD (EP.lister ns));
+  _ = case block == 0 of True -> Unit | False -> claim me ns "/services/block" (spawnD (BlockEP.serve block));
   logA = spawnD logActor;
   logs = spawnD (EP.simple logR logW);
   _ = claim me ns "/services/log" logs;

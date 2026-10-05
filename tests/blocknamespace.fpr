@@ -1,0 +1,68 @@
+# Portable/native namespace adapter: raw page grants are explicit and bounded.
+unsafe program.
+B = use "../std/blockio".
+BlockEP = use "../programs/mods/blockep".
+EP = use "../programs/mods/ep".
+AC = use "std/actor".
+S = use "std/string".
+ok (Ok value) = True.
+ok other = False.
+err why (Err text) = why == text.
+err why other = False.
+text (Ok (EP.IStr bytes)) = bytes.
+text other = "error".
+limited boss ns me =
+  _ = receive me;
+  allowed = ok (EP.readOnce me ns "/services/block/capacity");
+  denied = err "not granted: /services/block/pages/3 (read)" (EP.readOnce me ns "/services/block/pages/3");
+  writeDenied = err "not granted: /services/block/capacity (write)" (EP.writeOnce me ns "/services/block/capacity" EP.IUnit);
+  _ = send boss (allowed and denied and writeDenied);
+  Unit.
+readonly boss ns me =
+  _ = receive me;
+  ep = case EP.open me ns "/services/block/pages/3" "read" of Ok handle -> handle | Err why -> error why;
+  denied = err "block endpoint: handle is read-only" (EP.write me ep (EP.IStr "forbidden"));
+  allowed = substr (text (EP.read me ep 0)) 0 6 == "routed";
+  _ = EP.close me ep;
+  _ = send boss (denied and allowed); Unit.
+intruder boss ep me =
+  denied = err "block endpoint: handle belongs to another client" (EP.read me ep 0);
+  _ = send boss denied; Unit.
+main =
+  me = myself 0;
+  block = B.serve me (device "blk");
+  ns = AC.spawnWith (AC.Dynamic 64) EP.namespace;
+  endpoint = AC.spawnWith (AC.Dynamic 64) (BlockEP.serve block);
+  _ = EP.register me ns "/services/block" endpoint;
+  capacity = case EP.readOnce me ns "/services/block/capacity" of Ok (EP.IInt n) -> n > 3 | other -> False;
+  status = text (EP.readOnce me ns "/services/block/status") == "mode=0 queued=0 active=False";
+  budget = err "block: native budgets unsupported" (EP.readOnce me ns "/services/block/budget");
+  w = case EP.writeOnce me ns "/services/block/pages/3" (EP.IStr "routed") of Ok (EP.IInt 6) -> True | other -> False;
+  r = substr (text (EP.readOnce me ns "/services/block/pages/3")) 0 6 == "routed";
+  malformed = err "block endpoint: invalid page number" (EP.readOnce me ns "/services/block/pages/3x");
+  negative = err "block endpoint: invalid page number" (EP.readOnce me ns "/services/block/pages/-1");
+  overflow = err "block: page out of range" (EP.readOnce me ns "/services/block/pages/99999999999999999999999999999");
+  unknown = err "block endpoint: unknown path" (EP.readOnce me ns "/services/block/other");
+  shape = err "block endpoint: writes require bytes" (EP.writeOnce me ns "/services/block/pages/3" EP.IUnit);
+  size = err "block: payload exceeds one page" (EP.writeOnce me ns "/services/block/pages/3" (EP.IStr (S.repeat 4097 "x")));
+  binary = strcat (chr 0) "xyz";
+  fullPage = S.repeat 1024 binary;
+  whole = ok (EP.writeOnce me ns "/services/block/pages/4" (EP.IStr fullPage)) and text (EP.readOnce me ns "/services/block/pages/4") == fullPage;
+  app = Sys.spawnApp (limited me ns);
+  _ = EP.grant me ns (Sys.pidOf app) (("/services/block/capacity", "read") :: Nil);
+  _ = send app 1;
+  grants = case receiveFromRes me app of Ok yes -> yes | other -> False;
+  reader = Sys.spawnApp (readonly me ns);
+  _ = EP.grant me ns (Sys.pidOf reader) (("/services/block/pages/3", "read") :: Nil);
+  _ = send reader 1;
+  modes = case receiveFromRes me reader of Ok yes -> yes | other -> False;
+  handle = case EP.open me ns "/services/block/pages/3" "read" of Ok h -> h | Err why -> error why;
+  stranger = spawn (intruder me handle);
+  clients = case receiveFromRes me stranger of Ok yes -> yes | other -> False;
+  _ = EP.close me handle;
+  closedHandle = err "block endpoint: no such handle" (EP.read me handle 0);
+  drain = case B.call me block B.Drain of Ok B.Drained -> True | other -> False;
+  offline = err "block: draining" (EP.readOnce me ns "/services/block/pages/3");
+  closed = text (EP.readOnce me ns "/services/block/status") == "mode=2 queued=0 active=False";
+  holds = capacity and status and budget and w and r and malformed and negative and overflow and unknown and shape and size and whole and grants and modes and clients and closedHandle and drain and offline and closed;
+  "blocknamespace: capacity={capacity} status={status} budget={budget} write={w} read={r} malformed={malformed} negative={negative} overflow={overflow} unknown={unknown} shape={shape} size={size} whole={whole} grants={grants} modes={modes} clients={clients} closedHandle={closedHandle} drain={drain} offline={offline} closed={closed} {if holds then "HOLDS" else "FAILED"}".

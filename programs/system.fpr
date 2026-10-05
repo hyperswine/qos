@@ -70,9 +70,10 @@ IInt = EP.IInt.
 IStr = EP.IStr.
 IFn  = EP.IFn.
 IErr = EP.IErr.
-FS = use "std/fs#42407f97b02f451f".
-Block = use "std/block#70a7bd3df3e2b6b7".
-BlockIO = use "std/blockio#17e531c2046076a6".
+FS = use "std/fs#ef209d6518832a06".
+Block = use "std/block#f6a778da43671433".
+BlockEP = use "mods/blockep#97237492694e7b1a".
+BlockIO = use "std/blockio#1e7c2253c4828e32".
 UartM   = use "mods/uart".
 TimerM  = use "mods/timer".
 MK      = use "mods/matrixkpd".
@@ -1046,6 +1047,7 @@ main =
   # running a loaded process, just like the storage actor.
   diskHart = case Sys.harts Unit > 1 of True -> 1 | False -> 0;
   block = Block.serveOn diskHart me dsk;
+  _ = SysEp.claim me ns "/services/block" (AC.spawnWithOn diskHart (AC.Dynamic 64) (BlockEP.serve block));
   pages = bootBlockPages me block;
   store = case pages == 0 of True -> 0 | False -> spawnStore block;
   st = {has = store != 0, act = store, uart = usvc, timer = tsvc, ns = ns};

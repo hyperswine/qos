@@ -4,8 +4,9 @@
 unsafe module.
 EP = use "ep".
 AC = use "std/actor".
-FS = use "std/fs#42407f97b02f451f".
-Block = use "std/blockio#17e531c2046076a6".
+FS = use "std/fs#ef209d6518832a06".
+Block = use "std/blockio#1e7c2253c4828e32".
+BlockEP = use "blockep#97237492694e7b1a".
 Files = use "files".
 GX = use "graphics".
 GL = use "glsvc".
@@ -19,6 +20,7 @@ boot =
   _ = claim me ns "/" (AC.spawnWith (AC.Dynamic 64) (EP.lister ns));
   disk = device "blk";
   block = Block.serve me disk;
+  _ = claim me ns "/services/block" (AC.spawnWith (AC.Dynamic 64) (BlockEP.serve block));
   pages = blockPages me block;
   fs = case pages == 0 of True -> 0 | False -> startFiles me block;
   _ = claim me ns "/services/files" (AC.spawnWith (AC.Dynamic 64) (Files.serve fs));

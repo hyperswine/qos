@@ -1,0 +1,50 @@
+# Namespace adapter over the system-owned block protocol, with no Device handle.
+# Explicit grants authorize raw pages; no application gets such a grant by default.
+# Lifecycle administration stays with the direct protocol's creator.
+EP = use "ep#f5a7c81840106100".
+B = use "std/blockio#1e7c2253c4828e32".
+serve : unsafe Int -> Int -> a .
+serve block me = EP.simple (readAt block) (writeAt block) me.
+readAt : unsafe Int -> Int -> Int -> String -> Result EP.IoV String .
+readAt block me client url =
+  if EP.strEq url "/services/block/capacity" then pagesReply (B.call me block B.Capacity)
+  else if EP.strEq url "/services/block/status" then statusReply (B.call me block B.Status)
+  else if EP.strEq url "/services/block/budget" then budgetReply (B.call me block B.GetBudget)
+  else pageRead block me (pageNumber block me url).
+writeAt : unsafe Int -> Int -> Int -> String -> EP.IoV -> Result EP.IoV String .
+writeAt block me client url value = case value of
+    EP.IStr bytes -> pageWrite block me bytes (pageNumber block me url)
+  | other -> Err "block endpoint: writes require bytes".
+pagesReply (Ok (B.Pages n)) = Ok (EP.IInt n).
+pagesReply (Err why) = Err why.
+pagesReply other = Err "block endpoint: invalid capacity reply".
+statusReply (Ok (B.State mode queued active)) = Ok (EP.IStr "mode={mode} queued={queued} active={active}").
+statusReply (Err why) = Err why.
+statusReply other = Err "block endpoint: invalid status reply".
+budgetReply (Ok (B.Budget policy)) = (version, us, probes, factor) = policy; Ok (EP.IStr "version={version} deadlineUs={us} resetProbes={probes} waitFactor={factor}").
+budgetReply (Err why) = Err why.
+budgetReply other = Err "block endpoint: invalid budget reply".
+pageRead block me number = case number of
+    Err why -> Err why
+  | Ok p -> pageReply (B.call me block (B.Read p)).
+pageReply (Ok (B.Page bytes)) = Ok (EP.IStr bytes).
+pageReply (Err why) = Err why.
+pageReply other = Err "block endpoint: invalid page reply".
+pageWrite block me bytes number = case number of
+    Err why -> Err why
+  | Ok p -> writtenReply (B.call me block (B.Write p bytes)).
+writtenReply (Ok (B.Written n)) = Ok (EP.IInt n).
+writtenReply (Err why) = Err why.
+writtenReply other = Err "block endpoint: invalid write reply".
+pageNumber : unsafe Int -> Int -> String -> Result Int String .
+pageNumber block me url = if EP.prefixOf "/services/block/pages" url and strlen url > 22 then
+    case B.capacity me block of
+      Err why -> Err why
+    | Ok pages -> if pages <= 0 then Err "block: page out of range" else parsePage url 22 0 (pages - 1)
+  else Err "block endpoint: unknown path".
+parsePage : unsafe String -> Int -> Int -> Int -> Result Int String .
+parsePage url index value limit = if index >= strlen url then Ok value else
+  digit = charAt url index - 48;
+  if digit < 0 or digit > 9 then Err "block endpoint: invalid page number"
+  else if value > limit / 10 or (value == limit / 10 and digit > limit % 10) then Err "block: page out of range"
+  else parsePage url (index + 1) (value * 10 + digit) limit.

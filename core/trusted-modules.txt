@@ -37,3 +37,7 @@
 # Qlog major version. Exact immutable identities, matching source trust above.
 ../.fpr/store/9264cdf0b73fc85b.fpr
 ../.fpr/store/0c925c3cb42f0f77.fpr
+# Previously shipped Qlog interface checked for the lifecycle protocol major.
+../.fpr/store/f556a08d099fbe45.fpr
+# Previously shipped Files interface checked while refreshing its Qlog pin.
+../.fpr/store/42407f97b02f451f.fpr
