@@ -1,12 +1,13 @@
+N = use "../std/net#e014c97bab46e124".
 # Exercise the unchanged native net API with four simultaneous binary peers.
 unsafe program.
 loop : unsafe Int -> String -> String -> String -> String -> Int -> String .
 loop left a b c d attempts =
   if left == 0 then "nettransport: four binary peers HOLDS" else
   if attempts <= 0 then error "nettransport: timeout" else
-  cid = netPoll 0;
+  cid = N.poll 0;
   if cid == 0 then _ = Sys.sleepUs 1000; loop left a b c d (attempts - 1) else
-  bytes = netRead cid;
+  bytes = N.read cid;
   case cid of
       1 -> finish cid left (strcat a bytes) b c d attempts
     | 2 -> finish cid left a (strcat b bytes) c d attempts
@@ -17,7 +18,7 @@ finish : unsafe Int -> Int -> String -> String -> String -> String -> Int -> Str
 finish cid left a b c d attempts =
   bytes = case cid of 1 -> a | 2 -> b | 3 -> c | other -> d;
   if strlen bytes < 2573 then loop left a b c d (attempts - 1) else
-  _ = netWrite cid bytes;
-  _ = netClose cid;
+  _ = N.write cid bytes;
+  _ = N.close cid;
   loop (left - 1) a b c d (attempts - 1).
-main = _ = device "net"; loop 4 "" "" "" "" 20000.
+main = _ = case N.start (myself 0) of Ok owner -> owner | Err why -> error why; loop 4 "" "" "" "" 20000.

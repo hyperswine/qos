@@ -1,0 +1,20 @@
+# Packet TX deadline kills the network owner; requests fail without replay.
+unsafe program.
+N = use "../std/net#e014c97bab46e124".
+netTestStall : Unit -> Int .
+Sys.alive : Int -> Bool .
+beat boss me = _ = send boss 1; _ = Sys.sleepUs 10000; beat boss me.
+count me n = case receiveNow me of Ok 1 -> count me (n + 1) | other -> n.
+main =
+  me = myself 0;
+  owner = case N.start me of Ok a -> a | Err why -> error why;
+  heartbeat = spawn (beat me);
+  _ = netTestStall Unit;
+  # The external client sends a SYN; the actor's SYN/ACK frame stalls.
+  _ = wait me owner;
+  beats = count me 0; _ = kill heartbeat;
+  failed = case N.call me owner N.Status of Err why -> why == "network service: dead actor" | Ok other -> False;
+  latched = case N.start me of Err why -> why == "network service: dead actor" | Ok other -> False;
+  "netactorstall: heartbeat={beats} failed={failed} latched={latched} {if beats >= 10 and failed and latched then "HOLDS" else "FAILED"}".
+wait : unsafe Int -> Int -> Unit .
+wait me owner = case Sys.alive owner of False -> Unit | True -> _ = Sys.sleepUs 10000; wait me owner.

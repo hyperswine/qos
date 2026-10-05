@@ -1,0 +1,19 @@
+# The loaded image discovers the kernel owner; no private NIC/actor is created.
+unsafe program.
+N = use "../std/net#e014c97bab46e124".
+Sys.pidOf : Int -> Int .
+netOwner : Unit -> Int .
+netRxFrame : Unit -> String .
+outsider me = _ = netRxFrame Unit; Unit.
+main =
+  me = myself 0;
+  owner = case N.start me of Ok a -> a | Err why -> error why;
+  kernel = Sys.pidOf owner == 0;
+  actual = Sys.pidOf me != 0;
+  same = owner == netOwner Unit;
+  status = case N.call me owner N.Status of Ok (N.Info 1 True) -> True | other -> False;
+  noPeer = case N.call me owner N.Poll of Ok (N.Peer 0) -> True | other -> False;
+  denied = case N.call me owner N.Stop of Err why -> why == "net: stop requires administrator" | other -> False;
+  child = spawn outsider;
+  guarded = case receiveFromRes me child of Err why -> why == "dead actor" | other -> False;
+  "netactorprocess: kernel={kernel} actual={actual} same={same} status={status} noPeer={noPeer} denied={denied} guarded={guarded} {if kernel and actual and same and status and noPeer and denied and guarded then "HOLDS" else "FAILED"}".

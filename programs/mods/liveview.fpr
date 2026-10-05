@@ -1,3 +1,4 @@
+N = use "std/net#e014c97bab46e124".
 # ============================================================================
 # liveview.fpr -- LV.server: the BROWSER driver for std.MVU's App.
 #
@@ -9,8 +10,8 @@
 #
 # view returns a gen_view tree (mods/genview.fpr); this module is the
 # missing server half of that stack -- an HTTP server written in
-# FPRISC over the policy-free socket tier (netPoll/netRead/netWrite/
-# netClose; hal/virt/net.c on virt, hal/unix/net_raw.c under qosp,
+# FPRISC over std/net (poll/read/write/close): a frame/protocol actor on
+# native RV64 and a serialized socket transport under qosp (
 # port FPR_PORT default 8000):
 #
 #   GET  /            the first paint: generated CSS (cfg.css over the
@@ -35,7 +36,7 @@
 # a client-side listener -- future work, like push over SSE instead
 # of the poll script).
 #
-# MULTI-CLIENT (net tier v6): netPoll 0 returns the next connection
+# MULTI-CLIENT (net tier v6): N.poll 0 returns the next connection
 # id with buffered bytes, and each connection accumulates its request
 # in its own buffer.  CLIENT identity is a cookie: GET / mints (or
 # re-reads) lvsid and Set-Cookie carries it; the browser sends it back
@@ -212,14 +213,14 @@ server app = serve { env = 0, css = G.cssFor } app.
 serve : unsafe _ -> App -> String .
 serve cfg app =
   App ini upd sbs vw = app;
-  nic = device "net";              # brings the listener up (FPR_PORT / slirp)
+  nic = case N.start (myself 0) of Ok owner -> owner | Err why -> error why;              # brings the listener up (FPR_PORT / slirp)
   clint = device "clint";
   mt = reg32 clint 49144;
   m0 = ini cfg.env;
   srvLoop mt cfg app (Sv m0 Nil 1 (read mt) Nil).
 
 srvLoop : unsafe Int -> _ -> App -> Sv -> String .
-srvLoop mt cfg app sv = srvPoll mt cfg app sv (netPoll 0).
+srvLoop mt cfg app sv = srvPoll mt cfg app sv (N.poll 0).
 srvPoll : unsafe Int -> _ -> App -> Sv -> Int -> String .
 srvPoll mt cfg app sv cid = case cid == 0 of
     True -> srvIdle mt cfg app sv
@@ -255,7 +256,7 @@ srvAfterTick mt cfg app sv q = srvLoop mt cfg app sv.
 srvData : unsafe Int -> _ -> App -> Sv -> Int -> String .
 srvData mt cfg app sv cid =
   Sv model sess nsid ltt bufs = sv;
-  srvBytes mt cfg app sv cid (netRead cid).
+  srvBytes mt cfg app sv cid (N.read cid).
 # an empty read: the peer went away (net tier v7); forget its half request
 srvBytes : unsafe Int -> _ -> App -> Sv -> Int -> String -> String .
 srvBytes mt cfg app sv cid "" =
@@ -323,8 +324,8 @@ srvFull mt cfg app sv2 cid s2 d2 quit =
 srvSend : unsafe Int -> _ -> App -> Sv -> Int -> String -> Int -> String .
 srvSend mt cfg app sv cid resp quit =
   Sv model sess nsid ltt bufs = sv;
-  _ = netWrite cid resp;
-  _ = netClose cid;
+  _ = N.write cid resp;
+  _ = N.close cid;
   srvNext mt cfg app (Sv model sess nsid ltt (bufDel bufs cid)) quit.
 srvNext : unsafe Int -> _ -> App -> Sv -> Int -> String .
 srvNext mt cfg app sv 1 = srvBye sv.

@@ -393,3 +393,6 @@ static V h_timeNow(V u) {
 FPR_FN(fpr_g_timeNow, h_timeNow, 1);
 FPR_FN(fpr_g_glSavePpm, h_glSavePpm, 1);
 FPR_FN(fpr_g_inputPoll, h_inputPoll, 1);
+
+/* Shared actor binding; Portable uses its socket transport inside the actor. */
+#include "../../hal/net_actor_bridge.c"

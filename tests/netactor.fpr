@@ -1,0 +1,33 @@
+# Correlated callers, creator stop and permanent dead-owner refusal.
+unsafe program.
+N = use "../std/net#e014c97bab46e124".
+AC = use "std/actor#06e72a5feec8a6d4".
+netRxFrame : Unit -> String .
+client boss me = owner = case N.start me of Ok a -> a | Err why -> error why;
+  denied = case N.call me owner N.Stop of Err why -> why == "net: stop requires administrator" | other -> False;
+  status = case N.call me owner N.Status of Ok (N.Info mode True) -> True | other -> False;
+  _ = send boss (owner, denied and status); Unit.
+intruder boss me = _ = netRxFrame Unit; _ = send boss False; Unit.
+main =
+  me = myself 0;
+  owner = case N.start me of Ok a -> a | Err why -> error why;
+  a = spawn (client me); b = spawn (client me);
+  (aOwner, aOk) = receiveFrom me a; (bOwner, bOk) = receiveFrom me b;
+  same = owner == aOwner and owner == bOwner;
+  outsider = spawn (intruder me);
+  guarded = case receiveFromRes me outsider of Err why -> why == "dead actor" | Ok v -> False;
+  noPeer = case N.call me owner N.Poll of Ok (N.Peer 0) -> True | other -> False;
+  invalid = case N.call me owner N.Status of
+      Ok (N.Info 1 True) -> (case N.call me owner (N.Write 99 "bad peer") of Err why -> why == "net: connection closed" | other -> False)
+    | Ok (N.Info 0 True) -> True
+    | other -> False;
+  healthy = case N.call me owner N.Poll of Ok (N.Peer 0) -> True | other -> False;
+  stopped = case N.call me owner N.Stop of Ok N.Stopped -> True | other -> False;
+  repeat = case N.call me owner N.Stop of Ok N.Stopped -> True | other -> False;
+  refused = case N.call me owner N.Poll of Err why -> why == "net: stopped" | other -> False;
+  stoppedStart = case N.start me of Err why -> why == "net: stopped" | Ok other -> False;
+  _ = kill owner;
+  dead = case N.call me owner N.Status of Err why -> why == "network service: dead actor" | Ok other -> False;
+  noRestart = case N.start me of Err why -> why == "network service: dead actor" | Ok other -> False;
+  holds = same and aOk and bOk and guarded and noPeer and invalid and healthy and stopped and repeat and refused and stoppedStart and dead and noRestart;
+  "netactor: same={same} clients={aOk and bOk} guarded={guarded} invalid={invalid} healthy={healthy} stopped={stopped} repeat={repeat} refused={refused} stoppedStart={stoppedStart} dead={dead} noRestart={noRestart} {if holds then "HOLDS" else "FAILED"}".

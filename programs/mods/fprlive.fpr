@@ -1,3 +1,4 @@
+N = use "std/net#e014c97bab46e124".
 # ============================================================================
 # fprlive.fpr -- FPRLive: LiveView over a real websocket, for FP-RISC apps
 # on the socket tier (qosp / virt).  The browser driver for a
@@ -22,7 +23,7 @@
 # frames, sends events to the REGISTER actor -- the model's single
 # writer -- and renders and pushes its own deltas when the register
 # broadcasts a new model.  A slow or hostile peer stalls only its own
-# actor; sessions scale with memory, not with a table.
+# actor on Portable. Native peers share one frame actor and its TX deadline.
 #
 # The wire (docs/2026-09-02-FPRLIVE.md):
 #   GET /            the page: generated CSS, <div id=lv-root>, the client
@@ -38,9 +39,9 @@
 #   ping -> pong; close -> close; binary / fragmented / unmasked / oversize
 #   frames are refused with the RFC's close codes (1003 / 1002 / 1009).
 #
-# Limits that are the socket tier's, not this module's: 1024 connection
-# slots (QOS_NET_MAXCONN), 8 KiB receive buffer per connection, 1 KiB
-# per netRead call, a 256 KiB unsent tail per peer before it is dropped.
+# Portable: 1024 socket slots, 8 KiB RX and 256 KiB queued TX per peer.
+# Native RV64: four fixed-address TCP peers, 16 KiB RX per peer, no retransmit.
+# Both expose at most 1 KiB per N.read through the shared std/net owner.
 # Frames above 4096 bytes are refused (1009).
 # ============================================================================
 
@@ -358,7 +359,7 @@ boundaryC me st =
 serve cfg app =
   App ini upd vw sbs = app;
   me = myself 0;
-  nic = device "net";
+  nic = case N.start (myself 0) of Ok owner -> owner | Err why -> error why;
   m0 = ini cfg.env;
   port = spawn MV.port;                        # connection actors queue their close here
   acc = spawnAcc me port cfg app (tickMsOf (sbs m0));
@@ -449,12 +450,12 @@ accLoop : unsafe Int -> As -> Int .
 accLoop me st =
   As reg port cfg app map k ltt mt tickMs = st;
   map2 = closeAll map (drainPort me port);
-  accPoll me (As reg port cfg app map2 k ltt mt tickMs) (netPoll 0).
+  accPoll me (As reg port cfg app map2 k ltt mt tickMs) (N.poll 0).
 accPoll : unsafe Int -> As -> Int -> Int .
 accPoll me st 0 = accIdle me st.
 accPoll me st cid =
   As reg port cfg app map k ltt mt tickMs = st;
-  bytes = netRead cid;
+  bytes = N.read cid;
   (a, map2) = actorFor reg port cfg app map cid k;
   _ = send a (Data bytes);
   map3 = case strlen bytes == 0 of True -> mDel map2 cid | False -> map2;   # EOF: the slot is free
@@ -505,7 +506,7 @@ intsOf Nil acc = acc.
 intsOf (c :: r) acc = intsOf r (c :: acc).
 closeAll : unsafe List (Int, Int) -> List Int -> List (Int, Int) .
 closeAll map Nil = map.
-closeAll map (cid :: r) = _ = netClose cid; closeAll (mDel map cid) r.
+closeAll map (cid :: r) = _ = N.close cid; closeAll (mDel map cid) r.
 
 # ---- a connection's actor ------------------------------------------------------------------
 
@@ -516,8 +517,9 @@ connLoop me st =
   st2 = boundaryC me st;
   connMsg me st2 (receive me).
 connMsg : unsafe Int -> Cs -> Msg -> Int .
-connMsg me st m =
-  _ = drop m;
+connMsg me st borrowed =
+  m = keep borrowed;
+  _ = drop borrowed;
   case m of
     Data b -> connData me st b
   | Model m2 -> connModel me st m2
@@ -560,7 +562,7 @@ connRoute me st req mth pth = connHttpBad me st "404 Not Found".
 bodyOf req he = substr req he (strlen req - he).
 connHttpBad me st code =
   Cs reg port cfg app cid mode buf sid ls ld model = st;
-  _ = netWrite cid (httpResp code "text/plain" code);
+  _ = N.write cid (httpResp code "text/plain" code);
   connDone me st.
 
 # GET /: ask the register for the model once, render the not-yet-connected view
@@ -572,7 +574,7 @@ connPage me st =
   Hello z m0 = h;
   tree = vw 0 m0;
   (s, d) = G.render tree;
-  _ = netWrite cid (httpResp "200 OK" "text/html" (page cfg.css tree s d));
+  _ = N.write cid (httpResp "200 OK" "text/html" (page cfg.css tree s d));
   connDone me st.
 
 # GET /ws: the handshake, then JOIN (a fresh sid + the model), the first
@@ -580,7 +582,7 @@ connPage me st =
 connUpgrade me st key rest | strlen key != 24 = connHttpBad me st "400 Bad Request".
 connUpgrade me st key rest =
   Cs reg port cfg app cid mode buf sid ls ld model = st;
-  _ = netWrite cid "HTTP/1.1 101 Switching Protocols{crlf}Upgrade: websocket{crlf}Connection: Upgrade{crlf}Sec-WebSocket-Accept: {acceptKey key}{crlf}{crlf}";
+  _ = N.write cid "HTTP/1.1 101 Switching Protocols{crlf}Upgrade: websocket{crlf}Connection: Upgrade{crlf}Sec-WebSocket-Accept: {acceptKey key}{crlf}{crlf}";
   _ = send reg (Join me);
   h = receiveFrom me reg;
   Hello sid2 m0 = h;
@@ -601,10 +603,10 @@ pushOne st =
   (s2, d2) = G.render (vw sid model);
   _ = case G.sameStatics ls s2 of
       True -> pushDelta cid (G.deltaJson ld d2)
-    | False -> _ = netWrite cid (wsFrame 1 "\{\"s\":{G.jarr s2},\"d\":{G.jarr d2}}"); 0;
+    | False -> _ = N.write cid (wsFrame 1 "\{\"s\":{G.jarr s2},\"d\":{G.jarr d2}}"); 0;
   Cs reg port cfg app cid mode buf sid s2 d2 model.
 pushDelta cid dj | G.strEq dj "\{}" = 0.           # nothing changed for this session
-pushDelta cid dj = _ = netWrite cid (wsFrame 1 "\{\"d\":{dj}}"); 0.
+pushDelta cid dj = _ = N.write cid (wsFrame 1 "\{\"d\":{dj}}"); 0.
 
 # ---- websocket: drain every complete frame in the buffer --------------------------------
 
@@ -630,7 +632,7 @@ consume st used =
   Cs reg port cfg app cid mode (substr buf used (strlen buf - used)) sid ls ld model.
 connOp : unsafe Int -> Cs -> Int -> String -> Int .
 connOp me st 1 payload = connEvent me st (jStr payload "msg") (jStr payload "arg").
-connOp me st 9 payload = _ = netWrite (cidOf st) (wsFrame 10 payload); connFrames me st.
+connOp me st 9 payload = _ = N.write (cidOf st) (wsFrame 10 payload); connFrames me st.
 connOp me st 10 payload = connFrames me st.
 connOp me st 8 payload = connClose me st 1000 "bye".
 connOp me st op payload = connClose me st 1003 "text frames only".
@@ -644,11 +646,11 @@ connEvent me st msg arg =
   connFrames me st.
 connClose me st code reason =
   Cs reg port cfg app cid mode buf sid ls ld model = st;
-  _ = netWrite cid (closeFrame code reason);
+  _ = N.write cid (closeFrame code reason);
   _ = send reg (Gone sid);
   connDone me st.
 connBye me st =
   Cs reg port cfg app cid mode buf sid ls ld model = st;
-  _ = netWrite cid (closeFrame 1001 "server going away");
+  _ = N.write cid (closeFrame 1001 "server going away");
   _ = send reg (Gone sid);
   connDone me st.

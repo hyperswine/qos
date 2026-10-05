@@ -42,8 +42,8 @@ arp f n mac out = if n < 42 then 0 else
     _ = copy (Addr.add out 22) mac 6 0; _ = ourIp out 28;
     _ = copy (Addr.add out 32) (Addr.add f 22) 10 0; 42
   else 0.
-# Encode a TCP frame. Caller reserves TX memory before invocation and sends
-# exactly the returned length. Advance the sequence only for emitted bytes.
+# Encode a TCP frame; the owner sends exactly the returned length through
+# the frame HAL. A failed TX leaves the owner stopped, without state replay.
 emit : Addr -> Int -> Addr -> Int -> Addr -> Addr -> Int .
 emit address flags payload n mac out =
   c = Conn.at address;
@@ -109,7 +109,7 @@ receive f n mac table out = if n < 14 then 0 else
 poll : unsafe Addr -> Int -> Int -> Int .
 poll table cursor k = if k >= 4 then 0 else
   i = bit (cursor + k) 3; c = conn table i;
-  if Word.toInt (Conn.active c) != 0 and Word.toInt (Conn.length c) > 0 then i + 1 else poll table cursor (k + 1).
+  if Word.toInt (Conn.active c) != 0 and (Word.toInt (Conn.length c) > 0 or Word.toInt (Conn.fin c) != 0) then i + 1 else poll table cursor (k + 1).
 readSize : Addr -> Int .
 readSize address = min 1024 (Word.toInt (Conn.length (Conn.at address))).
 consume : Addr -> Int -> Unit .

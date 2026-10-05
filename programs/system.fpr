@@ -70,6 +70,7 @@ IInt = EP.IInt.
 IStr = EP.IStr.
 IFn  = EP.IFn.
 IErr = EP.IErr.
+Net = use "std/net#e014c97bab46e124".
 FS = use "std/fs#ada972463cd03f5d".
 Block = use "std/block#f6a778da43671433".
 BlockEP = use "mods/blockep#97237492694e7b1a".
@@ -1031,6 +1032,8 @@ main =
   clk = reg32 cl 49144;                  # CLINT mtime low word
 
   _ = Sys.init Unit; # buddy_init the process arena -- see docs/PROCESS-LOADING.md
+  # The kernel owns NIC buffers and protocol state before any app image runs.
+  network = case Net.start me of Ok owner -> owner | Err why -> _ = Sys.logAt 2 "network: offline ({why})"; 0;
 
   # ---- the services first: the console itself is one of them ----------------
   # UART.qa owns the UART (opened, armed, shared); Timer.qa the CLINT
@@ -1066,6 +1069,11 @@ main =
   # launch the startup app (TUIAppLauncher) through the permission gate
   _ = launch io startup;
 
+  _ = if network == 0 then Unit else
+        case Net.call me network Net.Stop of
+          Ok Net.Stopped -> putLn con "network: admission stopped"
+        | Err why -> putLn con "network: stop failed: {why}"
+        | Ok other -> putLn con "network: invalid stop reply";
   _ = case store == 0 of
       True -> Unit
     | False -> _ = case FS.shutdown me store block of

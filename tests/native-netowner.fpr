@@ -1,0 +1,18 @@
+unsafe program.
+N = use "../std/net#e014c97bab46e124".
+FS = use "std/fs".
+NI = use "nativeimage".
+Sys.bindApp : String -> Unit .
+main =
+  me = myself 0;
+  owner = case N.start me of Ok a -> a | Err why -> error why;
+  fs = FS.serve (device "blk");
+  qa = case FS.readLatest me fs "apps/NetOwner.qa" of Ok bytes -> bytes | Err why -> error why;
+  _ = Sys.bindApp "NetOwner";
+  (ok, why, root) = NI.place qa;
+  _ = if ok == 2 then Unit else error why;
+  result = NI.result me root;
+  freed = NI.settle 0 400;
+  alive = case N.call me owner N.Status of Ok (N.Info 1 True) -> True | other -> False;
+  _ = N.call me owner N.Stop;
+  "native-netowner: process=[{result}] freed={freed} alive={alive} {if freed and alive then "HOLDS" else "FAILED"}".

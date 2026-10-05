@@ -12,8 +12,8 @@
  *     IPv4 (no fragments), and a small-table (NETCONN) TCP with no retransmit,
  *     no congestion control, and fire-and-forget sends. This is a QEMU
  *     slirp demonstration: raw FP-RISC policy on RV64 (netpolicy.fpr),
- *     legacy C transport on RV32. Actor ownership and general TCP remain
- *     future work; the public netPoll/read/write/close ABI is unchanged.
+ *     legacy C transport on RV32. RV64 exposes frame-only mechanisms to
+ *     std/net, the protocol actor. The legacy native net API refuses bypasses.
  *
  * FPRISC surface (every unknown FPRISC name links against fpr_g_*):
  *   netPoll 0    -> Int     pump the NIC; the next connection id
@@ -338,22 +338,7 @@ done:
   q_tx.last_used = QUSED(&q_tx)->idx;
 }
 
-/* ---- transport policy: raw FP-RISC on RV64, legacy C on RV32 ---------- */
-#if __riscv_xlen == 64
-#include "netpolicy.h"
-#define NETCONN QOS_NET_CONNECTIONS
-#define TCP_FIN 0x01
-#define TCP_PSH 0x08
-typedef qos_net_conn conn_t;
-static conn_t conns[NETCONN];
-static u32 conn_rr;
-static void tcp_send(conn_t *cn, u8 flags, const u8 *payload, u32 plen) {
-  tx_take();
-  long size = qos_net_emit(cn, flags, payload, plen, our_mac, tx_buf + vhdr_len);
-  nic_tx((u32)size);
-  tx_release();
-}
-#else
+#if __riscv_xlen != 64
 /* ---- transport: ARP + IPv4 + one-connection TCP ------------------------ */
 static const u8 our_ip[4] = {10, 0, 2, 15};
 static u8 gw_mac[6] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff}; /* learned from ARP/traffic */
@@ -525,7 +510,6 @@ static void handle_tcp(const u8 *f, u32 len) {
   }
 }
 
-#endif
 
 static void net_pump(void) {
   if (!nic) return;
@@ -538,25 +522,12 @@ static void net_pump(void) {
     if (id < QSZ && e.len > (u32)vhdr_len) {
       const u8 *f = rx_bufs[id] + vhdr_len;
       u32 flen = e.len - vhdr_len;
-#if __riscv_xlen == 64
-      /* Policy replies are at most 54 bytes; RX memory remains device-owned
-       * until parsing/copying completes, before reposting the descriptor. */
-      if (flen <= sizeof(rx_bufs[0]) - (u32)vhdr_len) {
-        u8 reply[54];
-        long size = qos_net_receive(f, flen, our_mac, conns, reply);
-        if (size) {
-          tx_take(); ncpy(tx_buf + vhdr_len, reply, (u32)size);
-          nic_tx((u32)size); tx_release();
-        }
-      }
-#else
       if (flen >= 14) {
         u16 et = (u16)(f[12] << 8 | f[13]);
         if (et == ETH_ARP) handle_arp(f, flen);
         else if (et == ETH_IP4 && flen >= 34 && f[23] == 6 && neq(f + 30, our_ip, 4))
           handle_tcp(f, flen);
       }
-#endif
     }
     if (id < QSZ) rx_post(id);
     FENCE();
@@ -564,36 +535,19 @@ static void net_pump(void) {
   wr(R_INTACK, 3);
 }
 
-/* ---- device table hook + FPRISC surface ----------------------------------- */
-void net_setup(void) {
-  static int done;
-  if (done) return;
-  done = 1;
-  if (!net_probe()) nputs("[net] no virtio-net device found\n");
-}
-
 /* v6: the arg is the CONNECTION ID.  netPoll 0 -> the next id with
  * buffered rx (fair rotation) or 0; read/write/close address the id. */
 static conn_t *conn_of(V d) {
   if (!ISINT(d)) return 0;
   sw id = UNTAG(d);
-#if __riscv_xlen == 64
-  return qos_net_connection(conns, id);
-#else
   if (id < 1 || id > NETCONN) return 0;
   conn_t *cn = &conns[id - 1];
   return cn->est ? cn : 0;
-#endif
 }
 
 static V h_netPoll(V d) {
   (void)d;
   net_pump();
-#if __riscv_xlen == 64
-  long id = qos_net_poll(conns, conn_rr, 0);
-  if (id) conn_rr = (u32)id;
-  return TAG(id);
-#else
   for (u32 k = 0; k < NETCONN; k++) {
     u32 i = (conn_rr + k) % NETCONN;
     if (conns[i].est && conns[i].rxlen) {
@@ -602,27 +556,18 @@ static V h_netPoll(V d) {
     }
   }
   return TAG(0);
-#endif
 }
 
 static V h_netRead(V d) {
   net_pump();
   conn_t *cn = conn_of(d);
   if (!cn) return (V)fpr_mkstr((const u8 *)"", 0);
-#if __riscv_xlen == 64
-  u32 n = (u32)qos_net_read_size(cn);
-#else
   u32 n = cn->rxlen > 1024 ? 1024 : cn->rxlen;
-#endif
   str_t *s = fpr_mkstr(cn->rx, n);
-#if __riscv_xlen == 64
-  qos_net_consume(cn, n);
-#else
   if (n) {
     ncpy(cn->rx, cn->rx + n, cn->rxlen - n);
     cn->rxlen -= n;
   }
-#endif
   return (V)s;
 }
 
@@ -633,11 +578,7 @@ static V h_netWrite(V d, V sv) {
   str_t *s = (str_t *)sv;
   u64 off = 0;
   while (off < s->len) {
-#if __riscv_xlen == 64
-    u32 seg = (u32)qos_net_segment((long)(s->len - off));
-#else
     u32 seg = s->len - off > 1200 ? 1200 : (u32)(s->len - off);
-#endif
     tcp_send(cn, TCP_PSH, s->bytes + off, seg);
     off += seg;
   }
@@ -648,14 +589,25 @@ static V h_netClose(V d) {
   conn_t *cn = conn_of(d);
   if (cn) {
     tcp_send(cn, TCP_FIN, 0, 0);
-#if __riscv_xlen == 64
-    qos_net_close(cn);
-#else
     cn->est = 0;
-#endif
     /* PoC: no TIME_WAIT; slot free immediately. */
   }
   return TAG(0);
+}
+
+#else
+static V need_actor(void) { fpr_actor_fail("net: use std/net network actor"); return TAG(0); }
+static V h_netPoll(V u) { (void)u; return need_actor(); }
+static V h_netRead(V u) { (void)u; return need_actor(); }
+static V h_netWrite(V a,V b) { (void)a;(void)b; return need_actor(); }
+static V h_netClose(V u) { (void)u; return need_actor(); }
+#endif
+/* ---- device table hook + FPRISC surface ----------------------------------- */
+void net_setup(void) {
+  static int done;
+  if (done) return;
+  done = 1;
+  if (!net_probe()) nputs("[net] no virtio-net device found\n");
 }
 
 FPR_FN(fpr_g_netPoll, h_netPoll, 1);
@@ -696,4 +648,37 @@ FPR_FN(fpr_g_netTestPending, h_netTestPending, 1);
 FPR_FN(fpr_g_netTestRelease, h_netTestRelease, 1);
 FPR_FN(fpr_g_netTestNow, h_netTestNow, 1);
 FPR_FN(fpr_g_netTestSend, h_netTestSend, 1);
+#endif
+
+#if __riscv_xlen == 64
+/* Frame-only HAL: copy RX before reposting; TX copies into reserved DMA. */
+extern void qos_net_require_owner(void);
+static V h_netFrameMode(V u) { (void)u; qos_net_require_owner(); net_setup(); if (!nic) fpr_actor_fail("net: NIC absent"); return TAG(1); }
+static V h_netMac(V u) { (void)u; qos_net_require_owner(); return (V)fpr_mkstr(our_mac,6); }
+static V h_netRxFrame(V u) {
+  (void)u; qos_net_require_owner(); FENCE();
+  volatile vq_used_t *used=QUSED(&q_rx);
+  if (q_rx.last_used==used->idx) return (V)fpr_mkstr((const u8 *)"",0);
+  vq_uelem_t e=used->ring[q_rx.last_used++ % QSZ];
+  V out=(V)fpr_mkstr((const u8 *)"",0);
+  if (e.id<QSZ) {
+    if (e.len>(u32)vhdr_len && e.len<=sizeof(rx_bufs[0]))
+      out=(V)fpr_mkstr(rx_bufs[e.id]+vhdr_len,e.len-vhdr_len);
+    rx_post(e.id); FENCE();
+  }
+  return out;
+}
+static V h_netTxFrame(V bytes) {
+  qos_net_require_owner();
+  if (ISINT(bytes) || TID(bytes)!=T_STR) fpr_actor_fail("net: frame requires bytes");
+  str_t *s=(str_t *)bytes;
+  if (s->len<14 || s->len>FRAMESZ) fpr_actor_fail("net: frame length out of range");
+  tx_take(); ncpy(tx_buf+vhdr_len,s->bytes,s->len); nic_tx(s->len); tx_release(); return TAG(0);
+}
+static V h_netKick(V u) { (void)u; qos_net_require_owner(); wr(R_INTACK,3); FENCE_IO();return TAG(0); }
+FPR_FN(fpr_g_netFrameMode,h_netFrameMode,1);
+FPR_FN(fpr_g_netMac,h_netMac,1);
+FPR_FN(fpr_g_netRxFrame,h_netRxFrame,1);
+FPR_FN(fpr_g_netTxFrame,h_netTxFrame,1);
+FPR_FN(fpr_g_netKick,h_netKick,1);
 #endif

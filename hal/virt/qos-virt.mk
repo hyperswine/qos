@@ -16,7 +16,7 @@ $(BUILD)/qos-plic.s: $(QOS_HAL)/virt/plic.fpr $(FPRC)
 	@mkdir -p $(BUILD)
 	"$(FPRC)" --profile=bare-metal-builtin --arc --raw --lib --export=$(QOS_PLIC_EXPORTS) $< $@ >/dev/null
 
-QOS_VIRT_HAL = $(BUILD)/qos-plic.s $(QOS_HAL)/virt/plic.c $(QOS_HAL)/virt/net.c \
+QOS_VIRT_HAL = $(BUILD)/qos-plic.s $(QOS_HAL)/virt/plic.c $(QOS_HAL)/virt/net.c $(QOS_HAL)/net_actor_bridge.c \
                $(QOS_HAL)/virt/blk.c $(QOS_HAL)/virt/pins.c $(QOS_HAL)/virt/devices.c
 
 # Both device drivers share allocation-free probe/feature/queue policy on RV64.

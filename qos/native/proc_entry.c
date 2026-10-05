@@ -54,14 +54,10 @@ FPR_FN(fpr_g_Sys_x2estoreReq, h_sys_store_req, 2);
  * nested-scheduler mode).  With a plane, this image's actors are
  * TRANSPARENT ACBs: spawned into the kernel's per-hart queues with
  * this process's pid, donated/stolen like any of System.qa's own. */
-typedef struct {
-  fpr_sched_t *sched;
-  void *reply;          /* the launcher's acb: main's result goes here */
-  uw pid;
-  void (*on_exit)(void);
-  void *root;           /* OUT: the root actor, so the launcher waits for its result alone */
-  void *ns;             /* the namespace actor (mods/ep.fpr), or 0 */
-} fpr_shared_boot_t;
+#include "shared_boot.h"
+typedef qos_shared_boot_t fpr_shared_boot_t;
+static V (*g_net_owner)(void);
+V qos_process_net_owner(void) { return g_net_owner ? g_net_owner() : TAG(0); }
 
 static V g_reply;
 static V g_ns;
@@ -134,6 +130,7 @@ V fpr_process_entry(void *heap_base, uw heap_size, fpr_grant_t (*grow)(uw want_b
     g_reply = (V)sb->reply;
     g_on_exit = sb->on_exit;
     g_ns = (V)sb->ns;
+    g_net_owner = sb->net_abi == QOS_NET_BOOT_ABI ? sb->net_owner : 0;
     fpr_sched = sb->sched;
     /* OUR OWN statics window: the shared span (heap_lo..heap_hi)
      * covers the slot this image is loaded into, but our code/rodata/

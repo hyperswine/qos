@@ -96,14 +96,9 @@ static V mkrpc(V a, V b, V c, V d) {
  * (on_exit runs at its root's exit), and the app id it was launched as --
  * the kv capability is scoped by the CALLER's pid, so processes running at
  * once each reach only their own file. */
-typedef struct {
-  fpr_sched_t *sched;
-  void *reply;
-  uw pid;
-  void (*on_exit)(void);
-  void *root;         /* set by the process entry: its root actor (the launcher's correlation) */
-  void *ns;           /* the namespace actor, or 0 (Sys.ns in the process) */
-} shared_boot_t;
+#include "../qos/native/shared_boot.h"
+typedef qos_shared_boot_t shared_boot_t;
+extern V qos_net_owner_value(void);
 typedef struct {
   fpr_image_t im;     /* lo/hi: the whole buddy block; owner: this record */
   shared_boot_t sb;
@@ -345,6 +340,8 @@ static V g_sys_place_image_at(V qastr, V extv, V numsv, V capsv, V pidv, V diges
   pi->sb.on_exit = shared_on_exit;
   pi->sb.root = 0;
   pi->sb.ns = (void *)g_ns;
+  pi->sb.net_abi = QOS_NET_BOOT_ABI;
+  pi->sb.net_owner = qos_net_owner_value;
   if (!fpr_pid_quiet) fpr_pid_quiet = image_quiet;
   /* registered BEFORE the root is spawned: from here its cells are statics
    * to the kernel, and what leaves the process is decided against its pid */

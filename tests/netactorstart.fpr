@@ -1,0 +1,20 @@
+# Competing callers initialize one installed actor; losing candidates stay inert.
+unsafe program.
+N = use "../std/net#e014c97bab46e124".
+AC = use "std/actor#06e72a5feec8a6d4".
+netOwner : Unit -> Int .
+client boss me =
+  _ = receive me;
+  owner = case N.start me of Ok a -> a | Err why -> error why;
+  _ = send boss owner;
+  _ = receive me; Unit.
+main =
+  me = myself 0;
+  a = AC.spawnWithOn 0 (AC.Static 8) (client me);
+  b = AC.spawnWithOn (if Sys.harts Unit > 1 then 1 else 0) (AC.Static 8) (client me);
+  _ = send a 1; _ = send b 1;
+  aa = receiveFrom me a; bb = receiveFrom me b;
+  same = aa == bb and aa == netOwner Unit;
+  responsive = case N.call me aa N.Poll of Ok (N.Peer 0) -> True | other -> False;
+  _ = kill a; _ = kill b; _ = kill aa;
+  "netactorstart: same={same} responsive={responsive} {if same and responsive then "HOLDS" else "FAILED"}".

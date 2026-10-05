@@ -95,6 +95,12 @@ static V check(V ignored) {
   CHECK(qos_net_emit(&table[0],8,data,1200,mac,output)==1254);CHECK(valid(1254));
   CHECK(bytes_equal(output+54,data,1200) && table[0].snd_nxt==1198);
   CHECK(qos_net_segment(1201)==1200 && qos_net_segment(0)==0 && qos_net_segment(17)==17);
+  /* A half-close is readable once; reading EOF frees its slot. */
+  memset(table,0,sizeof(table));table[0].est=1;table[0].peer_fin=1;
+  table[0].rxlen=1;qos_net_consume(&table[0],1);CHECK(table[0].est==1);
+  CHECK(qos_net_poll(table,0,0)==1 && qos_net_read_size(&table[0])==0);
+  qos_net_close(&table[0]);
+  CHECK(table[0].est==0 && qos_net_poll(table,0,0)==0);
   return TAG(0);
 }
 FPR_FN(fpr_g_netPolicyCheck, check, 1);

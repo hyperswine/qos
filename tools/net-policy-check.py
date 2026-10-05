@@ -19,7 +19,8 @@ with tempfile.TemporaryDirectory(prefix='qos-netpolicy-') as d:
              '-c',ROOT/'hal/virt/net.c','-o',obj])
         symbols=run(['riscv64-unknown-elf-nm',obj])
         assert 'netTest' not in symbols,symbols
-        assert ('qos_net_receive' in symbols)==(bits==64),symbols
+        assert 'qos_net_receive' not in symbols,symbols
+        assert ('fpr_g_netRxFrame' in symbols)==(bits==64),symbols
         print(f'RV{bits} network object: expected policy ABI, no test hooks HOLDS',flush=True)
     run(['make','-s','-f','hal/virt/qos-virt.mk',f'FPRC={COMPILER}/fpr',f'BUILD={temp}','QOS_HAL=hal',temp/'qos-netpolicy.s'])
     for harts in (1,2):

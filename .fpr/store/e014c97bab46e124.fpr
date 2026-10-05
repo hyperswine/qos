@@ -1,0 +1,107 @@
+# One network owner per image. RV64 speaks Ethernet frames and owns the raw
+# FP-RISC protocol arena; Portable/RV32 serialize their compatibility transport.
+# The installed owner is never replaced automatically after failure.
+AC = use "std/actor#06e72a5feec8a6d4".
+Request = Type (Poll | Read Int | Write Int String | Close Int | Status | Stop).
+Reply = Type (Peer Int | Bytes String | Wrote Int | Closed | Info Int Bool | Stopped).
+netOwner : Unit -> Int .
+netBindOwner : Int -> Int .
+netFrameMode : Unit -> Int .
+netRxFrame : Unit -> String .
+netTxFrame : String -> Unit .
+netKick : Unit -> Unit .
+netMac : Unit -> String .
+netPolicyState : Unit -> Int .
+netPolicyRx : Int -> String -> String -> String .
+netPolicyPoll : Int -> Int -> Int .
+netPolicyRead : Int -> Int -> String .
+netPolicyEncode : Int -> Int -> String -> String -> String .
+netPolicyClose : Int -> Int -> String -> String .
+netPolicySegment : Int -> Int .
+start : unsafe Int -> Result Int String .
+start me =
+  prior = netOwner Unit;
+  owner = if prior != 0 then prior else install me (AC.spawnWithOn (if Sys.harts Unit > 1 then 1 else 0) (AC.Static 64) (actor me));
+  if owner == 0 then Err "net: kernel network actor unavailable" else
+  case call me owner Status of Ok (Info mode True) -> Ok owner | Ok other -> Err "net: stopped" | Err why -> Err why.
+install : Int -> Int -> Int .
+install me candidate = actual = netBindOwner candidate; _ = if actual != candidate then kill candidate else Unit; actual.
+call : Int -> Int -> Request -> Result Reply String .
+call me owner q = case AC.call me owner q of Ok answer -> answer | Err why -> Err "network service: {why}".
+# Compatibility-shaped helpers for existing browser modules. A failed request
+# kills only its calling actor, never the machine; checked callers use call.
+checked : Request -> Reply .
+checked q = me = myself 0; owner = netOwner Unit;
+  case owner == 0 of True -> fail "network actor not started" | False ->
+    case call me owner q of Ok answer -> answer | Err why -> fail why.
+fail : String -> a .
+fail why = _ = Sys.logAt 2 "net: {why}"; _ = kill (myself 0); error "unreachable network caller".
+poll : Int -> Int .
+poll u = case checked Poll of Peer id -> id | other -> fail "invalid poll reply".
+read : Int -> String .
+read id = case checked (Read id) of Bytes bytes -> bytes | other -> fail "invalid read reply".
+write : Int -> String -> Int .
+write id bytes = case checked (Write id bytes) of Wrote n -> n | other -> fail "invalid write reply".
+close : Int -> Unit .
+close id = case checked (Close id) of Closed -> Unit | other -> fail "invalid close reply".
+# Lazy initialization: only the CAS winner receives requests and touches NIC
+# setup or protocol storage. Losing startup candidates are killed uninitialized.
+actor : unsafe Int -> Int -> Unit .
+actor admin me =
+  borrowed = receive me; request = keep borrowed; _ = drop borrowed;
+  mode = netFrameMode Unit; _ = device "net";
+  arena = if mode == 1 then netPolicyState Unit else 0;
+  mac = if mode == 1 then netMac Unit else "";
+  begin admin mode arena mac me request.
+begin : unsafe Int -> Int -> Int -> String -> Int -> (Int, Int, Request) -> Unit .
+begin admin mode arena mac me request =
+  (from, id, q) = request;
+  (cursor, open, answer) = handle admin mode arena mac 0 True from q;
+  _ = AC.reply (from, id) answer;
+  fresh = AC.boundary me (mac, (cursor, open));
+  again admin mode arena fresh me.
+again : unsafe Int -> Int -> Int -> (String, (Int, Bool)) -> Int -> Unit .
+again admin mode arena state me = (mac, (cursor, open)) = state; loop admin mode arena mac cursor open me.
+loop : unsafe Int -> Int -> Int -> String -> Int -> Bool -> Int -> Unit .
+loop admin mode arena mac cursor open me =
+  _ = if mode == 1 and open then pump arena mac 32 else Unit;
+  next = case receiveNow me of
+      Err why -> _ = Sys.sleepUs 1000; (cursor, open)
+    | Ok borrowed -> (from, id, q) = keep borrowed; _ = drop borrowed;
+                     (rr, live, answer) = handle admin mode arena mac cursor open from q;
+                     _ = AC.reply (from, id) answer; (rr, live);
+  fresh = AC.boundary me (mac, next);
+  again admin mode arena fresh me.
+pump : unsafe Int -> String -> Int -> Unit .
+pump arena mac remaining = if remaining <= 0 then netKick Unit else
+  frame = netRxFrame Unit;
+  if strlen frame == 0 then netKick Unit else
+  reply = netPolicyRx arena frame mac;
+  _ = transmit reply;
+  pump arena mac (remaining - 1).
+transmit : String -> Unit .
+transmit bytes = if strlen bytes == 0 then Unit else netTxFrame bytes.
+handle : unsafe Int -> Int -> Int -> String -> Int -> Bool -> Int -> Request -> (Int, Bool, Result Reply String) .
+handle admin mode arena mac cursor open caller q = case q of
+    Status -> (cursor, open, Ok (Info mode open))
+  | Stop -> if caller == admin then (cursor, False, Ok Stopped) else (cursor, open, Err "net: stop requires administrator")
+  | other -> if open then operation mode arena mac cursor q else (cursor, False, Err "net: stopped").
+operation : unsafe Int -> Int -> String -> Int -> Request -> (Int, Bool, Result Reply String) .
+operation mode arena mac cursor q = case q of
+    Poll -> id = if mode == 1 then netPolicyPoll arena cursor else netPoll 0;
+            (if id == 0 then cursor else id, True, Ok (Peer id))
+  | Read id -> bytes = if mode == 1 then netPolicyRead arena id else netRead id;
+               _ = if mode == 1 and strlen bytes == 0 then transmit (netPolicyClose arena id mac) else Unit;
+               (cursor, True, Ok (Bytes bytes))
+  | Write id bytes -> result = if mode == 1 then segments arena id bytes 0 mac else _ = netWrite id bytes; Ok (strlen bytes);
+                      (cursor, True, case result of Ok n -> Ok (Wrote n) | Err why -> Err why)
+  | Close id -> _ = if mode == 1 then transmit (netPolicyClose arena id mac) else netClose id;
+                (cursor, True, Ok Closed)
+  | other -> (cursor, True, Err "net: invalid operation").
+segments : unsafe Int -> Int -> String -> Int -> String -> Result Int String .
+segments arena id bytes off mac = if off >= strlen bytes then Ok off else
+  n = netPolicySegment (strlen bytes - off);
+  frame = netPolicyEncode arena id (substr bytes off n) mac;
+  if strlen frame == 0 then Err "net: connection closed" else
+  _ = netTxFrame frame;
+  segments arena id bytes (off + n) mac.
