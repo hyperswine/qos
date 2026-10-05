@@ -1,0 +1,35 @@
+# Creator-only quiesce, ordered logical drain, permanent refusal and persistence.
+unsafe program.
+FS = use "../std/fs".
+B = use "../std/blockio".
+ok (Ok _) = True.
+ok (Err _) = False.
+err text (Err why) = why == text.
+err _ _ = False.
+untrusted boss fs me = _ = send boss (err "storage: quiesce requires administrator" (FS.quiesce me fs)); Unit.
+main =
+  me = myself 0;
+  hart = if Sys.harts Unit > 1 then 1 else 0;
+  block = B.serve me (device "blk");
+  fs = case FS.startBlockOn hart me block of Ok a -> a | Err why -> error why;
+  before = ok (FS.append me fs "shutdown/value" "committed");
+  child = spawn (untrusted me fs);
+  denied = receiveFrom me child;
+  live = case FS.readLatest me fs "shutdown/value" of Ok v -> v == "committed" | Err why -> False;
+  stopped = ok (FS.shutdown me fs block);
+  refused = err "storage offline: shutdown" (FS.append me fs "shutdown/value" "unwanted");
+  queryRefused = err "storage offline: shutdown" (FS.stats me fs "");
+  closed = case B.call me block B.Status of Ok (B.State 2 0 False) -> True | other -> False;
+  pageRefused = err "block: draining" (B.call me block (B.Read 0));
+  again = ok (FS.shutdown me fs block);
+  replacement = B.serve me (device "blk");
+  fresh = case FS.startBlockOn hart me replacement of Ok a -> a | Err why -> error why;
+  persisted = case FS.readLatest me fresh "shutdown/value" of Ok v -> v == "committed" | Err why -> False;
+  _ = FS.shutdown me fresh replacement;
+  # Failure between the barriers still leaves Files permanently quiesced.
+  wrongAdmin = B.serve 999 (device "blk");
+  other = case FS.startBlockOn hart me wrongAdmin of Ok a -> a | Err why -> error why;
+  failedDrain = err "storage quiesced; drain failed: block: drain requires administrator" (FS.shutdown me other wrongAdmin);
+  latched = err "storage offline: shutdown" (FS.readLatest me other "shutdown/value");
+  holds = before and denied and live and stopped and refused and queryRefused and closed and pageRefused and again and persisted and failedDrain and latched;
+  "filesshutdown: before={before} denied={denied} live={live} stopped={stopped} refused={refused} queryRefused={queryRefused} closed={closed} pageRefused={pageRefused} again={again} persisted={persisted} failedDrain={failedDrain} latched={latched} {if holds then "HOLDS" else "FAILED"}".

@@ -30,3 +30,8 @@ $(BUILD)/qos-blockpolicy.s: $(QOS_HAL)/virt/blockpolicy.fpr $(FPRC)
 	@mkdir -p $(BUILD)
 	"$(FPRC)" --profile=bare-metal-builtin --arc --raw --lib --export=expired:qos_blk_expired,waiting:qos_blk_waiting,resetStep:qos_blk_reset_step,budgetValid:qos_blk_budget_valid,ownership:qos_blk_ownership,claimStep:qos_blk_claim_step $< $@ >/dev/null
 QOS_VIRT_HAL += $(BUILD)/qos-blockpolicy.s
+
+$(BUILD)/qos-netpolicy.s: $(QOS_HAL)/virt/netpolicy.fpr $(FPRC)
+	@mkdir -p $(BUILD)
+	"$(FPRC)" --profile=bare-metal-builtin --arc --raw --lib --export=receive:qos_net_receive,emit:qos_net_emit,poll:qos_net_poll,readSize:qos_net_read_size,consume:qos_net_consume,segment:qos_net_segment,connection:qos_net_connection,close:qos_net_close $< $@ >/dev/null
+QOS_VIRT_HAL += $(BUILD)/qos-netpolicy.s

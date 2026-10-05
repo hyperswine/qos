@@ -41,7 +41,7 @@
 # (EP.grant, registered by the launcher); the shell's own actors are pid 0.
 # ============================================================================
 
-FS = use "std/fs#ef209d6518832a06".
+FS = use "std/fs#ada972463cd03f5d".
 AK  = use "appkit".
 QL  = use "qlog#5c94f0ce8d592d3d".
 BlockEP = use "blockep#97237492694e7b1a".

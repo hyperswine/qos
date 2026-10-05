@@ -1,0 +1,125 @@
+# Allocation-free RV64 Ethernet/ARP/IPv4/TCP policy. All addresses refer to
+# caller-owned bounded buffers; no MMIO, scheduler, allocation or DMA here.
+# PoC server: fixed 10.0.2.15:80, four peers, no retransmit/congestion control.
+profile builtin.
+Byte = Layout { value : U8 }.
+Conn = Layout { active : U32 @ 0, port : U16 @ 14, receive : U32 @ 16, sequence : U32 @ 20, fin : U32 @ 24, length : U32 @ 28 }.
+w n = Word.fromInt n.
+b p i = Byte.value (Byte.at (Addr.add p i)).
+put p i v = Byte.setValue (Byte.at (Addr.add p i)) v.
+shr n shift = Word.toInt (Word.shr (w n) shift).
+bit n mask = Word.toInt (Word.and (w n) (w mask)).
+u16 p i = b p i * 256 + b p (i + 1).
+u32 p i = Word.or (Word.shl (w (u16 p i)) 16) (w (u16 p (i + 2))).
+put16 p i v = _ = put p i (shr v 8); put p (i + 1) v.
+put32 p i v = _ = put16 p i (Word.toInt (Word.shr v 16)); put16 p (i + 2) (Word.toInt (Word.and v (w 65535))).
+copy : unsafe Addr -> Addr -> Int -> Int -> Unit .
+copy to from n i = if i >= n then Unit else _ = put to i (b from i); copy to from n (i + 1).
+equal : unsafe Addr -> Addr -> Int -> Int -> Bool .
+equal a z n i = if i >= n then True else if b a i != b z i then False else equal a z n (i + 1).
+foldSum s = bit s 65535 + shr s 16.
+sumBytes : unsafe Addr -> Int -> Int -> Int -> Int .
+sumBytes p n i s = if i + 1 < n then sumBytes p n (i + 2) (s + u16 p i) else if i < n then s + b p i * 256 else s.
+checksum : Addr -> Int -> Int -> Int .
+checksum p n seed = 65535 - foldSum (foldSum (sumBytes p n 0 seed)).
+ours p i = b p i == 10 and b p (i + 1) == 0 and b p (i + 2) == 2 and b p (i + 3) == 15.
+ourIp p i = _ = put p i 10; _ = put p (i + 1) 0; _ = put p (i + 2) 2; put p (i + 3) 15.
+conn table i = Conn.at (Addr.add table (i * 16416)).
+find : unsafe Addr -> Addr -> Int -> Int -> Int .
+find table peer port i = if i >= 4 then -1 else
+  c = conn table i;
+  if Word.toInt (Conn.active c) != 0 and Conn.port c == port and equal (Addr.add (Conn.addr c) 10) peer 4 0 then i else find table peer port (i + 1).
+free : unsafe Addr -> Int -> Int .
+free table i = if i >= 4 then -1 else if Word.eq (Conn.active (conn table i)) (w 0) then i else free table (i + 1).
+# ARP replies only to valid Ethernet/IPv4 requests for our fixed address.
+arp f n mac out = if n < 42 then 0 else
+  if u16 f 14 != 1 or u16 f 16 != 2048 or b f 18 != 6 or b f 19 != 4 or u16 f 20 != 1 then 0 else
+  if ours f 38 then
+    _ = copy out (Addr.add f 22) 6 0;
+    _ = copy (Addr.add out 6) mac 6 0;
+    _ = put16 out 12 2054; _ = put16 out 14 1; _ = put16 out 16 2048;
+    _ = put out 18 6; _ = put out 19 4; _ = put16 out 20 2;
+    _ = copy (Addr.add out 22) mac 6 0; _ = ourIp out 28;
+    _ = copy (Addr.add out 32) (Addr.add f 22) 10 0; 42
+  else 0.
+# Encode a TCP frame. Caller reserves TX memory before invocation and sends
+# exactly the returned length. Advance the sequence only for emitted bytes.
+emit : Addr -> Int -> Addr -> Int -> Addr -> Addr -> Int .
+emit address flags payload n mac out =
+  c = Conn.at address;
+  ip = Addr.add out 14; tcp = Addr.add out 34;
+  _ = copy out (Addr.add address 4) 6 0; _ = copy (Addr.add out 6) mac 6 0;
+  _ = put16 out 12 2048; _ = put16 ip 0 17664; _ = put16 ip 2 (40 + n);
+  _ = put16 ip 4 0; _ = put16 ip 6 16384; _ = put16 ip 8 16390; _ = put16 ip 10 0;
+  _ = ourIp ip 12; _ = copy (Addr.add ip 16) (Addr.add address 10) 4 0;
+  _ = put16 ip 10 (checksum ip 20 0);
+  _ = put16 tcp 0 80; _ = put16 tcp 2 (Conn.port c);
+  _ = put32 tcp 4 (Conn.sequence c); _ = put32 tcp 8 (Conn.receive c);
+  _ = put tcp 12 80; _ = put tcp 13 (bit flags 15 + 16);
+  _ = put16 tcp 14 (min 8192 (16384 - Word.toInt (Conn.length c)));
+  _ = put16 tcp 16 0; _ = put16 tcp 18 0; _ = copy (Addr.add tcp 20) payload n 0;
+  check = checksum tcp (20 + n) (u16 ip 12 + u16 ip 14 + u16 ip 16 + u16 ip 18 + 6 + 20 + n);
+  _ = put16 tcp 16 (if check == 0 then 65535 else check);
+  _ = Conn.setSequence c (Word.and (Word.add (Conn.sequence c) (w (n + if bit flags 3 != 0 then 1 else 0))) (w 4294967295));
+  54 + n.
+min a z = if a < z then a else z.
+# Bounds precede every variable-offset read. Reject fragments and corrupt
+# checksums before locating or mutating a connection.
+ipv4 f n mac table out = if n < 54 then 0 else
+  ip = Addr.add f 14; ihl = bit (b ip 0) 15 * 4;
+  if shr (b ip 0) 4 != 4 or ihl < 20 or ihl + 20 > n - 14 then 0 else
+  size = u16 ip 2;
+  if size < ihl + 20 or size > n - 14 or b ip 9 != 6 or bit (u16 ip 6) 16383 != 0 then 0 else
+  if ours ip 16 then checkedIp ip ihl size f mac table out else 0.
+checkedIp ip ihl size f mac table out = if checksum ip ihl 0 != 0 then 0 else
+  tcp = Addr.add ip ihl; thl = shr (b tcp 12) 4 * 4; count = size - ihl;
+  if thl < 20 or thl > count or u16 tcp 2 != 80 then 0 else
+  seed = u16 ip 12 + u16 ip 14 + u16 ip 16 + u16 ip 18 + 6 + count;
+  if checksum tcp count seed != 0 then 0 else
+    flags = b tcp 13; seq = u32 tcp 4;
+    index = find table (Addr.add ip 12) (u16 tcp 0) 0;
+    if index < 0 then
+      if bit flags 6 == 2 then openPeer table (free table 0) f ip tcp seq mac out else 0
+    else peer (Conn.addr (conn table index)) flags seq (Addr.add tcp thl) (count - thl) mac out.
+openPeer table index f ip tcp seq mac out = if index < 0 then 0 else
+  c = conn table index; address = Conn.addr c;
+  _ = Conn.setActive c (w 1); _ = copy (Addr.add address 4) (Addr.add f 6) 6 0;
+  _ = copy (Addr.add address 10) (Addr.add ip 12) 4 0; _ = Conn.setPort c (u16 tcp 0);
+  _ = Conn.setReceive c (Word.and (Word.add seq (w 1)) (w 4294967295));
+  _ = Conn.setSequence c (w 65536); _ = Conn.setLength c (w 0); _ = Conn.setFin c (w 0);
+  emit address 2 f 0 mac out.
+peer address flags seq payload n mac out =
+  c = Conn.at address;
+  case bit flags 4 != 0 of
+    True -> _ = if Word.eq seq (Conn.receive c) then Conn.setActive c (w 0) else Unit; 0
+  | False -> if Word.eq seq (Conn.receive c) then accept c address flags payload n mac out else
+      if n > 0 or bit flags 1 != 0 then emit address 0 payload 0 mac out else 0.
+accept c address flags payload n mac out =
+  used = Word.toInt (Conn.length c); take = min n (16384 - used);
+  _ = copy (Addr.add address (32 + used)) payload take 0;
+  _ = Conn.setLength c (w (used + take));
+  finish = bit flags 1 != 0 and take == n;
+  _ = Conn.setReceive c (Word.and (Word.add (Conn.receive c) (w (take + if finish then 1 else 0))) (w 4294967295));
+  _ = if finish then Conn.setFin c (w 1) else Unit;
+  if n > 0 or bit flags 1 != 0 then emit address 0 payload 0 mac out else 0.
+receive : Addr -> Int -> Addr -> Addr -> Addr -> Int .
+receive f n mac table out = if n < 14 then 0 else
+  case u16 f 12 of 2054 -> arp f n mac out | 2048 -> ipv4 f n mac table out | other -> 0.
+# Fair poll and bounded client read policy; C only allocates/copies Strings.
+poll : unsafe Addr -> Int -> Int -> Int .
+poll table cursor k = if k >= 4 then 0 else
+  i = bit (cursor + k) 3; c = conn table i;
+  if Word.toInt (Conn.active c) != 0 and Word.toInt (Conn.length c) > 0 then i + 1 else poll table cursor (k + 1).
+readSize : Addr -> Int .
+readSize address = min 1024 (Word.toInt (Conn.length (Conn.at address))).
+consume : Addr -> Int -> Unit .
+consume address n = c = Conn.at address; left = Word.toInt (Conn.length c) - n;
+  _ = copy (Addr.add address 32) (Addr.add address (32 + n)) left 0; Conn.setLength c (w left).
+segment : Int -> Int .
+segment n = min 1200 n.
+connection : Addr -> Int -> Addr .
+connection table id = if id < 1 or id > 4 then Addr.null Unit else
+  c = conn table (id - 1);
+  if Word.eq (Conn.active c) (w 0) then Addr.null Unit else Conn.addr c.
+close : Addr -> Unit .
+close address = Conn.setActive (Conn.at address) (w 0).

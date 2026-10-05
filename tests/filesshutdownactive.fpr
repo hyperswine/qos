@@ -1,0 +1,33 @@
+# A shutdown queued behind interrupted Files I/O must never start recovery.
+FS = use "../std/fs".
+B = use "../std/blockio".
+Native = use "../std/block".
+blkTestStallNth : Int -> Int .
+blkTestBusy : Unit -> Int .
+ok (Ok _) = True.
+ok (Err _) = False.
+writer : Int -> Int -> Int -> Unit .
+writer boss fs me = _ = send boss (case FS.append me fs "shutdown/value" "interrupted" of Err why -> True | Ok value -> False); Unit.
+active : unsafe Int -> Int -> Int -> Bool .
+active n me block = case B.call me block B.Status of
+    Ok (B.State 0 count True) -> True
+  | other -> if n <= 0 then False else _ = Sys.sleepUs 100; active (n - 1) me block.
+main : unsafe String .
+main =
+  me = myself 0;
+  hart = if Sys.harts Unit > 1 then 1 else 0;
+  block = Native.serveOn hart me (device "blk");
+  _ = B.call me block (B.Configure (0, 100000, 20, 2));
+  fs = case FS.startBlockOn hart me block of Ok a -> a | Err why -> error why;
+  _ = FS.append me fs "shutdown/value" "before";
+  _ = blkTestStallNth 1;
+  child = spawn (writer me fs);
+  busy = active 500 me block;
+  shutdown = ok (FS.shutdown me fs block);
+  failed = receiveFrom me child;
+  refused = case FS.readLatest me fs "shutdown/value" of Err why -> why == "storage offline: shutdown" | Ok v -> False;
+  closed = case B.call me block B.Status of Ok (B.State 2 0 False) -> True | other -> False;
+  # Logical drain must not claim the timed-out DMA has been released.
+  reserved = blkTestBusy Unit == 1;
+  holds = busy and shutdown and failed and refused and closed and reserved;
+  "filesshutdownactive: busy={busy} shutdown={shutdown} failed={failed} refused={refused} closed={closed} reserved={reserved} {if holds then "HOLDS" else "FAILED"}".

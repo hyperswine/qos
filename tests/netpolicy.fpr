@@ -1,0 +1,4 @@
+netPolicyCheck : Unit -> Int .
+main = case netPolicyCheck Unit of
+    0 -> print "netpolicy: packets, checksums, bounds, state and backpressure HOLDS"
+  | n -> error "netpolicy failed at check {n}".

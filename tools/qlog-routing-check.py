@@ -63,6 +63,7 @@ with tempfile.TemporaryDirectory(prefix='qos-qlog-routing-') as d:
             for count in (1, 2):
                 out = boot(system, harts, modern, disk, 'yyyyq')
                 assert f'storage: disk online -- boot #{count} on this log' in out, out
+                assert 'storage: Files quiesced and block drained' in out, out
                 assert 'System.qa: startup app returned; halting.' in out, out
             print(f'System routing: virtio v{2 if modern else 1}, {harts} hart(s), two persistent boots HOLDS', flush=True)
             # The first metadata read fails before readiness publication.

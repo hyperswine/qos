@@ -41,3 +41,8 @@
 ../.fpr/store/f556a08d099fbe45.fpr
 # Previously shipped Files interface checked while refreshing its Qlog pin.
 ../.fpr/store/42407f97b02f451f.fpr
+
+# Exact prior Files interface used for shutdown API compatibility checks.
+../.fpr/store/ef209d6518832a06.fpr
+# Exact routed Qlog dependency of the previous Files interface.
+../.fpr/store/5c94f0ce8d592d3d.fpr

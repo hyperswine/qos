@@ -70,7 +70,7 @@ IInt = EP.IInt.
 IStr = EP.IStr.
 IFn  = EP.IFn.
 IErr = EP.IErr.
-FS = use "std/fs#ef209d6518832a06".
+FS = use "std/fs#ada972463cd03f5d".
 Block = use "std/block#f6a778da43671433".
 BlockEP = use "mods/blockep#97237492694e7b1a".
 BlockIO = use "std/blockio#1e7c2253c4828e32".
@@ -1066,6 +1066,12 @@ main =
   # launch the startup app (TUIAppLauncher) through the permission gate
   _ = launch io startup;
 
+  _ = case store == 0 of
+      True -> Unit
+    | False -> _ = case FS.shutdown me store block of
+          Ok value -> putLn con "storage: Files quiesced and block drained"
+        | Err why -> putLn con "storage: shutdown failed: {why}";
+               Unit;
   putLn con "System.qa: startup app returned; halting.".
 
 # System.qa's own persistent MVU in miniature: Model = boot count,

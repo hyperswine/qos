@@ -61,10 +61,7 @@ def check(out, names):
             assert 'netTest' not in symbols and 'testFillFrom' not in symbols, symbols
         print('Production objects: injection entry points absent HOLDS', flush=True)
         for name in names:
-            kernel = out / (name + '.elf')
             flags = '-DQOS_NET_TEST -DNET_DEADLINE_TICKS=3000000ULL' if name.startswith('net') else '-DQOS_PROCESS_TEST'
-            run(['make', '-s', '-C', 'qos', 'native', f'SYSTEM={ROOT}/tests/{name}.fpr',
-                 f'KERNEL={kernel}', f'BUILD={out}/{name}', f'NATIVE_CFLAGS_EXTRA={flags}'])
             disk = None
             if name == 'nativerefusal':
                 archives = []
@@ -76,8 +73,11 @@ def check(out, names):
                     archives.append(qa)
                 disk = out / 'disk'
                 run(['python3', 'tools/mkdisk.py', disk, '8', *archives])
-            for modern in (False, True):
-                for harts in (1, 2):
+            for harts in (1, 2):
+                kernel = out / f'{name}-{harts}.elf'
+                run(['make', '-s', '-C', 'qos', 'native', f'SYSTEM={ROOT}/tests/{name}.fpr',
+                     f'KERNEL={kernel}', f'BUILD={out}/{name}-{harts}', f'NATIVE_CFLAGS_EXTRA={flags}', f'HARTS={harts}'])
+                for modern in (False, True):
                     log = boot(kernel, disk, name.startswith('net'), harts, modern)
                     assert name + ':' in log, log
                     reason = {'netstall': 'transmit timed out', 'netorphan': 'stalled on an abandoned frame',

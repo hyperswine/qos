@@ -438,3 +438,75 @@ boots, full disk hardening and reset-cancellation, the 24-boot Qlog routing and
 loaded-process syscall matrix, Portable plugin persistence, and shared Files
 prefix/compaction/refusal persistence checks also pass. This is focused
 verification, not a full repository sweep.
+
+## Files shutdown and RV64 TCP/ARP policy (2026-10-05)
+
+`std/fs` v2.0 adds `quiesce me fs` and `shutdown me fs block` for the stable
+owner created by `startBlock`/`startBlockOn`. The owner retains its creator
+identity. Rpc tag 7 checks that claimed identity, serializes behind the current
+Files operation, kills its Qlog child, and latches `storage offline: shutdown`.
+It stays alive so namespace adapters and existing syscall bindings receive
+explicit errors. It never rescans or restarts after quiesce. The shutdown helper
+waits for that acknowledgement before the creator sends the block service's
+administrator-only Drain. Repeated shutdown succeeds; a drain failure returns
+`storage quiesced; drain failed: ...` and leaves Files quiesced. The standalone
+`serve`/`serveBlock` compatibility actors do not implement this control.
+
+The native System bootstrap now invokes this sequence when the startup app
+returns, before its halt message. This is graceful logical settlement, without
+an implicit compact, flush, durability promise, device reset, or resume. A
+stalled current operation must finish/fail before quiesce can acknowledge.
+Requests handled after the barrier are refused. Authentication remains the
+existing cooperative message convention, not protection against a forged Rpc
+caller field or arbitrary HAL access in the same image. `/services/files/status`
+still indicates publication of a gateway; operation results report shutdown.
+
+`hal/virt/netpolicy.fpr` moves RV64 Ethernet/ARP reply formats, IPv4/TCP parsing
+and checksums, the four-connection lookup/allocation and sequence transitions,
+binary receive buffering, fair poll selection, read limits and send segment
+size into an allocation-free raw FP-RISC library. Typed byte and connection
+layouts share a C ABI with asserted field offsets and stride. C retains NIC
+queues, descriptor/fence/MMIO operations, static storage, TX ownership/deadlines,
+and String allocation/copying. The public `netPoll`/`netRead`/`netWrite`/`netClose`
+wire stays unchanged. Both the shared HAL makefile and the loaded-process build
+script link the new unit. RV32 still compiles its original C transport.
+
+Bounds precede variable header offsets. RV64 now drops malformed IPv4/TCP
+headers, fragments, wrong ports/destinations, and corrupt checksums before
+changing connection state. ARP requires an Ethernet/IPv4 request for our address.
+Receive overflow acknowledges only stored bytes; FIN advances the sequence only
+when its preceding payload fits, and advertised window follows available space.
+An established peer's RST must match the next expected sequence. These are
+correctness changes from the old unchecked parser and acknowledge-and-drop
+buffer overflow behavior.
+
+Fresh verification:
+
+- `tools/files-shutdown-check.py`: two Portable and four native v1/v2 h1/h2
+  creator/refusal/idempotence/persistence/drain-failure runs, plus four native
+  shutdown-behind-timed-out-I/O runs. The latter retain the HAL reservation
+  while reporting the logical block service drained; no recovery is triggered.
+- `tools/net-policy-check.py`: RV32/RV64 production object ABI and absence of
+  test hooks; two target-matched RV64 executions of packet, checksum, truncated
+  header, fragment, table-full, sequence-wrap, binary payload, fair poll and
+  backpressure fixtures. A checksum-blind temporary mutation is rejected.
+- `tools/net-transport-check.py`: real QEMU slirp ARP/TCP and four simultaneous
+  2573-byte binary echo peers, segmented both ways and closed with FIN, under
+  virtio v1/v2 and one/two target-matched harts. The runner accommodates slirp's
+  host listener accepting sockets before the guest handshake completes.
+- `tools/failure-injections-check.py --only netstall netorphan`: eight native
+  TX stall/orphan executions with deadlines, continuing heartbeat and offline
+  refusals. Its builds now match each QEMU hart count. The console injection
+  and production hook checks also pass.
+- `tools/qlog-routing-check.py`: the routed Qlog/owner/bootstrap/process matrix,
+  including two persistent System boots and the new successful shutdown log.
+- `tools/qsys-check.sh` and `tools/files-service-check.py`: Portable plugin
+  imports/persistent boots and Files prefix/compact/dead-owner refusals.
+
+This completes Files-to-block shutdown coordination. TCP/ARP is a policy
+migration checkpoint, not the complete Phase 2 actor design: connection storage
+and polling still use the compatibility HAL composition. A frame-only
+`rxFrame`/`txFrame`/`kick` interface, dedicated network actor and client migration
+remain. The stack still has fixed 10.0.2.15:80, four peers, no retransmission,
+congestion control, general TCP close/TIME_WAIT, DHCP or physical NIC evidence.
+Physical block resume/reprobe and remaining Phase 2/3 items remain open.
