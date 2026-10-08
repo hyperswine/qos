@@ -1,0 +1,52 @@
+# Test kernel: the Base mailbox contract holds for a loaded process exactly
+# as it holds for the plane's own actors (tests/mailboxproc.fpr).
+FS = use "std/fs".
+QAR = use "../programs/mods/qar".
+QaImg = use "../programs/mods/qaimg".
+
+Sys.placeImageAt : String -> List Int -> List Int -> String -> Int -> (String, String) -> (Int, String, Int) .
+Sys.reservePid : Unit -> Int .
+Sys.images : Int -> Int .
+
+place : String -> (Int, String, Int) .
+place qa = case QAR.sectionBytes qa "LOAD" of
+    Err e -> (0, "no LOAD: {e}", 0)
+  | Ok load -> place2 qa load.
+place2 : String -> String -> (Int, String, Int) .
+place2 qa load = case QAR.extent qa "IMAGE" of
+    Err e -> (0, "no IMAGE: {e}", 0)
+  | Ok r -> (case QAR.extent qa "RELOC" of
+      Err e -> (0, "no RELOC: {e}", 0)
+    | Ok rel -> place3 qa load r rel).
+place3 : String -> String -> (Int, Int) -> (Int, Int) -> (Int, String, Int) .
+place3 qa load r rel =
+  (ipos, iln) = r;
+  (rpos, rln) = rel;
+  case QaImg.parse load of
+    Err e -> (0, "bad LOAD: {e}", 0)
+  | Ok m -> (case QaImg.check m iln of
+      Err e -> (0, "bad image: {e}", 0)
+    | Ok m2 -> Sys.placeImageAt qa (ipos :: iln :: rpos :: rln :: 0 :: 0 :: Nil) (QaImg.nativeNums m2 load) "CkMailbox\n" (Sys.reservePid Unit) (QaImg.sha m2, QaImg.relsha m2)).
+
+main =
+  me = myself 0;
+  fs = FS.serve (device "blk");
+  case FS.readLatest me fs "apps/CkMailbox.qa" of
+    Err e -> "mailboxnative: no image {e}"
+  | Ok qa -> run me qa.
+result me root = case receiveFromRes me root of Ok m -> resultOf m | Err e -> "failed: {e}".
+resultOf m = case m of Ok s -> s | Err e -> "failed: {e}".
+run : unsafe Int -> String -> String .
+run me qa =
+  images0 = Sys.images 0;
+  (ok, msg, root) = place qa;
+  reply = case ok == 2 of True -> result me root | False -> msg;
+  _ = settle images0 400;
+  images = Sys.images 0 - images0;
+  expected = "mailbox: static 8 queued 8 of 20 (12 refused), drained 8 in order; dynamic 8 queued 20 of 20, drained 20 in order; arc 3000 shared values held, drained 3000 in order; a dead actor answers dead actor";
+  verdict = if reply == expected and images == 0 then "HOLDS" else "FAILED";
+  "mailboxnative: process=[{reply}] images={images} {verdict}".
+settle : unsafe Int -> Int -> Bool .
+settle images0 n = case Sys.images 0 == images0 of
+    True -> True
+  | False -> (case n <= 0 of True -> False | False -> Sys.sleepUs 20000 >> settle images0 (n - 1)).

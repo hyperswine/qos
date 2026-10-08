@@ -144,24 +144,38 @@ load loadText img = case parse loadText of
   | Ok m -> check m (strlen img).
 
 # Native process images share runtime structs with the kernel. Portable images
-# still use nums; nativeNums includes the checked compatibility declaration.
-nativeNums : Img -> Int -> List Int .
-nativeNums m abi = base m :: entry m :: execsz m :: rwoff m :: memsz m :: abi :: Nil.
+# still use nums; nativeNums adds the checked compatibility declarations, read
+# from the LOAD text: the native runtime ABI (struct layouts and the boot
+# block) and the two plane contract versions the image was compiled against
+# (fprisc docs/2026-10-08-PLANE-TABLES.md). -1 = not declared, or declared
+# badly; the loader refuses each by name.
+nativeNums : unsafe Img -> String -> List Int .
+nativeNums m load = nativeNumsWith m (nativeAbi load) (planeActorsAbi load) (planeMemoryAbi load).
+nativeNumsWith : Img -> Int -> Int -> Int -> List Int .
+nativeNumsWith m abi actors memory = base m :: entry m :: execsz m :: rwoff m :: memsz m :: abi :: actors :: memory :: Nil.
 
 nativeAbi : unsafe String -> Int .
-nativeAbi s = abiGo s 0 (strlen s) (0 - 1).
-abiGo : unsafe String -> Int -> Int -> Int -> Int .
-abiGo s i n seen | i >= n = seen.
-abiGo s i n seen = abiLine s i n seen (lineStop s i n).
-abiLine : unsafe String -> Int -> Int -> Int -> Int -> Int .
-abiLine s i n seen e = case substr s i 10 == "nativeabi " of
-    False -> abiGo s (e + 1) n seen
+nativeAbi s = declared s "nativeabi ".
+planeActorsAbi : unsafe String -> Int .
+planeActorsAbi s = declared s "planeactors ".
+planeMemoryAbi : unsafe String -> Int .
+planeMemoryAbi s = declared s "planememory ".
+
+# `key <decimal>` declared exactly once, 1..9 digits; -1 otherwise
+declared : unsafe String -> String -> Int .
+declared s key = abiGo s key (strlen key) 0 (strlen s) (0 - 1).
+abiGo : unsafe String -> String -> Int -> Int -> Int -> Int -> Int .
+abiGo s key kl i n seen | i >= n = seen.
+abiGo s key kl i n seen = abiLine s key kl i n seen (lineStop s i n).
+abiLine : unsafe String -> String -> Int -> Int -> Int -> Int -> Int -> Int .
+abiLine s key kl i n seen e = case substr s i kl == key of
+    False -> abiGo s key kl (e + 1) n seen
   | True -> (case seen >= 0 of
       True -> 0 - 1
-    | False -> (case e - i - 10 > 0 and e - i - 10 <= 9 of
-        True -> abiValue s e n (decimal s (i + 10) e 0 0) (e - i - 10)
+    | False -> (case e - i - kl > 0 and e - i - kl <= 9 of
+        True -> abiValue s key kl e n (decimal s (i + kl) e 0 0) (e - i - kl)
       | False -> 0 - 1)).
-abiValue : unsafe String -> Int -> Int -> (Int, Int) -> Int -> Int .
-abiValue s e n r digits = case r of (value, k) -> case k > 0 and k == digits of
-    True -> abiGo s (e + 1) n value
+abiValue : unsafe String -> String -> Int -> Int -> Int -> (Int, Int) -> Int -> Int .
+abiValue s key kl e n r digits = case r of (value, k) -> case k > 0 and k == digits of
+    True -> abiGo s key kl (e + 1) n value
   | False -> 0 - 1.

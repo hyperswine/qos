@@ -122,7 +122,7 @@ V fpr_process_entry(void *heap_base, uw heap_size, fpr_grant_t (*grow)(uw want_b
     /* SHARED PLANE: no private harts, no nested hart loop, no tp
      * repoint -- the root actor is spawned into the kernel's queues
      * with our pid and runs whenever a hart picks it up.  Pools grow
-     * from the shared buddy (fpr_alloc's fpr_sched branch), so the
+     * from the shared buddy (fpr_alloc's fpr_plane_memory branch), so the
      * kernel reaps our acbs exactly like its own. */
     g_caps_bytes = caps;
     g_caps_len = caps_len;
@@ -131,7 +131,17 @@ V fpr_process_entry(void *heap_base, uw heap_size, fpr_grant_t (*grow)(uw want_b
     g_on_exit = sb->on_exit;
     g_ns = (V)sb->ns;
     g_net_owner = sb->net_abi == QOS_NET_BOOT_ABI ? sb->net_owner : 0;
-    fpr_sched = sb->sched;
+    /* the two plane contracts, each at the version this image was
+     * compiled against -- otherwise refuse to start: no actor is
+     * spawned, the kernel reads `refused` and frees the image */
+    sb->refused = 0;
+    if (!sb->actors || sb->actors->abi != FPR_PLANE_ACTORS_ABI)
+      sb->refused = "plane actors ABI mismatch: rebuild the process with tools/build-process-app.sh";
+    else if (!sb->memory || sb->memory->abi != FPR_PLANE_MEMORY_ABI)
+      sb->refused = "plane memory ABI mismatch: rebuild the process with tools/build-process-app.sh";
+    if (sb->refused) { sb->root = 0; return (V)&fpr_unit; }
+    fpr_plane_actors = sb->actors;
+    fpr_plane_memory = sb->memory;
     /* OUR OWN statics window: the shared span (heap_lo..heap_hi)
      * covers the slot this image is loaded into, but our code/rodata/
      * data/bss cells have no alloc preheaders -- register the window
@@ -156,7 +166,7 @@ V fpr_process_entry(void *heap_base, uw heap_size, fpr_grant_t (*grow)(uw want_b
     root->fn = (uw)proc_root;
     root->arity = 1;
     root->nargs = 0;
-    sb->root = (void *)fpr_sched->spawn_pid((V)root, sb->pid);
+    sb->root = (void *)fpr_plane_actors->spawn_pid((V)root, sb->pid);
     return (V)&fpr_unit; /* launched; the result arrives as a message */
   }
 

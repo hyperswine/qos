@@ -45,7 +45,7 @@ place3 qa load r rel =
     Err e -> (0, "bad LOAD: {e}", 0)
   | Ok m -> (case QaImg.check m iln of
       Err e -> (0, "bad image: {e}", 0)
-    | Ok m2 -> Sys.placeImageAt qa (ipos :: iln :: rpos :: rln :: 0 :: 0 :: Nil) (QaImg.nativeNums m2 (QaImg.nativeAbi load)) "CkSlow\n" (Sys.reservePid Unit) (QaImg.sha m2, QaImg.relsha m2)).
+    | Ok m2 -> Sys.placeImageAt qa (ipos :: iln :: rpos :: rln :: 0 :: 0 :: Nil) (QaImg.nativeNums m2 load) "CkSlow\n" (Sys.reservePid Unit) (QaImg.sha m2, QaImg.relsha m2)).
 
 main =
   me = myself 0;

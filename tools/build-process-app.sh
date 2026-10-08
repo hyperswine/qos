@@ -54,7 +54,11 @@ link() { # link <base> <out.elf>
 link 0 "build/${BASE}.elf"
 link 0x10000000 "build/${BASE}.moved.elf"
 
-NATIVE_ABI=$(python3 -c 'import re,sys; print(re.search(r"^#define FPR_NATIVE_ABI (\d+)u", open(sys.argv[1]).read(), re.M)[1])' "$RUNTIME/fpr.h")
+abi_of() { python3 -c 'import re,sys; print(re.search(r"^#define " + sys.argv[2] + r" (\d+)u", open(sys.argv[1]).read(), re.M)[1])' "$RUNTIME/fpr.h" "$1"; }
+NATIVE_ABI=$(abi_of FPR_NATIVE_ABI)
+ACTORS_ABI=$(abi_of FPR_PLANE_ACTORS_ABI)
+MEMORY_ABI=$(abi_of FPR_PLANE_MEMORY_ABI)
 python3 tools/mkqa.py "$MANIFEST" "build/${BASE}.elf" -o "$OUT_QA" --relocatable \
-  --check-moved "build/${BASE}.moved.elf" --delta 0x10000000 --native-abi "$NATIVE_ABI"
+  --check-moved "build/${BASE}.moved.elf" --delta 0x10000000 --native-abi "$NATIVE_ABI" \
+  --plane-abis "$ACTORS_ABI" "$MEMORY_ABI"
 echo "wrote $OUT_QA (loadMode=process, relocatable; seed it with tools/mkdisk.py for a disk boot)"

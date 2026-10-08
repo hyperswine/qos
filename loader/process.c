@@ -107,7 +107,8 @@ typedef struct {
   uw idlen;
   char id[];          /* the app id (Sys.bindApp) */
 } proc_image_t;
-static fpr_sched_t g_kernel_sched;
+static fpr_plane_actors_t g_kernel_actors; /* the kernel's two plane tables, exported once */
+static fpr_plane_memory_t g_kernel_memory;
 static int g_sched_ready;
 static uw g_next_pid = 1;
 /* Sys.reservePid: the launcher takes the pid BEFORE placement, so the
@@ -239,14 +240,22 @@ static int digest_is(V wantv, const unsigned char *a, uw an, const unsigned char
 /* Shared by launcher preflight and placement itself. No image backing,
  * publication or execution can happen until this gate succeeds. Hashes are
  * integrity claims supplied from LOAD, not signatures or authorization. */
-static const char *check_image(V qastr, V extv, V numsv, V shav, V relshav, uw ext[6], uw nums[6]) {
+static const char *check_image(V qastr, V extv, V numsv, V shav, V relshav, uw ext[6], uw nums[8]) {
   if (ISINT(qastr) || TID(qastr) != T_STR) fpr_cpanic("native image archive must be a String");
   if (!fpr_list_ints(extv, ext, 6))
     return "native image extents must cover IMAGE, RELOC and IMPORT";
-  if (!fpr_list_ints(numsv, nums, 6))
+  if (!fpr_list_ints(numsv, nums, 8))
     return "native runtime ABI missing: rebuild the process with tools/build-process-app.sh";
   if (nums[5] != FPR_NATIVE_ABI)
     return "native runtime ABI mismatch: rebuild the process with tools/build-process-app.sh";
+  /* the two plane contracts (fpr.h): declared apart from the layout version,
+   * so either table can move without the other; -1 = not declared */
+  if (nums[6] == (uw)-1 || nums[7] == (uw)-1)
+    return "plane contract versions missing: rebuild the process with tools/build-process-app.sh";
+  if (nums[6] != FPR_PLANE_ACTORS_ABI)
+    return "plane actors ABI mismatch: rebuild the process with tools/build-process-app.sh";
+  if (nums[7] != FPR_PLANE_MEMORY_ABI)
+    return "plane memory ABI mismatch: rebuild the process with tools/build-process-app.sh";
   str_t *qa = (str_t *)qastr;
   for (uw i = 0; i < 6; i += 2)
     if (ext[i] > qa->len || ext[i+1] > qa->len - ext[i]) return "native image section outside archive";
@@ -265,7 +274,7 @@ static const char *check_image(V qastr, V extv, V numsv, V shav, V relshav, uw e
 /* Preflight before the launcher reserves a pid or records permission grants.
  * Placement repeats the gate so direct callers cannot skip integrity checks. */
 static V g_sys_check_image(V qa, V extv, V numsv, V sha, V relsha) {
-  uw ext[6], nums[6];
+  uw ext[6], nums[8];
   const char *bad = check_image(qa, extv, numsv, sha, relsha, ext, nums);
   if (bad) return fpr_mkresult(1, bad);
   hdr_t *ok = (hdr_t *)fpr_alloc(8 + sizeof(V));
@@ -282,7 +291,7 @@ FPR_FN(fpr_g_Sys_x2etestImageAllocs, g_test_image_allocs, 1);
 #endif
 
 /* Sys.placeImageAt qa [IMAGE off,len, RELOC off,len, IMPORT off,len]
- * [base,entry,execsz,rwoff,memsz,nativeabi] caps pid (sha,relsha)
+ * [base,entry,execsz,rwoff,memsz,nativeabi,planeactors,planememory] caps pid (sha,relsha)
  * -> (2, pid description, root actor), or (0, refusal, 0).
  * Digest failures return before any image buddy request or publication. */
 static V g_sys_place_image_at(V qastr, V extv, V numsv, V capsv, V pidv, V digests) {
@@ -290,7 +299,7 @@ static V g_sys_place_image_at(V qastr, V extv, V numsv, V capsv, V pidv, V diges
   V shav = *(V *)((char *)digests + 8), relshav = *(V *)((char *)digests + 8 + sizeof(V));
   if (ISINT(capsv) || TID(capsv) != T_STR) fpr_cpanic("Sys.placeImageAt: caps must be a String");
   if (!ISINT(pidv) || UNTAG(pidv) < 0) fpr_cpanic("Sys.placeImageAt: pid must be an Int");
-  uw ext[6], nums[6];
+  uw ext[6], nums[8];
   const char *invalid = check_image(qastr, extv, numsv, shav, relshav, ext, nums);
   if (invalid) return refuse(invalid);
   str_t *qa = (str_t *)qastr;
@@ -322,7 +331,7 @@ static V g_sys_place_image_at(V qastr, V extv, V numsv, V capsv, V pidv, V diges
   fpr_code_publish(); /* local fence now; remote fences before dispatch */
 
   if (!g_sched_ready) {
-    fpr_sched_export(&g_kernel_sched);
+    fpr_plane_export(&g_kernel_actors, &g_kernel_memory);
     g_sched_ready = 1;
   }
   uw pid = UNTAG(pidv) ? (uw)UNTAG(pidv) : __atomic_fetch_add(&g_next_pid, 1, __ATOMIC_RELAXED);
@@ -334,7 +343,9 @@ static V g_sys_place_image_at(V qastr, V extv, V numsv, V capsv, V pidv, V diges
   pi->ending = 0;
   pi->idlen = idlen;
   for (uw i = 0; i < idlen; i++) pi->id[i] = (char)g_app_id->bytes[i];
-  pi->sb.sched = &g_kernel_sched;
+  pi->sb.actors = &g_kernel_actors;
+  pi->sb.memory = &g_kernel_memory;
+  pi->sb.refused = 0;
   pi->sb.reply = fpr_hart()->current; /* the launcher actor gets the result */
   pi->sb.pid = pid;
   pi->sb.on_exit = shared_on_exit;
@@ -359,7 +370,11 @@ static V g_sys_place_image_at(V qastr, V extv, V numsv, V capsv, V pidv, V diges
   /* the root actor, read before the record can go: a process that started
    * nothing, or has already ended, is freed by the next line */
   V root = pi->sb.root ? (V)pi->sb.root : TAG(0);
+  const char *refused = pi->sb.refused;
   image_quiet(pid);
+  /* the entry declined a plane table version: nothing was spawned and the
+   * image is already gone; the refusal is the answer */
+  if (refused) return refuse(refused);
 
   char pm[32];
   uw pn = 0;

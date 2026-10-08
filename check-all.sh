@@ -20,6 +20,7 @@ echo "== Qlog and bootstrap block routing ==" && (python3 tools/qlog-routing-che
 echo "== disk hardening: deadlines, stalled devices, reset, offline refusal, overload refusal (native + Portable) ==" && (python3 tools/disk-harden-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
 echo "== native image integrity: corrupt sections and missing digests refuse before allocation ==" && (python3 tools/native-integrity-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
 echo "== initial memory admission: routed native process, refusal and reclamation ==" && (sh tools/admission-check.sh) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
+echo "== the mailbox contract as a loaded process: Static refuses through the plane's actors table ==" && (sh tools/mailbox-process-check.sh) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
 echo "== native runtime ABI parser: missing, malformed, duplicate and oversized declarations ==" && (./qos.py run tests/nativeabi.fpr --expect "nativeabi: HOLDS") || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
 echo "== audit failure injections: native TX stall/orphan, full console pipe, native process storage refusal and fail-stop ==" && (python3 tools/failure-injections-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
 echo "== stdcheck =="            && (${FPRISC_ROOT}/fpr stdcheck ${FPRISC_ROOT}/std/checkdemo.fpr | tail -1) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }

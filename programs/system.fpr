@@ -701,8 +701,8 @@ runProcessVerified con qa m exts caps =
 
 nativeProcessNums : String -> QaImg.Img -> List Int .
 nativeProcessNums qa m = case QAR.sectionBytes qa "LOAD" of
-    Ok load -> QaImg.nativeNums m (QaImg.nativeAbi load)
-  | Err e -> QaImg.nativeNums m (0 - 1).
+    Ok load -> QaImg.nativeNums m load
+  | Err e -> QaImg.nativeNumsWith m (0 - 1) (0 - 1) (0 - 1).
 
 # the process's pid is reserved first and its grants recorded in the
 # namespace under it, so an open from its first instruction on is judged

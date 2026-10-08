@@ -1,0 +1,70 @@
+# mailboxproc.fpr -- the mailbox contract (fprisc tests/mailbox.fpr) run as
+# a LOADED NATIVE PROCESS on the shared plane.  The Base profile promises a
+# Static ring refuses the burst that outruns it and says so, and a Dynamic
+# ring grows in order; until the plane's actors table carried the mailbox
+# policy (spawn_cap), a process's actors silently kept the plane's default
+# ring of 64, and the same program meant something else as a process.  The
+# result line must be the one tests/mailbox.fpr prints on the plane itself.
+unsafe program.
+AC = use "std/actor".
+Static = AC.Static.
+Dynamic = AC.Dynamic.
+gate me =
+  s = receive me;
+  k = receive me;
+  _ = AC.sendOrDie s k;
+  0.
+sink main gate me =
+  k = receiveFrom me gate;
+  (last, ordered) = drainN me main k 0 True;
+  _ = AC.sendOrDie main (k, ordered);
+  0.
+drainN me main 0 last ordered = (last, ordered).
+drainN me main k last ordered =
+  v = receiveFrom me main;
+  drainN me main (k - 1) v (ordered and v > last).
+sink2 main gate me =
+  k = receiveFrom me gate;
+  (last, ordered) = drainT me main k 0 True;
+  _ = AC.sendOrDie main (k, ordered);
+  0.
+drainT me main 0 last ordered = (last, ordered).
+drainT me main k last ordered =
+  (a, b) = receiveFrom me main;
+  drainT me main (k - 1) a (ordered and a > last).
+burst who i n ok | i > n = ok.
+burst who i n ok = case send who i of
+    Ok u -> burst who (i + 1) n (ok + 1)
+  | Err e -> burst who (i + 1) n ok.
+burstT who i n ok | i > n = ok.
+burstT who i n ok = case send who (i, i * 3) of
+    Ok u -> burstT who (i + 1) n (ok + 1)
+  | Err e -> burstT who (i + 1) n ok.
+trial me cap n =
+  g = spawn gate;
+  s = AC.spawnWith cap (sink me g);
+  _ = AC.sendOrDie g s;
+  ok = burst s 1 n 0;
+  _ = AC.sendOrDie g ok;
+  (k, ordered) = receiveFrom me s;
+  (ok, k, ordered).
+trialT me cap n =
+  g = spawn gate;
+  s = AC.spawnWith cap (sink2 me g);
+  _ = AC.sendOrDie g s;
+  ok = burstT s 1 n 0;
+  _ = AC.sendOrDie g ok;
+  (k, ordered) = receiveFrom me s;
+  (ok, k, ordered).
+orderWord True = "in order".
+orderWord False = "OUT OF ORDER".
+main =
+  me = myself 0;
+  (a, ka, oa) = trial me (Static 8) 20;
+  (b, kb, ob) = trialT me (Dynamic 8) 20;
+  (c, kc, oc) = trialT me (Dynamic 8) 3000;
+  dead = spawn (fn m -> 0);
+  _ = kill dead;
+  r = send dead 1;
+  deadTxt = case r of Ok u -> "ok" | Err e -> e;
+  "mailbox: static 8 queued {a} of 20 ({20 - a} refused), drained {ka} {orderWord oa}; dynamic 8 queued {b} of 20, drained {kb} {orderWord ob}; arc {c} shared values held, drained {kc} {orderWord oc}; a dead actor answers {deadTxt}".

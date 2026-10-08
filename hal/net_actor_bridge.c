@@ -9,7 +9,7 @@ extern V qos_process_net_owner(void) __attribute__((weak));
 #endif
 V qos_net_owner_value(void) {
 #if defined(__riscv)
-  if (fpr_sched && qos_process_net_owner) return qos_process_net_owner();
+  if (fpr_plane_actors && qos_process_net_owner) return qos_process_net_owner();
 #endif
   uw owner=__atomic_load_n(&qos_net_owner,__ATOMIC_ACQUIRE);
   return owner ? (V)owner : TAG(0);
@@ -23,7 +23,7 @@ void qos_net_require_owner(void) {
 }
 static V h_netOwner(V u) { (void)u; return qos_net_owner_value(); }
 static V h_netBindOwner(V actor) {
-  if (fpr_sched) return h_netOwner(TAG(0)); /* processes use the kernel owner */
+  if (fpr_plane_actors) return h_netOwner(TAG(0)); /* processes use the kernel owner */
   if (ISINT(actor) || TID(actor)!=T_ACTOR) fpr_actor_fail("net: binding requires actor");
   uw expected=0;
   __atomic_compare_exchange_n(&qos_net_owner,&expected,(uw)actor,0,__ATOMIC_ACQ_REL,__ATOMIC_ACQUIRE);

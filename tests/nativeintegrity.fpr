@@ -14,7 +14,7 @@ prepare qa =
   Ok reloc = QAR.extent qa "RELOC";
   Ok import = QAR.optionalExtent qa "IMPORT";
   (i,n) = image; (r,rn) = reloc; (b,bn) = import;
-  (i :: n :: r :: rn :: b :: bn :: Nil, QI.nativeNums m (QI.nativeAbi load), QI.sha m, QI.relsha m).
+  (i :: n :: r :: rn :: b :: bn :: Nil, QI.nativeNums m load, QI.sha m, QI.relsha m).
 checkBad : Int -> Int -> String -> String -> Bool.
 checkBad me fs id reason =
   Ok qa = FS.readLatest me fs "apps/{id}.qa";
@@ -38,6 +38,9 @@ main =
   noSha = checkBad me fs "NoSha" "IMAGE sha256 mismatch (corrupt archive or missing digest)";
   noRel = checkBad me fs "NoRelSha" "RELOC sha256 mismatch (corrupt archive or missing digest)";
   old = checkBad me fs "OldAbi" "native runtime ABI mismatch: rebuild the process with tools/build-process-app.sh";
+  oldActors = checkBad me fs "OldActors" "plane actors ABI mismatch: rebuild the process with tools/build-process-app.sh";
+  oldMemory = checkBad me fs "OldMemory" "plane memory ABI mismatch: rebuild the process with tools/build-process-app.sh";
+  noPlane = checkBad me fs "NoPlane" "plane contract versions missing: rebuild the process with tools/build-process-app.sh";
   validImport = checkBad me fs "WithImport" "native process IMPORT is unsupported: rebuild a self-contained process";
   Ok qa = FS.readLatest me fs "apps/CkVector.qa";
   (exts,nums,sha,relsha) = prepare qa;
@@ -45,6 +48,6 @@ main =
   (ok,msg,root) = Sys.placeImageAt qa exts nums "CkVector\n" 0 (sha,relsha);
   reply = case ok == 2 of True -> result me root | False -> msg;
   ended = settle 400;
-  good = unitOk and image and reloc and import and noSha and noRel and old and validImport and ended and reply == "vectorproc: generic=2.5 nested=3.5,4.5,7 fold=91" and Sys.testImageAllocs Unit == 1;
+  good = unitOk and image and reloc and import and noSha and noRel and old and oldActors and oldMemory and noPlane and validImport and ended and reply == "vectorproc: generic=2.5 nested=3.5,4.5,7 fold=91" and Sys.testImageAllocs Unit == 1;
   verdict = if good then "HOLDS" else "FAILED";
   "nativeintegrity: process=[{reply}] images={Sys.images 0} allocations={Sys.testImageAllocs Unit} {verdict}".

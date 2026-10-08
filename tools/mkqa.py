@@ -196,7 +196,8 @@ def check_moved(image, relocs, other_elf, delta):
             raise SystemExit(f"mkqa: --check-moved: the word at 0x{o:x} moved by {b - a}, not {delta}")
 
 def build(manifest_path, elf_path, out_path, relocatable=False,
-          check_moved_elf=None, check_delta=0, with_imports=False, native_abi=None):
+          check_moved_elf=None, check_delta=0, with_imports=False, native_abi=None,
+          plane_abis=None):
     with open(manifest_path, "rb") as f:
         manifest = f.read()
 
@@ -222,6 +223,12 @@ def build(manifest_path, elf_path, out_path, relocatable=False,
 
     if native_abi is not None:
         load += f"nativeabi {native_abi}\n".encode()
+    if plane_abis is not None:
+        # the two plane contracts the image was compiled against (fpr.h
+        # FPR_PLANE_ACTORS_ABI / FPR_PLANE_MEMORY_ABI): the loader refuses a
+        # mismatch by name before placing the image
+        actors_abi, memory_abi = plane_abis
+        load += f"planeactors {actors_abi}\nplanememory {memory_abi}\n".encode()
 
     # RELOC: little-endian u32 offsets of the address words to move by the
     # load address (the image is linked at 0).  IMPORT: one text line per
@@ -268,9 +275,14 @@ if __name__ == "__main__":
     ap.add_argument("--imports", action="store_true",
                     help="write an IMPORT section from the image's __qosimp_ markers (Portable plugins)")
     ap.add_argument("--native-abi", type=int, help="shared runtime ABI for a native process image")
+    ap.add_argument("--plane-abis", type=int, nargs=2, metavar=("ACTORS", "MEMORY"),
+                    help="the plane actors and memory contract versions the process was compiled against")
     a = ap.parse_args()
     if a.native_abi is not None and (not a.relocatable or not 1 <= a.native_abi <= 999999999):
         ap.error("--native-abi needs --relocatable and a positive version of at most nine digits")
     if a.imports and not a.relocatable:
         ap.error("--imports needs --relocatable")
-    build(a.manifest, a.elf, a.out, a.relocatable, a.check_moved, a.delta, a.imports, a.native_abi)
+    if a.plane_abis is not None and (a.native_abi is None or not all(1 <= v <= 999999999 for v in a.plane_abis)):
+        ap.error("--plane-abis needs --native-abi and two positive versions of at most nine digits")
+    build(a.manifest, a.elf, a.out, a.relocatable, a.check_moved, a.delta, a.imports, a.native_abi,
+          tuple(a.plane_abis) if a.plane_abis is not None else None)
