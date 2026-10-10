@@ -25,7 +25,9 @@ checkBad me fs id reason =
   good = pre and ok == 0 and why == reason and root == 0 and Sys.images 0 == images and Sys.testImageAllocs Unit == attempts;
   _ = print "nativeintegrity: {id} refused={good}";
   good.
-result me root = case receiveFromRes me root of Ok m -> (case m of Ok s -> s | Err e -> "failed: {e}") | Err e -> "failed: {e}".
+result me root = case receiveFromRes me root of Ok m -> kept m | Err e -> "failed: {e}".
+kept : _ -> String .
+kept m = r = keep (case m of Ok s -> s | Err e -> "failed: {e}"); _ = drop m; r.
 settle : unsafe Int -> Bool.
 settle n | Sys.images 0 == 0 = True.
 settle n | n <= 0 = False.

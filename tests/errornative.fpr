@@ -33,7 +33,10 @@ main =
   case FS.readLatest me fs "apps/CkError.qa" of
     Err e -> "errornative: no image {e}"
   | Ok qa -> run me qa.
-result me root = case receiveFromRes me root of Ok m -> resultOf m | Err e -> "failed: {e}".
+# the message root is dropped once its text is kept (the drop law)
+result me root = case receiveFromRes me root of Ok m -> kept m | Err e -> "failed: {e}".
+kept : _ -> String .
+kept m = r = keep (resultOf m); _ = drop m; r.
 resultOf m = case m of Ok s -> s | Err e -> "failed: {e}".
 run : unsafe Int -> String -> String .
 run me qa =
