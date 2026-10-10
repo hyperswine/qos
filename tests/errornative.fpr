@@ -1,0 +1,47 @@
+# Test kernel: does `error` inside a loaded process halt the machine?
+FS = use "std/fs".
+QAR = use "../programs/mods/qar".
+QaImg = use "../programs/mods/qaimg".
+
+Sys.placeImageAt : String -> List Int -> List Int -> String -> Int -> (String, String) -> (Int, String, Int) .
+Sys.reservePid : Unit -> Int .
+Sys.images : Int -> Int .
+
+place : String -> (Int, String, Int) .
+place qa = case QAR.sectionBytes qa "LOAD" of
+    Err e -> (0, "no LOAD: {e}", 0)
+  | Ok load -> place2 qa load.
+place2 : String -> String -> (Int, String, Int) .
+place2 qa load = case QAR.extent qa "IMAGE" of
+    Err e -> (0, "no IMAGE: {e}", 0)
+  | Ok r -> (case QAR.extent qa "RELOC" of
+      Err e -> (0, "no RELOC: {e}", 0)
+    | Ok rel -> place3 qa load r rel).
+place3 : String -> String -> (Int, Int) -> (Int, Int) -> (Int, String, Int) .
+place3 qa load r rel =
+  (ipos, iln) = r;
+  (rpos, rln) = rel;
+  case QaImg.parse load of
+    Err e -> (0, "bad LOAD: {e}", 0)
+  | Ok m -> (case QaImg.check m iln of
+      Err e -> (0, "bad image: {e}", 0)
+    | Ok m2 -> Sys.placeImageAt qa (ipos :: iln :: rpos :: rln :: 0 :: 0 :: Nil) (QaImg.nativeNums m2 load) "CkError\n" (Sys.reservePid Unit) (QaImg.sha m2, QaImg.relsha m2)).
+
+main =
+  me = myself 0;
+  fs = FS.serve (device "blk");
+  case FS.readLatest me fs "apps/CkError.qa" of
+    Err e -> "errornative: no image {e}"
+  | Ok qa -> run me qa.
+result me root = case receiveFromRes me root of Ok m -> resultOf m | Err e -> "failed: {e}".
+resultOf m = case m of Ok s -> s | Err e -> "failed: {e}".
+run : unsafe Int -> String -> String .
+run me qa =
+  (ok, msg, root) = place qa;
+  reply = case ok == 2 of True -> result me root | False -> msg;
+  _ = settle 400;
+  "errornative: process=[{reply}] images={Sys.images 0} MACHINE-CONTINUED".
+settle : unsafe Int -> Bool .
+settle n = case Sys.images 0 == 0 of
+    True -> True
+  | False -> (case n <= 0 of True -> False | False -> Sys.sleepUs 20000 >> settle (n - 1)).

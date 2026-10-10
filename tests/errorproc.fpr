@@ -1,0 +1,8 @@
+# errorproc.fpr -- a loaded process whose main calls the language's `error`.
+# SUPERVISION S8 asks whether a panic inside a process ends only that process
+# or halts the machine (the image has its own copy of the panic path).
+# tests/errornative.fpr launches it and reports which.
+unsafe program.
+main =
+  _ = print "errorproc: about to error";
+  error "errorproc: deliberate".

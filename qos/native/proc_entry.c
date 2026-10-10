@@ -85,8 +85,18 @@ static V proc_root(V self) {
   res->tid = T_RESULT;
   res->var = 0; /* Ok */
   *(V *)((char *)res + 8) = r;
-  for (int t = 0; !fpr_sent(fpr_send_as((uw)self, g_reply, (V)res)); t++)
-    if (t > 1000) fpr_cpanic("process: the reply mailbox refused the result");
+  /* the launcher's ring is Dynamic: a refusal is the machine out of memory,
+   * or the launcher gone.  Neither is a reason to halt the machine: say so
+   * through C's staged log and end; the launcher (if alive) hears this root
+   * end as "dead actor" through its receiveFromRes. */
+  for (int t = 0; !fpr_sent(fpr_send_as((uw)self, g_reply, (V)res)); t++) {
+    if (t >= 3) {
+      static const char why[] = "process: the launcher's mailbox refused the result; the root ends unanswered";
+      fpr_logput(2, why, sizeof why - 1);
+      break;
+    }
+    fpr_actor_sleep_us(1000);
+  }
   if (g_on_exit) g_on_exit();
   return (V)&fpr_unit;
 }

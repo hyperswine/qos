@@ -712,8 +712,18 @@ placeGranted con qa exts nums sha relsha caps =
   (u, ns) = con;
   pid = Sys.reservePid Unit;
   case EP.grant (capMe caps) ns pid (scopeGrants (capId caps) (capGranted caps)) of
-    Ok n -> Sys.placeImageAt qa exts nums (capsBlob caps) pid (sha, relsha)
+    Ok n -> retractIfRefused (capMe caps) ns pid (Sys.placeImageAt qa exts nums (capsBlob caps) pid (sha, relsha))
   | Err e -> (0, "process grants not recorded: {e}", 0).
+# a placement refused after the grants were recorded would leave them in the
+# namespace for a pid that will never run (pids are never reused): record an
+# EMPTY grant set for it, which the namespace reads first.  (A true retraction
+# needs an NsUngrant message in mods/ep.fpr, which every pinned user of that
+# module would have to re-pin for; this is the same effect without the churn.)
+retractIfRefused : Int -> Int -> Int -> (Int, String, Int) -> (Int, String, Int) .
+retractIfRefused me ns pid res = case res of (ok, msg, root) ->
+  case ok == 0 of
+    True -> (case EP.grant me ns pid Nil of _ -> res)
+  | False -> res.
 scopeGrants : unsafe String -> List (String, String) -> List (String, String) .
 scopeGrants id g = case g of
     Nil -> Nil
