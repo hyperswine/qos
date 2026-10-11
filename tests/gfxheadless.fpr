@@ -1,0 +1,26 @@
+# Physical GLES regression: repeated offscreen frames must submit work even
+# with no KMS connector. Before gfx_present's glFlush, V3D grows one command
+# list until BO allocation fails. The owner stays on one OS worker throughout.
+unsafe program.
+Gfx = Type (Scene statics dynamics lights camera | Ent mesh pos yaw scale color).
+scene = Scene Nil
+  (Ent "cube" (0, 0, 0) 300 (1000, 1000, 1000) (800, 300, 100) ::
+   Ent (0, "FP-RISC Pi offscreen soak") (-2500, 1600, 0) 0 (300, 300, 1000) (900, 900, 900) :: Nil)
+  Nil 6000.
+frames : unsafe Int -> Int -> Int .
+frames n draws = if n == 0 then draws else
+  (count, bytes) = glRender scene;
+  frames (n - 1) (draws + count).
+worker boss me =
+  _ = glInit 640 480;
+  draws = frames 5000 0;
+  rc = glSavePpm "/tmp/gfx-headless.ppm";
+  _ = send boss (draws, rc);
+  Unit.
+main =
+  me = myself 0;
+  a = spawnOn 0 (worker me);
+  (draws, rc) = receiveFrom me a;
+  _ = if draws >= 10000 and rc == 0 then print "gfxheadless: 5000 frames HOLDS"
+      else error "gfxheadless: draws={draws} snapshot={rc}";
+  Unit.

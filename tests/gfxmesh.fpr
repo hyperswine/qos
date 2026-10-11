@@ -67,7 +67,7 @@ main =
   me = myself 0;
   clint = device "clint";
   mt = reg32 clint 49144;
-  gl = spawn (GL.serve 960 600 "gfxmesh" (T.meshes + I.meshes + K.meshes + H.meshes));
+  gl = spawnOn 0 (GL.serve 960 600 "gfxmesh" (T.meshes + I.meshes + K.meshes + H.meshes));
   cfg = { env = 0, mt = mt, tick = 160000, input = gl, render = gl };
   _ = print "gfxmesh: {List.len (T.meshes + I.meshes + K.meshes + H.meshes)} meshes registered by the service";
   MV.game me cfg (App init update subs view).

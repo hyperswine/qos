@@ -396,8 +396,10 @@ bootWireSizedBlock w h me st apps block =
   _ = claim me ns "/apps" appsA;
   # the display, when this host has one: Graphics.qa owns it; programs
   # open sessions at /services/graphics/<tag> (mods/graphics.fpr)
+  # EGL contexts stay current on the creating OS thread. Pin the owner
+  # to hart 0 so waking it on another worker cannot strand that binding.
   _ = case glHas 0 == 1 of
-      True -> claim me ns "/services/graphics" (spawnD (GX.service w h GL.glBackend Nil))
+      True -> claim me ns "/services/graphics" (AC.spawnWithOn 0 (AC.Dynamic 64) (GX.service w h GL.glBackend Nil))
     | False -> Unit;
   _ = claimApps me ns appsA apps;
   _ = case st == 0 of

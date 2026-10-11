@@ -32,7 +32,10 @@ def png(path, rgb):
 def check(out):
     out.mkdir(parents=True, exist_ok=False)
     tag = f'qos-shell-check-{os.getpid()}'
-    env = dict(os.environ, XDG_CACHE_HOME=str(out / 'cache'), FPR_HARTS='1', FPR_PORT='0')
+    # Exercise the normal multi-worker scheduler: a single hart hides GL
+    # ownership bugs when a graphics actor wakes on a different worker.
+    env = dict(os.environ, XDG_CACHE_HOME=str(out / 'cache'),
+               FPR_HARTS=os.environ.get('FPR_HARTS', '4'), FPR_PORT='0')
 
     def run(*args):
         p = subprocess.run(list(map(str, args)), cwd=ROOT, env=env,
@@ -86,9 +89,6 @@ def check(out):
     assert 'PANIC' not in unit.stdout + unit.stderr
     env['FPR_DISK'] = str(disk)
     command = [str(ROOT / 'qos/qosp-gl'), '--yes', str(out / 'check.qa')]
-    if sys.platform != 'darwin' and not env.get('DISPLAY'):
-        assert shutil.which('xvfb-run'), 'needs DISPLAY or xvfb-run'
-        command = ['xvfb-run', '-a', *command]
 
     for boot in (1, 2):
         fifo = out / f'keys-{boot}.evd'
@@ -222,4 +222,12 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
+    if sys.platform != 'darwin' and not os.environ.get('DISPLAY'):
+        xvfb = shutil.which('xvfb-run')
+        assert xvfb, 'needs DISPLAY or xvfb-run'
+        # Wrap the harness, so Popen owns qosp directly. Wrapping only the
+        # child compares readiness to the shell wrapper's PID and leaves
+        # qosp holding stdout open when that wrapper is terminated.
+        os.execv(xvfb, [xvfb, '-a', sys.executable, str(Path(__file__).resolve()),
+                       *sys.argv[1:]])
     check(args.output.resolve())

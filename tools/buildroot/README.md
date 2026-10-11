@@ -130,7 +130,7 @@ module, and anything plugged in after boot.
 The image ships OpenSSH, `wpa_supplicant` and `iw`, and configures **none** of
 them — credentials are not something a repo should invent.
 
-Root has an empty password, so the **serial console** logs in with `root` and
+The unprovisioned image has an empty root password, so the **serial console** logs in with `root` and
 Enter. `sshd` refuses empty passwords, so before ssh works you must either set
 a root password (`BR2_TARGET_GENERIC_ROOT_PASSWD` in `menuconfig`) or add a
 public key through a rootfs overlay (`BR2_ROOTFS_OVERLAY`).
@@ -139,6 +139,61 @@ For wifi, write `/etc/wpa_supplicant.conf` on the target — `wpa_passphrase` is
 in the image for that — and bring it up with `wpa_supplicant -B -i wlan0 -c
 /etc/wpa_supplicant.conf && udhcpc -i wlan0`. The Pi's onboard Broadcom
 firmware (`brcmfmac_sdio-firmware-rpi`) is already installed.
+
+### Provision a headless Pi before flashing
+
+On the Mac, put `SSID` and `PASSWORD` in the ignored `qos/.env`, then run:
+
+    python3 tools/buildroot/provision-pi.py --country AU
+    python3 tools/buildroot/provision-check.py
+
+This generates `.qos/pi4/overlay` with a WPA2 Personal configuration and your
+`~/.ssh/id_ed25519.pub` as root's authorized key. `--authorized-key`, `--env`,
+`--hostname` and `--output` override the defaults. The parser treats values
+as data, derives the WPA2 PSK, and never prints credentials. WPA3-only and
+enterprise Wi-Fi need a different supplicant configuration. The generated
+overlay and resulting image contain network access material; keep them local.
+
+`vm.sh sync` deliberately excludes `.env` and `.qos`. Copy only the generated
+overlay into `~/qos/.qos/pi4/overlay` in the Linux build VM, then set
+`BR2_ROOTFS_OVERLAY` in that target's `menuconfig` to both directories:
+
+    $(BR2_EXTERNAL_QOSP_PATH)/board/qosp/overlay /home/dev/qos/.qos/pi4/overlay
+
+The first is the tracked startup script; the second is the private settings.
+The Pi defconfig already selects the first. Existing cached target configs
+must be updated explicitly: `br.sh` preserves their `.config`.
+
+`S41wifi` loads `brcmfmac` after the firmware filesystem is available, waits
+up to five seconds for `wlan0`, then starts `wpa_supplicant` and DHCP. DHCP's
+initial attempt is bounded to three three-second tries, with continued
+background retries afterward. Stop waits up to five seconds per daemon before
+allowing a replacement to start; the old supplicant can otherwise bring the
+new instance's interface down during its cleanup.
+
+The overlay disables only Broadcom firmware supplicant offload
+(`feature_disable=0x2000`, `BRCMF_FEAT_FWSUP` in the pinned kernel). On the
+tested Pi 4 / BCM43455, the default offload stalled at `ASSOCIATED`; letting
+`wpa_supplicant` perform the WPA2 handshake reached `COMPLETED` and DHCP.
+Ethernet remains available. SSH accepts the
+supplied public key and disables password authentication. Host keys are
+generated on the device's first boot, not shared between images. Use the
+router's DHCP lease for hostname `qosp` to find the address, then:
+
+    ssh root@<pi-address>
+    reboot
+
+The minimal image does not include an mDNS daemon; `qosp.local` discovery is
+not assumed. `python3 tools/main-profile.py` builds the graphical shell and
+onboard apps; select `BR2_PACKAGE_QOSP_MAIN_PROFILE` and its artifact directory
+to boot that profile with the supervisor's required readiness signal.
+
+Main's graphics owner is pinned to hart 0: EGL contexts remain current on
+their creating OS thread across mailbox waits. An unpinned owner passed
+initialization but failed on a later frame under the four-worker scheduler.
+`tools/guishell-check.py` now defaults to four workers; `FPR_HARTS=1` remains
+available for comparison. See the [Pi 4 hardware validation](../../docs/2026-10-11-PI4-BUILDROOT-VALIDATION.md)
+for the tested headless path and remaining boundaries.
 
 ## The application at boot
 

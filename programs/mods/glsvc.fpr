@@ -11,12 +11,14 @@
 #
 # A program that is alone (a test under Xvfb, a standalone game):
 #
-#   gl = spawn (GL.serve 960 600 "terra2" models);
+#   gl = spawnOn 0 (GL.serve 960 600 "terra2" models);
 #   cfg = { env = 0, mt = mt, tick = 160000, input = gl, render = gl };
 #   MV.game me cfg (App init update subs view)
 #
 # is a private Graphics.qa with this backend, and the program its one
-# session, admitted on its first frame.  Under a system that claims
+# session, admitted on its first frame. Pin its owner to an OS worker:
+# mailbox serialization alone does not preserve the GL thread binding.
+# Under a system that claims
 # /services/graphics the same program opens a session there instead
 # (GX.attach) and shares the display with the others.
 #

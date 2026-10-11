@@ -22,6 +22,7 @@ which is the closest approximation and is informative, not conclusive.
 
   ./powercut-check.py            20 cycles
   ./powercut-check.py --cycles 50 --cache directsync
+  ./powercut-check.py --keep     leave the working copy (512 MB) for a look
 """
 import os
 import random
@@ -119,7 +120,11 @@ def boot(image, rootfs, cache, run_dir):
     out += ["-display", "none", "-serial", f"unix:{ser},server=on,wait=on"]
     err = open(os.path.join(run_dir, "qemu.err"), "ab")
     q = subprocess.Popen(["qemu-system-aarch64"] + out, stdout=subprocess.DEVNULL, stderr=err)
-    return q, Console(ser, 30)
+    try:
+        return q, Console(ser, 30)
+    except BaseException:
+        q.kill(); q.wait()  # a console that never came up must not leave QEMU behind
+        raise
 
 
 def main():
@@ -131,6 +136,17 @@ def main():
         if not os.path.exists(os.path.join(DIR, f)):
             raise SystemExit(f"powercut: no {f} in {DIR} -- run `boot.sh pull` first")
     run_dir = tempfile.mkdtemp(prefix="qosp-powercut-")
+    try:
+        cycle_loop(cycles, cache, seed, run_dir)
+    finally:
+        # the 512 MB working copy goes whatever happened; --keep retains it for a look
+        if "--keep" in sys.argv:
+            print(f"powercut: kept {run_dir}")
+        else:
+            shutil.rmtree(run_dir, ignore_errors=True)
+
+
+def cycle_loop(cycles, cache, seed, run_dir):
     rootfs = os.path.join(run_dir, "rootfs.ext4")
     shutil.copyfile(os.path.join(DIR, "rootfs.ext4"), rootfs)
     image = os.path.join(DIR, "Image")
@@ -199,7 +215,6 @@ def main():
                 q.wait()
     print(f"powercut: {cycles} cycles HOLD: {cuts['qemu']} machine cuts, {cuts['qosp']} in-guest kills with "
           f"supervisor restart, no acknowledged record lost, every log contiguous (cache={cache}, seed={seed})")
-    shutil.rmtree(run_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":

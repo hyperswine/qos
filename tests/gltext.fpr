@@ -57,7 +57,7 @@ main =
   me = myself 0;
   clint = device "clint";
   mt = reg32 clint 49144;
-  gl = spawn (GL.serve 960 600 "gltext" Nil);
+  gl = spawnOn 0 (GL.serve 960 600 "gltext" Nil);
   cfg = { env = 0, mt = mt, tick = 160000, input = gl, render = gl };
   _ = print "gltext: text + discs";
   MV.game me cfg (App init update subs view).

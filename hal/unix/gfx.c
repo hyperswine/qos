@@ -1429,6 +1429,12 @@ static void gfx_present(void) {
   if (G.drm.on) {
     glReadPixels(0, 0, G.w, G.h, GL_RGBA, GL_UNSIGNED_BYTE, G.drm.rd);
     drm_scanout_present(&G.drm);
+  } else {
+    /* An offscreen frame still needs a submission boundary. With neither
+     * swap nor scanout readback, V3D keeps extending one command list until
+     * buffer allocation fails (and Mesa 24.0.9 dereferences the null BO).
+     * Flush submits asynchronously; snapshots retain their explicit finish. */
+    glFlush();
   }
 #endif
 }

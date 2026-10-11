@@ -1,0 +1,28 @@
+# config.txt for a QOS Portable Pi 4.
+#
+# The one thing that matters here beyond booting is `dtoverlay=vc4-kms-v3d`:
+# it is what makes the firmware hand the display to the OPEN vc4 KMS driver,
+# so Linux exposes /dev/dri/card* WITH A CONNECTOR.  That is precisely what
+# drm_scanout.h probes for; without it the Pi has a framebuffer and no DRM
+# device, and qosp renders offscreen into nothing anyone can see.
+#
+# v3d (the 3D core Mesa drives) comes up beside it as a render node with no
+# connectors -- the scanout probe skips it by design.
+
+start_file=start4.elf
+fixup_file=fixup4.dat
+
+kernel=Image
+arm_64bit=1
+
+# the open KMS driver, and enough framebuffers for it
+dtoverlay=vc4-kms-v3d
+max_framebuffers=2
+
+# full resolution; comment out if the picture runs off the edge
+disable_overscan=1
+
+# a serial console on ttyAMA0, so there is a shell even when the
+# application owns the screen (miniuart-bt moves Bluetooth off it)
+enable_uart=1
+dtoverlay=miniuart-bt

@@ -106,6 +106,7 @@ sync)
       --exclude .git --exclude dist-newstyle --exclude '/build' --exclude '/.qos' --exclude '/dist' --exclude '/fpr' --exclude '/fprc' \
       --exclude '*.elf' --exclude '*.qa' --exclude '*.o' --exclude '*.hi' --exclude '/qos/qosp' --exclude '/qos/qosp-gl' --exclude '/qos/qosp-es' --exclude '/qos/qosp-a64' --exclude '/qos/build' \
       --exclude cabal.project.local --exclude __pycache__ --exclude .DS_Store \
+      --exclude '/.env' --exclude '/.env.*' \
       "$QOS/../$r/" dev@127.0.0.1:$r/
   done
   ;;

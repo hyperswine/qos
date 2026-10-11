@@ -1,0 +1,24 @@
+# The Pi's display, built IN rather than left as modules.
+#
+# The bcm2711 defconfig ships vc4 and v3d as modules, which is right for a
+# distribution with udev and wrong for this image twice over:
+#
+#  - nothing here would load them.  Device creation is devtmpfs, so device
+#    NODES appear by themselves, but loading a module for a device tree node
+#    is userspace's job and there is no udev.  The image would boot to no
+#    /dev/dri at all, and qosp would render offscreen into nothing.
+#
+#  - even with mdev loading them, it would be a race: S99qosp starts the
+#    application at boot, and a display that appears a moment later is a
+#    display the scanout probe has already missed.
+#
+# Built in, the card is there before userspace is.
+
+# vc4 `depends on SND && SND_SOC` (it owns the HDMI audio codec), and a
+# tristate cannot be built in over modules, so these come with it.  That is
+# no loss: it is what gives the image a working sound tier as well.
+CONFIG_SND=y
+CONFIG_SND_SOC=y
+
+CONFIG_DRM_VC4=y
+CONFIG_DRM_V3D=y

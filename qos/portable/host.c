@@ -386,6 +386,8 @@ static void bus_handler(int sig, siginfo_t *info, void *vctx) {
   ucontext_t *uc = (ucontext_t *)vctx;
 #ifdef __APPLE__
   uintptr_t pc = uc ? uc->uc_mcontext->__ss.__pc : 0;
+#elif defined(__linux__) && defined(__aarch64__)
+  uintptr_t pc = uc ? uc->uc_mcontext.pc : 0;
 #else
   uintptr_t pc = 0; (void)uc;
 #endif
@@ -394,9 +396,15 @@ static void bus_handler(int sig, siginfo_t *info, void *vctx) {
   /* DELIBERATELY bare stderr: a fault handler must not take the
    * app's locks (the fault may BE inside fpr_logput); the app-side
    * error ring + #24 persist already cover app panics. */
-  fprintf(stderr, "qosp: fatal %s: addr=%p pc=%#lx in_image=%d\n",
+  fprintf(stderr, "qosp: fatal %s: addr=%p pc=%#lx in_image=%d image_base=%#lx\n",
           sig == SIGBUS ? "SIGBUS" : "SIGSEGV", addr, (unsigned long)pc,
-          in_image);
+          in_image, (unsigned long)g_img_base);
+#if defined(__linux__) && defined(__aarch64__)
+  if (uc) fprintf(stderr, "qosp: fault lr=%#lx sp=%#lx x0=%#lx\n",
+                  (unsigned long)uc->uc_mcontext.regs[30],
+                  (unsigned long)uc->uc_mcontext.sp,
+                  (unsigned long)uc->uc_mcontext.regs[0]);
+#endif
   fflush(stderr);
   _exit(139);
 }

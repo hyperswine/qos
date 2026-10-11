@@ -28,7 +28,8 @@ ready hub = case Lifecycle.files hub.lifecycle == 0 of True -> Unit | False -> S
 stop me hub = Lifecycle.stop me hub.lifecycle.
 withGraphics hub w h =
   me = myself 0;
-  graphics = AC.spawnWith (AC.Dynamic 64) (GX.service w h GL.glBackend Nil);
+  # The GL context belongs to its creating OS thread, across mailbox waits.
+  graphics = AC.spawnWithOn 0 (AC.Dynamic 64) (GX.service w h GL.glBackend Nil);
   _ = claim me hub.ns "/services/graphics" graphics;
   hub.
 

@@ -1,0 +1,38 @@
+# What qosp's gfx and input tiers need from a kernel, and what a minimal
+# defconfig (Buildroot's qemu aarch64-virt one) leaves out.
+#
+#   drm_scanout.h   a DRM device with a connector, to SetCrtc a dumb buffer
+#   evdev_raw.c     /dev/input/event* -- the keyboard
+#   mice_raw.c      /dev/input/mice   -- the kernel's aggregate pointer
+#
+# The virtual console is here because the scanout draws over tty1 and the
+# init script runs the application there; fbdev emulation is what gives
+# that console a framebuffer to exist on before any frame is drawn.
+
+# the monitor
+CONFIG_DRM=y
+CONFIG_DRM_VIRTIO_GPU=y
+CONFIG_DRM_FBDEV_EMULATION=y
+CONFIG_FB=y
+
+# a console on it
+CONFIG_VT=y
+CONFIG_VT_CONSOLE=y
+CONFIG_FRAMEBUFFER_CONSOLE=y
+
+# the keyboard and the pointer, as a bare console sees them
+CONFIG_INPUT=y
+CONFIG_INPUT_EVDEV=y
+CONFIG_INPUT_MOUSEDEV=y
+CONFIG_INPUT_MOUSEDEV_PSAUX=y
+
+# USB HID: how both QEMU's usb-kbd/usb-mouse and a Pi's real keyboard and
+# mouse arrive
+CONFIG_USB_SUPPORT=y
+CONFIG_USB=y
+CONFIG_USB_XHCI_HCD=y
+CONFIG_USB_XHCI_PCI=y
+CONFIG_USB_XHCI_PLATFORM=y
+CONFIG_HID=y
+CONFIG_HID_GENERIC=y
+CONFIG_USB_HID=y

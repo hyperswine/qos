@@ -21,4 +21,6 @@ finish cid left a b c d attempts =
   _ = N.write cid bytes;
   _ = N.close cid;
   loop (left - 1) a b c d (attempts - 1).
-main = _ = case N.start (myself 0) of Ok owner -> owner | Err why -> error why; loop 4 "" "" "" "" 20000.
+main = _ = case N.start (myself 0) of Ok owner -> owner | Err why -> error why;
+  _ = Sys.ready Unit;
+  loop 4 "" "" "" "" 20000.
