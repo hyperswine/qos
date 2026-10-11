@@ -21,7 +21,7 @@
 # payloads are first-class -- records are length-carried end to end.
 # ============================================================================
 
-QL = use "../programs/mods/qlog#bac5b00293d99d6c".
+QL = use "../programs/mods/qlog#3c2ad30ff14444d6".
 SVC = use "../programs/mods/svc#0c925c3cb42f0f77".
 AC = use "std/actor#06e72a5feec8a6d4".
 B = use "std/blockio#1326ddf2a0e4841e".

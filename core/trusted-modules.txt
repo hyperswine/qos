@@ -46,3 +46,7 @@
 ../.fpr/store/ef209d6518832a06.fpr
 # Exact routed Qlog dependency of the previous Files interface.
 ../.fpr/store/5c94f0ce8d592d3d.fpr
+# Exact prior Files interface checked while updating its Qlog memory contract.
+../.fpr/store/10db41d6e4d0d077.fpr
+# Exact Files interface from the first memory-reclamation implementation.
+../.fpr/store/56b7962bf2098855.fpr

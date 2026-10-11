@@ -17,6 +17,7 @@ echo "== disk suspension: one-hart progress, abandoned requests and copied buffe
 echo "== virtio raw policy: register programming and full-word deadlines against C ==" && (python3 tools/virtio-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
 echo "== native block service: configurable budgets and failure isolation ==" && (python3 tools/block-service-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
 echo "== Qlog and bootstrap block routing ==" && (python3 tools/qlog-routing-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
+echo "== Qlog scratch reclamation, binary reads and two-boot persistence ==" && (python3 tools/qlog-memory-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
 echo "== Portable durable storage: barriers, dual metadata and staged recovery ==" && (python3 tools/portable-durable-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
 echo "== Portable compatibility KV durability and torn-tail recovery ==" && (sh qos/tests-host/store-check.sh) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
 echo "== Portable compatibility KV application ABI and uncertain outcomes ==" && (python3 tools/portable-store-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }

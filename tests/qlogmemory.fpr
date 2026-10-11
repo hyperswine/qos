@@ -1,0 +1,84 @@
+# Seeded by tools/qlog-memory-check.py. Use the real stable Files owner,
+# including its pinned Qlog interpreter, on a separate disk.
+unsafe program.
+FS = use "../std/fs".
+B = use "../std/blockio".
+freeKiB u = case Sys.memInfo 0 of _ :: f :: _ -> f | _ -> 0.
+must r = case r of Ok v -> v | Err why -> error "qlogmemory: {why}".
+check yes why = if yes then Unit else error "qlogmemory: {why}".
+poolBytes me fs =
+  text = must (FS.stats me fs "");
+  at = strIndexOf "pool-bytes=" text;
+  _ = check (at >= 0) "missing pool telemetry";
+  bytes = parseInt (substr text (at + 11) (strlen text));
+  _ = check (bytes > 0 and bytes < 4194304) "Qlog pool exceeds 4 MiB: {bytes}";
+  bytes.
+sample me fs tag key =
+  value = must (FS.rpc me fs tag key "");
+  _ = check (strlen value == 1048593) "blob length";
+  _ = check (charAt value 0 == 0 and charAt value 4095 == 255 and charAt value 1048592 == 16) "blob bytes";
+  _ = check (charAt value 4096 == 0 and charAt value 1048575 == 255) "page order";
+  Unit.
+reads : unsafe Int -> Int -> Int -> Unit .
+reads me fs n = if n == 0 then Unit else
+  _ = Sys.arena (fn u -> sample me fs (if n % 2 == 0 then 1 else 3) "seed/blob");
+  reads me fs (n - 1).
+mutate me fs n =
+  key = "memory/{n}";
+  _ = must (FS.append me fs key "first");
+  _ = must (FS.append me fs key "second");
+  _ = check (must (FS.readLatest me fs key) == "second") "latest after append";
+  _ = check (must (FS.replay me fs key) == "firstsecond") "replay after append";
+  _ = must (FS.del me fs key);
+  _ = check (case FS.readLatest me fs key of Err why -> True | Ok v -> False) "tombstone";
+  _ = must (FS.append me fs key "after-delete");
+  _ = check (must (FS.replay me fs key) == "after-delete") "replay after tombstone";
+  _ = must (FS.del me fs key);
+  Unit.
+mutations : unsafe Int -> Int -> Int -> Unit .
+mutations me fs n = if n == 0 then Unit else
+  _ = Sys.arena (fn u -> mutate me fs n);
+  mutations me fs (n - 1).
+compactOnce me fs =
+  _ = must (FS.compact me fs);
+  _ = must (FS.rpc me fs 8 "" "");
+  _ = sample me fs 1 "seed/blob";
+  _ = check (must (FS.replay me fs "persist/value") == "beforeafter") "compaction lost replay";
+  _ = check (must (FS.readLatest me fs "seed/bulk") == "beta") "bulk latest";
+  _ = check (must (FS.replay me fs "seed/bulk") == "alphabeta") "bulk replay";
+  Unit.
+compactions : unsafe Int -> Int -> Int -> Unit .
+compactions me fs n = if n == 0 then Unit else
+  _ = Sys.arena (fn u -> compactOnce me fs);
+  compactions me fs (n - 1).
+main =
+  me = myself 0;
+  block = B.serve me (device "blk");
+  free0 = freeKiB Unit;
+  fs = must (FS.startBlock me block);
+  bootCost = free0 - freeKiB Unit;
+  _ = check (bootCost < 8192) "startup retains over 8 MiB";
+  bootPool = poolBytes me fs;
+  _ = case FS.readLatest me fs "persist/value" of
+      Err why ->
+        _ = must (FS.append me fs "persist/value" "before");
+        _ = must (FS.append me fs "persist/value" "after"); Unit
+    | Ok v -> check (v == "after") "fresh-process latest";
+  _ = reads me fs 4;
+  _ = poolBytes me fs;
+  before = freeKiB Unit;
+  _ = reads me fs 40;
+  readsPool = poolBytes me fs;
+  _ = print "qlogmemory: after reads retainedKiB={before - freeKiB Unit}";
+  _ = mutations me fs 24;
+  writesPool = poolBytes me fs;
+  _ = print "qlogmemory: after mutations retainedKiB={before - freeKiB Unit}";
+  _ = compactions me fs 4;
+  compactPool = poolBytes me fs;
+  _ = print "qlogmemory: after compactions retainedKiB={before - freeKiB Unit}";
+  _ = reads me fs 4;
+  finalPool = poolBytes me fs;
+  retained = before - freeKiB Unit;
+  _ = check (must (FS.replay me fs "persist/value") == "beforeafter") "persistent replay";
+  _ = must (FS.shutdown me fs block);
+  print "qlogmemory: HOLDS bootKiB={bootCost} globalGrowthKiB={retained} poolBytes={bootPool}/{readsPool}/{writesPool}/{compactPool}/{finalPool} reads=48 mutations=24 compactions=4".

@@ -74,3 +74,25 @@ correctness. Check its logs, GPU progress and shutdown separately.
 The bundle also contains a 20,000-frame scoped MVU memory test and a
 100,000-frame graphics-owner memory test. Both check buddy allocation rather
 than confusing virtual reservations with resident or logically live memory.
+
+The arena migration case parks inside nested `Sys.arena` and `Sys.loopWith`
+calls and requires observed migration on four workers. Qlog has a separate
+driver because it needs a checksummed binary seed and two boots of each disk:
+
+```sh
+python3 tools/qlog-memory-check.py \
+  --host 192.168.0.232 --identity ~/.ssh/id_ed25519 \
+  --known-hosts .qos/pi4/known_hosts \
+  --archive .qos/pi4/validation/bundle/qlogmemory.qa \
+  --runner .qos/pi4/validation/bundle/runner \
+  --output .qos/pi4/validation/qlog-memory
+```
+
+This uses the installed `/usr/bin/qosp` and separate SD-backed disks. It checks
+large binary reads, replay, tombstones, compaction, persistence and a 4 MiB
+bound on Qlog's sampled logical pool allocation, on one/four workers with a
+64 MiB global heap cap. It reports global allocation separately: the current
+block adapter retains actor identities per I/O, so the check does not establish
+bounded memory for indefinite storage workloads. The driver removes only its
+own two disk copies after success and retains logs. Without `--host`, it builds
+and tests the local Portable host.

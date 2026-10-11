@@ -153,6 +153,7 @@ exact = {
     'vecwide': 'w2: at3=9 kept=8 sum=8147 echoed=8147\nw4: at3=30 kept=8 sum=8490 echoed=8490\nw8: at3=108 kept=8 sum=9764 echoed=9764\nw9: at3=135 kept=8 sum=10205 echoed=10205\nw32: at3=1584 kept=8 sum=33872 echoed=33872\nw65: at3=6435 kept=8 sum=113105 echoed=113105\nw128: at3=24768 kept=8 sum=412544 echoed=412544\nfloat record: n=4 x=1.5 y=2.25 k=2\none: 3\n',
 }
 contains = {
+    'arenamigrate': ('arenamigrate: nested arenas and loopWith survive; migrations=',),
     'fixedheap': ('HOLDS', 'local grant exhausted',
                   'scratch arenas require separate admission', 'reset blocked by escaped data'),
     'sleepwake': ('sleepwake: alive',),

@@ -84,6 +84,7 @@ Rpc = SVC.Rpc.
 # Page-source choice is explicit. Raw access is for standalone tools/tests;
 # all storage actors and native bootstrap use a routed block service.
 B = use "std/blockio#1326ddf2a0e4841e".
+AC = use "std/actor#06e72a5feec8a6d4".
 PageSource = Type (Direct Device | Routed Int).
 direct dev = Direct dev.
 routed service = Routed service.
@@ -493,7 +494,16 @@ buE2 pay n acc len wp = case wp of (uw, i3) -> buGo pay (i3 + len) n (append acc
 
 # ---- reads -------------------------------------------------------------------
 # payload of the record whose header is at page p (paylen pl)
-readPayload dev p pl = rpGo dev (p + 1) pl "".
+readPayload dev p pl = Sys.arena (fn u -> strJoin "" (Core.revS (rpParts dev (p + 1) pl Nil) Nil)).
+# Gather once and join once: no successively larger prefixes. Only the
+# resulting String escapes; routed page replies die with the scratch arena.
+rpParts : unsafe PageSource -> Int -> Int -> List String -> List String .
+rpParts dev p left acc =
+  case left <= 0 of
+    True -> acc
+  | False ->
+      take = minI pgsz left;
+      rpParts dev (p + 1) (left - take) (substr (pageRead dev p) 0 take :: acc).
 rpGo : unsafe PageSource -> Int -> Int -> String -> String .
 rpGo dev p left acc =
   case left <= 0 of
@@ -645,13 +655,19 @@ vRecord dev head p cnt np pl hh =
   case ok of True -> vGo dev head (p + 1 + np) (cnt + 1) | False -> Err "hash mismatch at page {p}".
 hashPayload : unsafe PageSource -> Int -> Int -> Int -> Int .
 hashPayload dev p left acc =
-  case left <= 0 of True -> hFix acc | False -> hashPayloadPage dev p left acc (pageRead dev p).
+  case left <= 0 of
+    True -> hFix acc
+  | False ->
+      # Only the polynomial state leaves this page's scratch pool. A large
+      # archive must not retain every routed reply until verification ends.
+      next = Sys.arena (fn u -> hashPayloadPage dev p left acc (pageRead dev p));
+      hashPayload dev (p + 1) (left - minI pgsz left) next.
 hashPayloadPage : unsafe PageSource -> Int -> Int -> Int -> String -> Int .
 hashPayloadPage dev p left acc bytes =
   take = minI pgsz left;
   case strlen bytes == pgsz of
     False -> stop "short payload page during verification"
-  | True -> hashPayload dev (p + 1) (left - take) (hGo bytes 0 take acc).
+  | True -> hGo bytes 0 take acc.
 vPayload dev head p cnt rec pay =
   RecH tag np pl u hh = rec;
   hashed = case hh == 0 of True -> True | False -> hh == hashStr pay;
@@ -1073,38 +1089,44 @@ icStep r url e =
 # supplies the already-created service through actorWith instead.
 actor dev me = block = B.serve me dev; actorWith (routed block) me.
 actorWith dev me =
-  head = ensure dev;
-  _ = verifyDurable dev head;
-  aLoop dev me head (scanIdxE dev head).
-aLoop : unsafe PageSource -> Int -> Int -> List Ent -> zz .
-aLoop dev me head idx =
+  head = Sys.arena (fn u -> ensure dev);
+  _ = Sys.arena (fn u -> verifyDurable dev head);
+  idx = Sys.arena (fn u -> scanIdxE dev head);
+  # Reclaim boot temporaries before publishing the first reply. Thereafter
+  # reclaim adaptively: copying a large index on every read is unnecessary.
+  aAgain me (AC.tidied me 1048576 (AC.boundary me (dev, head, idx))).
+aLoop : unsafe PageSource -> Int -> Int -> List Ent -> AC.Tidy -> zz .
+aLoop dev me head idx tidy = aAgain me (AC.tidy me ((dev, head, idx), tidy)).
+aAgain : unsafe Int -> ((PageSource, Int, List Ent), AC.Tidy) -> zz .
+aAgain me fresh =
+  ((dev, head, idx), tidy) = fresh;
   borrowed = receive me;
   m = keep borrowed;
   _ = drop borrowed;
-  case m of Rpc replyTo tag url pay -> aServe dev me head idx replyTo tag url pay.
-aServe : unsafe PageSource -> Int -> Int -> List Ent -> Int -> Int -> String -> String -> zz .
-aServe dev me head idx replyTo tag url pay =
+  case m of Rpc replyTo tag url pay -> aServe dev me head idx tidy replyTo tag url pay.
+aServe : unsafe PageSource -> Int -> Int -> List Ent -> AC.Tidy -> Int -> Int -> String -> String -> zz .
+aServe dev me head idx tidy replyTo tag url pay =
   case tag of
-    1 -> send replyTo (idxLatestE dev idx url)           >> aLoop dev me head idx
-  | 2 -> aAppend dev me head idx replyTo "QREC" url pay
-  | 3 -> send replyTo (Ok (idxReplayE dev idx url ""))   >> aLoop dev me head idx
-  | 4 -> aAppend dev me head idx replyTo "QDEL" url ""
-  | 5 -> send replyTo (Ok (aStats dev head idx url))     >> aLoop dev me head idx
-  | 6 -> aCompact dev me head replyTo
-  | 7 -> aAppendBulk dev me head idx replyTo pay
-  | 8 -> send replyTo (verifyLog dev head)               >> aLoop dev me head idx
-  | _ -> send replyTo (Err "storage: unknown request tag") >> aLoop dev me head idx.
+    1 -> send replyTo (idxLatestE dev idx url)           >> aLoop dev me head idx tidy
+  | 2 -> aAppend dev me head idx tidy replyTo "QREC" url pay
+  | 3 -> send replyTo (Ok (idxReplayE dev idx url ""))   >> aLoop dev me head idx tidy
+  | 4 -> aAppend dev me head idx tidy replyTo "QDEL" url ""
+  | 5 -> send replyTo (Ok (aStats dev head idx url))     >> aLoop dev me head idx tidy
+  | 6 -> aCompact dev me head tidy replyTo
+  | 7 -> aAppendBulk dev me head idx tidy replyTo pay
+  | 8 -> send replyTo (verifyLog dev head)               >> aLoop dev me head idx tidy
+  | _ -> send replyTo (Err "storage: unknown request tag") >> aLoop dev me head idx tidy.
 aStats dev head idx url = aStats2 head idx url (metaOr dev head).
 aStats2 head idx url m =
   Meta h v w c d sw mr = m;
-  "head={head} url-records={idxCountE idx url} v={v} w={w} c={c} data-end={d} swap-head={sw} merkle={mr}".
-aAppend : unsafe PageSource -> Int -> Int -> List Ent -> Int -> String -> String -> String -> zz .
-aAppend dev me head idx replyTo tag url pay =
+  "head={head} url-records={idxCountE idx url} v={v} w={w} c={c} data-end={d} swap-head={sw} merkle={mr} pool-bytes={heapUsed Unit}".
+aAppend : unsafe PageSource -> Int -> Int -> List Ent -> AC.Tidy -> Int -> String -> String -> String -> zz .
+aAppend dev me head idx tidy replyTo tag url pay =
   case appendRes dev head tag url pay of
-    Err e -> send replyTo (Err e) >> aLoop dev me head idx
-  | Ok h2 -> aAppendOk dev me head idx replyTo tag url pay h2.
-aAppendOk : unsafe PageSource -> Int -> Int -> List Ent -> Int -> String -> String -> String -> Int -> zz .
-aAppendOk dev me head idx replyTo tag url pay h2 =
+    Err e -> send replyTo (Err e) >> aLoop dev me head idx tidy
+  | Ok h2 -> aAppendOk dev me head idx tidy replyTo tag url pay h2.
+aAppendOk : unsafe PageSource -> Int -> Int -> List Ent -> AC.Tidy -> Int -> String -> String -> String -> Int -> zz .
+aAppendOk dev me head idx tidy replyTo tag url pay h2 =
   # OWN COPY of the url before it goes into the long-lived index: the
   # message's url string lives in the SENDER's slab -- freed when that
   # actor is reaped, or bulk-freed with a loaded process's whole arena
@@ -1116,22 +1138,22 @@ aAppendOk dev me head idx replyTo tag url pay h2 =
            True -> dropUrlE idx url
          | False -> append idx ((Ent u2 head (strlen pay) 0 (strlen pay)) :: Nil);
   _ = send replyTo (Ok "");
-  aLoop dev me h2 idx2.
-aAppendBulk : unsafe PageSource -> Int -> Int -> List Ent -> Int -> String -> zz .
-aAppendBulk dev me head idx replyTo pay =
+  aLoop dev me h2 idx2 tidy.
+aAppendBulk : unsafe PageSource -> Int -> Int -> List Ent -> AC.Tidy -> Int -> String -> zz .
+aAppendBulk dev me head idx tidy replyTo pay =
   case appendPackedRes dev head pay (bulkCntAll pay) of
-    Err e -> send replyTo (Err e) >> aLoop dev me head idx
-  | Ok h2 -> aAppendBulkOk dev me head idx replyTo pay h2.
-aAppendBulkOk : unsafe PageSource -> Int -> Int -> List Ent -> Int -> String -> Int -> zz .
-aAppendBulkOk dev me head idx replyTo pay h2 =
+    Err e -> send replyTo (Err e) >> aLoop dev me head idx tidy
+  | Ok h2 -> aAppendBulkOk dev me head idx tidy replyTo pay h2.
+aAppendBulkOk : unsafe PageSource -> Int -> Int -> List Ent -> AC.Tidy -> Int -> String -> Int -> zz .
+aAppendBulkOk dev me head idx tidy replyTo pay h2 =
   # bulkEnts rebuilds each chunk url via takeWord/strcat, so the index
   # entries own their strings in THIS actor's slab (same discipline as
   # aAppendOk's u2)
   idx2 = append idx (bulkEnts pay head (strlen pay));
   _ = send replyTo (Ok "");
-  aLoop dev me h2 idx2.
-aCompact : unsafe PageSource -> Int -> Int -> Int -> zz .
-aCompact dev me head replyTo =
+  aLoop dev me h2 idx2 tidy.
+aCompact : unsafe PageSource -> Int -> Int -> AC.Tidy -> Int -> zz .
+aCompact dev me head tidy replyTo =
   case compactRes dev head of
-    Err why -> send replyTo (Err why) >> aLoop dev me head (scanIdxE dev head)
-  | Ok h2 -> send replyTo (Ok "compacted head={h2}") >> aLoop dev me h2 (scanIdxE dev h2).
+    Err why -> send replyTo (Err why) >> aLoop dev me head (scanIdxE dev head) tidy
+  | Ok h2 -> send replyTo (Ok "compacted head={h2}") >> aLoop dev me h2 (scanIdxE dev h2) tidy.

@@ -137,12 +137,12 @@ does not establish a bound on transient peaks or memory under arbitrary workload
 
 ## Remaining work
 
-The Qlog owner retains roughly **116 MiB of allocated pool data after boot**
-in all observed versions. Boot verification/index scans run in the same pool
-as the persistent owner without reclamation. Its allocation stayed constant
-in this workload. Separating scan/request scratch from the persistent index,
-then testing repeated reads, writes, replay and compaction, is the next memory
-target; idle-shell stability does not establish bounded storage workloads.
+At the end of this campaign, Qlog retained roughly **116 MiB of allocated
+pool data after boot**. The subsequent [Qlog memory repair](2026-10-11-QLOG-MEMORY.md)
+reclaims scan/request scratch and tests repeated reads, writes, replay and
+compaction. That follow-up records both the improvement and the remaining
+global block I/O actor-identity growth; idle-shell stability alone does not
+establish bounded storage workloads.
 
 Global V3D counters already reported **29,770 BOs / 1,128,040 KiB** before
 the isolated runs. Those totals include all GPU clients and are not process

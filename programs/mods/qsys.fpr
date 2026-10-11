@@ -41,8 +41,8 @@
 # (EP.grant, registered by the launcher); the shell's own actors are pid 0.
 # ============================================================================
 
-FS = use "std/fs#10db41d6e4d0d077".
-Lifecycle = use "std/lifecycle#f1ee5f21f27625c4".
+FS = use "std/fs#aeb97cb13f0aff84".
+Lifecycle = use "std/lifecycle#f95ec7dce656d2bb".
 AK  = use "appkit".
 BlockEP = use "blockep#d44cf337abf58619".
 SVC = use "svc".

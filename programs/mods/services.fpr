@@ -4,7 +4,7 @@
 unsafe module.
 EP = use "ep".
 AC = use "std/actor".
-Lifecycle = use "std/lifecycle#f1ee5f21f27625c4".
+Lifecycle = use "std/lifecycle#f95ec7dce656d2bb".
 BlockEP = use "blockep#d44cf337abf58619".
 Files = use "files".
 GX = use "graphics".
