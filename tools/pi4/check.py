@@ -146,6 +146,7 @@ exact = {
     'autodrop2': 'autodrop2: 3000 direct destructures cost under 32 MiB; 3000 Result-wrapped receives cost under 32 MiB\n',
     'sleepwait': 'waiter got 7\nmain got 1\n',
     'taskstress': 'shastress: 40\n',
+    'mvuscoped': 'mvuscoped: caller state survives; 20000 frames cost under 4 MiB\n',
     'typedvector': 'typed: 2 7 2.5 ok 2.25 3 True\n',
     'files': 'files: True False 8 [one\ntwo\n]\n',
     'veccaps': 'affine: sum=10000000000 grew=0 B; above: kept=49999 sum=7499899999 grew=0 B\nbool capture unboxed: 10 0\nnine-field record map: sum=5546500 grew=0 B\nrecord filter: kept=559 sum=402480 last.f8=1007 grew=0 B\n',
@@ -191,6 +192,8 @@ for harts in (() if args.skip_runtime else (1, 4)):
                  'QOS_BLK_DEADLINE_MS': '300'} if name == 'blocklifecyclep' else {}
         case(f'qos-{name}-h{harts}', f'{name}.qa', harts,
              contains=('HOLDS',), env=fault)
+    case(f'qos-gfxmemory-h{harts}', 'gfxmemory.qa', harts, deadline=120,
+         contains=('gfxmemory: 100000 frames retain under 2 MiB; backend state survives',))
     disk = f'{persistent}/files-{harts}.disk'
     for boot, size in ((1, 6), (2, 12)):
         case(f'qos-files-h{harts}-boot{boot}', 'filessvc.qa', harts,

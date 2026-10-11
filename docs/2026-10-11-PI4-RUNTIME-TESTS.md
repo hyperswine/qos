@@ -5,6 +5,10 @@ but these results do not establish an appliance ready for unattended use.
 The tests found and fixed a real headless GPU crash that short startup and
 screenshot checks had missed. Longer memory and endurance testing remains.
 
+The subsequent [memory investigation and longer soaks](2026-10-11-PI4-MEMORY-SOAK.md)
+localize and repair the per-frame growth discussed below. This report retains
+the original campaign's results and deployment state.
+
 ## Platform and evidence
 
 Raspberry Pi 4 Model B Rev 1.4, 8 GB RAM, original power supply, SD boot,

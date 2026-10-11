@@ -82,6 +82,12 @@ serviceAs w h be meshes tag me = loop me (Gs w h be (Ses (0 - 1) 0 (strcat tag "
 
 loop : unsafe Int -> Gs -> a .
 loop me st =
+  # Session state survives, while render/poll temporaries die each turn.
+  # Copy before reset: tags and backend closures can live in this pool.
+  fresh = AC.boundary me st;
+  dispatch me fresh.
+dispatch : unsafe Int -> Gs -> a .
+dispatch me st =
   m = receive me;
   case m of
     (from, id, q) -> epMsg me st (from, id) from q

@@ -1,0 +1,39 @@
+# A persistent graphics owner must reclaim render/poll temporaries while
+# keeping its session state and a backend closure with heap-owned captures.
+unsafe program.
+GX = use "../programs/mods/graphics".
+MV = use "std/mvu".
+AC = use "std/actor".
+freeKiB u = case Sys.memInfo 0 of _ :: f :: _ -> f | _ -> 0.
+init label w h = (w, h).
+mesh label name text = 0.
+render label scene ents dist =
+  _ = if label == "retained-backend" then Unit else error "backend capture lost";
+  (strlen label, 0).
+poll label u = (0, 0, 0).
+snap label path = 0.
+backend label = {init = init label, mesh = mesh label, render = render label,
+                 poll = poll label, snap = snap label}.
+frames : unsafe Int -> Int -> Int -> Int .
+frames me g n = if n == 0 then 0 else
+  r = MV.svcCall me g (MV.Render 0 (0, (Nil, 0), 0) 0 n);
+  (draws, bytes) = r;
+  _ = if draws == 16 then Unit else error "wrong graphics reply";
+  _ = drop r;
+  _ = Sys.poolReset 0;
+  frames me g (n - 1).
+main =
+  me = myself 0;
+  label = strcat "retained" "-backend";
+  g = AC.spawnWith (AC.Dynamic 64) (GX.service 960 600 (backend label) Nil);
+  dims = MV.svcCall me g (MV.Dims 0);
+  _ = drop dims;
+  _ = Sys.arena (fn u -> frames me g 4000);
+  before = freeKiB Unit;
+  _ = Sys.arena (fn u -> frames me g 100000);
+  after = freeKiB Unit;
+  _ = kill g;
+  _ = if before - after < 2048 and label == "retained-backend"
+      then print "gfxmemory: 100000 frames retain under 2 MiB; backend state survives"
+      else error "gfxmemory: retainedKiB={before - after}";
+  Unit.

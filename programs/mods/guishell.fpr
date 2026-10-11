@@ -247,7 +247,7 @@ run tag =
   cfg = {env = (q, tiles, mt), mt = mt, tick = 333330, input = inp, render = graphics};
   app = MV.MApp init update staticKey staticView view done (subscriptions port);
   _ = QS.ready lifecycle;
-  result = MV.run me cfg app;
+  result = MV.runScoped me cfg app;
   _ = Sys.shutdownBegin Unit;
   _ = EP.close me ep;
   _ = case QS.stop me lifecycle of Ok value -> print "shell: {value}" | Err why -> error "shell shutdown: {why}";

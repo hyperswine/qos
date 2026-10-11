@@ -54,3 +54,23 @@ reset, then performs a graceful stop.
 
 Keep raw JSON/logs and pre-fix failures. A short successful soak does not
 establish long-term memory stability or physical power-loss durability.
+
+For a longer observation of an already running shell:
+
+```sh
+python3 tools/pi4/soak.py \
+  --host 192.168.0.232 --identity ~/.ssh/id_ed25519 \
+  --known-hosts .qos/pi4/known_hosts --seconds 1800 --interval 30 \
+  --output .qos/pi4/validation/soak
+```
+
+This does not restart or stop the application. It fails on a changed ready PID
+or failed sample, and records full smaps, CPU counters, temperature and binary
+hashes. Optional V3D BO totals require debugfs to be mounted; they are global
+GPU counters, not per-process RSS. `--ready-file` and `--app` select an isolated
+test instance. `complete.json` confirms observation completed, not application
+correctness. Check its logs, GPU progress and shutdown separately.
+
+The bundle also contains a 20,000-frame scoped MVU memory test and a
+100,000-frame graphics-owner memory test. Both check buddy allocation rather
+than confusing virtual reservations with resident or logically live memory.
