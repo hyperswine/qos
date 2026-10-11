@@ -1,8 +1,9 @@
 # Pi 4 deployment of the Qlog and memory fixes, 2026-10-11
 
 The tested Main archive was installed and verified after reboot at
-`/usr/share/qosp/app.qa` on the physical Buildroot Pi. The subsequent network
-interruption leaves its current running state unconfirmed. This follows the
+`/usr/share/qosp/app.qa` on the physical Buildroot Pi. Wi-Fi access was later
+restored after diagnosing a stale Ethernet route; QOS was still running on
+the same boot and application PID with zero restarts. This follows the
 [Qlog memory investigation](2026-10-11-QLOG-MEMORY.md).
 QOS source is `dbc47be0259c0347a8fe7ab3bf2f5c25187e2955`; its FP-RISC pin
 is `4f621a38ac02588a72ec1b6a2fa57a2a0b25ff4f`. Both were verified pushed
@@ -68,16 +69,39 @@ restarts were recorded in every successful sample. GPU bin/render submissions
 advanced to 3,639, with 21 BOs / 7,660 KiB in the final sample. Sampled peak
 temperature was 57.939°C.
 
-Subsequent Ethernet and Wi-Fi connections timed out. The Mac could still reach
-the router; local subnet discovery found neither known Pi MAC address. This
-does not distinguish power/cabling loss from a board/kernel/network failure.
-Physical-state clarification was requested. The final planned stop/start
-check has not been performed, and current Pi readiness is unconfirmed.
+Subsequent IPv4 Ethernet and Wi-Fi connections timed out. The user then
+confirmed Ethernet was unplugged. IPv6 link-local SSH over Wi-Fi succeeded,
+showing the same boot ID and application PID 296 with zero restarts. This
+network interruption was not evidence of a QOS crash. The failed five-minute
+observation remains incomplete; recovery does not supply its missing samples.
+The final planned stop/start check has not been performed.
+
+### Wi-Fi recovery and persistent routing fix
+
+Wi-Fi had DHCP address `192.168.0.233`, but Ethernet retained `192.168.0.232`
+and its routes despite having no carrier. Both interfaces shared the subnet.
+`ip -4 route get 192.168.0.90` selected `eth0`, so IPv4 SSH replies took the
+unplugged interface. IPv6 link-local access through `wlan0` allowed diagnosis.
+
+Setting `net.ipv4.conf.all.ignore_routes_with_linkdown=1` changed that route
+to `wlan0` and restored IPv4 SSH. The tracked Buildroot overlay now contains
+`etc/sysctl.d/40-qosp-routing.conf`, setting this option for `all` and `default`.
+The same file was installed and synced on the running Pi. Over IPv6, clearing
+both settings reproduced the Ethernet route; running the actual boot loader
+`/etc/init.d/S02sysctl start` restored both settings and the Wi-Fi route.
+Fresh IPv4 SSH succeeded afterward. QOS remained PID 296 with zero restarts
+throughout; no reboot or application restart was needed for this fix.
+
+During recovery the user had been navigating applications. One RSS sample
+was 114,048 KiB, higher than the earlier idle samples; this interactive growth
+has not been characterized. GPU allocation was 22 BOs / 7,728 KiB. Neither
+this recovery check nor the incomplete idle observation establishes endurance
+or a bound on memory across repeated application navigation.
 
 Raw private evidence is in
 `.qos/pi4/validation/deployment-dbc47be/`: deployment and shutdown logs,
 backup hashes, UI assertions/screenshots, fresh-boot records, smaps, GPU
-counters, temperatures and service samples.
+counters, temperatures, service samples and Wi-Fi routing/persistence checks.
 
 Before reboot, even with every QOS process stopped and no DRM clients,
 V3D reported 29,750 BOs / 1,122,632 KiB. After reboot with the new Main

@@ -175,7 +175,13 @@ The overlay disables only Broadcom firmware supplicant offload
 (`feature_disable=0x2000`, `BRCMF_FEAT_FWSUP` in the pinned kernel). On the
 tested Pi 4 / BCM43455, the default offload stalled at `ASSOCIATED`; letting
 `wpa_supplicant` perform the WPA2 handshake reached `COMPLETED` and DHCP.
-Ethernet remains available. SSH accepts the
+Ethernet remains available. The overlay's `40-qosp-routing.conf`, loaded by
+`S02sysctl`, makes IPv4 ignore routes through interfaces without carrier.
+On the tested Pi, unplugging Ethernet otherwise left its DHCP subnet route
+preferred over Wi-Fi, preventing IPv4 SSH replies despite a working wireless
+connection. IPv6 link-local SSH remained reachable during diagnosis.
+
+SSH accepts the
 supplied public key and disables password authentication. Host keys are
 generated on the device's first boot, not shared between images. Use the
 router's DHCP lease for hostname `qosp` to find the address, then:
