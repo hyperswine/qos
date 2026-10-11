@@ -1,0 +1,129 @@
+#!/bin/sh
+# One appliance instance, with finite restart policy and bounded termination.
+. "${QOSP_SERVICE_LIB:-/usr/lib/qosp-service.sh}" || exit 1
+qosp_config || exit 1
+mkdir -p "$RUN_DIR" || exit 1
+OWN_DIR=$RUN_DIR/instance.$$
+mkdir "$OWN_DIR" || exit 1
+identity=$(qosp_identity $$) || { rmdir "$OWN_DIR"; exit 1; }
+if ! qosp_write_record "$OWN_DIR/supervisor.pid" "$$" ||
+   ! qosp_write_record "$OWN_DIR/supervisor.identity" "$identity"; then
+	rm -f "$OWN_DIR/supervisor.pid" "$OWN_DIR/supervisor.identity"
+	rmdir "$OWN_DIR" 2>/dev/null || :
+	echo "qosp: cannot record supervisor ownership; no application launched" >&2
+	exit 1
+fi
+if ! ln -s "$OWN_DIR" "$LOCK" 2>/dev/null; then
+	rm -f "$OWN_DIR/supervisor.pid" "$OWN_DIR/supervisor.identity"
+	rmdir "$OWN_DIR"
+	echo "qosp: another supervisor owns $LOCK" >&2
+	exit 1
+fi
+stopping=0
+child=
+child_identity=
+restarts=0
+delay=$BACKOFF_SECS
+trap 'stopping=1' TERM INT HUP
+
+child_alive() { [ -n "$child" ] && qosp_matches "$child" "$child_identity"; }
+cleanup() {
+	rm -f "$READY_FILE"
+	# Never touch a later instance's directory. Only serialized administrative
+	# commands remove the stable link, even when it has become dangling.
+	if { [ -z "$child" ] || { [ -n "$child_identity" ] && ! child_alive; }; } && qosp_matches $$ "$identity"; then
+		rm -f "$OWN_DIR/supervisor.pid" "$OWN_DIR/supervisor.identity" "$OWN_DIR/child.pid" "$OWN_DIR/child.identity" "$OWN_DIR/child.pending" "$OWN_DIR/stop"
+		rmdir "$OWN_DIR" 2>/dev/null || :
+	fi
+}
+trap cleanup 0
+
+stop_child() {
+	forced=0
+	if child_alive; then
+		qosp_signal_child TERM
+		n=$((STOP_SECS * 10))
+		while child_alive && [ "$n" -gt 0 ]; do sleep 0.1; n=$((n - 1)); done
+		if child_alive; then
+			forced=1
+			echo "qosp: graceful stop timed out; killing application $child" >&2
+			qosp_signal_child KILL
+			n=$((KILL_SECS * 10))
+			while child_alive && [ "$n" -gt 0 ]; do sleep 0.1; n=$((n - 1)); done
+		fi
+	fi
+	if child_alive; then
+		echo "qosp: application $child remains alive after SIGKILL; ownership retained" >&2
+		return 1
+	fi
+	if wait "$child" 2>/dev/null; then child_rc=0; else child_rc=$?; fi
+	child=
+	child_identity=
+	rm -f "$LOCK/child.pid" "$LOCK/child.identity" "$LOCK/child.pending" "$READY_FILE"
+	[ "$forced" -eq 0 ] && [ "$child_rc" -eq 0 ]
+}
+
+while :; do
+	[ "$stopping" -eq 0 ] && [ ! -f "$LOCK/stop" ] || break
+	rm -f "$READY_FILE"
+	qosp_state "starting attempt=$((restarts + 1))" || exit 1
+	if ! qosp_write_record "$LOCK/child.pending" pending; then
+		echo "qosp: cannot record pending application ownership; no application launched" >&2
+		exit 1
+	fi
+	QOSP_READY_FILE=$READY_FILE "$DETACH" "$SESSION" &
+	child=$!
+	child_identity=$(qosp_identity "$child") || child_identity=
+	if [ -z "$child_identity" ] || ! qosp_write_record "$LOCK/child.pid" "$child" ||
+	   ! qosp_write_record "$LOCK/child.identity" "$child_identity"; then
+		echo "qosp: cannot record application ownership; stopping without restart" >&2
+		qosp_state "failed application-ownership-record" || :
+		# The in-memory start identity still permits bounded teardown after a
+		# record write fails. Unknown identity retains the pending marker.
+		if [ -n "$child_identity" ]; then stop_child || :; fi
+		exit 1
+	fi
+	rm -f "$LOCK/child.pending"
+	ready=0
+	n=$((READY_SECS * 10))
+	while child_alive && [ "$stopping" -eq 0 ] && [ ! -f "$LOCK/stop" ]; do
+		if [ "$ready" -eq 0 ]; then
+			if [ -r "$READY_FILE" ] && [ "$(cat "$READY_FILE" 2>/dev/null)" = "$child" ]; then
+				ready=1
+				qosp_state "running pid=$child restarts=$restarts"
+			elif [ "$n" -le 0 ]; then
+				echo "qosp: application $child did not enter within $READY_SECS seconds" >&2
+				break
+			fi
+			n=$((n - 1))
+		fi
+		sleep 0.1
+	done
+	if [ "$stopping" -ne 0 ] || [ -f "$LOCK/stop" ]; then break; fi
+	if child_alive; then
+		stop_child || :
+		if child_alive; then qosp_state "failed unreaped-application=$child"; exit 1; fi
+	else
+		if wait "$child" 2>/dev/null; then child_rc=0; else child_rc=$?; fi
+		echo "qosp: application $child exited status=$child_rc ready=$ready" >&2
+		child=
+		child_identity=
+		rm -f "$LOCK/child.pid" "$LOCK/child.identity" "$LOCK/child.pending" "$READY_FILE"
+	fi
+	if [ "$restarts" -ge "$RESTART_MAX" ]; then
+		qosp_state "failed restart-budget-exhausted restarts=$restarts"
+		echo "qosp: restart budget exhausted; administrative restart required" >&2
+		exit 1
+	fi
+	restarts=$((restarts + 1))
+	qosp_state "backoff seconds=$delay restarts=$restarts"
+	n=$((delay * 10))
+	while [ "$n" -gt 0 ] && [ "$stopping" -eq 0 ] && [ ! -f "$LOCK/stop" ]; do sleep 0.1; n=$((n - 1)); done
+	delay=$((delay * 2))
+	[ "$delay" -le "$BACKOFF_MAX" ] || delay=$BACKOFF_MAX
+done
+
+qosp_state stopping
+if [ -z "$child" ] || stop_child; then qosp_state stopped; exit 0; fi
+qosp_state "failed shutdown-status=$child_rc"
+exit 1

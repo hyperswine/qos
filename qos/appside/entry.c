@@ -31,6 +31,41 @@ uw fpr_g_tlsoff; /* x64 only: the %fs borrow displacement (fpr.h) */
 
 const qos_hal_t *qos_hal; /* installed before anything can call out */
 
+/* A lifecycle actor may complete while actor 0 is waiting on an application.
+ * The scheduler returns through the existing process-mode path; result
+ * rendering below must not read actor 0's still-unset result in this case. */
+static int g_shutdown_finished;
+static int g_shutdown_status;
+static V h_shutdown_requested(V u) {
+  (void)u;
+  return TAG(qos_hal->shutdown_requested ? qos_hal->shutdown_requested() : 0);
+}
+static V h_shutdown_begin(V u) {
+  (void)u;
+  if (qos_hal->shutdown_begin) qos_hal->shutdown_begin();
+  return (V)&fpr_unit;
+}
+static V h_shutdown_complete(V status) {
+  if (!ISINT(status)) fpr_cpanic("Sys.shutdownComplete: status must be an Int");
+  int code = UNTAG(status) == 0 ? 0 : 1;
+  __atomic_fetch_or(&g_shutdown_status, code, __ATOMIC_RELAXED);
+  __atomic_store_n(&g_shutdown_finished, 1, __ATOMIC_RELEASE);
+  if (qos_hal->shutdown_complete) qos_hal->shutdown_complete(code);
+  __atomic_store_n(&fpr_process_done, 1, __ATOMIC_RELEASE);
+  fpr_actor_sleep_us(1); /* hand back to the scheduler; it does not resume us */
+  return (V)&fpr_unit;
+}
+static V h_ready(V u) {
+  (void)u;
+  if (qos_hal->ready && qos_hal->ready() < 0)
+    fpr_actor_fail("Sys.ready: could not publish readiness");
+  return (V)&fpr_unit;
+}
+FPR_FN(fpr_g_Sys_x2eshutdownRequested, h_shutdown_requested, 1);
+FPR_FN(fpr_g_Sys_x2eshutdownBegin, h_shutdown_begin, 1);
+FPR_FN(fpr_g_Sys_x2eshutdownComplete, h_shutdown_complete, 1);
+FPR_FN(fpr_g_Sys_x2eready, h_ready, 1);
+
 static const unsigned char *g_caps_bytes;
 static uw g_caps_len;
 static V h_sys_caps(V d) {
@@ -325,6 +360,7 @@ static V h_sys_store_req(V tagv, V payv) {
   int64_t r = g_syscall((uw)UNTAG(tagv), (const char *)s->bytes, s->len,
                         g_sysout, sizeof g_sysout);
   if (r == -2) return fpr_mkresult(1, "no disk");
+  if (r == -5) return fpr_mkresult(1, "storage outcome unknown");
   if (r < 0) return fpr_mkresult(1, "storage error");
   return fpr_mkresultn(0, g_sysout, (uw)r);
 }
@@ -348,6 +384,8 @@ static void qos_host_ring_sink(const char *line, uint64_t n) {
  * (fopen/fwrite), no actor machinery involved, so it is one of the
  * few things a dying world can still safely do. */
 static void qos_panic_persist(const char *msg, uw n) {
+  /* Fatal diagnostics must not hang forever in a host storage syscall. */
+  if (qos_hal && qos_hal->shutdown_begin) qos_hal->shutdown_begin();
   if (!g_syscall) return;
   static char rec[192];
   const char *pre = "sys/panic\n";
@@ -371,9 +409,9 @@ int64_t qos_app_entry(const qos_boot_t *boot, char *result_out,
 
   if (!boot || boot->abi_version != QOS_ABI_VERSION) return -1;
   qos_hal = boot->hal; /* first: panics from here on can reach putc */
+  if (!qos_hal || qos_hal->version != QOS_ABI_VERSION) return -1;
   /* the host's fault handler asks this which actor ran off its stack */
   qos_hal->set_stack_query((void *(*)(uint64_t *, uint64_t *))fpr_current_stack);
-  if (!qos_hal || qos_hal->version != QOS_ABI_VERSION) return -1;
 #if !defined(FPR_QOSAPP_SINGLE) && !defined(__aarch64__)
   fpr_g_tlsoff = boot->tls_off; /* before ANY tp read: fpr_set_tp below
                                  * already goes through the borrow.
@@ -469,6 +507,13 @@ int64_t qos_app_entry(const qos_boot_t *boot, char *result_out,
                       * which also ends every secondary hart loop, so
                       * the host's joins are prompt) */
 
+  if (__atomic_load_n(&g_shutdown_finished, __ATOMIC_ACQUIRE)) {
+    const char *text = __atomic_load_n(&g_shutdown_status, __ATOMIC_ACQUIRE) ? "shutdown failed" : "shutdown complete";
+    uw n = 0;
+    while (text[n] && n + 1 < result_cap) { result_out[n] = text[n]; n++; }
+    if (result_cap) result_out[n] = 0;
+    return 0;
+  }
   V result = fpr_process_result_get();
   /* render into the host's buffer: fpr_prim_fn_str allocates the
    * string in OUR arena, which stays mapped until the host tears the

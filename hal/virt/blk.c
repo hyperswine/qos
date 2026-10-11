@@ -632,6 +632,10 @@ static V h_blkWrite(V d, V pv, V sv) {
 FPR_FN(fpr_g_blkPages, h_blkPages, 1);
 FPR_FN(fpr_g_blkRead, h_blkRead, 2);
 FPR_FN(fpr_g_blkWrite, h_blkWrite, 3);
+/* Native has not negotiated/implemented VIRTIO_BLK_F_FLUSH yet. Never
+ * present a completed page write as a durable device barrier. */
+static V h_blkFlush(V d) { (void)d; return TAG(1); }
+FPR_FN(fpr_g_blkFlush, h_blkFlush, 1);
 
 /* Native-only policy mechanism. (version, deadline microseconds, reset probes,
  * waiter factor). Negative configure codes: invalid -1, busy -2, stale -3,

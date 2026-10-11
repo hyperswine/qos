@@ -106,10 +106,11 @@ run dsk np =
   # ---- swap: the circular buffer wraps onto the partition start -------------
   mS = QL.metaOr (QL.direct dsk) h7;
   d = mDataEnd mS;
-  _ = QL.sbW (QL.direct dsk) (mWithSwapHead mS (np - 1));
+  swapLast = if mVer mS == 3 then np - 2 else np - 1;
+  _ = QL.sbW (QL.direct dsk) (mWithSwapHead mS swapLast);
   w1 = QL.swapWrite (QL.direct dsk) "one";
   w2 = QL.swapWrite (QL.direct dsk) "two";
-  sw1 = w1 == (np - 1);
+  sw1 = w1 == swapLast;
   sw2 = w2 == d;
   swCur = mSwapHead (QL.metaOr (QL.direct dsk) h7) == (d + 1);
   swBack = QL.strEq (substr (QL.swapRead (QL.direct dsk) d) 0 3) "two";

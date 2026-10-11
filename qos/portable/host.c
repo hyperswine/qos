@@ -51,6 +51,9 @@
 #include <signal.h>
 #include <sys/ucontext.h>
 #include <pthread.h>
+#include <fcntl.h>
+#include <poll.h>
+#include <time.h>
 
 /* runtime/core, compiled hosted into qosp (qaimg.c only: the host
  * keeps no allocator over the arena since abi v12) */
@@ -62,6 +65,130 @@ void qosp_store_bind(const char *app_id);
 int64_t qosp_store_call(uint64_t, const char *, uint64_t, char *, uint64_t);
 
 static int g_trace;
+
+/* SIGINT/SIGTERM are requests to the app, not calls into its scheduler.
+ * The handler writes only a sig_atomic_t and a nonblocking self-pipe. An
+ * independent host thread enforces the deadline even when every app hart is
+ * stuck in a device call. The app may also arm it before normal shutdown.
+ * Repeated requests do not reset that deadline. */
+static volatile sig_atomic_t shutdown_signal;
+static volatile sig_atomic_t shutdown_write_fd = -1;
+static int shutdown_pipe[2] = {-1, -1};
+static pthread_t shutdown_thread;
+static int shutdown_thread_live, shutdown_thread_stop;
+static int shutdown_ack = -1;
+static int shutdown_software_begin;
+static uint64_t shutdown_timeout_ms = 5000;
+static const char *ready_path;
+
+static uint64_t shutdown_clock_ms(void) {
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return (uint64_t)ts.tv_sec * 1000 + (uint64_t)ts.tv_nsec / 1000000;
+}
+static void shutdown_handler(int sig) {
+  int saved_errno = errno;
+  if (!shutdown_signal) shutdown_signal = sig;
+  int fd = shutdown_write_fd;
+  if (fd >= 0) { const char byte = 1; (void)write(fd, &byte, 1); }
+  errno = saved_errno;
+}
+static void ready_clear(void) {
+  if (ready_path && *ready_path) (void)unlink(ready_path);
+}
+static void *shutdown_watch(void *unused) {
+  (void)unused;
+  uint64_t began = 0;
+  for (;;) {
+    if (__atomic_load_n(&shutdown_thread_stop, __ATOMIC_ACQUIRE)) return 0;
+    if ((shutdown_signal || __atomic_load_n(&shutdown_software_begin, __ATOMIC_ACQUIRE)) && !began)
+      began = shutdown_clock_ms();
+    if (began && shutdown_clock_ms() - began >= shutdown_timeout_ms) {
+      /* No logging, TTY restoration or unlink here: each may block. The
+       * supervisor interprets 124 as forced/unconfirmed and clears its
+       * readiness marker. A stale PID is never a new child's readiness. */
+      _exit(124);
+    }
+    struct pollfd p = {shutdown_pipe[0], POLLIN, 0};
+    (void)poll(&p, 1, 10);
+    if (p.revents & POLLIN) { char bytes[64]; (void)read(p.fd, bytes, sizeof bytes); }
+  }
+}
+static int shutdown_start(void) {
+  const char *ms = getenv("QOSP_SHUTDOWN_MS");
+  if (ms && *ms) {
+    char *end;
+    unsigned long value = strtoul(ms, &end, 10);
+    if (*end || value < 1 || value > 600000) return -1;
+    shutdown_timeout_ms = value;
+  }
+  ready_path = getenv("QOSP_READY_FILE");
+  ready_clear(); /* a previous process's marker is never readiness */
+  if (pipe(shutdown_pipe)) return -1;
+  for (int i = 0; i < 2; i++) {
+    if (fcntl(shutdown_pipe[i], F_SETFD, FD_CLOEXEC) < 0 ||
+        fcntl(shutdown_pipe[i], F_SETFL, O_NONBLOCK) < 0) return -1;
+  }
+  shutdown_write_fd = shutdown_pipe[1];
+  struct sigaction sa = {0};
+  sa.sa_handler = shutdown_handler;
+  sigemptyset(&sa.sa_mask);
+  sigaddset(&sa.sa_mask, SIGINT);
+  sigaddset(&sa.sa_mask, SIGTERM);
+  if (sigaction(SIGINT, &sa, 0) || sigaction(SIGTERM, &sa, 0)) return -1;
+  if (pthread_create(&shutdown_thread, 0, shutdown_watch, 0)) return -1;
+  shutdown_thread_live = 1;
+  return 0;
+}
+static void shutdown_stop(void) {
+  if (!shutdown_thread_live) return;
+  __atomic_store_n(&shutdown_thread_stop, 1, __ATOMIC_RELEASE);
+  const char byte = 0;
+  (void)write(shutdown_pipe[1], &byte, 1);
+  pthread_join(shutdown_thread, 0);
+  shutdown_thread_live = 0;
+  shutdown_write_fd = -1;
+  close(shutdown_pipe[0]); close(shutdown_pipe[1]);
+}
+int qosp_shutdown_requested(void) { return shutdown_signal; }
+void qosp_shutdown_begin(void) {
+  __atomic_store_n(&shutdown_software_begin, 1, __ATOMIC_RELEASE);
+  const char byte = 1;
+  (void)write(shutdown_pipe[1], &byte, 1);
+}
+void qosp_shutdown_complete(int status) {
+  /* Explicit completion terminates the app even without an earlier signal.
+   * Keep the deadline active through the resulting host exit cleanup. */
+  qosp_shutdown_begin();
+  /* Repeated completion cannot turn a reported failure into success. */
+  if (status) __atomic_store_n(&shutdown_ack, 1, __ATOMIC_RELEASE);
+  else {
+    int pending = -1;
+    (void)__atomic_compare_exchange_n(&shutdown_ack, &pending, 0, 0,
+                                       __ATOMIC_RELEASE, __ATOMIC_RELAXED);
+  }
+}
+int qosp_ready(void) {
+  if (!ready_path || !*ready_path || shutdown_signal ||
+      __atomic_load_n(&shutdown_software_begin, __ATOMIC_ACQUIRE)) return 0;
+  size_t n = strlen(ready_path) + 40;
+  char *tmp = malloc(n);
+  if (!tmp) return -1;
+  snprintf(tmp, n, "%s.%ld.tmp", ready_path, (long)getpid());
+  int fd = open(tmp, O_WRONLY | O_CREAT | O_EXCL, 0644);
+  int result = -1;
+  if (fd >= 0) {
+    char pid[32];
+    int count = snprintf(pid, sizeof pid, "%ld\n", (long)getpid());
+    ssize_t written = write(fd, pid, (size_t)count);
+    int closed = close(fd);
+    if (written == count && !closed && !shutdown_signal &&
+        !__atomic_load_n(&shutdown_software_begin, __ATOMIC_ACQUIRE) && !rename(tmp, ready_path)) result = 0;
+    (void)unlink(tmp);
+  }
+  free(tmp);
+  return result;
+}
 
 #define TRACE(...) \
   do { if (g_trace) qos_hostlog("qosp: " __VA_ARGS__); } while (0)
@@ -357,6 +484,7 @@ static V h_init(V tracev) {
   sa.sa_flags = SA_SIGINFO | SA_ONSTACK; /* the faulting stack may be the exhausted one */
   sigaction(SIGBUS, &sa, NULL);
   sigaction(SIGSEGV, &sa, NULL);
+  if (shutdown_start()) return res_err("cannot initialize shutdown watchdog (QOSP_SHUTDOWN_MS must be 1..600000)");
   TRACE("stage 1 (initializer): arena at %#lx, %lu MiB of address space reserved\n",
         (unsigned long)g_arena_base, (unsigned long)(g_arena_size >> 20));
   if (!g_arena_size)
@@ -483,6 +611,22 @@ static V h_run(V idv, V namev, V capsv) {
   int64_t rc = enter_app((qos_app_entry_t)g_ld.entry, &boot, result, sizeof result);
   g_in_app = 0;
   join_harts(); /* every hart loop exited through fpr_process_done */
+  ready_clear();
+  int status = __atomic_load_n(&shutdown_ack, __ATOMIC_ACQUIRE);
+  if (shutdown_signal || status >= 0) {
+    if (status < 0) {
+      fputs("qosp: app returned without shutdown acknowledgement\n", stderr);
+      status = 1;
+    } else {
+      fprintf(stderr, "qosp: shutdown %s\n", status ? "failed" : "complete");
+    }
+    /* Keep the watchdog alive through exit handlers, including sound/TTY
+     * cleanup. A cleanup that stalls still cannot exceed the deadline. */
+    exit(status);
+  }
+  /* Software-initiated shutdown preserves main's result, but the same
+   * deadline still covers host result output and all exit handlers. */
+  if (!__atomic_load_n(&shutdown_software_begin, __ATOMIC_ACQUIRE)) shutdown_stop();
   if (rc) return res_err("the app entry rejected the boot record (abi mismatch?)");
   return res_ok_str(result, strlen(result));
 }

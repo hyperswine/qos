@@ -53,3 +53,9 @@ blockep v1.1 153fbb62fb092259
 blockep v1.2 97237492694e7b1a
 fs v2.0 ada972463cd03f5d
 net v1.0 e014c97bab46e124
+blockio v3.0 1326ddf2a0e4841e
+block v3.0 17e287cc039996f2
+blockep v2.0 d44cf337abf58619
+qlog v5.0 bac5b00293d99d6c
+fs v3.0 10db41d6e4d0d077
+lifecycle v1.0 f1ee5f21f27625c4

@@ -28,6 +28,7 @@
 
 static pthread_mutex_t blk_mu = PTHREAD_MUTEX_INITIALIZER;
 static int blk_fd = -1;
+static int blk_dir_fd = -1;
 static int blk_tried;
 static uint64_t blk_npages;
 
@@ -44,10 +45,29 @@ static void blk_open_locked(void) {
     return;
   }
 
+  /* A first durable commit must also make a newly created backing file's
+   * name durable.  Keep this descriptor with the file; changing FPR_DISK
+   * after setup must not send the flush to a different directory. */
+  const char *slash = strrchr(path, '/');
+  size_t parent_len = slash ? (size_t)(slash - path) : 0;
+  char *parent = malloc(parent_len + 2);
+  if (!parent) { close(fd); return; }
+  if (!slash) { parent[0] = '.'; parent[1] = 0; }
+  else if (!parent_len) { parent[0] = '/'; parent[1] = 0; }
+  else { memcpy(parent, path, parent_len); parent[parent_len] = 0; }
+  int dir_fd = open(parent, O_RDONLY | O_DIRECTORY);
+  free(parent);
+  if (dir_fd < 0) {
+    qos_hostlog("blk: cannot open parent of %s (%s) -- no durable disk", path, strerror(errno));
+    close(fd);
+    return;
+  }
+
   struct stat st;
   if (fstat(fd, &st) < 0) {
     qos_hostlog("blk: cannot stat %s (%s) -- no disk", path, strerror(errno));
     close(fd);
+    close(dir_fd);
     return;
   }
 
@@ -67,6 +87,7 @@ static void blk_open_locked(void) {
       qos_hostlog("blk: cannot size %s to %lluMB (%s) -- no disk", path,
                   (unsigned long long)mb, strerror(errno));
       close(fd);
+      close(dir_fd);
       return;
     }
     qos_hostlog("blk: %s created, %llu pages of 4096 bytes", path,
@@ -77,6 +98,7 @@ static void blk_open_locked(void) {
   }
 
   blk_fd = fd;
+  blk_dir_fd = dir_fd;
   blk_npages = size / QOS_BLK_PAGE;
 }
 
@@ -120,24 +142,58 @@ int64_t qos_blkraw_write(uint64_t page, const char *src, uint64_t len) {
   return n == (ssize_t)QOS_BLK_PAGE ? (int64_t)len : -1;
 }
 
+static int sync_fd(int fd) {
+  int rc;
+  do { rc = fsync(fd); } while (rc < 0 && errno == EINTR);
+  return rc;
+}
+int64_t qos_blkraw_flush(void) {
+#ifdef QOS_BLK_TEST
+  /* Test-only fault positions let a filesystem test fail or stall the exact
+   * barrier whose acknowledgment it is about to expose. */
+  static unsigned long flushes;
+  unsigned long ordinal = __atomic_add_fetch(&flushes, 1, __ATOMIC_RELAXED);
+  const char *fail = getenv("QOS_BLK_TEST_FAIL_FLUSH_AT");
+  const char *delay = getenv("QOS_BLK_TEST_FLUSH_DELAY_US");
+  const char *at = getenv("QOS_BLK_TEST_FLUSH_DELAY_AT");
+  if (delay && (!at || !strtoul(at, 0, 10) || ordinal == strtoul(at, 0, 10)))
+    usleep((useconds_t)strtoul(delay, 0, 10));
+  if (fail && ordinal == strtoul(fail, 0, 10)) { errno = EIO; return -1; }
+#endif
+  qos_blkraw_setup();
+  if (blk_fd < 0 || blk_dir_fd < 0) return -1;
+  if (sync_fd(blk_fd) < 0) return -1;
+#ifdef F_FULLFSYNC
+  /* macOS fsync need not flush a drive's volatile cache.  Where the host
+   * offers the stronger operation, a refusal is an error, not a successful
+   * durability acknowledgment with weaker semantics. */
+  int rc;
+  do { rc = fcntl(blk_fd, F_FULLFSYNC); } while (rc < 0 && errno == EINTR);
+  if (rc < 0) return -1;
+#endif
+  if (sync_fd(blk_dir_fd) < 0) return -1;
+  return 0;
+}
+
 /* One host worker serves the disk. No actor-stack or arena pointers cross
  * this boundary. Two references: caller and queue/worker. Killing a waiting
  * actor (or a caller giving up at its deadline) releases the caller
  * reference; the worker finishes and frees its own -- the page buffer lives
  * until the host call that may still write it has returned.
  *
- * THE BOUND (2026-10-01): the queue is bounded by time, not by a count.
+ * The physical queue has a hard bound of 64 queued+running jobs, including
+ * jobs whose actors have abandoned them. Caller cancellation cannot release
+ * an admission slot until the worker finishes the host operation.
  * When the worker is STALLED -- the job it is running, or the oldest one
  * waiting, has been in the system longer than the deadline -- a new
  * submission is REFUSED (NULL) instead of joining a queue that is not
- * draining.  Callers are themselves deadline-bound, so the queue holds at
- * most what arrives within one deadline.  $QOS_BLK_DEADLINE_MS sets the
+ * draining. $QOS_BLK_DEADLINE_MS sets the
  * deadline (default 5000, the virt driver's). */
 typedef struct blk_job {
   struct blk_job *next;
   unsigned refs, done;
   uint64_t page, len;
-  int write;
+  int operation;
   int64_t result;
   uint64_t submitted; /* monotonic ns */
   char data[QOS_BLK_PAGE];
@@ -147,6 +203,8 @@ static pthread_cond_t job_cv = PTHREAD_COND_INITIALIZER;
 static pthread_once_t worker_once = PTHREAD_ONCE_INIT;
 static blk_job *job_head, *job_tail;
 static int worker_ok;
+enum { BLK_MAX_PENDING = 64 };
+static unsigned job_count; /* queued + running, protected by job_mu */
 static uint64_t running_since; /* ns the worker's current job started; 0 idle (job_mu) */
 static uint64_t deadline_ns;
 static uint64_t mono_ns(void) {
@@ -168,10 +226,12 @@ static void *disk_worker(void *unused) {
     if (!job_head) job_tail = 0;
     running_since = mono_ns();
     pthread_mutex_unlock(&job_mu);
-    j->result = j->write ? qos_blkraw_write(j->page, j->data, j->len)
-                         : qos_blkraw_read(j->page, j->data);
+    j->result = j->operation == QOS_BLK_FLUSH ? qos_blkraw_flush()
+              : j->operation == QOS_BLK_WRITE ? qos_blkraw_write(j->page, j->data, j->len)
+              : qos_blkraw_read(j->page, j->data);
     pthread_mutex_lock(&job_mu);
     running_since = 0;
+    job_count--;
     pthread_mutex_unlock(&job_mu);
     __atomic_store_n(&j->done, 1, __ATOMIC_RELEASE);
     qos_blkraw_release(j);
@@ -187,18 +247,21 @@ static void start_worker(void) {
     pthread_detach(t); worker_ok = 1;
   }
 }
-void *qos_blkraw_submit(uint64_t page, const char *src, uint64_t len, int write) {
-  if (len > QOS_BLK_PAGE || (write && len && !src)) return 0;
+void *qos_blkraw_submit(uint64_t page, const char *src, uint64_t len, int operation) {
+  if (operation < QOS_BLK_READ || operation > QOS_BLK_FLUSH ||
+      len > QOS_BLK_PAGE || (operation == QOS_BLK_WRITE && len && !src) ||
+      (operation == QOS_BLK_FLUSH && (page || src || len))) return 0;
   pthread_once(&worker_once, start_worker);
   if (!worker_ok) return 0;
   blk_job *j = calloc(1, sizeof *j);
   if (!j) return 0;
-  j->refs = 2; j->page = page; j->len = len; j->write = write;
-  if (write && len) memcpy(j->data, src, len);
+  j->refs = 2; j->page = page; j->len = len; j->operation = operation;
+  if (operation == QOS_BLK_WRITE && len) memcpy(j->data, src, len);
   pthread_mutex_lock(&job_mu);
   uint64_t now = mono_ns();
   j->submitted = now;
-  if ((running_since && now - running_since > deadline_ns) ||
+  if (job_count >= BLK_MAX_PENDING ||
+      (running_since && now - running_since > deadline_ns) ||
       (job_head && now - job_head->submitted > deadline_ns)) {
     /* stalled: refuse rather than queue behind a worker that is not draining */
     pthread_mutex_unlock(&job_mu);
@@ -207,6 +270,7 @@ void *qos_blkraw_submit(uint64_t page, const char *src, uint64_t len, int write)
   }
   if (job_tail) job_tail->next = j; else job_head = j;
   job_tail = j;
+  job_count++;
   pthread_cond_signal(&job_cv);
   pthread_mutex_unlock(&job_mu);
   return j;
@@ -217,6 +281,6 @@ int qos_blkraw_done(void *p) {
 int64_t qos_blkraw_result(void *p, char *dst) {
   blk_job *j = p;
   if (!qos_blkraw_done(j)) return -1;
-  if (!j->write && j->result == 0 && dst) memcpy(dst, j->data, QOS_BLK_PAGE);
+  if (j->operation == QOS_BLK_READ && j->result == 0 && dst) memcpy(dst, j->data, QOS_BLK_PAGE);
   return j->result;
 }

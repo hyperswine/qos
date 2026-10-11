@@ -1,0 +1,17 @@
+# The main actor waits while the lifecycle actor owns shutdown administration.
+Lifecycle = use "std/lifecycle".
+FS = use "std/fs".
+wait : unsafe Lifecycle.Context -> Unit .
+wait ctx = _ = Sys.sleepUs 10000; wait ctx.
+main : unsafe Unit .
+main =
+  me = myself 0;
+  ctx = case Lifecycle.start me of Ok value -> value | Err why -> error why;
+  fs = Lifecycle.files ctx;
+  _ = case FS.readLatest me fs "shutdown/durable" of
+      Ok value -> print "portableshutdown: replayed={value}"
+    | Err why -> print "portableshutdown: fresh";
+  _ = case FS.append me fs "shutdown/durable" "committed" of Ok value -> Unit | Err why -> error why;
+  _ = inputPoll 0; # exercise lazy TTY setup before the signal arrives
+  _ = Sys.ready Unit;
+  wait ctx.

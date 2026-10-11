@@ -1,0 +1,40 @@
+# powercut.fpr -- the appliance's storage under power cuts (tools/buildroot/
+# powercut-check.py).  On every boot: replay the log, report how many records
+# it holds and the last value (they must agree: no gaps, nothing from before
+# a committed record missing), publish readiness, then append one numbered
+# record every 50 ms and report each commit.  The check kills the machine at
+# random moments and asserts the next boot recovers at least every record it
+# saw committed.
+Lifecycle = use "std/lifecycle".
+FS = use "std/fs".
+S = use "std/string".
+L = use "std/list".
+O = use "std/option".
+
+count : List String -> Int .
+count xs = L.length (L.filter (fn l -> strlen l > 0) xs).
+lastOf : List String -> Int .
+lastOf xs = case L.last (L.filter (fn l -> strlen l > 0) xs) of
+    O.None -> 0
+  | O.Some s -> (case S.toInt s of Ok n -> n | Err e -> 0 - 1).
+
+append : unsafe Int -> Int -> Int -> Unit .
+append me fs n =
+  _ = case FS.append me fs "pc/log" "{n}\n" of
+      Ok h -> print "powercut: committed {n}"
+    | Err why -> print "powercut: append {n} failed: {why}";
+  _ = Sys.sleepUs 50000;
+  append me fs (n + 1).
+
+main : unsafe Unit .
+main =
+  me = myself 0;
+  ctx = case Lifecycle.start me of Ok value -> value | Err why -> error why;
+  fs = Lifecycle.files ctx;
+  text = case FS.replay me fs "pc/log" of Ok t -> t | Err why -> "";
+  lines = S.split "\n" text;
+  k = count lines;
+  last = lastOf lines;
+  _ = print "powercut: recovered records={k} last={last} {case k == last of True -> "contiguous" | False -> "GAP"}";
+  _ = Sys.ready Unit;
+  append me fs (last + 1).

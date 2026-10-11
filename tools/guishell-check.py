@@ -32,7 +32,7 @@ def png(path, rgb):
 def check(out):
     out.mkdir(parents=True, exist_ok=False)
     tag = f'qos-shell-check-{os.getpid()}'
-    env = dict(os.environ, XDG_CACHE_HOME=str(out / 'cache'), FPR_HARTS='1')
+    env = dict(os.environ, XDG_CACHE_HOME=str(out / 'cache'), FPR_HARTS='1', FPR_PORT='0')
 
     def run(*args):
         p = subprocess.run(list(map(str, args)), cwd=ROOT, env=env,
@@ -95,6 +95,9 @@ def check(out):
         os.mkfifo(fifo)
         fd = os.open(fifo, os.O_RDWR | os.O_NONBLOCK)
         env['FPR_EVDEV'] = str(fifo)
+        ready = out / f'ready-{boot}'
+        ready.write_text('424242\n')
+        env['QOSP_READY_FILE'] = str(ready)
         proc = subprocess.Popen(command, cwd=out, env=env, stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, text=True, bufsize=1)
         lines = queue.Queue()
@@ -105,7 +108,8 @@ def check(out):
                 lines.put(line)
             lines.put(None)
 
-        threading.Thread(target=reader, daemon=True).start()
+        reader_thread = threading.Thread(target=reader, daemon=True)
+        reader_thread.start()
 
         def wait_for(text):
             deadline = time.monotonic() + 20
@@ -149,6 +153,10 @@ def check(out):
 
         try:
             wait_for('Main Profile ready (10 shortcuts, 2 pages)')
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline and (not ready.exists() or ready.read_text().strip() != str(proc.pid)):
+                time.sleep(.01)
+            assert ready.exists() and ready.read_text().strip() == str(proc.pid), 'Main did not publish current-PID readiness'
             first = shot(1)
             key(109); wait_for('shell: page 2')
             second = shot(2)
@@ -172,13 +180,25 @@ def check(out):
             assert clock != first, 'loaded clock did not draw'
             key(1); wait_for('shell: home'); await_capture(Path(f'/tmp/{tag}-9.ppm'))
             shutil.move(f'/tmp/{tag}-9.ppm', out / f'boot{boot}-9.ppm')
-            key(16)
+            if boot == 1:
+                key(16)
+            else:
+                proc.terminate()
             proc.wait(timeout=10)
+            reader_thread.join(timeout=5)
+            assert not reader_thread.is_alive(), 'Main output did not reach EOF'
             while not lines.empty():
                 line = lines.get_nowait()
                 if line is not None:
                     log.append(line)
-            assert proc.returncode == 0 and 'shell ended' in ''.join(log), ''.join(log)
+            text = ''.join(log)
+            assert proc.returncode == 0, text
+            assert ('shell ended' if boot == 1 else 'qosp: shutdown complete') in text, text
+            if boot == 1:
+                assert 'shell: storage drained and flushed' in text, text
+            # Signal completion is acknowledged by the host only after the
+            # lifecycle barrier. Sys.logAt's console echo is rate limited.
+            assert not ready.exists(), 'Main left a stale readiness marker'
             assert '[desktopgl] GLFW' in ''.join(log), 'no real GL initialization'
         finally:
             if proc.poll() is None:

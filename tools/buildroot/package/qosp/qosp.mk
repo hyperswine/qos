@@ -71,6 +71,8 @@ endef
 
 define QOSP_BUILD_CMDS
 	$(QOSP_CHECK_TREE)
+	$(TARGET_CC) $(TARGET_CFLAGS) -O2 -Wall -Wextra \
+		$(QOSP_PKGDIR)/qosp-service-guard.c -o $(@D)/qosp-service-guard $(TARGET_LDFLAGS)
 	$(MAKE1) -C $(QOSP_QOS_DIR)/qos portable-es \
 		FPRISC_ROOT="$(QOSP_FPRISC_DIR)" \
 		QOSP_ARCH="$(QOSP_TARGET_ARCH)" \
@@ -81,10 +83,23 @@ define QOSP_BUILD_CMDS
 endef
 
 define QOSP_INSTALL_TARGET_CMDS
+	# Bake the state directory into the persistent rootfs, before first boot.
+	# fsync(disk + immediate parent) cannot persist a newly created ancestor,
+	# and following a custom skeleton's /var link could put state in tmpfs.
+	for path in $(TARGET_DIR)/var $(TARGET_DIR)/var/lib $(TARGET_DIR)/var/lib/qosp; do \
+		test ! -L "$$path" || { \
+			echo "qosp: default state path must use real directories: $$path" >&2; exit 1; }; \
+	done
+	$(INSTALL) -d -m 0755 $(TARGET_DIR)/var/lib/qosp
 	$(INSTALL) -D -m 0755 $(@D)/qosp $(TARGET_DIR)/usr/bin/qosp
+	$(INSTALL) -D -m 0755 $(@D)/qosp-service-guard $(TARGET_DIR)/usr/bin/qosp-service-guard
 	$(INSTALL) -D -m 0644 $(QOSP_APP) $(TARGET_DIR)/usr/share/qosp/app.qa
 	$(INSTALL) -D -m 0755 $(QOSP_PKGDIR)/qosp-session \
 		$(TARGET_DIR)/usr/bin/qosp-session
+	$(INSTALL) -D -m 0755 $(QOSP_PKGDIR)/qosp-supervise \
+		$(TARGET_DIR)/usr/bin/qosp-supervise
+	$(INSTALL) -D -m 0644 $(QOSP_PKGDIR)/qosp-service.sh \
+		$(TARGET_DIR)/usr/lib/qosp-service.sh
 	$(if $(filter y,$(BR2_PACKAGE_QOSP_MAIN_PROFILE)),\
 		$(INSTALL) -D -m 0644 $(QOSP_MAIN_DIR)/Main.disk $(TARGET_DIR)/usr/share/qosp/Main.disk)
 endef

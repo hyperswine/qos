@@ -143,15 +143,84 @@ firmware (`brcmfmac_sdio-firmware-rpi`) is already installed.
 ## The application at boot
 
 `BR2_PACKAGE_QOSP_AUTOSTART` (default on) installs `/etc/init.d/S99qosp`,
-which runs `/usr/bin/qosp-session` on tty1 — where the scanout puts its
+which supervises `/usr/bin/qosp-session` on tty1 — where the scanout puts its
 frames. The serial console keeps its own getty, so there is always a shell to
 debug from, and the application's own output goes to `/var/log/qosp.log`
 rather than over the picture.
 
-`qosp-session` holds the only policy: the app is `/usr/share/qosp/app.qa`, its
+`qosp-session` selects the app and persistent paths: the app is `/usr/share/qosp/app.qa`, its
 QLOG disk persists in `/var/lib/qosp`, and assets come from
 `/usr/share/qosp/assets`. All three are overridable from the environment, so
 the same script serves the appliance and a hand-run session.
+
+The package creates `/var/lib/qosp` in the image and refuses symlinked state
+ancestors during installation. Custom `QOSP_STATE` or `FPR_DISK` paths must
+have already durable resolved ancestors on persistent mounted storage before
+launch; runtime `mkdir -p` alone does not make new ancestor names durable.
+`python3 tools/buildroot/package-install-check.py` checks the package install
+macro against fresh, existing and volatile-link filesystem layouts.
+
+### Readiness, restart and stop
+
+The service requires an explicit application readiness signal. After its own
+startup has succeeded, the application calls `Sys.ready Unit`; the host writes
+its PID to the fresh `QOSP_READY_FILE` supplied by the supervisor. For a Files
+application, call this after storage initialization. A live process alone is
+not ready, and the marker does not assert continuing application progress or
+hardware health. Existing applications that do not signal readiness can still
+run by hand, but supervised startup will time out.
+
+`S99qosp start` waits for the matching child PID's readiness before reporting
+success. Parallel/duplicate starts share one instance. `status` distinguishes
+running, starting, backoff, stopped and failed; a failed or stopped service
+returns nonzero. A small `flock`/`exec` helper serializes lifecycle mutations;
+Linux `/proc` start tokens protect stale PID records from signalling a reused
+PID. The supervisor owns and reaps its application process.
+
+An unexpected application exit (including status 0) restarts after exponential
+backoff, with three restarts allowed for that supervisor's lifetime. Exhaustion
+latches a failure and requires an administrative `start` or `restart`. A
+requested stop never restarts the application. Stop sends SIGTERM so the host
+can perform its durable shutdown, waits for a bounded grace period, then uses
+SIGKILL if necessary. A nonzero shutdown result or escalation is reported as a
+failure. A process still alive after escalation retains its ownership record
+and prevents a second application from starting.
+
+Ownership-record failures refuse launch or trigger bounded child teardown.
+An incomplete launch marker is retained when the writer's identity or death
+cannot be confirmed; later starts fail closed until an operator resolves it.
+After supervisor death, stopping its orphan also reports an unconfirmed
+shutdown because the exit status cannot be reaped. Once the child is gone,
+an explicit administrative restart can safely create a fresh instance.
+A supervised stop requires the recorded `stopped` result; a failed final-state
+write also reports an unconfirmed shutdown.
+
+The settings are environment variables, in decimal integer seconds/counts:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `QOSP_READY_TIMEOUT_SEC` | 20 | Application readiness deadline per launch |
+| `QOSP_STOP_TIMEOUT_SEC` | 15 | SIGTERM grace period; keep above the host's `QOSP_SHUTDOWN_MS` deadline |
+| `QOSP_KILL_TIMEOUT_SEC` | 2 | Additional wait after SIGKILL |
+| `QOSP_RESTART_MAX` | 3 | Restarts before failure is latched |
+| `QOSP_RESTART_DELAY_SEC` | 1 | First restart delay |
+| `QOSP_RESTART_DELAY_MAX_SEC` | 30 | Maximum exponential backoff |
+| `QOSP_RUN_DIR` | `/var/run/qosp` | Instance ownership, readiness and state files |
+| `QOSP_LOG` | `/var/log/qosp.log` | Service and application log |
+
+Run `python3 tools/buildroot/service-check.py` from the QOS checkout to exercise
+the actual scripts with real sessions and signals: concurrent start, readiness
+refusal, finite restart/backoff, graceful/failed/forced stop, stale PID safety,
+supervisor death and stop during startup. These host tests do not replace a
+rebuilt image boot or Pi hardware tests. The image check remains a QEMU graphics
+smoke test; it does not establish storage durability or long-running health.
+
+For the complete host composition, first build `qosp` and an archive from
+`tests/portableshutdown.fpr`, then run
+`python3 tools/buildroot/service-check.py --real-only --host /path/to/qosp --archive /path/to/shutdown.qa`.
+This passes the actual host and application through `qosp-session` and the
+supervisor with one and two harts, then checks a clean durable stop and replay
+after a fresh process starts against the same disk.
 
 ### Filling the screen
 

@@ -1267,7 +1267,7 @@ SMOKE = [
     ("GUI shell controls", "tests/guishell.fpr", "qosp", "guishell: HOLDS"),
     ("mvu engine",        "tests/mvutick.fpr",  "qosp", "4 statics builds"),
     ("display O(1)",      "tests/tuiframes.fpr", "qosp", "TUIFRAMES HOLD"),
-    ("disk v2",           "tests/qdisk2.fpr",   "qosp", "torn=True"),
+    ("disk recovery",     "tests/qdisk2.fpr",   "qosp", "torn=True"),
     ("dtree == GHC",      "tests/dtree.fpr",    "qosp", "root split: col 1"),
     ("bigfree",           "tests/bigfree.fpr",  "qosp", "BIGFREE HOLDS"),
     ("equality is deep",  "tests/eq.fpr",       "qosp", "ok  (1, 2) == (3, 4)"),
@@ -1297,7 +1297,7 @@ def cmd_test(a):
             r = subprocess.run(["make", "-s", "bare-metal-run", f"PROG={prog}", f"IMAGE={WS.mk().image(prog)}"] + WS.make_vars(),
                                cwd=ROOT, capture_output=True, timeout=300)
             out = r.stdout.decode("utf-8", "replace")
-        ok = expect in out
+        ok = r.returncode == 0 and expect in out
         ran += 1
         say(f"{'ok  ' if ok else 'FAIL'} {label}")
         if not ok:
@@ -1305,7 +1305,7 @@ def cmd_test(a):
     # the multi-client LiveView wire rides its own script
     if not a.legs or any("web" in k or "live" in k for k in a.legs):
         r = subprocess.run(["sh", "tests-host/mvuweb-check.sh"], cwd=QOS, capture_output=True, timeout=300)
-        ok = b"ALL LEGS PASS" in r.stdout
+        ok = r.returncode == 0 and b"ALL LEGS PASS" in r.stdout
         ran += 1
         say(f"{'ok  ' if ok else 'FAIL'} liveview multi-client")
         if not ok:

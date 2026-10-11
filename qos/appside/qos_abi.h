@@ -19,7 +19,7 @@
 
 #include <stdint.h>
 
-#define QOS_ABI_VERSION 18u /* v18: tag 4 checks RELOC and IMPORT against LOAD's relsha; v17: tag 8 unloads a plugin whose process ended; v16: tag 4 publishes a plugin the app placed (no shell span); v15: copied worker disk requests */
+#define QOS_ABI_VERSION 19u /* v19: shutdown begin/request/completion and explicit app readiness; v18: tag 4 checks RELOC and IMPORT against LOAD's relsha */
 
 /* ---- the address plan (linux-x86-64) --------------------------------
  * The host is linked non-PIE (default 0x400000 text); the arena is a
@@ -236,6 +236,16 @@ typedef struct {
   int (*blk_done)(void *job);
   int64_t (*blk_result)(void *job, char *dst);
   void (*blk_release)(void *job);
+  /* v19: host lifecycle. Request is a latched SIGINT/SIGTERM number, or 0.
+   * Completion acknowledges the app's own quiesce/drain/flush sequence; it
+   * does not itself flush storage. Readiness is explicitly published by the
+   * app, after its required services have initialized, never at image entry. */
+  int (*shutdown_requested)(void);
+  void (*shutdown_complete)(int status);
+  int (*ready)(void);
+  /* Arms the same deadline for ordinary app-initiated graceful shutdown,
+   * without inventing an OS signal or terminating the app's return path. */
+  void (*shutdown_begin)(void);
 } qos_hal_t;
 
 /* ---- the memory-growth grant (RETIRED in v12) ----------------------

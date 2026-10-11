@@ -6,31 +6,125 @@
 # always a shell to debug from.  Its own output goes to a log rather
 # than over the picture.
 
+. "${QOSP_SERVICE_LIB:-/usr/lib/qosp-service.sh}" || exit 1
+qosp_config || exit 1
 TTY=${QOSP_TTY:-/dev/tty1}
-LOG=/var/log/qosp.log
-PIDFILE=/var/run/qosp.pid
+LOG=${QOSP_LOG:-/var/log/qosp.log}
+mkdir -p "$RUN_DIR" || exit 1
+if [ "${QOSP_SERVICE_GUARDED:-}" != 1 ]; then
+	exec "$GUARD" "$RUN_DIR/control.lock" sh "$0" "$@"
+fi
 
 start() {
-	printf 'Starting qosp: '
-	# a minimal rootfs may have neither, and a failed redirect here would
-	# mean the appliance silently does not come up
-	mkdir -p "$(dirname "$LOG")" "$(dirname "$PIDFILE")"
-	[ -c "$TTY" ] || TTY=/dev/console
-	setsid /usr/bin/qosp-session <"$TTY" >>"$LOG" 2>&1 &
-	echo $! > "$PIDFILE"
-	echo "OK (on ${TTY}, log ${LOG})"
+	mkdir -p "$(dirname "$LOG")" "$RUN_DIR" || return 1
+	if ! qosp_recorded supervisor; then
+		if qosp_recorded child; then echo "qosp: orphan application $recorded_pid; stop it before starting" >&2; return 1; fi
+		if qosp_child_uncertain; then echo "qosp: application ownership is unconfirmed; refusing another writer" >&2; return 1; fi
+		if [ -d "$LOCK" ] || [ -L "$LOCK" ]; then
+			qosp_unlock || return 1
+		fi
+		if ! qosp_recorded supervisor; then
+			[ -c "$TTY" ] || TTY=/dev/console
+			qosp_state "starting supervisor-pending"
+			QOSP_SERVICE_GUARDED= "$DETACH" "$SUPERVISOR" <"$TTY" >>"$LOG" 2>&1 9>&- &
+			# Retain the control lock until the daemon records its owner. Another
+			# start must never mistake a partly initialized owner for a stale one.
+			n=50
+			while ! qosp_recorded supervisor && [ "$n" -gt 0 ]; do sleep 0.1; n=$((n - 1)); done
+			if ! qosp_recorded supervisor; then echo "qosp: supervisor failed to start (see $LOG)" >&2; return 1; fi
+		fi
+	fi
+	exec 9>&-
+	# Include all allowed failed starts and backoffs, each with bounded teardown.
+	n=$(((RESTART_MAX + 1) * (READY_SECS + STOP_SECS + KILL_SECS + BACKOFF_MAX + 2) * 10))
+	while [ "$n" -gt 0 ]; do
+		state=starting
+		[ ! -r "$STATE_FILE" ] || read -r state detail < "$STATE_FILE"
+		if [ "$state" = running ] && qosp_recorded supervisor && qosp_recorded child; then
+			echo "qosp: running (application $recorded_pid, log $LOG)"; return 0
+		fi
+		if [ "$state" = failed ] && ! qosp_recorded supervisor; then echo "qosp: $state $detail" >&2; return 1; fi
+		if [ "$state" = stopped ] && ! qosp_recorded supervisor; then echo "qosp: startup was stopped" >&2; return 1; fi
+		sleep 0.1; n=$((n - 1))
+	done
+	echo "qosp: startup did not reach readiness" >&2
+	stop
+	return 1
 }
 
 stop() {
-	printf 'Stopping qosp: '
-	[ -f "$PIDFILE" ] && kill "$(cat "$PIDFILE")" 2>/dev/null
-	rm -f "$PIDFILE"
-	echo OK
+	was_supervised=0
+	if qosp_recorded supervisor; then
+		was_supervised=1
+		owner=$recorded_pid; owner_identity=$recorded_identity
+		: > "$LOCK/stop"
+		kill -TERM "$owner" 2>/dev/null || :
+		n=$(((STOP_SECS + KILL_SECS + 3) * 10))
+		while qosp_matches "$owner" "$owner_identity" && [ "$n" -gt 0 ]; do sleep 0.1; n=$((n - 1)); done
+		if qosp_matches "$owner" "$owner_identity"; then
+			echo "qosp: supervisor stop timed out; escalating" >&2
+			if qosp_recorded child; then
+				child=$recorded_pid; child_identity=$recorded_identity
+				qosp_signal_child KILL
+			fi
+			kill -KILL "$owner" 2>/dev/null || :
+			qosp_state "failed supervisor-stop-timeout"
+			return 1
+		fi
+	elif qosp_recorded child; then
+		child=$recorded_pid; child_identity=$recorded_identity
+		qosp_signal_child TERM
+		n=$((STOP_SECS * 10))
+		while qosp_matches "$child" "$child_identity" && [ "$n" -gt 0 ]; do sleep 0.1; n=$((n - 1)); done
+		if qosp_matches "$child" "$child_identity"; then
+			qosp_signal_child KILL
+			qosp_state "failed orphan-stop-timeout"
+			return 1
+		fi
+		# This process did not parent the orphan and cannot observe its exit
+		# status. Disappearance cannot acknowledge a durable graceful drain.
+		qosp_state "failed orphan-shutdown-unconfirmed"
+		if [ -d "$LOCK" ] || [ -L "$LOCK" ]; then qosp_unlock || return 1; fi
+		rm -f "$READY_FILE"
+		echo "qosp: orphan stopped; shutdown outcome unconfirmed" >&2
+		return 1
+	fi
+	if qosp_child_uncertain; then echo "qosp: application ownership is unconfirmed; refusing cleanup" >&2; return 1; fi
+	state=
+	[ ! -r "$STATE_FILE" ] || read -r state detail < "$STATE_FILE"
+	# A missing result is clean only when there was no instance or prior state.
+	# A dead supervisor plus stale running/stopping state cannot acknowledge the
+	# child's exit status: the final state write may have failed.
+	if [ -z "$state" ] && [ "$was_supervised" -eq 0 ] &&
+	   [ ! -e "$STATE_FILE" ] && [ ! -L "$STATE_FILE" ] &&
+	   [ ! -d "$LOCK" ] && [ ! -L "$LOCK" ]; then state=stopped; fi
+	if [ "$state" = failed ]; then echo "qosp: $state $detail" >&2; return 1; fi
+	if [ "$state" != stopped ]; then echo "qosp: shutdown outcome unconfirmed (state ${state:-missing})" >&2; return 1; fi
+	if [ -d "$LOCK" ] || [ -L "$LOCK" ]; then qosp_unlock || return 1; fi
+	rm -f "$READY_FILE"
+	echo "qosp: stopped"
+}
+
+status() {
+	state=stopped; detail=
+	[ ! -r "$STATE_FILE" ] || read -r state detail < "$STATE_FILE"
+	if qosp_recorded supervisor; then
+		if [ "$state" = running ] && qosp_recorded child; then echo "qosp: running (application $recorded_pid)"; return 0; fi
+		echo "qosp: $state $detail"; return 1
+	fi
+	if qosp_recorded child; then echo "qosp: orphan application $recorded_pid"; return 1; fi
+	if qosp_child_uncertain; then echo "qosp: application ownership is unconfirmed"; return 1; fi
+	echo "qosp: $state $detail"
+	return 3
 }
 
 case "$1" in
 	start) start ;;
 	stop) stop ;;
-	restart|reload) stop; sleep 1; start ;;
-	*) echo "usage: $0 {start|stop|restart}"; exit 1 ;;
+	restart|reload)
+		if stop; then start
+		elif ! qosp_recorded supervisor && ! qosp_recorded child; then start
+		else exit 1; fi ;;
+	status) status ;;
+	*) echo "usage: $0 {start|stop|restart|status}"; exit 1 ;;
 esac

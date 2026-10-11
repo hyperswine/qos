@@ -1,0 +1,92 @@
+# One administrator owns network admission and Files/block shutdown. Its
+# polling loop remains runnable while the bootstrap actor waits on an app.
+# Host deadline enforcement is mechanism outside this actor. Completion
+# follows draining and, when Files exists, its final requested flush. Native
+# explicitly reports unsupported durability; an absent disk is drained only.
+AC = use "std/actor#06e72a5feec8a6d4".
+Net = use "std/net#e014c97bab46e124".
+FS = use "std/fs#10db41d6e4d0d077".
+IO = use "std/blockio#1326ddf2a0e4841e".
+Context = Type (Context Int Int Int Int).
+Request = Type (Stop).
+owner (Context admin net block files) = admin.
+network (Context admin net block files) = net.
+block (Context admin net block files) = block.
+files (Context admin net block files) = files.
+
+start : unsafe Int -> Result Context String .
+start caller = startWith caller defaultBlock.
+startWith : unsafe Int -> (Int -> Int -> Device -> Int) -> Result Context String .
+startWith caller makeBlock =
+  hart = if Sys.harts Unit > 1 then 1 else 0;
+  admin = AC.spawnWithOn hart (AC.Static 16) (actor caller hart makeBlock);
+  case receiveFromRes caller admin of
+      Err why -> Err "lifecycle: startup failed: {why}"
+    | Ok borrowed -> answer = keep borrowed; _ = drop borrowed; answer.
+
+defaultBlock : unsafe Int -> Int -> Device -> Int .
+defaultBlock hart admin dev = IO.serveWithOn hart admin dev unsupported unsupported.
+unsupported q = Err "block: native budgets unsupported".
+actor : unsafe Int -> Int -> (Int -> Int -> Device -> Int) -> Int -> Unit .
+actor caller hart makeBlock me =
+  net = case Net.start me of Ok a -> a | Err why -> _ = Sys.logAt 2 "network: offline ({why})"; 0;
+  dev = device "blk";
+  disk = makeBlock hart me dev;
+  ready = case IO.capacity me disk of
+      Err why -> Err "block service startup: {why}"
+    | Ok pages -> if pages == 0 then Ok 0 else
+        case FS.startBlockOn hart me disk of
+            Ok store -> Ok store
+          | Err why -> Err "storage startup failed: {why}";
+  case ready of
+      Err why ->
+        cleanup = finish (Context me net disk 0) me;
+        failure = case cleanup of Ok value -> why | Err detail -> "{why}; startup cleanup failed: {detail}";
+        _ = send caller (Err failure);
+        Unit
+    | Ok store ->
+        ctx = Context me net disk store;
+        _ = send caller (Ok ctx);
+        loop ctx me.
+
+stop : Int -> Context -> Result String String .
+stop caller ctx = _ = Sys.shutdownBegin Unit; case AC.call caller (owner ctx) Stop of
+    Ok answer -> answer
+  | Err why -> Err "lifecycle: {why}".
+
+loop : unsafe Context -> Int -> Unit .
+loop ctx me =
+  if Sys.shutdownRequested Unit != 0 then
+    answer = finish ctx me;
+    _ = Sys.shutdownComplete (case answer of Ok value -> 0 | Err why -> 1);
+    Unit
+  else case receiveNow me of
+      Err why -> _ = Sys.sleepUs 1000; loop ctx me
+    | Ok borrowed ->
+        (caller, id, q) = keep borrowed; _ = drop borrowed;
+        answer = case q of Stop -> finish ctx me;
+        _ = AC.reply (caller, id) answer;
+        Unit.
+
+finish : Context -> Int -> Result String String .
+finish (Context admin net disk store) me =
+  networkResult = if net == 0 then Ok "network offline" else
+    case Net.call me net Net.Stop of
+        Ok Net.Stopped -> _ = Sys.logAt 3 "network: admission stopped"; Ok "network stopped"
+      | Err why -> Err "network: stop failed: {why}"
+      | Ok other -> Err "network: invalid stop reply";
+  storageResult = if store == 0 then drainOffline me disk else FS.shutdown me store disk;
+  _ = case storageResult of
+      Ok value -> if store == 0 then Sys.logAt 3 "storage: {value}" else Sys.logAt 3 "storage: Files quiesced and block drained ({value})"
+    | Err why -> Sys.logAt 2 "storage: shutdown failed: {why}";
+  case storageResult of
+      Err why -> Err why
+    | Ok value -> case networkResult of Err why -> Err why | Ok state -> Ok value.
+
+# Even an optional absent disk has a live block owner to close. No device
+# flush is requested when Files was never established.
+drainOffline : Int -> Int -> Result String String .
+drainOffline me disk = case IO.call me disk IO.Drain of
+    Ok IO.Drained -> Ok "storage offline; block drained"
+  | Err why -> Err "offline storage drain failed: {why}"
+  | Ok other -> Err "offline storage drain returned an invalid reply".

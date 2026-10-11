@@ -17,6 +17,13 @@ echo "== disk suspension: one-hart progress, abandoned requests and copied buffe
 echo "== virtio raw policy: register programming and full-word deadlines against C ==" && (python3 tools/virtio-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
 echo "== native block service: configurable budgets and failure isolation ==" && (python3 tools/block-service-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
 echo "== Qlog and bootstrap block routing ==" && (python3 tools/qlog-routing-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
+echo "== Portable durable storage: barriers, dual metadata and staged recovery ==" && (python3 tools/portable-durable-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
+echo "== Portable compatibility KV durability and torn-tail recovery ==" && (sh qos/tests-host/store-check.sh) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
+echo "== Portable compatibility KV application ABI and uncertain outcomes ==" && (python3 tools/portable-store-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
+echo "== Files quiesce, block drain and final flush ==" && (python3 tools/files-shutdown-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
+echo "== Portable bounded graceful shutdown ==" && (python3 tools/portable-shutdown-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
+echo "== Buildroot service supervision and finite restart ==" && (python3 tools/buildroot/service-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
+echo "== Buildroot persistent state directory installation ==" && (python3 tools/buildroot/package-install-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
 echo "== disk hardening: deadlines, stalled devices, reset, offline refusal, overload refusal (native + Portable) ==" && (python3 tools/disk-harden-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
 echo "== native image integrity: corrupt sections and missing digests refuse before allocation ==" && (python3 tools/native-integrity-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
 echo "== initial memory admission: routed native process, refusal and reclamation ==" && (sh tools/admission-check.sh) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }

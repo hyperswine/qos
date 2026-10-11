@@ -37,8 +37,20 @@ int64_t qos_blkraw_read(uint64_t page, char *dst);
  * page; returns len accepted, or -1 out of range / oversize / error */
 int64_t qos_blkraw_write(uint64_t page, const char *src, uint64_t len);
 
-/* Worker-owned buffers; release abandons a pending job safely. */
-void *qos_blkraw_submit(uint64_t page, const char *src, uint64_t len, int write);
+/* Flush data/file metadata and the backing file's directory entry.  This
+ * synchronous mechanism returns 0 on success, -1 on an unavailable disk or
+ * any host sync error.  Actor callers submit QOS_BLK_FLUSH below instead. */
+int64_t qos_blkraw_flush(void);
+
+enum { QOS_BLK_READ = 0, QOS_BLK_WRITE = 1, QOS_BLK_FLUSH = 2 };
+
+/* Worker-owned buffers; release abandons a pending job safely. At most 64
+ * queued+running jobs are admitted, including abandoned jobs. All jobs use
+ * one FIFO worker.  A FLUSH (page=0, src=NULL, len=0) completes after every
+ * previously admitted read/write and before any later job.  Its result is
+ * 0 or -1; dst is ignored.  Completion only says what the host fsync calls
+ * guarantee, not that arbitrary hardware has been power-loss qualified. */
+void *qos_blkraw_submit(uint64_t page, const char *src, uint64_t len, int operation);
 int qos_blkraw_done(void *job);
 int64_t qos_blkraw_result(void *job, char *dst);
 void qos_blkraw_release(void *job);

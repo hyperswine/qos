@@ -41,11 +41,10 @@
 # (EP.grant, registered by the launcher); the shell's own actors are pid 0.
 # ============================================================================
 
-FS = use "std/fs#ada972463cd03f5d".
+FS = use "std/fs#10db41d6e4d0d077".
+Lifecycle = use "std/lifecycle#f1ee5f21f27625c4".
 AK  = use "appkit".
-QL  = use "qlog#5c94f0ce8d592d3d".
-BlockEP = use "blockep#97237492694e7b1a".
-Block = use "std/blockio#1e7c2253c4828e32".
+BlockEP = use "blockep#d44cf337abf58619".
 SVC = use "svc".
 EP  = use "ep".
 Core = use "coreutil".
@@ -358,28 +357,26 @@ aiStep r a = case a of App aid anm ati ->
 # Returns Qsys ns st ns log apps.  Degrades honestly without a disk:
 # storage 0, no apps, the namespace still serves /logs.
 
+# The coordinator keeps the administrator identity while the shell blocks
+# on input or an app. Callers retaining ctx can also request a normal stop.
 boot me =
-  block = Block.serve me (device "blk");
-  boot2 me block (blockPages me block).
+  (q, ctx) = bootManagedSized me 0 0;
+  q.
 bootSized me w h =
-  block = Block.serve me (device "blk");
-  st = case blockPages me block == 0 of True -> 0 | False -> startStorage me block;
+  (q, ctx) = bootManagedSized me w h;
+  q.
+bootManagedSized me w h =
+  ctx = case Lifecycle.start me of Ok value -> value | Err why -> error why;
+  block = Lifecycle.block ctx;
+  st = Lifecycle.files ctx;
+  _ = case st == 0 of True -> Sys.logAt 1 "system: storage and apps offline" | False -> Unit;
   apps = case st == 0 of True -> Nil | False -> attachAll me st;
-  bootWireSizedBlock w h me st apps block.
-blockPages me block = case Block.capacity me block of Ok n -> n | Err why -> error "system: block service startup: {why}".
-boot2 me block n = case n == 0 of
-    True -> _ = Sys.logAt 1 "system: no disk -- storage and apps offline"; bootWireBlock me 0 Nil block
-  | False -> bootDisk me block.
+  (bootWireSizedBlock w h me st apps block, ctx).
+stop me ctx = Lifecycle.stop me ctx.
+ready ctx = case Lifecycle.files ctx == 0 of True -> Unit | False -> Sys.ready Unit.
 bootNoDisk me =
   _ = Sys.logAt 1 "system: no disk -- storage and apps offline";
   bootWire me 0 Nil.
-bootDisk me block =
-  st = startStorage me block;
-  bootWireBlock me st (case st == 0 of True -> Nil | False -> attachAll me st) block.
-startStorage me block = storageReady (FS.startBlock me block).
-storageReady ready = case ready of
-    Ok st -> st
-  | Err why -> _ = Sys.logAt 2 "system: storage startup failed: {why}"; 0.
 bootWire : unsafe Int -> Int -> List App -> Qsys .
 bootWire me st apps = bootWireBlock me st apps 0.
 bootWireBlock : unsafe Int -> Int -> List App -> Int -> Qsys .

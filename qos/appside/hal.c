@@ -213,7 +213,7 @@ FPR_FN(fpr_g_netClose, h_netClose, 1);
 #endif
 static int64_t disk_wait(uint64_t page, const char *src, uint64_t len, int write, char *dst) {
 #ifdef QOS_DISK_TEST_SYNC
-  return write ? qos_hal->blk_write(page, src, len) : qos_hal->blk_read(page, dst);
+  if (write != 2) return write ? qos_hal->blk_write(page, src, len) : qos_hal->blk_read(page, dst);
 #endif
   if (!qos_hal->blk_submit || !qos_hal->blk_done || !qos_hal->blk_result || !qos_hal->blk_release)
     fpr_cpanic("blk: asynchronous disk capability not granted");
@@ -264,6 +264,13 @@ static V h_blkWrite(V d, V pv, V sv) {
 FPR_FN(fpr_g_blkPages, h_blkPages, 1);
 FPR_FN(fpr_g_blkRead, h_blkRead, 2);
 FPR_FN(fpr_g_blkWrite, h_blkWrite, 3);
+/* ABI v19 gives operation 2 its barrier meaning. The worker serializes it
+ * after preceding writes; a timeout abandons only the caller reference. */
+static V h_blkFlush(V d) {
+  (void)d;
+  return TAG((sw)disk_wait(0, 0, 0, 2, 0));
+}
+FPR_FN(fpr_g_blkFlush, h_blkFlush, 1);
 
 /* ---- gfx: the nullable table tier ----------------------------------
  * The renderer (and Mesa's dynamic linking) lives in the HOST image --

@@ -71,10 +71,11 @@ IStr = EP.IStr.
 IFn  = EP.IFn.
 IErr = EP.IErr.
 Net = use "std/net#e014c97bab46e124".
-FS = use "std/fs#ada972463cd03f5d".
-Block = use "std/block#f6a778da43671433".
-BlockEP = use "mods/blockep#97237492694e7b1a".
-BlockIO = use "std/blockio#1e7c2253c4828e32".
+Lifecycle = use "std/lifecycle#f1ee5f21f27625c4".
+FS = use "std/fs#10db41d6e4d0d077".
+Block = use "std/block#17e287cc039996f2".
+BlockEP = use "mods/blockep#d44cf337abf58619".
+BlockIO = use "std/blockio#1326ddf2a0e4841e".
 UartM   = use "mods/uart".
 TimerM  = use "mods/timer".
 MK      = use "mods/matrixkpd".
@@ -1042,14 +1043,11 @@ main =
   clk = reg32 cl 49144;                  # CLINT mtime low word
 
   _ = Sys.init Unit; # buddy_init the process arena -- see docs/PROCESS-LOADING.md
-  # The kernel owns NIC buffers and protocol state before any app image runs.
-  network = case Net.start me of Ok owner -> owner | Err why -> _ = Sys.logAt 2 "network: offline ({why})"; 0;
 
   # ---- the services first: the console itself is one of them ----------------
   # UART.qa owns the UART (opened, armed, shared); Timer.qa the CLINT
   # deadline; the namespace knows who owns which url; System.qa's own
   # endpoints claim theirs (mods/sysep.fpr).  Only then is there a console.
-  dsk = device "blk";
   uarts = spawnUarts me board;
   usvc = firstOf uarts;
   tsvc = spawnTimer Unit;
@@ -1059,10 +1057,11 @@ main =
   # Keep the block service and every I/O worker off a hart synchronously
   # running a loaded process, just like the storage actor.
   diskHart = case Sys.harts Unit > 1 of True -> 1 | False -> 0;
-  block = Block.serveOn diskHart me dsk;
+  lifecycle = case Lifecycle.startWith me Block.serveOn of Ok ctx -> ctx | Err why -> error "system: {why}";
+  block = Lifecycle.block lifecycle;
   _ = SysEp.claim me ns "/services/block" (AC.spawnWithOn diskHart (AC.Dynamic 64) (BlockEP.serve block));
-  pages = bootBlockPages me block;
-  store = case pages == 0 of True -> 0 | False -> spawnStore block;
+  store = Lifecycle.files lifecycle;
+  _ = if store == 0 then Unit else Sys.bindStore store (Rpc store 0 "" "");
   st = {has = store != 0, act = store, uart = usvc, timer = tsvc, ns = ns};
   _ = SysEp.boot me ns usvc tsvc clk st;
   _ = SysEp.claimUarts me ns uarts 0;   # /services/uart/<n>, one per device
@@ -1072,6 +1071,9 @@ main =
   _ = putLn con "----------------------------";
   io = Io4 con me clk st;
   _ = bootBeat io con;
+  # The supervisor sees THIS host PID only after Files completed its initial
+  # scan. An image entering its scheduler is not a readiness claim.
+  _ = if store == 0 then Unit else Sys.ready Unit;
   startup = configGet systemConfig "startup";
   _ = putLn con (strcat "config: startup = " startup);
   _ = putLn con "";
@@ -1079,17 +1081,9 @@ main =
   # launch the startup app (TUIAppLauncher) through the permission gate
   _ = launch io startup;
 
-  _ = if network == 0 then Unit else
-        case Net.call me network Net.Stop of
-          Ok Net.Stopped -> putLn con "network: admission stopped"
-        | Err why -> putLn con "network: stop failed: {why}"
-        | Ok other -> putLn con "network: invalid stop reply";
-  _ = case store == 0 of
-      True -> Unit
-    | False -> _ = case FS.shutdown me store block of
-          Ok value -> putLn con "storage: Files quiesced and block drained"
-        | Err why -> putLn con "storage: shutdown failed: {why}";
-               Unit;
+  _ = case Lifecycle.stop me lifecycle of
+      Ok value -> Unit
+    | Err why -> error "system: shutdown failed: {why}";
   putLn con "System.qa: startup app returned; halting.".
 
 # System.qa's own persistent MVU in miniature: Model = boot count,
@@ -1151,18 +1145,6 @@ claimRoot : Int -> Int -> Int -> Unit .
 claimRoot me ns lst = case EP.register me ns "/" lst of
     Ok n -> Unit
   | Err e -> error "system: could not claim / ({e})".
-
-bootBlockPages me block = case BlockIO.capacity me block of
-    Ok n -> n
-  | Err why -> error "system: block service startup: {why}".
-spawnStore block =
-  hart = if Sys.harts Unit > 1 then 1 else 0;
-  # Bind the stable Files owner only after its first Qlog scan succeeds.
-  storeReady (FS.startBlockOn hart (myself 0) block).
-storeReady ready = case ready of
-    Ok a -> _ = Sys.bindStore a (Rpc a 0 "" ""); a
-  | Err why -> storeUnavailable why.
-storeUnavailable why = _ = Sys.logAt 2 "system: storage startup failed: {why}"; 0.
 
 bootBeat : Io4 -> (Int, Int) -> Unit .
 bootBeat io con =

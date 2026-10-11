@@ -1,6 +1,11 @@
 unsafe program.
-# browser root: module-table carrier only
+# browser root: explicitly export the appkit entry points for scoped lookup.
 A = use "../programs/mods/browserapp".
+appMeta u = A.appMeta u.
+appInit self env = A.appInit self env.
+appUpdate self env key state = A.appUpdate self env key state.
+appTree viewport = A.appTree viewport.
+appVals self env state = A.appVals self env state.
 main : Unit .
 main =
   _ = A.appMeta 0;

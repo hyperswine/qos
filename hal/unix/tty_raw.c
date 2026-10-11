@@ -10,8 +10,9 @@
  *      exactly as they do under GFX=1 / qosp.
  *   2. otherwise      -> RAW stdin.  If stdin is a tty it is switched
  *      to non-canonical no-echo mode (VMIN=0/VTIME=0: reads never
- *      block, matching the poll contract) and restored at exit and on
- *      SIGINT/SIGTERM; a pipe works too (tests feed bytes that way).
+ *      block, matching the poll contract) and restored at normal exit. The
+ *      Portable host owns SIGINT/SIGTERM; its forced deadline skips cleanup.
+ *      A pipe works too (tests feed bytes that way).
  *
  *   3. FPR_EVDEV=auto -> every real keyboard, discovered, plus the mouse
  *      (mice_raw.c): what a Pi on its own console wants.
@@ -73,11 +74,13 @@ static int win_poll(int64_t* kind, int64_t* a, int64_t* c) {
 static void tty_restore(void) {
   if (tty_state == 1) tcsetattr(0, TCSAFLUSH, &tty_saved);
 }
+#ifndef QOSP_HOST
 static void tty_sig(int s) {
   tty_restore();
   signal(s, SIG_DFL);
   raise(s);
 }
+#endif
 static void tty_init(void) {
   if (tty_state) return;
   signal(SIGWINCH, tty_winch);
@@ -96,8 +99,10 @@ static void tty_init(void) {
   t.c_cc[VTIME] = 0;
   if (tcsetattr(0, TCSAFLUSH, &t)) { tty_state = -1; return; }
   atexit(tty_restore);
+#ifndef QOSP_HOST
   signal(SIGINT, tty_sig);
   signal(SIGTERM, tty_sig);
+#endif
   tty_state = 1;
 }
 

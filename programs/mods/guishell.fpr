@@ -234,7 +234,7 @@ inputEvent graphics w h me from x y buttons kind a b =
 main = run "qos-shell".
 run tag =
   me = myself 0;
-  q = QS.bootSized me width height;
+  (q, lifecycle) = QS.bootManagedSized me width height;
   QS.Qsys ns st vfs log apps = q;
   tiles = cat shortcuts (installed me st apps);
   mt = reg32 (device "clint") 49144;
@@ -246,6 +246,9 @@ run tag =
   port = spawn MV.port;
   cfg = {env = (q, tiles, mt), mt = mt, tick = 333330, input = inp, render = graphics};
   app = MV.MApp init update staticKey staticView view done (subscriptions port);
+  _ = QS.ready lifecycle;
   result = MV.run me cfg app;
+  _ = Sys.shutdownBegin Unit;
   _ = EP.close me ep;
+  _ = case QS.stop me lifecycle of Ok value -> print "shell: {value}" | Err why -> error "shell shutdown: {why}";
   result.

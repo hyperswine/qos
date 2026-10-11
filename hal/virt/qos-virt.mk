@@ -17,7 +17,7 @@ $(BUILD)/qos-plic.s: $(QOS_HAL)/virt/plic.fpr $(FPRC)
 	"$(FPRC)" --profile=bare-metal-builtin --arc --raw --lib --export=$(QOS_PLIC_EXPORTS) $< $@ >/dev/null
 
 QOS_VIRT_HAL = $(BUILD)/qos-plic.s $(QOS_HAL)/virt/plic.c $(QOS_HAL)/virt/net.c $(QOS_HAL)/net_actor_bridge.c \
-               $(QOS_HAL)/virt/blk.c $(QOS_HAL)/virt/pins.c $(QOS_HAL)/virt/devices.c
+               $(QOS_HAL)/virt/blk.c $(QOS_HAL)/virt/pins.c $(QOS_HAL)/virt/devices.c $(QOS_HAL)/core/lifecycle.c
 
 # Both device drivers share allocation-free probe/feature/queue policy on RV64.
 QOS_VIRTIO_EXPORTS = probe:qos_virtio_probe,probeAt:qos_virtio_probe_at,negotiate:qos_virtio_negotiate,queue:qos_virtio_queue,ready:qos_virtio_ready

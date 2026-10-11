@@ -8,7 +8,7 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 with tempfile.TemporaryDirectory(prefix='qos-files-service-') as temp:
     out = Path(temp)
-    env = dict(os.environ, FPR_HARTS='1', FPR_DISK=str(out / 'disk'))
+    env = dict(os.environ, FPR_HARTS='1', FPR_PORT='0', FPR_DISK=str(out / 'disk'))
     env.setdefault('XDG_CACHE_HOME', str(out / 'cache'))
     def run(args):
         p = subprocess.run(list(map(str, args)), cwd=out if args[0] == ROOT / 'qos/qosp' else ROOT,

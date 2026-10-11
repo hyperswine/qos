@@ -1,0 +1,69 @@
+# Fresh-process probe for tools/portable-durable-check.py. The script substitutes
+# action, leaving all page operations on the routed block-service path.
+QL = use "../programs/mods/qlog".
+B = use "std/blockio#1326ddf2a0e4841e".
+SVC = use "svc#0c925c3cb42f0f77".
+action = 0.
+outcome r = case r of Ok s -> "Ok {s}" | Err why -> "Err {why}".
+inspect src h =
+  QL.Meta mh v w c d sw mr = QL.metaOr src h;
+  "head={h} v={v} w={w} c={c} data={d} swap={sw} root={mr} key={outcome (QL.readLatest src h "key")} dead={outcome (QL.readLatest src h "dead")}".
+perform src h = case action of
+    1 -> (case QL.appendRes src h "QREC" "key" "new" of Ok h2 -> "append {inspect src h2}" | Err why -> "refused {why}")
+  | 2 -> (case QL.compactRes src h of Ok h2 -> "compact {inspect src h2}" | Err why -> "refused {why}")
+  | 3 -> swapProbe src h
+  | 4 -> rejectProbe src h
+  | 6 -> inputProbe src h
+  | other -> inspect src h.
+swapProbe src h =
+  QL.Meta mh v w c d sw mr = QL.metaOr src h;
+  _ = QL.sbW src (QL.Meta mh v w c d (QL.pageCount src - 2) mr);
+  a = QL.swapWrite src "swap-end";
+  b = QL.swapWrite src "swap-wrap";
+  "swap first={a} second={b} {inspect src h}".
+rejectProbe src h =
+  staleAppend = outcome (QL.appendRes src (h - 1) "QREC" "key" "bad");
+  staleCompact = outcome (QL.compactRes src (h - 1));
+  verified = outcome (QL.verifyLog src h);
+  "stale-append={staleAppend} stale-compact={staleCompact} verify={verified}".
+isRefused r = case r of Err why -> True | Ok h -> False.
+inputProbe src h =
+  tag = isRefused (QL.appendRes src h "unknown" "key" "x");
+  empty = isRefused (QL.appendRes src h "QREC" "" "x");
+  space = isRefused (QL.appendRes src h "QREC" "a b" "x");
+  newline = isRefused (QL.appendRes src h "QREC" (strcat "a" (strcat (chr 10) "b")) "x");
+  tab = isRefused (QL.appendRes src h "QREC" (strcat "a" (strcat (chr 9) "b")) "x");
+  nul = isRefused (QL.appendRes src h "QREC" (strcat "a" (strcat (chr 0) "b")) "x");
+  oversize = isRefused (QL.appendRes src h "QREC" oversizedKey "x");
+  tombstone = isRefused (QL.appendRes src h "QDEL" "key" "x");
+  bulk = isRefused (QL.appendPackedRes src h (strcat "50 key" (strcat (chr 10) "x")) 1);
+  count = isRefused (QL.appendPackedRes src h (strcat "3 key" (strcat (chr 10) "old")) 2);
+  bulkKey = isRefused (QL.appendBulkRes src h (("", "old") :: Nil));
+  "input tag={tag} empty={empty} space={space} newline={newline} tab={tab} nul={nul} oversize={oversize} tombstone={tombstone} bulk={bulk} count={count} bulk-key={bulkKey}".
+oversizedKey =
+  k1 = "x";
+  k2 = strcat k1 k1;
+  k3 = strcat k2 k2;
+  k4 = strcat k3 k3;
+  k5 = strcat k4 k4;
+  k6 = strcat k5 k5;
+  k7 = strcat k6 k6;
+  k8 = strcat k7 k7;
+  k9 = strcat k8 k8;
+  k10 = strcat k9 k9;
+  k11 = strcat k10 k10;
+  k12 = strcat k11 k11;
+  strcat k12 k12.
+worker : unsafe Int -> Int -> Unit .
+worker boss self =
+  block = B.serve self (device "blk");
+  src = QL.routed block;
+  case action == 5 of True -> QL.actorWith src self | False -> workerProbe boss src.
+workerProbe boss src =
+  h = QL.ensure src;
+  send boss (perform src h) >> Unit.
+main =
+  me = myself 0;
+  child = spawn (worker me);
+  _ = case action == 5 of True -> send child (SVC.Rpc me 5 "" "") | False -> Ok Unit;
+  "durable: {outcome (receiveFromRes me child)}".

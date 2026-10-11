@@ -3,7 +3,7 @@
 FS = use "../std/fs".
 B = use "../std/blockio".
 Native = use "../std/block".
-QL = use "../programs/mods/qlog#5c94f0ce8d592d3d".
+QL = use "../programs/mods/qlog#bac5b00293d99d6c".
 blkTestStallNth : Int -> Int .
 blkTestNow : Unit -> Int .
 ok r = case r of Ok v -> True | Err why -> False.
@@ -22,8 +22,9 @@ main =
   fs = FS.serveBlock block;
   before = ok (FS.append me fs "test/value" "before");
   head = headOf (metadata (B.call me block (B.Read 0)));
-  # Pending metadata + record header land; its first payload page stalls.
-  _ = blkTestStallNth 4;
+  # Metadata selection reads both slots and the legacy descriptor first;
+  # pending metadata + record header then land before the payload stalls.
+  _ = blkTestStallNth 6;
   aborted = dead (FS.append me fs "test/value" "stalls");
   stale = dead (FS.readLatest me fs "test/value");
   alive = ok (B.call me block B.GetBudget);

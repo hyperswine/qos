@@ -4,7 +4,7 @@
 # their record prefix; opening a record does not give them a raw disk.
 unsafe module.
 EP = use "ep".
-FS = use "std/fs#ada972463cd03f5d".
+FS = use "std/fs#10db41d6e4d0d077".
 AC = use "std/actor".
 
 serve fs me = EP.simple (readRecord fs) (writeRecord fs) me.

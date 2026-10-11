@@ -33,6 +33,8 @@ sndMusic : String -> Int -> Int .
 blkPages : a -> Int .
 blkRead : a -> Int -> b .
 blkWrite : a -> Int -> b -> Unit .
+# 0 = durable host barrier, 1 = unsupported, negative = failed/outcome unknown.
+blkFlush : a -> Int .
 netPoll : Int -> a .
 netRead : Int -> a .
 netWrite : Int -> a -> Unit .
@@ -52,6 +54,10 @@ Pin.tclear : a -> Unit .
 Sys.caps : Unit -> a .
 Sys.storeReq : a -> b .
 Sys.compile : String -> String -> Result String String .
+Sys.shutdownRequested : Unit -> Int .
+Sys.shutdownBegin : Unit -> Unit .
+Sys.shutdownComplete : Int -> Unit .
+Sys.ready : Unit -> Unit .
 timeNow : a -> Int .
 
 # ---- the kernel's launcher  (loader/process.c, loader/apps.c)

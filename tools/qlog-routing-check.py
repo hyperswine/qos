@@ -6,24 +6,24 @@ import os
 import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 
-def run(args, cwd=ROOT, stdin=None, timeout=180, env=None):
+def run(args, cwd=ROOT, stdin=None, timeout=180, env=None, expected=0):
     p = subprocess.run(list(map(str, args)), cwd=cwd, input=stdin,
                        capture_output=True, text=True, timeout=timeout, env={**os.environ, **(env or {})})
-    assert p.returncode == 0, f'{args}: {p.returncode}\n{p.stdout}{p.stderr}'
+    assert p.returncode == expected, f'{args}: {p.returncode}\n{p.stdout}{p.stderr}'
     return p.stdout + p.stderr
 
 def build(source, kernel, directory, harts, flags=''):
     run(['make', '-s', 'native', f'SYSTEM={source}', f'KERNEL={kernel}', f'BUILD={directory}',
          f'NATIVE_CFLAGS_EXTRA={flags}', f'HARTS={harts}'], cwd=ROOT / 'qos')
 
-def boot(kernel, harts, modern, disk=None, keys=None):
+def boot(kernel, harts, modern, disk=None, keys=None, expected=0):
     args = ['qemu-system-riscv64', '-machine', 'virt', '-smp', harts, '-m', '256M',
             '-nographic', '-bios', 'none', '-kernel', kernel]
     if disk:
         args += ['-drive', f'file={disk},if=none,format=raw,id=hd0', '-device', 'virtio-blk-device,drive=hd0']
     if modern:
         args += ['-global', 'virtio-mmio.force-legacy=false']
-    return run(args, stdin=keys, timeout=30)
+    return run(args, stdin=keys, timeout=30, expected=expected)
 
 with tempfile.TemporaryDirectory(prefix='qos-qlog-routing-') as d:
     temp = Path(d)
@@ -43,7 +43,7 @@ with tempfile.TemporaryDirectory(prefix='qos-qlog-routing-') as d:
         with tempfile.NamedTemporaryFile(mode='w', suffix='.fpr', prefix='.qlog-startup-', dir=ROOT / 'programs') as fixture:
             src = (ROOT / 'programs/system.fpr').read_text()
             src = src.replace('main : unsafe Unit .', 'blkTestStallNth : Int -> Int .\nmain : unsafe Unit .')
-            src = src.replace('  store = case pages == 0', '  _ = blkTestStallNth 1;\n  store = case pages == 0')
+            src = src.replace('  lifecycle = case Lifecycle.startWith', '  _ = blkTestStallNth 1;\n  lifecycle = case Lifecycle.startWith')
             fixture.write(src); fixture.flush()
             build(fixture.name, stalled, temp / f'stalled-{harts}', harts, '-DQOS_BLK_TEST -DBLK_DEADLINE_TICKS=1000000ULL')
         for modern in (False, True):
@@ -69,10 +69,10 @@ with tempfile.TemporaryDirectory(prefix='qos-qlog-routing-') as d:
             # The first metadata read fails before readiness publication.
             disk = temp / f'stalled-{modern}-{harts}.disk'
             run(['python3', ROOT / 'tools/mkdisk.py', disk, '8'])
-            out = boot(stalled, harts, modern, disk, 'yyyyq')
-            assert 'system: storage startup failed: storage service: dead actor' in out and 'storage: offline' in out, out
-            assert 'storage: disk online' not in out and 'System.qa: startup app returned; halting.' in out, out
-            print(f'System routing: virtio v{2 if modern else 1}, {harts} hart(s), failed initialization stays offline HOLDS', flush=True)
+            out = boot(stalled, harts, modern, disk, 'yyyyq', expected=1)
+            assert 'storage startup failed: storage service: dead actor' in out, out
+            assert 'storage: disk online' not in out and 'System.qa: startup app returned; halting.' not in out, out
+            print(f'System routing: virtio v{2 if modern else 1}, {harts} hart(s), failed initialization refuses startup HOLDS', flush=True)
         out = boot(system, harts, False, keys='yyyyq')
         assert 'storage: offline' in out and 'storage: disk online' not in out, out
         assert 'System.qa: startup app returned; halting.' in out, out

@@ -31,4 +31,6 @@ printf 'fake-qa-two-with-more-bytes' > /tmp/two.qa
 python3 ../../tools/mkdisk.py /tmp/qdisk-seeded.disk 4 /tmp/one.qa /tmp/two.qa
 FPR_DISK=/tmp/qdisk-seeded.disk /tmp/blkraw_check seeded
 
+sh ./blkflush-check.sh
+
 echo "blkraw-check: ALL LEGS PASS"

@@ -94,6 +94,10 @@ void hal_heap_release(void *p, uint64_t bytes); /* machine/posix: madvise */
 static void qosp_heap_release(void *p, uint64_t bytes) { hal_heap_release(p, bytes); }
 void *(*qosp_app_stack_query)(uint64_t *id, uint64_t *size); /* host.c's fault handler asks it */
 static void qosp_set_stack_query(void *(*q)(uint64_t *, uint64_t *)) { qosp_app_stack_query = q; }
+int qosp_shutdown_requested(void);
+void qosp_shutdown_complete(int status);
+int qosp_ready(void);
+void qosp_shutdown_begin(void);
 
 static qos_hal_t the_table = {
     .version = QOS_ABI_VERSION,
@@ -154,6 +158,10 @@ static qos_hal_t the_table = {
     .stack_unguard = qosp_stack_unguard,
     .set_stack_query = qosp_set_stack_query,
     .heap_release = qosp_heap_release,
+    .shutdown_requested = qosp_shutdown_requested,
+    .shutdown_complete = qosp_shutdown_complete,
+    .ready = qosp_ready,
+    .shutdown_begin = qosp_shutdown_begin,
 };
 
 const qos_hal_t *qosp_hal_table(void) { return &the_table; }
