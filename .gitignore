@@ -4,6 +4,11 @@
 qosp
 !tools/buildroot/package/qosp/
 !tools/buildroot/package/qosp/**
+!tools/buildroot/board/qosp/
+!tools/buildroot/board/qosp/**
+# Local provisioning inputs must never enter the repository.
+/.env
+/.env.*
 *.disk
 qosp-gl
 qosp-es
