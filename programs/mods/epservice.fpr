@@ -1,0 +1,120 @@
+# Bounded endpoint owners using the published v1 endpoint protocol.
+# Keep clients and wire types in ep; implementation changes here preserve
+# compatibility with independently compiled plugins pinned to ep v1.
+EP = use "ep#f5a7c81840106100".
+AC = use "std/actor#06e72a5feec8a6d4".
+Open = EP.Open. Read = EP.Read. Write = EP.Write. Close = EP.Close.
+Opened = EP.Opened. Refused = EP.Refused.
+NsReg = EP.NsReg. NsUnreg = EP.NsUnreg. NsOpen = EP.NsOpen.
+NsGrant = EP.NsGrant. NsList = EP.NsList.
+
+# The only durable namespace state is the registry and grants. Adaptive
+# copying reclaims request history after about 32 KiB of temporary work.
+NsSt = Type (NsSt ents grants tidy).
+
+namespace : unsafe Int -> a .
+namespace me = nsLoop me (NsSt Nil Nil AC.tidySmall).
+nsLoop : unsafe Int -> NsSt -> a .
+nsLoop me (NsSt ents grants tidy) =
+  ((es, gs), t) = AC.tidy me ((ents, grants), tidy);
+  nsReceive me (NsSt es gs t).
+nsReceive : unsafe Int -> NsSt -> a .
+nsReceive me st =
+  m = receive me;
+  (from, id, q) = m;
+  nsMsg me st (from, id) from q.
+nsMsg : unsafe Int -> NsSt -> (Int, Int) -> Int -> EP.Ns -> a .
+nsMsg me st ret from q =
+  NsSt ents grants tidy = st;
+  case q of
+    NsReg url owner -> nsReg me st ret from url owner
+  | NsUnreg url -> nsUnreg me st ret from url
+  | NsOpen url mode -> nsOpen me st ret from url mode
+  | NsGrant pid gs -> AC.reply ret (Ok 1) >> nsLoop me (NsSt ents ((pid, EP.copyGrants gs) :: grants) tidy)
+  | NsList pre -> AC.reply ret (Ok (EP.listing ents pre "")) >> nsLoop me st.
+
+# a service claims a url; an exact duplicate is refused.  owner 0 = the sender.
+nsReg : unsafe Int -> NsSt -> (Int, Int) -> Int -> String -> Int -> a .
+nsReg me st ret from url owner =
+  NsSt ents grants tidy = st;
+  o = case owner == 0 of True -> from | False -> owner;
+  case EP.ownerOf ents url == 0 of
+    False -> AC.reply ret (Err "taken: {url}") >> nsLoop me st
+  | True -> AC.reply ret (Ok 1) >> nsLoop me (NsSt (EP.cat ents ((strcat url "", o) :: Nil)) grants tidy).
+# only the owner may withdraw its url
+nsUnreg : unsafe Int -> NsSt -> (Int, Int) -> Int -> String -> a .
+nsUnreg me st ret from url =
+  NsSt ents grants tidy = st;
+  case EP.ownerOf ents url == from of
+    False -> AC.reply ret (Err "not the owner of {url}") >> nsLoop me st
+  | True -> AC.reply ret (Ok 1) >> nsLoop me (NsSt (EP.without ents url) grants tidy).
+
+# authorize by the CALLER's pid, resolve, forward the caller's envelope
+nsOpen : unsafe Int -> NsSt -> (Int, Int) -> Int -> String -> String -> a .
+nsOpen me st ret from url mode =
+  NsSt ents grants tidy = st;
+  case EP.allowed grants (Sys.pidOf from) url mode of
+    False -> AC.reply ret (Err "not granted: {url} ({mode})") >> nsLoop me st
+  | True -> nsOpen2 me st ret from url mode (EP.resolve ents url).
+nsOpen2 : unsafe Int -> NsSt -> (Int, Int) -> Int -> String -> String -> Int -> a .
+nsOpen2 me st ret from url mode owner = case owner == 0 of
+    True -> AC.reply ret (Err "no such url: {url}") >> nsLoop me st
+  | False -> nsForward me st ret from url mode owner.
+nsForward : unsafe Int -> NsSt -> (Int, Int) -> Int -> String -> String -> Int -> a .
+nsForward me st ret from url mode owner =
+  id2 = Sys.nextId Unit;
+  case send owner (from, id2, Open url mode) of
+    Err e -> AC.reply ret (Err "{url}: its owner {e}") >> nsLoop me st
+  | Ok u -> AC.reply ret (Ok (owner, id2)) >> nsLoop me st.
+
+
+# Directory handles remain live across reclamation.
+lister : unsafe Int -> Int -> a .
+lister ns me = lsLoop ns me Nil 1 AC.tidySmall.
+lsLoop : unsafe Int -> Int -> List (Int, String) -> Int -> AC.Tidy -> a .
+lsLoop ns me hs next tidy =
+  ((hs2, next2), t2) = AC.tidy me ((hs, next), tidy);
+  lsReceive ns me hs2 next2 t2.
+lsReceive : unsafe Int -> Int -> List (Int, String) -> Int -> AC.Tidy -> a .
+lsReceive ns me hs next tidy =
+  m = receive me;
+  (from, id, q) = m;
+  lsMsg ns me hs next tidy (from, id) q.
+lsMsg : unsafe Int -> Int -> List (Int, String) -> Int -> AC.Tidy -> (Int, Int) -> EP.Ep -> a .
+lsMsg ns me hs next tidy ret q = case q of
+    Open url mode -> lsOpen ns me hs next tidy ret url
+  | Read h n -> AC.reply ret (lsRead ns me (EP.hUrl hs h)) >> lsLoop ns me hs next tidy
+  | Write h v -> AC.reply ret (Err "a listing is read-only") >> lsLoop ns me hs next tidy
+  | Close h -> AC.reply ret (Ok 0) >> lsLoop ns me (EP.hDrop hs h) next tidy.
+lsOpen : unsafe Int -> Int -> List (Int, String) -> Int -> AC.Tidy -> (Int, Int) -> String -> a .
+lsOpen ns me hs next tidy ret url = case EP.endsSlash url of
+    False -> AC.reply ret (Refused "not a listing: {url}") >> lsLoop ns me hs next tidy
+  | True -> AC.reply ret (Opened next) >> lsLoop ns me ((next, strcat url "") :: hs) (next + 1) tidy.
+lsRead : Int -> Int -> String -> Result EP.IoV String .
+lsRead ns me pre = case strlen pre == 0 of
+    True -> Err "no such handle"
+  | False -> (case AC.call me ns (NsList pre) of
+      Ok r -> (case r of Ok s -> Ok (EP.IStr s) | Err e -> Err e)
+    | Err e -> Err "namespace: {e}").
+
+
+# Stateless callback service, retaining its callbacks and open handles.
+simple : unsafe _ -> _ -> Int -> a .
+simple rd wr me = sLoop rd wr me Nil 1 AC.tidySmall.
+sLoop : unsafe _ -> _ -> Int -> List (Int, String, Int) -> Int -> AC.Tidy -> a .
+sLoop rd wr me hs next tidy =
+  # Closures are state too: preserve their heap-owned captures along with
+  # the live handles. Closed handles and request temporaries are garbage.
+  (((rd2, wr2), (hs2, next2)), t2) = AC.tidy me (((rd, wr), (hs, next)), tidy);
+  sReceive rd2 wr2 me hs2 next2 t2.
+sReceive : unsafe _ -> _ -> Int -> List (Int, String, Int) -> Int -> AC.Tidy -> a .
+sReceive rd wr me hs next tidy =
+  m = receive me;
+  (from, id, q) = m;
+  sMsg rd wr me hs next tidy (from, id) from q.
+sMsg : unsafe _ -> _ -> Int -> List (Int, String, Int) -> Int -> AC.Tidy -> (Int, Int) -> Int -> EP.Ep -> a .
+sMsg rd wr me hs next tidy ret from q = case q of
+    Open url mode -> AC.reply ret (Opened next) >> sLoop rd wr me ((next, strcat url "", from) :: hs) (next + 1) tidy
+  | Read h n -> AC.reply ret (EP.sRead rd me (EP.hFind hs h)) >> sLoop rd wr me hs next tidy
+  | Write h v -> AC.reply ret (EP.sWrite wr me (EP.hFind hs h) v) >> sLoop rd wr me hs next tidy
+  | Close h -> AC.reply ret (Ok 0) >> sLoop rd wr me (EP.hRemove hs h) next tidy.

@@ -19,6 +19,7 @@
 
 unsafe program.
 
+Endpoint = use "../programs/mods/epservice".
 EP = use "../programs/mods/ep".
 AC = use "std/actor".
 
@@ -131,8 +132,8 @@ coGo s sub i = case i + strlen sub > strlen s of
 
 main =
   me = myself 0;
-  ns = AC.spawnWith (AC.Dynamic 64) EP.namespace;
-  lst = AC.spawnWith (AC.Dynamic 64) (EP.lister ns);
+  ns = AC.spawnWith (AC.Dynamic 64) Endpoint.namespace;
+  lst = AC.spawnWith (AC.Dynamic 64) (Endpoint.lister ns);
   _ = EP.register me ns "/" lst;
   # 1. the new service claims its url and is used through the four
   svc = AC.spawnWith (AC.Dynamic 64) echo;

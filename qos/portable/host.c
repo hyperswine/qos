@@ -59,6 +59,10 @@
  * keeps no allocator over the arena since abi v12) */
 #include "fpr.h"
 
+/* This Base runtime runs qosp itself on one hart. FPR_HARTS belongs to the
+ * loaded application's workers (resolved below), not to the host's cap. */
+const char *fpr_posix_harts_env(void) { return NULL; }
+
 const qos_hal_t *qosp_hal_table(void);
 void qosp_hal_set_smp(uint64_t nharts, int (*sh)(uint64_t, void (*)(uint64_t)));
 void qosp_store_bind(const char *app_id);

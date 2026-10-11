@@ -6,7 +6,7 @@
 # readLatest/replayAll/appendRec on its own url and nothing else.
 #
 # What lives here:
-#   boot                the namespace (EP.namespace) and its lister at "/",
+#   boot                the namespace (Endpoint.namespace) and its lister at "/",
 #                       then every service below, each claiming its url
 #   QL.actor            (spawned by boot) the ONE disk writer -- svc's
 #                       Rpc protocol, tags 1 latest / 2 append /
@@ -50,6 +50,7 @@ EP  = use "ep".
 Core = use "coreutil".
 QAR = use "qar".
 Plug = use "plug".
+Endpoint = use "epservice".
 AC = use "std/actor".
 GX = use "graphics".
 GL = use "glsvc".
@@ -166,6 +167,8 @@ joinGo acc l = case l of Nil -> acc | x :: r -> joinGo "{acc}\n{x}" r.
 
 logActor : unsafe Int -> a .
 logActor me =
+  # No local state survives a request; replies are copied before this turn.
+  _ = Sys.poolReset 0;
   m = receive me;
   (replyTo, id, q) = m;
   logMsg me (replyTo, id) q.
@@ -385,14 +388,14 @@ bootWireSized : unsafe Int -> Int -> Int -> Int -> List App -> Qsys .
 bootWireSized w h me st apps = bootWireSizedBlock w h me st apps 0.
 bootWireSizedBlock : unsafe Int -> Int -> Int -> Int -> List App -> Int -> Qsys .
 bootWireSizedBlock w h me st apps block =
-  ns = spawnD EP.namespace;
-  _ = claim me ns "/" (spawnD (EP.lister ns));
+  ns = spawnD Endpoint.namespace;
+  _ = claim me ns "/" (spawnD (Endpoint.lister ns));
   _ = case block == 0 of True -> Unit | False -> claim me ns "/services/block" (spawnD (BlockEP.serve block));
   logA = spawnD logActor;
-  logs = spawnD (EP.simple logR logW);
+  logs = spawnD (Endpoint.simple logR logW);
   _ = claim me ns "/services/log" logs;
   _ = claim me ns "/logs" logs;
-  appsA = spawnD (EP.simple (appsR apps) EP.noWrite);
+  appsA = spawnD (Endpoint.simple (appsR apps) EP.noWrite);
   _ = claim me ns "/apps" appsA;
   # the display, when this host has one: Graphics.qa owns it; programs
   # open sessions at /services/graphics/<tag> (mods/graphics.fpr)
@@ -417,7 +420,7 @@ caStep me ns appsA r a = case a of App aid anm ati ->
 # files that have always been there
 bootDiskUrls : unsafe Int -> Int -> Int -> Unit .
 bootDiskUrls me ns st =
-  _ = claim me ns "/services/storage" (spawnD (EP.simple (stR st) (stW st)));
+  _ = claim me ns "/services/storage" (spawnD (Endpoint.simple (stR st) (stW st)));
   mgr = spawnD (filesMgr st ns);
   _ = claim me ns "/tmp" mgr;
   _ = claim me ns "/home" mgr;

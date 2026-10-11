@@ -6,6 +6,8 @@ ep v1.0 f5a7c81840106100 programs/mods/blockep.fpr
 std/actor v1.0 06e72a5feec8a6d4 programs/mods/blockep.fpr
 std/blockio v3.0 1326ddf2a0e4841e programs/mods/blockep.fpr
 std/actor v1.0 06e72a5feec8a6d4 programs/mods/ep.fpr
+ep v1.0 f5a7c81840106100 programs/mods/epservice.fpr
+std/actor v1.0 06e72a5feec8a6d4 programs/mods/epservice.fpr
 std/fs v3.2 aeb97cb13f0aff84 programs/mods/files.fpr
 std/net v1.0 e014c97bab46e124 programs/mods/fprlive.fpr
 std/actor v1.0 06e72a5feec8a6d4 programs/mods/graphics.fpr
@@ -43,6 +45,7 @@ std/fs v3.2 aeb97cb13f0aff84 std/lifecycle.fpr
 std/blockio v3.0 1326ddf2a0e4841e std/lifecycle.fpr
 ../programs/mods/ep v1.0 f5a7c81840106100 std/loader.fpr
 std/actor v1.0 06e72a5feec8a6d4 std/net.fpr
+ep v1.0 f5a7c81840106100 tests/epmemory.fpr
 ../std/net v1.0 e014c97bab46e124 tests/native-netowner.fpr
 ../std/net v1.0 e014c97bab46e124 tests/netactor.fpr
 std/actor v1.0 06e72a5feec8a6d4 tests/netactor.fpr

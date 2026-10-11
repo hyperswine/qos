@@ -2,6 +2,7 @@
 # attach to Graphics.qa and access Files.qa through their namespace.
 # Clock capability remains the legacy MVU mtime handle for now.
 unsafe module.
+Endpoint = use "epservice".
 EP = use "ep".
 AC = use "std/actor".
 Lifecycle = use "std/lifecycle#f95ec7dce656d2bb".
@@ -15,8 +16,8 @@ claim me ns url owner = case EP.register me ns url owner of
   | Err why -> error "service registration {url}: {why}".
 boot =
   me = myself 0;
-  ns = AC.spawnWith (AC.Dynamic 64) EP.namespace;
-  _ = claim me ns "/" (AC.spawnWith (AC.Dynamic 64) (EP.lister ns));
+  ns = AC.spawnWith (AC.Dynamic 64) Endpoint.namespace;
+  _ = claim me ns "/" (AC.spawnWith (AC.Dynamic 64) (Endpoint.lister ns));
   lifecycle = case Lifecycle.start me of Ok ctx -> ctx | Err why -> error why;
   block = Lifecycle.block lifecycle;
   _ = claim me ns "/services/block" (AC.spawnWith (AC.Dynamic 64) (BlockEP.serve block));

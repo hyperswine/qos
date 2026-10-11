@@ -74,6 +74,7 @@ Net = use "std/net#e014c97bab46e124".
 Lifecycle = use "std/lifecycle#f95ec7dce656d2bb".
 FS = use "std/fs#aeb97cb13f0aff84".
 Block = use "std/block#17e287cc039996f2".
+Endpoint = use "mods/epservice".
 BlockEP = use "mods/blockep#d44cf337abf58619".
 BlockIO = use "std/blockio#1326ddf2a0e4841e".
 UartM   = use "mods/uart".
@@ -1051,8 +1052,8 @@ main =
   uarts = spawnUarts me board;
   usvc = firstOf uarts;
   tsvc = spawnTimer Unit;
-  ns = AC.spawnWith (AC.Dynamic 64) EP.namespace;
-  _ = claimRoot me ns (AC.spawnWith (AC.Dynamic 64) (EP.lister ns));
+  ns = AC.spawnWith (AC.Dynamic 64) Endpoint.namespace;
+  _ = claimRoot me ns (AC.spawnWith (AC.Dynamic 64) (Endpoint.lister ns));
   _ = Sys.bindNs ns;                     # a loaded process's Sys.ns
   # Keep the block service and every I/O worker off a hart synchronously
   # running a loaded process, just like the storage actor.

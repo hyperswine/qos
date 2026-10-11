@@ -1,0 +1,32 @@
+# Appkit's log capability adapter must also release owned snapshots each turn.
+#: expect logcapmemory: HOLDS
+unsafe program.
+QS = use "../programs/mods/qsys".
+AK = use "../programs/mods/appkit".
+AC = use "std/actor".
+freeKiB u = case Sys.memInfo 0 of _ :: f :: _ -> f | _ -> 0.
+must r = case r of Ok v -> v | Err e -> error "logcapmemory: {e}".
+seed 0 = Unit.
+seed n = log "capability row {n}" >> seed (n - 1).
+sample me adapter =
+  lines = must (AC.call me adapter (AK.LogSnap 0));
+  if listLen lines == 8 then Unit else error "logcapmemory: snapshot changed".
+samples : unsafe Int -> Int -> Int -> Unit .
+samples me adapter n = if n == 0 then Unit else
+  _ = Sys.arena (fn u -> sample me adapter);
+  samples me adapter (n - 1).
+main =
+  me = myself 0;
+  _ = Sys.logKeep 8;
+  _ = seed 8;
+  adapter = AC.spawnWith (AC.Dynamic 64) QS.logActor;
+  _ = samples me adapter 1000;
+  before = freeKiB Unit;
+  roots = arcLive 0;
+  _ = samples me adapter 20000;
+  grew = before - freeKiB Unit;
+  delta = arcLive 0 - roots;
+  _ = kill adapter;
+  if grew < 4096 and delta < 16
+  then print "logcapmemory: HOLDS 20000 snapshots; growthKiB={grew} arcGrowth={delta}"
+  else error "logcapmemory: growthKiB={grew} arcGrowth={delta}".

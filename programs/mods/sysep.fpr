@@ -28,7 +28,7 @@
 #
 # The keyboard is the one with a held read: a Read on /services/keyboard
 # waits for a key, and a Close of that handle answers it Err "closed" (the
-# contract's cancellation).  Everything else is EP.simple: a handle is its
+# contract's cancellation).  Everything else is Endpoint.simple: a handle is its
 # url and its client, and each request is one function.
 # ============================================================================
 
@@ -36,6 +36,7 @@ EP = use "ep".
 SV = use "svc".
 UM = use "uart#cdee34460c2ad81a".
 TM = use "timer#38fa906125d48580".
+Endpoint = use "epservice".
 AC = use "std/actor".
 
 IStr = EP.IStr. IInt = EP.IInt. IUnit = EP.IUnit. IFn = EP.IFn. IErr = EP.IErr.
@@ -48,14 +49,14 @@ Opened = EP.Opened. Refused = EP.Refused.
 # timer, ns}.
 boot : unsafe Int -> Int -> Int -> Int -> Int -> _ -> Unit .
 boot me ns usvc tsvc clk st =
-  _ = claim me ns "/services/display" (spawnD (EP.simple EP.noRead (dispW usvc)));
+  _ = claim me ns "/services/display" (spawnD (Endpoint.simple EP.noRead (dispW usvc)));
   _ = claim me ns "/services/keyboard" (spawnD (keyboard usvc));
-  _ = claim me ns "/services/clock" (spawnD (EP.simple (clockR clk) EP.noWrite));
-  _ = claim me ns "/services/modules" (spawnD (EP.simple modR EP.noWrite));
-  _ = claim me ns "/services/storage" (spawnD (EP.simple (kvR st) (kvW st)));
-  _ = claim me ns "/services/uart" (spawnD (EP.simple (uartR usvc) (uartW usvc)));
-  _ = claim me ns "/services/timer" (spawnD (EP.simple EP.noRead (timerW tsvc)));
-  _ = claim me ns "/pins" (spawnD (EP.simple pinR pinW));
+  _ = claim me ns "/services/clock" (spawnD (Endpoint.simple (clockR clk) EP.noWrite));
+  _ = claim me ns "/services/modules" (spawnD (Endpoint.simple modR EP.noWrite));
+  _ = claim me ns "/services/storage" (spawnD (Endpoint.simple (kvR st) (kvW st)));
+  _ = claim me ns "/services/uart" (spawnD (Endpoint.simple (uartR usvc) (uartW usvc)));
+  _ = claim me ns "/services/timer" (spawnD (Endpoint.simple EP.noRead (timerW tsvc)));
+  _ = claim me ns "/pins" (spawnD (Endpoint.simple pinR pinW));
   Unit.
 spawnD f = AC.spawnWith (AC.Dynamic 64) f.
 
@@ -66,7 +67,7 @@ spawnD f = AC.spawnWith (AC.Dynamic 64) f.
 claimUarts : unsafe Int -> Int -> List Int -> Int -> Unit .
 claimUarts me ns svcs n = case svcs of
     Nil -> Unit
-  | u :: r -> claim me ns "/services/uart/{n}" (spawnD (EP.simple (uartR u) (uartW u))) >> claimUarts me ns r (n + 1).
+  | u :: r -> claim me ns "/services/uart/{n}" (spawnD (Endpoint.simple (uartR u) (uartW u))) >> claimUarts me ns r (n + 1).
 
 claim : Int -> Int -> String -> Int -> Unit .
 claim me ns url a = case EP.register me ns url a of

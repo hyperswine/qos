@@ -2,6 +2,8 @@
 
 The later [Files/Logs scrolling update](2026-10-11-UI-SCROLLING.md) replaced
 the Main archive described here while retaining its host and disk.
+The subsequent [UI memory investigation](2026-10-11-UI-MEMORY.md) traces and
+repairs the growth exposed by leaving Files or Logs open.
 
 The tested Main archive was installed and verified after reboot at
 `/usr/share/qosp/app.qa` on the physical Buildroot Pi. Wi-Fi access was later

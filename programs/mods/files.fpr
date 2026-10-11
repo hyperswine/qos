@@ -3,11 +3,12 @@
 # Only System (pid 0) may compact the whole log. Apps receive grants to
 # their record prefix; opening a record does not give them a raw disk.
 unsafe module.
+Endpoint = use "epservice".
 EP = use "ep".
 FS = use "std/fs#aeb97cb13f0aff84".
 AC = use "std/actor".
 
-serve fs me = EP.simple (readRecord fs) (writeRecord fs) me.
+serve fs me = Endpoint.simple (readRecord fs) (writeRecord fs) me.
 result (Ok text) = Ok (EP.IStr text).
 result (Err why) = Err why.
 

@@ -1,0 +1,71 @@
+# Repeated UI-style listings must not retain request history in the owners.
+# The old pinned client also verifies that service changes preserve wire tags.
+#: expect epmemory: HOLDS
+unsafe program.
+EP = use "../programs/mods/epservice".
+Wire = use "ep#f5a7c81840106100".
+AC = use "std/actor".
+freeKiB u = case Sys.memInfo 0 of _ :: f :: _ -> f | _ -> 0.
+must r = case r of Ok v -> v | Err e -> error "epmemory: {e}".
+check yes why = if yes then Unit else error "epmemory: {why}".
+reader label me client url = Ok (Wire.IStr "{label}:{url}").
+writer ns label me client url v = case v of
+    Wire.IStr "unregister" ->
+      _ = must (Wire.unregister me ns url);
+      Ok (Wire.IInt 0)
+  | Wire.IStr s -> Ok (Wire.IStr "{label}:{s}")
+  | _ -> Err "text required".
+sample ctx =
+  listing = Wire.text (Wire.readOnce ctx.me ctx.ns "/");
+  _ = check (listing == "/services/persistent") "listing changed";
+  _ = check (Wire.text (Wire.read ctx.me ctx.listing 0) == listing) "open listing handle lost";
+  _ = check (Wire.text (Wire.read ctx.me ctx.service 0) == "retained-reader:/services/persistent") "reader capture or handle lost";
+  _ = check (Wire.text (Wire.write ctx.me ctx.service (Wire.IStr "ping")) == "retained-writer:ping") "writer capture lost";
+  Unit.
+samples : unsafe _ -> Int -> Unit .
+samples ctx n = if n == 0 then Unit else
+  _ = Sys.arena (fn u -> sample ctx);
+  samples ctx (n - 1).
+child ns back me =
+  go = receiveFrom me back;
+  _ = drop go;
+  endpoint = must (Wire.open me ns "/services/persistent" "read");
+  text = Wire.text (Wire.read me endpoint 0);
+  _ = must (Wire.close me endpoint);
+  _ = send back text;
+  0.
+main =
+  me = myself 0;
+  ns = AC.spawnWith (AC.Dynamic 64) EP.namespace;
+  lst = AC.spawnWith (AC.Dynamic 64) (EP.lister ns);
+  labelR = strcat "retained" "-reader";
+  labelW = strcat "retained" "-writer";
+  svc = AC.spawnWith (AC.Dynamic 64) (EP.simple (reader labelR) (writer ns labelW));
+  _ = must (Wire.register me ns "/" lst);
+  url = strcat "/services/" "persistent";
+  _ = must (Wire.register me ns url svc);
+  granted = Sys.spawnApp (child ns me);
+  _ = Sys.arena (fn u -> must (Wire.grant me ns (Sys.pidOf granted)
+    [(strcat "/services/" "persistent", strcat "r" "ead")]));
+  listing = must (Wire.open me ns "/" "read");
+  service = must (Wire.open me ns url "rw");
+  ctx = {me=me, ns=ns, listing=listing, service=service};
+  _ = samples ctx 5000;
+  before = freeKiB Unit;
+  arcBefore = arcLive 0;
+  _ = samples ctx 20000;
+  retained = before - freeKiB Unit;
+  _ = print "epmemory: growthKiB={retained} arcGrowth={arcLive 0 - arcBefore}";
+  arcGrowth = arcLive 0 - arcBefore;
+  _ = check (arcGrowth < 16) "retained message roots: {arcGrowth}";
+  _ = check (retained < 4096) "endpoint requests retain over 4 MiB";
+  _ = send granted 1;
+  childReply = receiveFrom me granted;
+  _ = check (childReply == "retained-reader:/services/persistent") "grant lost across tidy";
+  _ = drop childReply;
+  _ = must (Wire.write me service (Wire.IStr "unregister"));
+  _ = must (Wire.close me service);
+  _ = must (Wire.close me listing);
+  _ = check (Wire.text (Wire.readOnce me ns "/") == "") "registered URL lost across tidy";
+  _ = kill lst; _ = kill svc; _ = kill ns;
+  print "epmemory: HOLDS 20000 cycles; handles, grants, callbacks and pinned client survive".
