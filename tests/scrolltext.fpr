@@ -1,0 +1,35 @@
+# Newlines, font-aware wrapping, long tokens and bounded row virtualization.
+#: expect scrolltext: HOLDS
+unsafe program.
+ST = use "../programs/mods/scrolltext".
+Fm = use "../programs/mods/fontm".
+check True = Unit.
+check False = error "scrolltext: invariant failed".
+same Nil Nil = True.
+same (a :: r) (b :: s) = a == b and same r s.
+same a b = False.
+join Nil = "".
+join (s :: r) = s + join r.
+fits Nil width size = True.
+fits (s :: r) width size = Fm.width s * size <= width * 1000 and fits r width size.
+rows i | i >= 100 = Nil.
+rows i = "row {i}" :: rows (i + 1).
+main =
+  _ = check (same (ST.lines "alpha\r\n\nbeta") ["alpha", "", "beta"]);
+  _ = check (same (ST.wrap "") Nil);
+  _ = check (same (ST.wrapLines ["first\nsecond"]) ["first", "second"]);
+  words = ST.wrapLine "one two three" 60 16;
+  _ = check (same words ["one", "two", "three"]);
+  path = "/services/averylongunbrokentoken";
+  wrapped = ST.wrapLine path 40 16;
+  _ = check (join wrapped == path and fits wrapped 40 16);
+  _ = check (same (ST.wrapLine "abc" 1 16) ["a", "b", "c"]);
+  all = rows 0;
+  _ = check (ST.offset 100 10000 == 91 and ST.offset 100 (0 - 10) == 0);
+  _ = check (ST.offset 0 100 == 0 and ST.offset 3 100 == 0);
+  _ = check (ST.count (ST.window all 0) == 9);
+  _ = check (same (ST.window all 91) (rows 91));
+  _ = check (ST.click 100 0 == 0 and ST.click 100 (ST.paneH - 1) == 91);
+  _ = check (ST.thumbTop 100 91 + ST.thumb 100 == ST.paneH);
+  _ = check (ST.thumb 0 == ST.paneH and ST.thumbTop 0 100 == 0);
+  "scrolltext: HOLDS".

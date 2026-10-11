@@ -6,6 +6,7 @@ GX = use "graphics".
 EP = use "ep".
 AK = use "appkit".
 S2 = use "scene2d".
+ST = use "scrolltext".
 FS = use "std/fs".
 AC = use "std/actor".
 MV = use "std/mvu".
@@ -61,7 +62,7 @@ envOf q tiles mt =
 titles Nil = Nil.
 titles (Tile id title hint ti :: r) = title :: titles r.
 
-init env = {page = 0, selected = 0, active = 0, inner = 0, status = "Ready when you are", snap = 0}.
+init env = {page = 0, selected = 0, active = 0, inner = 0, status = "Ready when you are", snap = 0, scroll = 0}.
 staticKey m = 0.
 staticView vp m = 0.
 done m = "shell ended".
@@ -69,6 +70,8 @@ subscriptions port m = MV.SPort port :: subs m.
 subs m = [MV.STick 100, MV.SKeys].
 update me env (MV.EKey 16) m | m.active == 0 = (m, [MV.MQuit]).
 update me env (MV.EKey k) m = (key env k m, Nil).
+update me env (MV.EWheel dy dx) m | scrollable m.active =
+  (scrollBy env m (0 - dy * 3 / 10), Nil).
 update me env (MV.EMsg "quit" _) m = (m, [MV.MQuit]).
 update me env ev m = (m, Nil).
 key env 1 m =
@@ -105,7 +108,10 @@ pointer env k m =
   pos = k - (case press of True -> 2000000 | False -> 1000000);
   x = pos % width; y = pos / width;
   case m.active != 0 of
-    True -> (case press and y >= 530 of True -> key env 1 m | False -> m)
+    True -> (case press and y >= 530 of True -> key env 1 m | False ->
+      case press and scrollable m.active and x >= 886 and x < 898 and y >= 236 and y < 470 of
+        True -> scrollClick env m (y - 236)
+      | False -> m)
   | False -> pointerHome env m press x y.
 pointerHome env m press x y | y >= 530 =
   case press of True -> page env m (case x < width / 2 of True -> 0 - 1 | False -> 1) | False -> m.
@@ -128,12 +134,26 @@ openTile env m =
   case ti == 0 - 100 of
     True -> {m | status = "Cannot open {id}: archive load was refused"}
   | False -> case ti < 0 of
-      True -> {m | active = ti, status = title}
+      True -> {m | active = ti, status = title, scroll = 0}
     | False -> case gui ti of
         False -> {m | status = "Cannot open {id}: this .qa has no appkit GUI entry"}
       | True ->
           inner = (export ti "appInit") (myself 0) (envOf q tiles mt);
           {m | active = ti + 1, inner = inner, status = title}.
+scrollable a = a == 0 - 2 or a == 0 - 3.
+scrollBy env m delta = scrollTo env m (m.scroll + delta).
+scrollTo env m requested =
+  n = ST.count (builtinLines (myself 0) env m.active);
+  {m | scroll = ST.offset n requested}.
+scrollClick env m y =
+  n = ST.count (builtinLines (myself 0) env m.active);
+  {m | scroll = ST.click n y}.
+appKey env 103 m | scrollable m.active = scrollBy env m (0 - 1).
+appKey env 108 m | scrollable m.active = scrollBy env m 1.
+appKey env 104 m | scrollable m.active = scrollBy env m (0 - ST.visible).
+appKey env 109 m | scrollable m.active = scrollBy env m ST.visible.
+appKey env 102 m | scrollable m.active = scrollTo env m 0.
+appKey env 107 m | scrollable m.active = scrollTo env m 1000000.
 appKey env k m | m.active < 0 = m.
 appKey env k m =
   (q, tiles, mt) = env;
@@ -177,10 +197,27 @@ sheet title body = Box [Col, W width, H height, Pad 42, Gap 24, Bg (18, 30, 60)]
 builtin self env m =
   (q, tiles, mt) = env;
   QS.Qsys ns st vfs log apps = q;
-  builtinTree self ns mt m.active.
+  case scrollable m.active of
+    True -> scrollSheet (case m.active == 0 - 2 of True -> "Files & services" | False -> "System log")
+      (case m.active == 0 - 2 of True -> "The onboard namespace" | False -> "Normal messages - live runtime ring")
+      (builtinLines self env m.active) m.scroll
+  | False -> builtinTree self ns mt m.active.
+builtinLines self env a =
+  (q, tiles, mt) = env;
+  QS.Qsys ns st vfs log apps = q;
+  case a == 0 - 2 of
+    True -> ST.wrap (AK.vfsRead self ns "/")
+  | False -> ST.wrapLines (Sys.logSnap 0).
+scrollSheet title subtitle rows off =
+  Box [Col, W width, H height, Pad 42, Gap 16, Bg (18, 30, 60)]
+    [header,
+     Box [Col, W 876, H 378, Pad 20, Gap 12, Round 24, Bg (65, 98, 155)]
+       [text title ink 30, text subtitle accent 14, ST.pane rows off,
+        Box [Row, W 836, Mid]
+          [text (ST.range rows off) accent 12, spacer,
+           text "UP / DOWN   PGUP / PGDN   HOME / END" dim 12]],
+     text "ESC OR CLICK HERE TO GO HOME     P SNAPSHOT" dim 14].
 builtinTree self ns mt a | a == 0 - 1 = sheet "Take your time" [text (AK.clockStr mt) ink 70, text "QOS runtime clock" dim 17].
-builtinTree self ns mt a | a == 0 - 2 = sheet "Files & services" [text "The onboard namespace" accent 17, text (AK.vfsRead self ns "/") ink 14].
-builtinTree self ns mt a | a == 0 - 3 = sheet "System log" [text (QS.joinNl (Sys.logSnap 0)) ink 14].
 builtinTree self ns mt a = sheet "Welcome to QOS" [text "An actor system, written in FP-RISC." ink 20,
        text "Apps come from the onboard disk. Shortcuts live here." dim 16,
        text "ARROWS select   ENTER open   PGUP / PGDN pages" accent 16,

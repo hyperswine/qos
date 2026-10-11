@@ -6,6 +6,8 @@ QS = use "../programs/mods/qsys".
 MV = use "std/mvu".
 check True = Unit.
 check False = error "guishell: invariant failed".
+logRows i | i >= 30 = Unit.
+logRows i = Sys.logAt 0 "scroll fixture {i}" >> logRows (i + 1).
 source events me =
   (from, MV.Poll _) = receive me;
   case events of
@@ -33,6 +35,23 @@ main =
   _ = check (home.active == 0);
   refused = S.openTile env {m | selected = 4};
   _ = check (refused.active == 0 and strlen refused.status > 0);
+  _ = logRows 0;
+  logs = S.openTile env {m | selected = 2, scroll = 100};
+  _ = check (logs.scroll == 0);
+  down = S.key env 108 logs;
+  _ = check (down.scroll == 1);
+  paged = S.key env 109 logs;
+  _ = check (paged.scroll == 9);
+  bottom = S.key env 107 logs;
+  more = S.key env 108 bottom;
+  _ = check (bottom.scroll > paged.scroll and more.scroll == bottom.scroll);
+  top = S.key env 102 bottom;
+  up = S.key env 103 top;
+  _ = check (up.scroll == 0);
+  (wheel, _) = S.update me env (MV.EWheel (0 - 10) 0) logs;
+  _ = check (wheel.scroll == 3);
+  clicked = S.pointer env (2000000 + 469 * 960 + 890) logs;
+  _ = check (clicked.scroll == bottom.scroll and clicked.active == logs.active);
   be = spawn (source [(2, 0 - 400, 120), (3, 1, 0), (3, 1, 0), (3, 0, 0), (3, 1, 0), (2, 5000, 5000), (7, 80, 180), (3, 0, 0), (3, 1, 0)]);
   inp = spawn (S.input be 960 600);
   (k, code, v) = poll me inp;

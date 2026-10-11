@@ -81,12 +81,18 @@ def check(out):
         *[profile / (name + '.qa') for name in ['clock', 'logs', 'browser', 'disk', 'plugmini', 'broken']])
     run('make', '-s', 'qos-app', 'PROG=tests/guishell.fpr',
         f'QA_OUT={out / "unit.qa"}', f'BUILD={out / "unit-build"}')
+    run('make', '-s', 'qos-app', 'PROG=tests/scrolltext.fpr',
+        f'QA_OUT={out / "scrolltext.qa"}', f'BUILD={out / "scrolltext-build"}')
     run('make', '-s', '-C', 'qos', 'portable-gl')
     unit = subprocess.run([str(ROOT / 'qos/qosp-gl'), '--yes', str(out / 'unit.qa')],
                           cwd=out, env=env, capture_output=True, text=True, timeout=30)
     (out / 'unit.log').write_text(unit.stdout + unit.stderr)
     assert unit.returncode == 0 and 'guishell: HOLDS' in unit.stdout, unit.stdout + unit.stderr
     assert 'PANIC' not in unit.stdout + unit.stderr
+    scroll = subprocess.run([str(ROOT / 'qos/qosp-gl'), '--yes', str(out / 'scrolltext.qa')],
+                            cwd=out, env=env, capture_output=True, text=True, timeout=30)
+    (out / 'scrolltext.log').write_text(scroll.stdout + scroll.stderr)
+    assert scroll.returncode == 0 and 'scrolltext: HOLDS' in scroll.stdout, scroll.stdout + scroll.stderr
     env['FPR_DISK'] = str(disk)
     command = [str(ROOT / 'qos/qosp-gl'), '--yes', str(out / 'check.qa')]
 
@@ -180,6 +186,28 @@ def check(out):
             assert clock != first, 'loaded clock did not draw'
             key(1); wait_for('shell: home'); await_capture(Path(f'/tmp/{tag}-9.ppm'))
             shutil.move(f'/tmp/{tag}-9.ppm', out / f'boot{boot}-9.ppm')
+            key(105); key(105); key(105); key(28); wait_for('shell: open files')
+            files = shot(10)
+            # Each namespace entry occupies its own row in the fixed viewport.
+            # Count bright text in separate row bands, excluding the scrollbar.
+            def row_ink(rgb, y):
+                return sum(all(v > 160 for v in rgb[(yy * 960 + x) * 3:(yy * 960 + x) * 3 + 3])
+                           for yy in range(y, y + 24) for x in range(65, 870))
+            assert sum(row_ink(files, 236 + row * 26) > 20 for row in range(9)) >= 6, 'Files is not a vertical list'
+            key(109)
+            files_bottom = shot(11)
+            assert files_bottom != files, 'Files page-down did not scroll'
+            key(102)
+            assert shot(12) == files, 'Files Home did not return to the first row'
+            key(1); wait_for('shell: home'); await_capture(Path(f'/tmp/{tag}-13.ppm'))
+            shutil.move(f'/tmp/{tag}-13.ppm', out / f'boot{boot}-13.ppm')
+            key(106); key(28); wait_for('shell: open logs')
+            logs = shot(14)
+            assert sum(row_ink(logs, 236 + row * 26) > 20 for row in range(9)) >= 6, 'Logs is not a vertical list'
+            key(107)
+            assert shot(15) != logs, 'Logs End did not scroll'
+            key(1); wait_for('shell: home'); await_capture(Path(f'/tmp/{tag}-16.ppm'))
+            shutil.move(f'/tmp/{tag}-16.ppm', out / f'boot{boot}-16.ppm')
             if boot == 1:
                 key(16)
             else:
@@ -211,11 +239,11 @@ def check(out):
             os.close(fd)
             fifo.unlink(missing_ok=True)
             (out / f'boot{boot}.log').write_text(''.join(log))
-            for n in range(1, 10):
+            for n in range(1, 17):
                 p = Path(f'/tmp/{tag}-{n}.ppm')
                 if p.exists():
                     shutil.move(p, out / f'boot{boot}-{n}.ppm')
-    print('guishell: real GL, two pages, onboard clock/browser, refusals, pointer protocol and two boots HOLDS')
+    print('guishell: real GL, Files/Logs vertical scrolling, two pages, onboard clock/browser, refusals, pointer protocol and two boots HOLDS')
 
 
 if __name__ == '__main__':

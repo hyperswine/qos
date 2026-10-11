@@ -1,0 +1,82 @@
+# A bounded vertical text viewport for Main's namespace and log shortcuts.
+# Wrap by the renderer's proportional font metrics, with a hard break for
+# long URLs/tokens. Only visible rows become scene entities.
+S2 = use "scene2d".
+Fm = use "fontm".
+
+visible = 9. pitch = 26. paneW = 808. paneH = visible * pitch.
+em = 16. textW = paneW - 6.
+
+count Nil = 0.
+count (_ :: r) = 1 + count r.
+clamp lo hi n | n < lo = lo.
+clamp lo hi n | n > hi = hi.
+clamp lo hi n = n.
+limit n = S2.imax 0 (n - visible).
+offset n requested = clamp 0 (limit n) requested.
+
+lines "" = Nil.
+lines s = split s 0 0 (strlen s) Nil.
+split s i start n acc | i >= n = S2.rev Nil (segment s start i :: acc).
+split s i start n acc | charAt s i == 10 =
+  split s (i + 1) (i + 1) n (segment s start i :: acc).
+split s i start n acc = split s (i + 1) start n acc.
+segment s start end =
+  last = case end > start and charAt s (end - 1) == 13 of True -> end - 1 | False -> end;
+  substr s start (last - start).
+
+wrap s = wrapSegments (lines s).
+wrapLines Nil = Nil.
+wrapLines (s :: rest) = append (wrap s) (wrapLines rest).
+wrapSegments Nil = Nil.
+wrapSegments (s :: rest) = append (wrapLine s textW em) (wrapSegments rest).
+append Nil ys = ys.
+append (x :: rest) ys = x :: append rest ys.
+wrapLine "" width size = [""].
+wrapLine s width size = chunks s 0 (strlen s) (S2.imax 1 width * 1000) (S2.imax 1 size).
+chunks s start n budget size | start >= n = Nil.
+chunks s start n budget size =
+  end = fitEnd s start n budget size 0;
+  cut = case end >= n of True -> n | False -> wordEnd s start end;
+  next = case cut < end of True -> skipSpace s (cut + 1) n | False -> cut;
+  substr s start (cut - start) :: chunks s next n budget size.
+fitEnd s i n budget size used | i >= n = i.
+fitEnd s i n budget size used =
+  next = used + Fm.adv (charAt s i) * size;
+  case next > budget of
+    True -> (case used == 0 of True -> i + 1 | False -> i)
+  | False -> fitEnd s (i + 1) n budget size next.
+wordEnd s start end = wordBack s start (end - 1) end.
+wordBack s start i fallback | i <= start = fallback.
+wordBack s start i fallback | charAt s i == 32 = i.
+wordBack s start i fallback = wordBack s start (i - 1) fallback.
+skipSpace s i n | i >= n = i.
+skipSpace s i n | charAt s i == 32 = skipSpace s (i + 1) n.
+skipSpace s i n = i.
+
+window rows start = take (skip rows start) visible.
+skip rows 0 = rows.
+skip Nil start = Nil.
+skip (_ :: rest) start = skip rest (start - 1).
+take rows 0 = Nil.
+take Nil n = Nil.
+take (s :: rest) n = s :: take rest (n - 1).
+
+row s = S2.Box [S2.Col, S2.W paneW, S2.H pitch, S2.Pad 3]
+  [S2.Lbl [S2.Fs em, S2.Fg (940, 950, 990)] s].
+rowTrees Nil = Nil.
+rowTrees (s :: rest) = row s :: rowTrees rest.
+thumb n = clamp 22 paneH (paneH * visible / S2.imax visible n).
+thumbTop n off = (paneH - thumb n) * offset n off / S2.imax 1 (limit n).
+click n y = offset n (clamp 0 (paneH - 1) y * limit n / (paneH - 1)).
+pane rows requested =
+  n = count rows; off = offset n requested;
+  S2.Box [S2.Row, S2.W 836, S2.H paneH, S2.Gap 16]
+    [S2.Box [S2.Col, S2.W paneW, S2.H paneH, S2.Clip]
+       (case n == 0 of True -> [row "No entries yet."] | False -> rowTrees (window rows off)),
+     S2.Box [S2.Col, S2.W 12, S2.H paneH, S2.Round 6, S2.Bg (32, 49, 78)]
+       [S2.Box [S2.H (thumbTop n off)] Nil,
+        S2.Box [S2.W 12, S2.H (thumb n), S2.Round 6, S2.Bg (380, 800, 980)] Nil]].
+range rows requested =
+  n = count rows; off = offset n requested;
+  case n == 0 of True -> "NO ENTRIES" | False -> "{off + 1}-{clamp 0 n (off + visible)} / {n} LINES".

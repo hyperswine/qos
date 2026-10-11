@@ -1,5 +1,8 @@
 # Pi 4 deployment of the Qlog and memory fixes, 2026-10-11
 
+The later [Files/Logs scrolling update](2026-10-11-UI-SCROLLING.md) replaced
+the Main archive described here while retaining its host and disk.
+
 The tested Main archive was installed and verified after reboot at
 `/usr/share/qosp/app.qa` on the physical Buildroot Pi. Wi-Fi access was later
 restored after diagnosing a stale Ethernet route; QOS was still running on
