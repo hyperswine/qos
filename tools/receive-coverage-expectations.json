@@ -1,0 +1,7 @@
+{
+  "programs/main.fpr": ["irqRoute", "logPutTo", "openAwait", "trLoop", "drain", "claimApps", "fileServe", "meshes"],
+  "apps/clock.fpr": ["irqRoute", "logPutTo", "openAwait"],
+  "apps/logs.fpr": ["irqRoute", "logPutTo", "openAwait"],
+  "apps/browser.fpr": ["irqRoute", "logPutTo", "openAwait"],
+  "apps/disk.fpr": ["irqRoute", "logPutTo", "openAwait"]
+}

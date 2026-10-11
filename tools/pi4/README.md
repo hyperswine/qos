@@ -96,3 +96,25 @@ block adapter retains actor identities per I/O, so the check does not establish
 bounded memory for indefinite storage workloads. The driver removes only its
 own two disk copies after success and retains logs. Without `--host`, it builds
 and tests the local Portable host.
+
+For a matching candidate bundle already extracted on the Pi, exercise Main's
+Files/Logs scroll views and onboard Browser repeatedly, with a separate
+SD-backed disk and two shutdown paths:
+
+```sh
+python3 tools/pi4/main-soak.py \
+  --host 192.168.0.233 --host-key-alias 192.168.0.232 \
+  --identity ~/.ssh/id_ed25519 --known-hosts .qos/pi4/known_hosts \
+  --remote-dir /tmp/qos-candidate --seconds 7200 --interval 30 \
+  --output .qos/pi4/validation/main-candidate
+```
+
+The directory must contain matching `runner`, `qosp-es`, `main.qa` and a
+32 MiB `Main.disk` seeded with the standard eight-shortcut Main profile.
+This driver preserves the installed service and copies only the candidate's
+seed disk. It checks UI log acknowledgements on every cycle, unchanged test
+PID/service state, sampled RSS growth (default 16 MiB allowance), normal quit
+with storage drain, and a second boot stopped by SIGTERM. Successful runs
+remove only their own SD disk and retain logs; failures retain that disk for
+inspection. `complete.json` confirms those assertions passed. A short run
+still does not establish long-term stability or power-loss recovery.

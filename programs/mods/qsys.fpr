@@ -67,7 +67,7 @@ Opened = EP.Opened. Refused = EP.Refused. Redirect = EP.Redirect.
 IStr = EP.IStr. IInt = EP.IInt.
 
 # a discovered app: manifest id + name + its module-table index
-App = Type (App aid anm ati).
+App = Type (App String String Int).
 
 # the boot record boot returns (a declared constructor: the ABI has
 # Tup2/Tup3 only, and this crosses units).  sys and vfs are both the
@@ -220,7 +220,9 @@ stOn st me url pay tag =
 fileActor st path me = fileServe st path me (rpc me st 3 path "") 1.
 fileServe : unsafe Int -> String -> Int -> Result String String -> Int -> a .
 fileServe st path me body next =
-  m = receive me;
+  borrowed = receive me;
+  m = keep borrowed;
+  _ = drop borrowed;
   (replyTo, id, q) = m;
   fileMsg st path me (fileLoaded st path me body) next (replyTo, id) q.
 # not loaded yet (storage was unreachable): try again on this request

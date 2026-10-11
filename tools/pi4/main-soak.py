@@ -1,0 +1,185 @@
+#!/usr/bin/env python3
+"""Exercise an isolated, matching Main bundle on a Pi; preserve its installed session.
+
+The remote directory must contain runner, qosp-es, main.qa and Main.disk.
+A separate SD-backed disk is used for both boots. Workload assertions and
+shutdown are distinct from sampled residency; global GPU BOs are diagnostic.
+"""
+import argparse
+import base64
+import json
+from pathlib import Path
+import re
+import shlex
+import struct
+import subprocess
+import time
+
+from soak import mappings
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument('--host', required=True)
+    ap.add_argument('--identity', required=True)
+    ap.add_argument('--known-hosts', required=True)
+    ap.add_argument('--host-key-alias')
+    ap.add_argument('--remote-dir', required=True)
+    ap.add_argument('--seconds', type=int, default=1800)
+    ap.add_argument('--interval', type=int, default=30)
+    ap.add_argument('--max-growth-mib', type=int, default=16)
+    ap.add_argument('--output', type=Path, required=True)
+    a = ap.parse_args()
+    if a.seconds < 60 or a.interval <= 0 or a.max_growth_mib < 0:
+        ap.error('seconds must be >=60, interval positive, growth nonnegative')
+    a.output.mkdir(parents=True, exist_ok=True)
+    ssh_args = ['ssh', '-F', '/dev/null', '-i', a.identity, '-o', 'IdentitiesOnly=yes',
+                '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes',
+                '-o', f'UserKnownHostsFile={a.known_hosts}', '-o', 'ConnectTimeout=5']
+    if a.host_key_alias:
+        ssh_args += ['-o', 'HostKeyAlias='+a.host_key_alias]
+    ssh_args += ['root@'+a.host]
+
+    def ssh(command):
+        return subprocess.check_output([*ssh_args, command], text=True, timeout=20)
+
+    stamp = str(time.time_ns())
+    base = a.remote_dir.rstrip('/')
+    work = base+'/soak-'+stamp
+    store = '/var/lib/qosp/check-main-soak-'+stamp
+    quote = shlex.quote
+    production = ssh('cat /var/run/qosp/state').strip()
+    hashes = ssh('sha256sum '+ ' '.join(quote(base+'/'+n) for n in ('qosp-es', 'main.qa', 'Main.disk')))
+    ssh('set -e\nmkdir '+quote(work)+' '+quote(store)+'\ncp '+quote(base+'/Main.disk')+' '+quote(store+'/Main.disk'))
+    result = {'remote_dir': base, 'work': work, 'store': store, 'bundle_hashes': hashes,
+              'production_before': production, 'boots': [], 'scope':
+              'isolated Main UI workload and two graceful shutdown paths; sampled Linux residency, not a logical heap proof'}
+    (a.output/'started.json').write_text(json.dumps(result, indent=2)+'\n')
+
+    def logfile(boot):
+        return ssh('cat '+quote(work+f'/boot{boot}.log'))
+
+    def wait_log(boot, text, count=1, timeout=30):
+        deadline = time.monotonic()+timeout
+        while time.monotonic() < deadline:
+            log = logfile(boot)
+            if 'PANIC' in log or 'SIGSEGV' in log:
+                raise RuntimeError(log[-3000:])
+            if log.count(text) >= count:
+                return log
+            time.sleep(.3)
+        raise RuntimeError(f'boot {boot}: waiting for {text!r} #{count}\n{log[-2000:]}')
+
+    def key(boot, code):
+        data = b''.join(struct.pack('<qqHHi', 0, 0, 1, code, value) for value in (1, 0))
+        encoded = base64.b64encode(data).decode()
+        ssh('printf %s '+quote(encoded)+' | base64 -d > '+quote(work+f'/keys{boot}'))
+        time.sleep(.2)
+
+    def start(boot, seconds, stop):
+        ready, keys = work+f'/ready{boot}', work+f'/keys{boot}'
+        command = ('cd '+quote(work)+'\nmkfifo '+quote(keys)+'\n'
+                   + 'FPR_HARTS=4 FPR_HEAP_MB=256 FPR_PORT=0 FPR_EVDEV='+quote(keys)
+                   + ' QOSP_READY_FILE='+quote(ready)+' FPR_DISK='+quote(store+'/Main.disk')
+                   + ' '+quote(base+'/runner')+f' {seconds+60} {stop} '+quote(work+f'/boot{boot}.log')
+                   + ' '+quote(base+'/qosp-es')+' --yes '+quote(base+'/main.qa')
+                   + ' > '+quote(work+f'/boot{boot}.json')+' 2> '+quote(work+f'/boot{boot}.err')+' < /dev/null &')
+        ssh(command)
+        wait_log(boot, 'Main Profile ready (8 shortcuts, 2 pages)')
+        return int(ssh('cat '+quote(ready)))
+
+    def collect(boot):
+        deadline = time.monotonic()+15
+        while time.monotonic() < deadline:
+            raw = ssh('cat '+quote(work+f'/boot{boot}.json'))
+            if raw.strip():
+                break
+            time.sleep(.3)
+        meta = json.loads(raw)
+        log = logfile(boot)
+        (a.output/f'boot{boot}.log').write_text(log)
+        if meta['exit'] != 0 or meta['signal'] or meta['timeout'] or meta['killed']:
+            raise RuntimeError(meta)
+        if '[gfx] EGL' not in log or 'V3D' not in log:
+            raise RuntimeError('real Pi EGL/V3D backend not exercised')
+        ssh('test ! -e '+quote(work+f'/ready{boot}'))
+        return meta, log
+
+    pid = None
+    try:
+        pid = start(1, a.seconds, 0)
+        started = time.monotonic()
+        samples = []
+        cycles = 0
+        with (a.output/'samples.jsonl').open('w') as output:
+            while True:
+                # Reset the launcher selection each time; exercise both text
+                # viewports, their scroll keys, and the onboard Browser.
+                for code in (1, 104, 106, 28): key(1, code)
+                wait_log(1, 'shell: open files', cycles+1)
+                for code in (109, 102, 1, 104, 106, 106, 28): key(1, code)
+                wait_log(1, 'shell: open logs', cycles+1)
+                for code in (107, 102, 1, 109, 28): key(1, code)
+                wait_log(1, 'shell: open browser', cycles+1)
+                for code in (108, 28, 1, 104): key(1, code)
+                cycles += 1
+                raw = ssh('set -e\np=$(cat '+quote(work+'/ready1')+')\n'
+                          'echo SECTION:pid; echo "$p"\n'
+                          'echo SECTION:smaps; cat /proc/$p/smaps\n'
+                          'echo SECTION:status; cat /proc/$p/status\n'
+                          'echo SECTION:bo; cat /sys/kernel/debug/dri/0/bo_stats 2>/dev/null || true\n'
+                          'echo SECTION:service; cat /var/run/qosp/state\n'
+                          'echo SECTION:temperature; cat /sys/class/thermal/thermal_zone0/temp\n')
+                (a.output/f'sample-{cycles:04d}.txt').write_text(raw)
+                parts = re.split(r'^SECTION:(\w+)\n', raw, flags=re.M)
+                sections = dict(zip(parts[1::2], parts[2::2]))
+                if int(sections['pid']) != pid or sections['service'].strip() != production:
+                    raise RuntimeError('test PID or installed service changed')
+                maps = mappings(sections['smaps'])
+                elapsed = time.monotonic()-started
+                sample = {'seconds': elapsed, 'cycles': cycles, 'pid': pid,
+                          'rss_kib': sum(m.get('Rss', 0) for m in maps),
+                          'pss_kib': sum(m.get('Pss', 0) for m in maps),
+                          'anonymous_kib': sum(m.get('Anonymous', 0) for m in maps),
+                          'bo_global': sections['bo'].strip(),
+                          'temperature_mc': int(sections['temperature'])}
+                samples.append(sample)
+                output.write(json.dumps(sample)+'\n'); output.flush()
+                print(f'{elapsed:.1f}s cycles={cycles} RSS={sample["rss_kib"]} KiB PSS={sample["pss_kib"]} KiB', flush=True)
+                if elapsed >= a.seconds: break
+                time.sleep(min(a.interval, a.seconds-elapsed))
+        key(1, 16)
+        wait_log(1, 'shell: storage drained and flushed')
+        meta, _ = collect(1)
+        pid = None
+        rss = [s['rss_kib'] for s in samples]
+        result['boots'].append({'boot': 1, **meta, 'cycles': cycles, 'samples': len(samples),
+                                'rss_first_kib': rss[0], 'rss_last_kib': rss[-1],
+                                'rss_min_kib': min(rss), 'rss_max_kib': max(rss)})
+        if max(rss)-rss[0] > a.max_growth_mib*1024:
+            raise RuntimeError(f'RSS growth exceeded {a.max_growth_mib} MiB: {rss[0]} -> {max(rss)} KiB')
+        pid = start(2, 45, 30)
+        wait_log(2, 'qosp: shutdown complete', timeout=60)
+        meta, _ = collect(2)
+        pid = None
+        if not meta['stop_requested']: raise RuntimeError('signal shutdown was not requested')
+        result['boots'].append({'boot': 2, **meta})
+        result['production_after'] = ssh('cat /var/run/qosp/state').strip()
+        if result['production_after'] != production: raise RuntimeError('installed service changed')
+        result['passed'] = True
+        # Remove only this run's successfully drained, isolated disk.
+        ssh('rm '+quote(store+'/Main.disk')+'\nrmdir '+quote(store))
+        (a.output/'complete.json').write_text(json.dumps(result, indent=2)+'\n')
+        print('Main workload, residency threshold, normal quit and signal shutdown PASS', flush=True)
+    except Exception as error:
+        result['passed'] = False
+        result['error'] = str(error)
+        (a.output/'failed.json').write_text(json.dumps(result, indent=2)+'\n')
+        if pid is not None:
+            # Kill only our isolated runner's child, never a production PID.
+            ssh(f'kill -TERM {pid} 2>/dev/null || true')
+        raise
+
+
+if __name__ == '__main__':
+    main()
