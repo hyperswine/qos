@@ -11,6 +11,8 @@
 #   3. writes /tmp/note.txt through the vfs (create-on-write) and reads
 #      it back; content length counts boots -- run twice, it grows
 #   4. lists the namespace and logs one line through /services/log
+#   5. reads one app's image back as a URL object, /apps/plugmini.qa
+#      (mods/appsep.fpr), and reports its archive magic
 #
 #   make qos-app-macos PROG=tests/qsys.fpr
 #   make plugin-qa PROG=tests/plugmini.fpr
@@ -23,6 +25,7 @@
 
 QS = use "../programs/mods/qsys".
 AK = use "../programs/mods/appkit".
+AppsEP = use "../programs/mods/appsep".
 
 Qsys = QS.Qsys.
 App  = QS.App.
@@ -52,7 +55,14 @@ run me vfs log apps =
   ids = QS.appIds apps;
   nb = strlen body;
   lg = Sys.logSeq 0;
-  "qsys: boot #{boots}; {n} apps [{ids}]; ping={ping}; hello={hi}; 21+21={dbl}; note={nb}B; {paths} paths; logs={lg}".
+  img = imageMagic (AppsEP.read me vfs "plugmini");
+  "qsys: boot #{boots}; {n} apps [{ids}]; ping={ping}; hello={hi}; 21+21={dbl}; note={nb}B; {paths} paths; logs={lg}; image={img}".
+
+# the first four bytes of an image read by URL ("QAR2" for an archive)
+imageMagic : Result String String -> String .
+imageMagic r = case r of
+    Err e -> "({e})"
+  | Ok b -> (case strlen b < 4 of True -> "(short)" | False -> substr b 0 4).
 
 # resolve export `nm` in the app whose manifest id is `aid`, call it
 tblOf : unsafe List App -> String -> Int .

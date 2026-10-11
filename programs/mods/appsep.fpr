@@ -1,0 +1,73 @@
+# ============================================================================
+# appsep.fpr -- application images as URL objects (mods/ep.fpr).
+#
+#   /apps/<id>.qa    read -> IStr: the image's bytes, exactly as installed
+#   /apps, /apps/<id> read -> IStr: the platform's description
+#
+# An image is an object at a URL like any file or service: a launcher or a
+# loader opens /apps/<id>.qa, reads, closes, and does what it does with the
+# bytes.  Where the bytes come from is the platform's FETCH, injected at
+# boot: on Native the disk's "apps/<id>.qa" record and then the shipped
+# rodata set; on Portable the disk's record.  Neither the platform nor the
+# client names a storage record or a C primitive to reach an image any more.
+#
+# This is the first step of fprisc docs/2026-10-10-UNIFORM-LOADING.md ("a
+# load begins with open of a URL").  Writing an image here (installing) is
+# not part of it yet: the endpoint is read-only.
+# ============================================================================
+
+EP = use "ep".
+
+IStr = EP.IStr.
+
+# the url of app <id>'s image
+qaUrl : String -> String .
+qaUrl id = "/apps/{id}.qa".
+
+# the id in "/apps/<id>.qa", or "" when the url names no image (a nested
+# path such as "/apps/a/b.qa" names none)
+imageId : unsafe String -> String .
+imageId url =
+  n = strlen url;
+  case n > 9 of
+    False -> ""
+  | True -> imageId2 url n.
+imageId2 : unsafe String -> Int -> String .
+imageId2 url n = case EP.startsWith "/apps/" url of
+    False -> ""
+  | True -> (case EP.strEq (substr url (n - 3) 3) ".qa" of
+      False -> ""
+    | True -> plainId (substr url 6 (n - 9))).
+plainId : unsafe String -> String .
+plainId id = case slashAt id 0 (strlen id) of True -> "" | False -> id.
+slashAt : unsafe String -> Int -> Int -> Bool .
+slashAt s i n = case i >= n of
+    True -> False
+  | False -> (case charAt s i == 47 of True -> True | False -> slashAt s (i + 1) n).
+
+# ---- the owner: EP.simple's reader ------------------------------------------
+# fetch me id : Result String String, the image bytes ("" or Err: absent);
+# describe url : String, the platform's text for /apps and /apps/<id>.
+images : unsafe _ -> _ -> Int -> Int -> String -> Result EP.IoV String .
+images fetch describe me client url = imagesOn fetch describe me url (imageId url).
+imagesOn : _ -> _ -> Int -> String -> String -> Result EP.IoV String .
+imagesOn fetch describe me url id = case strlen id == 0 of
+    True -> Ok (IStr (describe url))
+  | False -> imageBytes url (fetch me id).
+imageBytes : String -> Result String String -> Result EP.IoV String .
+imageBytes url r = case r of
+    Err e -> Err "no such app image: {url} ({e})"
+  | Ok b -> (case strlen b == 0 of
+      True -> Err "no such app image: {url}"
+    | False -> Ok (IStr b)).
+
+# ---- the client ---------------------------------------------------------------
+# app <id>'s image bytes through the namespace: open, read, close
+read : Int -> Int -> String -> Result String String .
+read me ns id = bytesOf (EP.readOnce me ns (qaUrl id)).
+bytesOf : Result EP.IoV String -> Result String String .
+bytesOf r = case r of
+    Err e -> Err e
+  | Ok v -> (case v of
+      IStr b -> Ok b
+    | o -> Err "an app image is bytes").

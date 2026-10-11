@@ -57,6 +57,7 @@ TimeFmt = use "mods/timefmt#39dff276efd647a1".
 SVCM    = use "mods/svc".
 EP      = use "mods/ep".
 SysEp   = use "mods/sysep".
+AppsEP  = use "mods/appsep".
 AC      = use "std/actor".
 QAR     = use "mods/qar".
 Manifest = use "mods/manifest".
@@ -535,18 +536,27 @@ capBug url = error (strcat "capability fault: app used ungranted service " url).
 # loadMode="process" maps the .qa's IMAGE section (QAR2 flat image)
 # into the process slot and jumps to LOAD's entry with the same caps.
 
-# read a .qa by id: the DISK is the install target and overrides the
-# shipped rodata set -- "apps/<id>.qa" on the log wins; rodata is the
-# fallback ("" if absent everywhere).
+# read a .qa by id: an image is a URL object, /apps/<id>.qa, served by
+# the /apps endpoint below ("" if absent everywhere)
 qaFor io id =
-  case stHas (ioSt io) of
-    True -> qaFromDisk io id
-  | False -> Apps.read id.
-qaFromDisk io id =
-  r = storeRpc1 (ioMe io) (ioSt io) 1 (strcat "apps/" (strcat id ".qa")) "";
-  case r of
+  case AppsEP.read (ioMe io) (stNs (ioSt io)) id of
     Ok qa -> qa
-  | Err _ -> Apps.read id.
+  | Err _ -> "".
+stNs st = st.ns.
+
+# the /apps endpoint's fetch: the DISK is the install target and overrides
+# the shipped rodata set -- "apps/<id>.qa" on the log wins; rodata is the
+# fallback ("" if absent everywhere)
+qaImage st me id =
+  case stHas st of
+    True -> qaFromDisk st me id
+  | False -> Ok (Apps.read id).
+qaFromDisk st me id =
+  r = storeRpc1 me st 1 (strcat "apps/" (strcat id ".qa")) "";
+  case r of
+    Ok qa -> Ok qa
+  | Err _ -> Ok (Apps.read id).
+appsText url = "the app images: /apps/<id>.qa".
 
 launch : unsafe Io4 -> String -> Unit .
 launch io id =
@@ -1065,6 +1075,7 @@ main =
   _ = if store == 0 then Unit else Sys.bindStore store (Rpc store 0 "" "");
   st = {has = store != 0, act = store, uart = usvc, timer = tsvc, ns = ns};
   _ = SysEp.boot me ns usvc tsvc clk st;
+  _ = SysEp.claim me ns "/apps" (AC.spawnWith (AC.Dynamic 64) (Endpoint.simple (AppsEP.images (qaImage st) appsText) EP.noWrite));
   _ = SysEp.claimUarts me ns uarts 0;   # /services/uart/<n>, one per device
   con = (usvc, ns);
   _ = putLn con "";

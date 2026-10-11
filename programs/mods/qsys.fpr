@@ -24,6 +24,7 @@
 #                       the open that created it -- the namespace is never
 #                       in a read or a write
 #   /apps, /apps/<id>   the loaded apps, from their manifests
+#   /apps/<id>.qa       each loaded app's image bytes (mods/appsep.fpr)
 #   attachAll           DISK ENUMERATION: read apps/index, then per id
 #                       read apps/<id>.qa and Plug.attach the bytes --
 #                       installing an app is appending records, no
@@ -50,6 +51,7 @@ EP  = use "ep".
 Core = use "coreutil".
 QAR = use "qar".
 Plug = use "plug".
+AppsEP = use "appsep".
 Endpoint = use "epservice".
 AC = use "std/actor".
 GX = use "graphics".
@@ -290,9 +292,12 @@ filesHand st ns me act ret from url mode a =
     | Err e -> AC.reply ret (Refused "{url}: its file actor {e}");
   filesServe st ns me act.
 
-# ---- apps: /apps/<id> names a loaded table ----------------------------------
-appsR : unsafe List App -> Int -> Int -> String -> Result EP.IoV String .
-appsR apps me client url = Ok (IStr (appsText apps url)).
+# ---- apps: /apps/<id> names a loaded table, /apps/<id>.qa is its image -------
+# the image bytes are the disk's record; without a disk there are none
+qaFetch : unsafe Int -> Int -> String -> Result String String .
+qaFetch st me id = case st == 0 of
+    True -> Err "storage offline"
+  | False -> rpc me st 1 "apps/{id}.qa" "".
 appsText : unsafe List App -> String -> String .
 appsText apps path = case apps of
     Nil -> (case strEq path "/apps" of True -> "the loaded apps: /apps/<id>" | False -> "no such app")
@@ -395,7 +400,7 @@ bootWireSizedBlock w h me st apps block =
   logs = spawnD (Endpoint.simple logR logW);
   _ = claim me ns "/services/log" logs;
   _ = claim me ns "/logs" logs;
-  appsA = spawnD (Endpoint.simple (appsR apps) EP.noWrite);
+  appsA = spawnD (Endpoint.simple (AppsEP.images (qaFetch st) (appsText apps)) EP.noWrite);
   _ = claim me ns "/apps" appsA;
   # the display, when this host has one: Graphics.qa owns it; programs
   # open sessions at /services/graphics/<tag> (mods/graphics.fpr)
@@ -415,7 +420,7 @@ claimApps me ns appsA apps = case apps of
   | a :: r -> caStep me ns appsA r a.
 caStep : unsafe Int -> Int -> Int -> List App -> App -> Unit .
 caStep me ns appsA r a = case a of App aid anm ati ->
-  claim me ns "/apps/{aid}" appsA >> claimApps me ns appsA r.
+  claim me ns "/apps/{aid}" appsA >> claim me ns (AppsEP.qaUrl aid) appsA >> claimApps me ns appsA r.
 # with a disk: the records as urls, and the file namespaces with two
 # files that have always been there
 bootDiskUrls : unsafe Int -> Int -> Int -> Unit .
