@@ -118,3 +118,16 @@ with storage drain, and a second boot stopped by SIGTERM. Successful runs
 remove only their own SD disk and retain logs; failures retain that disk for
 inspection. `complete.json` confirms those assertions passed. A short run
 still does not establish long-term stability or power-loss recovery.
+The driver sets `QOSP_ARENA_MB` explicitly (default 256 MiB, adjustable with
+`--arena-mib`). `FPR_HEAP_MB` limits the hosted Base runtime; it does not cap
+the loaded QOS application's independently initialized buddy arena.
+
+To attribute growth, build `tests/mainmemory.fpr` as the candidate `main.qa`
+and add `--memory-probe`. This uses the same shell boot and shutdown paths,
+with a test-only F12 update callback. Each sample records buddy arena/free
+KiB, reserved KiB (their difference), ARC root count, and the model actor's
+cumulative pool bump gauge. Reservations include stacks and reusable slabs;
+they do not measure reachable objects. The bump gauge is not live bytes.
+The driver also saves this process's DRM fdinfo when the kernel supplies it,
+separately from global V3D BO totals. Missing DRM counters remain empty.
+Use a fresh disk with matching onboard plugins after changing shared modules.

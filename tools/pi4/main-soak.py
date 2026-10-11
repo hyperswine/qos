@@ -28,10 +28,14 @@ def main():
     ap.add_argument('--seconds', type=int, default=1800)
     ap.add_argument('--interval', type=int, default=30)
     ap.add_argument('--max-growth-mib', type=int, default=16)
+    ap.add_argument('--arena-mib', type=int, default=256,
+                    help='QOS app arena reservation limit in MiB (default 256)')
+    ap.add_argument('--memory-probe', action='store_true',
+                    help='require tests/mainmemory.fpr as main.qa; sample its F12 allocator probe')
     ap.add_argument('--output', type=Path, required=True)
     a = ap.parse_args()
-    if a.seconds < 60 or a.interval <= 0 or a.max_growth_mib < 0:
-        ap.error('seconds must be >=60, interval positive, growth nonnegative')
+    if a.seconds < 60 or a.interval <= 0 or a.max_growth_mib < 0 or a.arena_mib < 64:
+        ap.error('seconds must be >=60, interval positive, growth nonnegative, arena >=64 MiB')
     a.output.mkdir(parents=True, exist_ok=True)
     ssh_args = ['ssh', '-F', '/dev/null', '-i', a.identity, '-o', 'IdentitiesOnly=yes',
                 '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes',
@@ -52,8 +56,9 @@ def main():
     hashes = ssh('sha256sum '+ ' '.join(quote(base+'/'+n) for n in ('qosp-es', 'main.qa', 'Main.disk')))
     ssh('set -e\nmkdir '+quote(work)+' '+quote(store)+'\ncp '+quote(base+'/Main.disk')+' '+quote(store+'/Main.disk'))
     result = {'remote_dir': base, 'work': work, 'store': store, 'bundle_hashes': hashes,
-              'production_before': production, 'boots': [], 'scope':
-              'isolated Main UI workload and two graceful shutdown paths; sampled Linux residency, not a logical heap proof'}
+              'production_before': production, 'boots': [], 'memory_probe': a.memory_probe,
+              'arena_limit_mib': a.arena_mib, 'scope':
+              'isolated Main UI workload and two graceful shutdown paths; residency and optional allocator reservations/root counts, not reachability proof'}
     (a.output/'started.json').write_text(json.dumps(result, indent=2)+'\n')
 
     def logfile(boot):
@@ -79,7 +84,7 @@ def main():
     def start(boot, seconds, stop):
         ready, keys = work+f'/ready{boot}', work+f'/keys{boot}'
         command = ('cd '+quote(work)+'\nmkfifo '+quote(keys)+'\n'
-                   + 'FPR_HARTS=4 FPR_HEAP_MB=256 FPR_PORT=0 FPR_EVDEV='+quote(keys)
+                   + f'FPR_HARTS=4 FPR_HEAP_MB=256 QOSP_ARENA_MB={a.arena_mib} FPR_PORT=0 FPR_EVDEV='+quote(keys)
                    + ' QOSP_READY_FILE='+quote(ready)+' FPR_DISK='+quote(store+'/Main.disk')
                    + ' '+quote(base+'/runner')+f' {seconds+60} {stop} '+quote(work+f'/boot{boot}.log')
                    + ' '+quote(base+'/qosp-es')+' --yes '+quote(base+'/main.qa')
@@ -123,11 +128,26 @@ def main():
                 wait_log(1, 'shell: open browser', cycles+1)
                 for code in (108, 28, 1, 104): key(1, code)
                 cycles += 1
+                logical = None
+                if a.memory_probe:
+                    key(1, 88)
+                    log = wait_log(1, 'main-memory: ', cycles)
+                    rows = re.findall(r'main-memory: arena_kib=(\d+) free_kib=(\d+) roots=(\d+) owner_bumped_bytes=(\d+)', log)
+                    if len(rows) != cycles:
+                        raise RuntimeError('missing, duplicate or malformed allocator sample')
+                    arena, free, roots, bumped = map(int, rows[-1])
+                    if free > arena or arena == 0 or arena > a.arena_mib*1024:
+                        raise RuntimeError('invalid allocator reservation sample')
+                    logical = {'arena_kib': arena, 'free_kib': free,
+                               'reserved_kib': arena-free, 'arc_roots': roots,
+                               'owner_bumped_bytes': bumped}
                 raw = ssh('set -e\np=$(cat '+quote(work+'/ready1')+')\n'
                           'echo SECTION:pid; echo "$p"\n'
                           'echo SECTION:smaps; cat /proc/$p/smaps\n'
                           'echo SECTION:status; cat /proc/$p/status\n'
                           'echo SECTION:bo; cat /sys/kernel/debug/dri/0/bo_stats 2>/dev/null || true\n'
+                          'echo SECTION:drm; for f in /proc/$p/fdinfo/*; do '
+                          'if grep -q drm-driver "$f"; then echo "$f"; cat "$f"; fi; done\n'
                           'echo SECTION:service; cat /var/run/qosp/state\n'
                           'echo SECTION:temperature; cat /sys/class/thermal/thermal_zone0/temp\n')
                 (a.output/f'sample-{cycles:04d}.txt').write_text(raw)
@@ -142,6 +162,8 @@ def main():
                           'pss_kib': sum(m.get('Pss', 0) for m in maps),
                           'anonymous_kib': sum(m.get('Anonymous', 0) for m in maps),
                           'bo_global': sections['bo'].strip(),
+                          'drm_fdinfo': sections['drm'].strip(),
+                          'allocator': logical,
                           'temperature_mc': int(sections['temperature'])}
                 samples.append(sample)
                 output.write(json.dumps(sample)+'\n'); output.flush()
@@ -156,6 +178,9 @@ def main():
         result['boots'].append({'boot': 1, **meta, 'cycles': cycles, 'samples': len(samples),
                                 'rss_first_kib': rss[0], 'rss_last_kib': rss[-1],
                                 'rss_min_kib': min(rss), 'rss_max_kib': max(rss)})
+        if a.memory_probe:
+            result['boots'][-1]['allocator_first'] = samples[0]['allocator']
+            result['boots'][-1]['allocator_last'] = samples[-1]['allocator']
         if max(rss)-rss[0] > a.max_growth_mib*1024:
             raise RuntimeError(f'RSS growth exceeded {a.max_growth_mib} MiB: {rss[0]} -> {max(rss)} KiB')
         pid = start(2, 45, 30)

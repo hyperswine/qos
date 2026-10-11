@@ -1,0 +1,15 @@
+# Opt-in Main soak entry: F12 samples allocator reservations and ARC roots.
+# The normal Main profile keeps its usual update callback and key behavior.
+unsafe program.
+Shell = use "../programs/mods/guishell".
+MV = use "std/mvu".
+probe me env (MV.EKey 88) model =
+  ledger = Sys.memInfo 0;
+  roots = arcLive 0;
+  bumped = heapUsed Unit;
+  _ = case ledger of
+      arena :: free :: _ -> print "main-memory: arena_kib={arena} free_kib={free} roots={roots} owner_bumped_bytes={bumped}"
+    | _ -> error "main-memory: missing allocator ledger";
+  (model, Nil).
+probe me env ev model = Shell.update me env ev model.
+main = Shell.runWith "qos-shell-memory" probe.
