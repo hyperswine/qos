@@ -29,6 +29,38 @@ def png(path, rgb):
                      chunk(b'IDAT', zlib.compress(raw)) + chunk(b'IEND', b''))
 
 
+def check_live_deadline(out, env, profile):
+    # Delay the real shell's render callback. The worker stays live beyond
+    # its budget; Main must still drain storage and clear readiness.
+    import re
+    module = out / 'stalled-shell.fpr'
+    text = (ROOT/'programs/mods/guishell.fpr').read_text()
+    text = re.sub(r'use "(?!std/)([^"\n]+)"',
+                  lambda m: 'use "' + str(ROOT/'programs/mods'/m[1]) + '"', text)
+    text = text.replace('serviceBudgetMs = 5000.', 'serviceBudgetMs = 1000.')
+    text = text.replace('staticView view done', 'staticView stalledView done')
+    text += '\nstalledView self env vp model = _ = Sys.sleepUs 2000000; view self env vp model.\n'
+    module.write_text(text)
+    entry = out/'deadline-entry.fpr'
+    entry.write_text('unsafe program.\nS = use "' + str(module.with_suffix('')) + '".\nmain = S.main.\n')
+    p = subprocess.run(['make', '-s', 'qos-app', f'PROG={entry}',
+                        f'QA_OUT={out/"deadline.qa"}', f'BUILD={out/"deadline-build"}'],
+                       cwd=ROOT, env=env, capture_output=True, text=True, timeout=240)
+    assert p.returncode == 0, p.stdout+p.stderr
+    shutil.copyfile(profile/'Main.disk', out/'deadline.disk')
+    p = subprocess.run([str(ROOT/'qos/qosp-gl'), '--yes', str(out/'deadline.qa')],
+        cwd=out, env=dict(env, FPR_DISK=str(out/'deadline.disk'), FPR_EVDEV='/dev/null',
+                         QOSP_READY_FILE=str(out/'deadline.ready')),
+        capture_output=True, text=True, timeout=20)
+    text = p.stdout+p.stderr
+    (out/'deadline.log').write_text(text)
+    assert p.returncode == 1 and 'deadline exceeded' in text and 'shell stopped: mvu:' in text, text
+    assert text.index('storage drained and flushed') < text.index('shell stopped: mvu:'), text
+    assert 'qosp: shutdown failed' in text and not (out/'deadline.ready').exists(), text
+    assert 'deadlock --' not in text and 'SIGSEGV' not in text, text
+    print('guishell: live render-worker deadline drains storage before failed exit HOLDS')
+
+
 def check(out):
     out.mkdir(parents=True, exist_ok=False)
     tag = f'qos-shell-check-{os.getpid()}'
@@ -272,6 +304,7 @@ def check(out):
     assert 'deadlock --' not in text and 'SIGSEGV' not in text, text
     assert not (out/'failure.ready').exists(), text
     print('guishell: graphics death drains storage before failed exit HOLDS')
+    check_live_deadline(out, env, profile)
     print('guishell: real GL, Files/Logs vertical scrolling, two pages, onboard clock/browser, refusals, pointer protocol and two boots HOLDS')
 
 

@@ -9,6 +9,10 @@ unsafe program.
 AC = use "std/actor".
 Static = AC.Static.
 Dynamic = AC.Dynamic.
+Task = use "std/task".
+check ok why = if ok then Unit else error "mailbox process: {why}".
+idle self = _ = receive self; _ = receive self; Unit.
+failJob x = _ = kill (myself 0); _ = yield (myself 0); x.
 gate me =
   s = receive me;
   k = receive me;
@@ -60,6 +64,14 @@ orderWord True = "in order".
 orderWord False = "OUT OF ORDER".
 main =
   me = myself 0;
+  _ = check (Sys.arena (fn u -> "scratch {7}") == "scratch 7") "scratch arena through plane";
+  idleActor = spawn idle;
+  _ = check (receiveFromNow me idleActor == Err "empty") "selective plane poll";
+  _ = check (AC.callWithin 10 me idleActor 0 == Err "deadline exceeded (outcome unknown)") "live deadline through plane";
+  _ = kill idleActor;
+  _ = check (receiveFromNow me idleActor == Err "dead actor") "selective plane death";
+  _ = check (Task.map (fn x -> x + 1) (1 :: 2 :: Nil) == Ok (2 :: 3 :: Nil)) "task process join";
+  _ = check (Task.map failJob (0 :: Nil) == Err "task: worker 0: dead actor") "task process failure";
   (a, ka, oa) = trial me (Static 8) 20;
   (b, kb, ob) = trialT me (Dynamic 8) 20;
   (c, kc, oc) = trialT me (Dynamic 8) 3000;

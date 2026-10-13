@@ -16,8 +16,10 @@ make -s -C "$qos/qos" portable-es QOSP_ES_OUT="$out/qosp-es" \
   SND_FLAGS=-DQOSP_SND_ALSA SND_LIBS=-lasound
 echo 'built diagnostic EGL host'
 cd "$fprisc"
-for name in strprims bitrange longpanic killblocked deadmail autodrop2 fixedheap sleepwake sleepwait taskstress mvufailure mvuscoped arenamigrate vecwide veccaps typedvector vecsimd_int bigheap overflow files; do
-  ./fpr build "tests/base/$name.fpr" -o "$out/$name" --harts 4 --cc "$cc"
+for name in strprims bitrange longpanic killblocked deadmail autodrop2 fixedheap sleepwake sleepwait taskstress mvufailure mvuscoped deadlines taskfailure mvudeadlines arenamigrate vecwide veccaps typedvector vecsimd_int bigheap overflow files; do
+  extra=()
+  if [ "$name" = taskfailure ]; then extra=(--with tests/base/actorfail_probe.c); fi
+  ./fpr build "tests/base/$name.fpr" -o "$out/$name" --harts 4 --cc "$cc" "${extra[@]}"
   echo "built base/$name"
 done
 for name in fvec2 fmath actors; do

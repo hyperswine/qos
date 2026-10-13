@@ -17,6 +17,7 @@ W = S2.W. H = S2.H. Grow = S2.Grow. Fs = S2.Fs.
 Bg = S2.Bg. Fg = S2.Fg. Round = S2.Round. Center = S2.Center. Mid = S2.Mid.
 Tile = Type (Tile id title hint table).
 width = 960. height = 600. pageSize = 6.
+serviceBudgetMs = 5000.
 ink = (940, 950, 990). dim = (530, 610, 750).
 accent = (380, 800, 980).
 
@@ -284,7 +285,12 @@ runWith tag upd =
     | Ok ep -> runAttached me upd q lifecycle tiles mt ep.
 runAttached me upd q lifecycle tiles mt ep =
   (graphics, h) = ep;
-  case MV.svcCallRes me graphics (MV.Dims 0) of
+  calls = spawn (AC.session me);
+  dimsResult = case AC.deadlineAfter serviceBudgetMs of
+      Err why -> Err why
+    | Ok deadline -> AC.sessionCallUntil deadline me calls graphics (fn ret -> (ret, MV.Dims 0));
+  _ = kill calls;
+  case dimsResult of
       Err why -> finishSession me lifecycle ep (Err "shell dimensions: {why}")
     | Ok dims -> runSized me upd q lifecycle tiles mt ep dims.
 runSized me upd q lifecycle tiles mt ep dims =
@@ -296,13 +302,14 @@ runSized me upd q lifecycle tiles mt ep dims =
   cfg = {env = (q, tiles, mt), mt = mt, tick = 333330, input = inp, render = graphics};
   app = MV.MApp init upd staticKey staticView view done (subscriptions port);
   _ = QS.ready lifecycle;
-  result = MV.runResult me cfg app;
+  result = MV.runResultWithin serviceBudgetMs me cfg app;
   _ = kill inp;
   _ = kill port;
   finishSession me lifecycle ep result.
 finishSession me lifecycle ep result =
   _ = Sys.shutdownBegin Unit;
-  closed = EP.close me ep;
+  (graphics, h) = ep;
+  closed = EP.flat (AC.callWithin serviceBudgetMs me graphics (EP.Close h));
   finishUnattached me lifecycle (withCleanup result "graphics close" closed).
 finishUnattached me lifecycle result =
   _ = Sys.shutdownBegin Unit;

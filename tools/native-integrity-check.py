@@ -81,6 +81,10 @@ def native_checks(out):
     assert b'planeactors '+actors_abi+b'\nplanememory '+memory_abi+b'\n' in sections['LOAD'], sections['LOAD']
     changed=dict(sections);changed['LOAD']=changed['LOAD'].replace(b'planeactors '+actors_abi+b'\n',b'planeactors 999\n');variants['OldActors']=changed
     changed=dict(sections);changed['LOAD']=changed['LOAD'].replace(b'planememory '+memory_abi+b'\n',b'planememory 999\n');variants['OldMemory']=changed
+    if actors_abi != b'1':
+        changed=dict(sections);changed['LOAD']=changed['LOAD'].replace(b'planeactors '+actors_abi+b'\n',b'planeactors 1\n');variants['LegacyActors']=changed
+    if memory_abi != b'1':
+        changed=dict(sections);changed['LOAD']=changed['LOAD'].replace(b'planememory '+memory_abi+b'\n',b'planememory 1\n');variants['LegacyMemory']=changed
     changed=dict(sections);changed['LOAD']=b''.join(row+b'\n' for row in changed['LOAD'].splitlines() if not row.startswith(b'plane'));variants['NoPlane']=changed
     changed=dict(sections);changed['IMPORT']=b'c 0 8 fpr_missing\n'
     digest=hashlib.sha256(changed['RELOC']+changed['IMPORT']).hexdigest().encode()
