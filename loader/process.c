@@ -27,9 +27,9 @@ void fpr_proc_arena_init(void) {
  * to System.qa's actors.  Instead System.qa passes ONE C function
  * through the entry ABI; the process-side svc helpers call it, and it
  * -- running System.qa's code -- sends to the storage actor with the
- * calling process ACB as replyTo and PARKS that actor for the reply
- * (receiveFromRes: a refused send or a dead storage actor is an error
- * to the process, never a wait).  Capability scoping is enforced HERE, structurally: a
+ * calling process ACB as replyTo. Correlated selective polling shares one
+ * monotonic deadline; refused, dead and live-hung peers return errors.
+ * Capability scoping is enforced HERE, structurally: a
  * process may only name the relative url "kv", which the trampoline
  * rewrites to apps/<id>/<id>.kv from the id System.qa bound at launch.
  * Tags: 2 append, 3 replay (the kv event-sourcing pair). */
@@ -37,7 +37,7 @@ static V g_store_actor;   /* Sys.bindStore, at boot (0 = diskless) */
 static str_t *g_app_id;   /* Sys.bindApp, per launch */
 static V g_ns;            /* Sys.bindNs, at boot: the namespace a process reaches with Sys.ns */
 
-/* The RPC envelope is a DECLARED FPR constructor now (svc.fpr's Rpc),
+/* The RPC envelope is a DECLARED FPR constructor (svc.fpr's TimedRpc),
  * and constructor tids are content-addressed by (unit hash, type name) —
  * C cannot know the tag statically. So bindStore takes a PROTOTYPE Rpc
  * value alongside the actor: we read tid/var off its header once at
@@ -46,10 +46,12 @@ static V g_ns;            /* Sys.bindNs, at boot: the namespace a process reache
 static uw g_rpc_tid; /* from the bind-time prototype */
 static uw g_rpc_var;
 static V g_sys_bind_store(V a, V rpc_proto) {
-  g_store_actor = a;
+  if (ISINT(rpc_proto) || ((hdr_t *)rpc_proto)->var != 1)
+    fpr_cpanic("Sys.bindStore: expected TimedRpc prototype");
   hdr_t *p = (hdr_t *)rpc_proto;
   g_rpc_tid = p->tid;
   g_rpc_var = p->var;
+  g_store_actor = a;
   return (V)&fpr_unit;
 }
 /* the id the NEXT placement is launched as (copied into its image record) */
@@ -67,7 +69,7 @@ FPR_FN(fpr_g_Sys_x2ebindApp, g_sys_bind_app, 1);
 static V g_sys_bind_ns(V a) { g_ns = a; return (V)&fpr_unit; }
 FPR_FN(fpr_g_Sys_x2ebindNs, g_sys_bind_ns, 1);
 
-/* mint an Rpc constructor value (4 fields) with the bind-time tag.
+/* mint a TimedRpc constructor value (6 fields) with the bind-time tag.
  * The old scheme here — a Tup2 header carrying 4 slots — was exactly
  * the silent-corruption ABI the compiler now rejects at compile time;
  * this was its last C-side survivor. */
@@ -79,13 +81,13 @@ static sw store_refused(const char *why, char *out, uw outcap) {
   if (k < outcap) out[k] = 0;
   return -1;
 }
-static V mkrpc(V a, V b, V c, V d) {
+static V mkrpc(V a, V id, V until, V b, V c, V d) {
   if (!g_rpc_tid) fpr_cpanic("store call before bindStore prototype");
-  hdr_t *t = (hdr_t *)fpr_alloc(8 + 4 * sizeof(uw));
+  hdr_t *t = (hdr_t *)fpr_alloc(8 + 6 * sizeof(uw));
   t->tid = g_rpc_tid;
   t->var = g_rpc_var;
   V *f = (V *)((char *)t + 8);
-  f[0] = a; f[1] = b; f[2] = c; f[3] = d;
+  f[0] = a; f[1] = id; f[2] = until; f[3] = b; f[4] = c; f[5] = d;
   return (V)t;
 }
 
@@ -136,9 +138,13 @@ static void image_quiet(uw pid) {
   buddy_free(pi->block);
 }
 
+extern V fpr_g_Sys_x2enextId_call1(V);
+
 sw qos_store_call(uw tag, const char *pay, uw plen, char *out, uw outcap) {
   if (!g_store_actor) return -2; /* no disk */
   if (tag != 2 && tag != 3) return -3;
+  if (plen > 4194304)
+    return store_refused("storage: payload too large", out, outcap);
   /* apps/<id>/<id>.kv, where <id> is the CALLING process's own app id */
   fpr_lock(&g_img_lock);
   proc_image_t *pi = image_of_pid(fpr_current_pid());
@@ -161,23 +167,49 @@ sw qos_store_call(uw tag, const char *pay, uw plen, char *out, uw outcap) {
   /* the calling PROCESS ACB is the replyTo -- kv IO is an ordinary actor
    * round trip (a blocking receive frees the hart) */
   void *me = fpr_hart()->current;
-  V msg = mkrpc((V)me, TAG((sw)tag), urlv, payv);
-  /* The stable Files owner forwards to a replaceable Qlog interpreter.
-   * Its mailbox is Dynamic; a refusal is the machine out
-   * of memory, or the actor gone -- the PROCESS hears it, the kernel runs on */
+  V id = fpr_g_Sys_x2enextId_call1((V)&fpr_unit);
+  uint64_t until = hal_mtime() / 10 + 10000000; /* same default as storage.fpr */
+  V msg = mkrpc((V)me, id, TAG((sw)until), TAG((sw)tag), urlv, payv);
   if (!fpr_sent(fpr_send_as((uw)me, g_store_actor, msg)))
     return store_refused("storage: the storage actor refused the request", out, outcap);
-  /* the reply is the Files owner's own: Ok <its Result>, or Err "dead
-   * actor" when it ended first (receiveFromRes wraps the message) */
-  V w = fpr_receive_from_res_c((V)me, g_store_actor);
-  V r = ((hdr_t *)w)->var == 0 ? *(V *)((char *)w + 8) : w;
-  /* r = Ok s | Err s (builtin Result, variant 0/1), field at +8 */
-  hdr_t *h = (hdr_t *)r;
-  str_t *s = (str_t *)*(V *)((char *)h + 8);
-  uw cp = s->len < outcap ? s->len : outcap;
-  for (uw i = 0; i < cp; i++) out[i] = (char)s->bytes[i];
-  if (cp < outcap) out[cp] = 0;
-  return h->var == 0 ? (sw)cp : -1;
+  for (;;) {
+    uint64_t now = hal_mtime() / 10;
+    if (now >= until)
+      return store_refused(tag == 2 ? "storage service: deadline exceeded (outcome unknown)" :
+                           "storage service: deadline exceeded", out, outcap);
+    V polled = fpr_receive_from_now_c((V)me, g_store_actor);
+    if (((hdr_t *)polled)->var != 0) {
+      str_t *why = (str_t *)FPR_FLD(polled, 0);
+      if (why->len == 5 && why->bytes[0] == 'e' && why->bytes[1] == 'm' &&
+          why->bytes[2] == 'p' && why->bytes[3] == 't' && why->bytes[4] == 'y') {
+        fpr_actor_sleep_us(until - now < 100 ? (uw)(until - now) : 100);
+        continue;
+      }
+      return store_refused(tag == 2 ? "storage service: dead actor (outcome unknown)" :
+                           "storage service: dead actor", out, outcap);
+    }
+    V message = FPR_FLD(polled, 0);
+    if (ISINT(message) || TID(message) != T_TUP2) {
+      fpr_arc_decref(message);
+      return store_refused(tag == 2 ? "storage: invalid correlated reply (outcome unknown)" :
+                           "storage: invalid correlated reply", out, outcap);
+    }
+    if (FPR_FLD(message, 0) != id) { fpr_arc_decref(message); continue; }
+    V r = FPR_FLD(message, 1);
+    if (ISINT(r) || TID(r) != T_RESULT || ISINT(FPR_FLD(r, 0)) || TID(FPR_FLD(r, 0)) != T_STR) {
+      fpr_arc_decref(message);
+      return store_refused(tag == 2 ? "storage: invalid reply value (outcome unknown)" :
+                           "storage: invalid reply value", out, outcap);
+    }
+    hdr_t *h = (hdr_t *)r;
+    str_t *s = (str_t *)FPR_FLD(r, 0);
+    uw cp = s->len < outcap ? s->len : outcap;
+    for (uw i = 0; i < cp; i++) out[i] = (char)s->bytes[i];
+    if (cp < outcap) out[cp] = 0;
+    sw status = h->var == 0 ? (sw)cp : -1;
+    fpr_arc_decref(message);
+    return status;
+  }
 }
 
 #ifdef QOS_PROCESS_TEST

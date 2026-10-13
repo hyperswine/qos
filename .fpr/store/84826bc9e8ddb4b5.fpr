@@ -1,0 +1,228 @@
+# ============================================================================
+# std/fs.fpr -- std.fs: the storage SERVICE, as a client.
+#
+# The disk is ONE append-only log and Files (mods/qlog's storage actor)
+# is its ONE writer and ONE interpreter: everything that exists --
+# module versions (apps/<id>.qa), system state (sys/*), user files,
+# kv event logs -- is a named record on it, and every consumer speaks
+# MESSAGES to the service instead of touching the device.  This module
+# is the client half: system composition passes its block owner to
+# `startBlock`; applications use `connect me namespace`. `serve device`
+# remains the standalone compatibility composition.
+#
+#   me = myself 0;
+#   fs = FS.connect me namespace;
+#   r  = FS.readLatest me fs "apps/edit1.qa";   # Ok bytes | Err e
+#   h  = FS.append me fs "sys/live" manifest;   # Ok head  | Err e
+#   t  = FS.replay me fs "notes/log";           # all live records, joined
+#
+# The wire is qlog's Rpc protocol (one tag per op); replies are the
+# storage actor's own Result values, forwarded verbatim.  Binary
+# payloads are first-class -- records are length-carried end to end.
+# ============================================================================
+
+QL = use "../programs/mods/qlog#7022992c8e4a9fba".
+SVC = use "../programs/mods/svc#75479fb6d5f34670".
+AC = use "std/actor#201a0e9bf98a5154".
+B = use "std/blockio#8b4ffa1467ca03a5".
+EP = use "../programs/mods/ep#c66ad65e68dd97f5".
+Wire = use "std/storage#a8f7ee14e1efae76".
+ED = use "../programs/mods/epdeadline#08a8ecf9d7c57d85".
+
+# spawn the service on a device the caller opened; the returned actor
+# handle IS the filesystem from here on
+serve : unsafe Device -> Int .
+serve dev = Wire.spawn 8 Wire.inboxBytes (QL.actor dev).
+# Compose Files on the system's existing block service.
+serveBlock : unsafe Int -> Int .
+serveBlock block = Wire.spawn 8 Wire.inboxBytes (QL.actorWith (QL.routed block)).
+startBlock : unsafe Int -> Int -> Result Int String .
+startBlock me block = startBlockOn (hartId 0) me block.
+startBlockOn : unsafe Int -> Int -> Int -> Result Int String .
+startBlockOn hart me block = case Wire.spawnResult hart 8 Wire.inboxBytes (owner hart block me) of
+    Err why -> Err "Files admission: {why}"
+  | Ok actor -> readyBlock me actor.
+readyBlock : unsafe Int -> Int -> Result Int String .
+readyBlock me fs = case stats me fs "" of
+    Ok value -> Ok fs
+  | Err why -> _ = kill fs; Err why.
+
+# A stable RPC address owns a replaceable Qlog interpreter. Never replay an
+# interrupted request: a write may already have committed before its reply.
+# Recovery is attempted once, on the next request; failed recovery is latched
+# offline. The same address remains in namespace clients and storage syscalls.
+# At most three Qlog generations per gateway (initial plus two recoveries).
+# A transport failure never replays the operation that failed.
+owner hart block admin me =
+  _ = Sys.loop (0, "", 0) (ownerStep hart block admin me); Unit.
+ownerStep hart block admin me state =
+  (child, offline, attempts) = state;
+  borrowed = receive me;
+  request = keep borrowed;
+  _ = drop borrowed;
+  case request of
+    SVC.TimedRpc caller id until tag key payload -> ownerDispatch hart block admin me state request
+  | SVC.Rpc caller tag key payload -> ownerDispatch hart block admin me state request
+  | stale -> (True, state).
+ownerDispatch hart block admin me state request =
+  (child, offline, attempts) = state;
+  (ret, (until, (tag, key, payload))) = requestFields request;
+  (caller, id, correlated) = ret;
+  (next, reason, used, answer) = if Wire.expired until then
+      (child, offline, attempts, Err "storage: deadline exceeded before execution")
+    else case Wire.validate key payload of
+        Err why -> (child, offline, attempts, Err why)
+      | Ok u -> if tag == 7 then
+          (n, r, result) = quiesceOwner admin caller child offline;
+          (n, r, attempts, result)
+        else ownerBudgetUntil until hart block child offline attempts me tag key payload;
+  _ = Wire.reply ret answer;
+  (True, (next, reason, used)).
+ownerBudgetUntil until hart block child offline attempts me tag key payload =
+  if offline != "" then (0, offline, attempts, Err "storage offline: {offline}") else
+  if child == 0 and attempts >= 3 then
+    (0, "recovery budget exhausted", attempts, Err "storage offline: recovery budget exhausted")
+  else
+    used = attempts + (if child == 0 then 1 else 0);
+    ready = ownerPrepareUntil until hart block child me;
+    (next, reason, answer) = ownerPreparedUntil until ready me tag key payload;
+    (next, reason, used, answer).
+# Serialized behind any current Files request. Keep the gateway alive so all
+# existing bindings receive an explicit refusal; shutdown never restarts Qlog.
+quiesceOwner : unsafe Int -> Int -> Int -> String -> (Int, String, Result String String) .
+quiesceOwner admin caller child offline = case caller == admin of
+    False -> (child, offline, Err "storage: quiesce requires administrator")
+  | True -> _ = case child == 0 of True -> Unit | False -> _ = kill child; Unit;
+            (0, "shutdown", Ok "quiesced").
+quiesce : unsafe Int -> Int -> Result String String .
+quiesce me fs = rpc me fs 7 "" "".
+# The creator is also the block administrator. Quiesce acknowledgement comes
+# before Drain, so Files cannot enqueue new page I/O behind the drain barrier.
+# Drain settles admitted work. The administrator then issues a final barrier
+# behind all admitted I/O. Native explicitly reports unsupported flushing.
+shutdown : unsafe Int -> Int -> Int -> Result String String .
+shutdown me fs block = shutdownWithin Wire.defaultMs me fs block.
+shutdownWithin ms me fs block = case Wire.deadline ms of
+    Err why -> Err why
+  | Ok until -> shutdownUntil until me fs block.
+shutdownUntil until me fs block = case rpcUntil until me fs 7 "" "" of
+    Err why -> Err "storage quiesce failed: {why}"
+  | Ok value -> case B.callUntil until me block B.Drain of
+        Ok B.Drained -> shutdownFlushUntil until me block
+      | Ok other -> Err "storage: invalid block drain reply"
+      | Err why -> Err "storage quiesced; drain failed: {why}".
+shutdownFlush me block = case Wire.deadline Wire.defaultMs of
+    Err why -> Err why
+  | Ok until -> shutdownFlushUntil until me block.
+shutdownFlushUntil until me block = case B.callUntil until me block B.Flush of
+    Ok (B.Flushed True) -> Ok "storage drained and flushed"
+  | Ok (B.Flushed False) -> Ok "storage drained (durable flush unsupported)"
+  | Ok other -> Err "storage drained; invalid flush reply"
+  | Err why -> Err "storage drained; flush failed: {why}".
+ownerRequest : unsafe Int -> Int -> Int -> String -> Int -> Int -> String -> String -> (Int, String, Result String String) .
+ownerRequest hart block child offline me tag key payload = case Wire.deadline Wire.defaultMs of
+    Err why -> (child, offline, Err why)
+  | Ok until -> ownerRequestUntil until hart block child offline me tag key payload.
+ownerRequestUntil until hart block child offline me tag key payload = case strlen offline > 0 of
+    True -> (0, offline, Err "storage offline: {offline}")
+  | False -> ownerPreparedUntil until (ownerPrepareUntil until hart block child me) me tag key payload.
+ownerPrepare : unsafe Int -> Int -> Int -> Int -> Result Int String .
+ownerPrepare hart block child me = case Wire.deadline Wire.defaultMs of
+    Err why -> Err why
+  | Ok until -> ownerPrepareUntil until hart block child me.
+ownerPrepareUntil until hart block child me = case child != 0 of
+    True -> Ok child
+  | False -> case Wire.spawnResult hart 2 Wire.inboxBytes (QL.actorWithUntil until (QL.routed block)) of
+      Err why -> Err "Qlog admission: {why}"
+    | Ok fresh -> case rpcUntil until me fresh 5 "" "" of
+        Ok value -> Ok fresh
+      | Err why -> _ = kill fresh; Err why.
+ownerPrepared : unsafe Result Int String -> Int -> Int -> String -> String -> (Int, String, Result String String) .
+ownerPrepared ready me tag key payload = case Wire.deadline Wire.defaultMs of
+    Err why -> (0, why, Err why)
+  | Ok until -> ownerPreparedUntil until ready me tag key payload.
+ownerPreparedUntil until ready me tag key payload = case ready of
+    Err why -> (0, why, Err why)
+  | Ok child -> ownerAnswer child (Wire.callRawUntil until me child SVC.TimedRpc tag key payload).
+ownerAnswer : unsafe Int -> Result (Result String String) String -> (Int, String, Result String String) .
+ownerAnswer child reply = case reply of
+    Ok answer -> (child, "", answer)
+  | Err why -> _ = kill child; (0, "", Err why).
+
+# the send is checked, and a Files service that refused the request or has
+# ended is an Err like any other storage failure -- never a caller left
+# waiting (std/actor sendAwait: the storage actor sends its callers nothing
+# but replies, so the next message from it IS the answer)
+rpc : unsafe Int -> Int -> Int -> String -> String -> Result String String .
+rpc me fs tag url pay = Wire.call Wire.defaultMs me fs SVC.TimedRpc tag url pay.
+rpcUntil until me fs tag url pay = Wire.callUntil until me fs SVC.TimedRpc tag url pay.
+rpcWithin ms me fs tag url pay = Wire.call ms me fs SVC.TimedRpc tag url pay.
+missing why = Wire.missing why.
+
+readLatest : unsafe Int -> Int -> String -> Result String String .
+readLatest me fs url = rpc me fs 1 url "".
+
+append : unsafe Int -> Int -> String -> String -> Result String String .
+append me fs url pay = rpc me fs 2 url pay.
+
+replay : unsafe Int -> Int -> String -> Result String String .
+replay me fs url = rpc me fs 3 url "".
+
+del : unsafe Int -> Int -> String -> Result String String .
+del me fs url = rpc me fs 4 url "".
+
+stats : unsafe Int -> Int -> String -> Result String String .
+stats me fs url = rpc me fs 5 url "".
+# the GC sweep: live records copied forward, the log truncated (idempotent)
+compact : unsafe Int -> Int -> Result String String .
+compact me fs = rpc me fs 6 "" "".
+
+# Namespace client for a system-owned Files.qa. Its small adapter preserves
+# the existing FS API; it owns no disk. Every operation is authorized at open.
+# 0 preserves the documented optional/no-disk application behavior.
+connect : unsafe Int -> Int -> Int .
+connect me ns = case EP.readOnce me ns "/services/files/status" of
+    Ok v -> connected ns v
+  | Err why -> error "Files.qa unavailable: {why}".
+connected : unsafe Int -> EP.IoV -> Int .
+connected ns (EP.IInt 0) = 0.
+connected ns (EP.IInt 1) = Wire.spawn 8 Wire.inboxBytes (forward ns).
+connected _ _ = error "Files.qa returned an invalid status".
+forward : unsafe Int -> Int -> a .
+forward ns self =
+  msg = receive self;
+  case msg of
+    SVC.TimedRpc caller id until tag key payload -> forwardRequest ns self msg
+  | SVC.Rpc caller tag key payload -> forwardRequest ns self msg
+  | stale -> _ = drop msg; forward ns self.
+forwardRequest ns self msg =
+  (ret, (until, (tag, key, payload))) = requestFields msg;
+  answer = if Wire.expired until then Err "storage: deadline exceeded before execution" else viaNamespaceUntil until self ns tag key payload;
+  _ = Wire.reply ret answer;
+  _ = drop answer;
+  _ = drop msg;
+  _ = Sys.poolReset 0;
+  forward ns self.
+viaNamespace : unsafe Int -> Int -> Int -> String -> String -> Result String String .
+viaNamespace me ns 1 key _ = fileReply (EP.readOnce me ns "/services/files/{key}/latest").
+viaNamespace me ns 2 key bytes = fileReply (EP.writeOnce me ns "/services/files/{key}/append" (EP.IStr bytes)).
+viaNamespace me ns 3 key _ = fileReply (EP.readOnce me ns "/services/files/{key}/replay").
+viaNamespace me ns 4 key _ = fileReply (EP.writeOnce me ns "/services/files/{key}/delete" (EP.IStr "")).
+viaNamespace me ns 5 key _ = fileReply (EP.readOnce me ns "/services/files/{key}/stats").
+viaNamespace me ns 6 _ _ = fileReply (EP.writeOnce me ns "/services/files/compact" EP.IUnit).
+viaNamespace _ _ _ _ _ = Err "unknown storage operation".
+fileReply (Ok (EP.IStr bytes)) = Ok bytes.
+fileReply (Ok _) = Err "Files.qa returned non-bytes".
+fileReply (Err why) = Err why.
+
+requestFields message = case message of
+    SVC.TimedRpc caller id until tag key payload -> ((caller, id, True), (until, (tag, key, payload)))
+  | SVC.Rpc caller tag key payload -> ((caller, 0, False), (Wire.now Unit + Wire.defaultMs * 1000, (tag, key, payload))).
+
+viaNamespaceUntil until me ns 1 key _ = fileReply (ED.readOnceUntil until me ns "/services/files/{key}/latest").
+viaNamespaceUntil until me ns 2 key bytes = fileReply (ED.writeOnceUntil until me ns "/services/files/{key}/append" (EP.IStr bytes)).
+viaNamespaceUntil until me ns 3 key _ = fileReply (ED.readOnceUntil until me ns "/services/files/{key}/replay").
+viaNamespaceUntil until me ns 4 key _ = fileReply (ED.writeOnceUntil until me ns "/services/files/{key}/delete" (EP.IStr "")).
+viaNamespaceUntil until me ns 5 key _ = fileReply (ED.readOnceUntil until me ns "/services/files/{key}/stats").
+viaNamespaceUntil until me ns 6 _ _ = fileReply (ED.writeOnceUntil until me ns "/services/files/compact" EP.IUnit).
+viaNamespaceUntil _ _ _ _ _ _ = Err "unknown storage operation".

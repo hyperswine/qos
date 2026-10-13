@@ -12,7 +12,7 @@
 # Expected: "qload: <N>B .qa read off disk -> table #0; ping=pong from
 # a .qa read off qosp.disk; 40+2=42".
 
-QL = use "../programs/mods/qlog".
+QL = use "../programs/mods/qlog#7022992c8e4a9fba".
 Plug = use "../programs/mods/plug".
 
 main =

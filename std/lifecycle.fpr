@@ -3,10 +3,10 @@
 # Host deadline enforcement is mechanism outside this actor. Completion
 # follows draining and, when Files exists, its final requested flush. Native
 # explicitly reports unsupported durability; an absent disk is drained only.
-AC = use "std/actor#06e72a5feec8a6d4".
-Net = use "std/net#e014c97bab46e124".
-FS = use "std/fs#cc97de9b0dbf26f7".
-IO = use "std/blockio#2dcfa109efe528e5".
+AC = use "std/actor#201a0e9bf98a5154".
+Net = use "std/net#464ca3ee0d89bc64".
+FS = use "std/fs#84826bc9e8ddb4b5".
+IO = use "std/blockio#8b4ffa1467ca03a5".
 Context = Type (Context Int Int Int Int).
 Request = Type (Stop).
 owner (Context admin net block files) = admin.
@@ -50,7 +50,7 @@ actor caller hart makeBlock me =
         loop ctx me.
 
 stop : Int -> Context -> Result String String .
-stop caller ctx = _ = Sys.shutdownBegin Unit; case AC.call caller (owner ctx) Stop of
+stop caller ctx = _ = Sys.shutdownBegin Unit; case AC.callWithin 10000 caller (owner ctx) Stop of
     Ok answer -> answer
   | Err why -> Err "lifecycle: {why}".
 
@@ -70,12 +70,17 @@ loop ctx me =
 
 finish : Context -> Int -> Result String String .
 finish (Context admin net disk store) me =
+  case AC.deadlineAfter 10000 of
+    Err why -> Err why
+  | Ok until -> finishUntil until (Context admin net disk store) me.
+finishUntil : Int -> Context -> Int -> Result String String .
+finishUntil until (Context admin net disk store) me =
   networkResult = if net == 0 then Ok "network offline" else
-    case Net.call me net Net.Stop of
+    case Net.callUntil until me net Net.Stop of
         Ok Net.Stopped -> _ = Sys.logAt 3 "network: admission stopped"; Ok "network stopped"
       | Err why -> Err "network: stop failed: {why}"
       | Ok other -> Err "network: invalid stop reply";
-  storageResult = if store == 0 then drainOffline me disk else FS.shutdown me store disk;
+  storageResult = if store == 0 then drainOfflineUntil until me disk else FS.shutdownUntil until me store disk;
   _ = case storageResult of
       Ok value -> if store == 0 then Sys.logAt 3 "storage: {value}" else Sys.logAt 3 "storage: Files quiesced and block drained ({value})"
     | Err why -> Sys.logAt 2 "storage: shutdown failed: {why}";
@@ -87,6 +92,11 @@ finish (Context admin net disk store) me =
 # flush is requested when Files was never established.
 drainOffline : Int -> Int -> Result String String .
 drainOffline me disk = case IO.call me disk IO.Drain of
+    Ok IO.Drained -> Ok "storage offline; block drained"
+  | Err why -> Err "offline storage drain failed: {why}"
+  | Ok other -> Err "offline storage drain returned an invalid reply".
+drainOfflineUntil : Int -> Int -> Int -> Result String String .
+drainOfflineUntil until me disk = case IO.callUntil until me disk IO.Drain of
     Ok IO.Drained -> Ok "storage offline; block drained"
   | Err why -> Err "offline storage drain failed: {why}"
   | Ok other -> Err "offline storage drain returned an invalid reply".

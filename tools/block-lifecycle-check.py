@@ -17,13 +17,13 @@ def build(source, kernel, directory, harts, flags=''):
     run(['make', '-s', 'native', f'SYSTEM={source}', f'KERNEL={kernel}', f'BUILD={directory}',
          f'HARTS={harts}', f'NATIVE_CFLAGS_EXTRA={flags}'], cwd=ROOT / 'qos')
 
-def boot(kernel, disk, harts, modern):
+def boot(kernel, disk, harts, modern, timeout=30):
     args = ['qemu-system-riscv64', '-machine', 'virt', '-smp', harts, '-m', '256M',
             '-nographic', '-bios', 'none', '-kernel', kernel, '-drive', f'file={disk},if=none,format=raw,id=hd0',
             '-device', 'virtio-blk-device,drive=hd0']
     if modern:
         args += ['-global', 'virtio-mmio.force-legacy=false']
-    return run(args, timeout=30)
+    return run(args, timeout=timeout)
 
 def holds(out, name):
     assert f'{name}:' in out and 'HOLDS' in out and 'FAILED' not in out and 'PANIC' not in out, out
@@ -60,6 +60,9 @@ with tempfile.TemporaryDirectory(prefix='qos-block-lifecycle-') as d:
             for name, kernel in (('blocklifecycle', lifecycle), ('blocknamespace', endpoint), ('blockmemory', memory)):
                 disk = temp / f'{name}-{harts}-{modern}.disk'
                 run(['python3', ROOT / 'tools/mkdisk.py', disk, '8'])
-                out = boot(kernel, disk, harts, modern)
+                # 8,192 native reads take about 28-30 seconds on a loaded
+                # two-hart emulator. Keep functional checks independent of
+                # that host scheduling boundary; per-request deadlines hold.
+                out = boot(kernel, disk, harts, modern, 60 if name == 'blockmemory' else 30)
                 holds(out, name)
                 print(f'Native {name}: virtio v{2 if modern else 1}, {harts} hart(s) HOLDS', flush=True)

@@ -1,7 +1,7 @@
 # Queued cancellation, active cancellation, global queue bound and drain.
 unsafe program.
-B = use "../std/blockio".
-Native = use "../std/block".
+B = use "../std/blockio#8b4ffa1467ca03a5".
+Native = use "../std/block#615ea5947fe13b00".
 blkTestStall : Unit -> Int .
 blkTestBusy : Unit -> Int .
 err why (Err text) = why == text.

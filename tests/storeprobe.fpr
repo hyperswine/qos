@@ -3,8 +3,8 @@ unsafe program.
 # while preserving unrelated mailbox traffic from the kernel.
 main =
   me = myself 0;
-  _ = receive me;
+  tag = receive me;
   _ = Sys.sleepUs 50000;
-  r = Sys.storeReq 3 "";
+  r = Sys.storeReq (if tag == 2 then 2 else 3) "";
   noise = case receiveNow me of Ok (Err "unrelated") -> True | _ -> False;
   "storeprobe: {r} noise={noise}".

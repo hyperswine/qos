@@ -1,0 +1,29 @@
+# Deadline-aware endpoint calls; requires the ep Timed protocol version.
+EP = use "ep#51c4e7b2f4821669".
+AC = use "std/actor#f361991e7cea6106".
+openUntil until me ns url mode = case AC.callUntil until me ns (EP.NsOpen url mode) of
+    Err why -> Err "namespace: {why}"
+  | Ok answer -> case answer of
+        Err why -> Err why
+      | Ok (owner, id) -> awaitOpen until me owner id.
+awaitOpen : unsafe Int -> Int -> Int -> Int -> Result (Int, Int) String .
+awaitOpen until me owner id = case AC.awaitReplyUntil until me owner id of
+    Err why -> Err "the owner {why} before answering open"
+  | Ok answer -> (case answer of
+        EP.Opened handle -> Ok (owner, handle)
+      | EP.Refused why -> Err why
+      | EP.Redirect other -> awaitOpen until me other id).
+readUntil until me ep n = (owner, h) = ep; EP.flat (AC.callUntil until me owner (EP.Timed until (EP.Read h n))).
+writeUntil until me ep bytes = (owner, h) = ep; EP.flat (AC.callUntil until me owner (EP.Timed until (EP.Write h bytes))).
+closeUntil until me ep = (owner, h) = ep; EP.flat (AC.callUntil until me owner (EP.Timed until (EP.Close h))).
+readOnceUntil until me ns url = case openUntil until me ns url "read" of
+    Err why -> Err why
+  | Ok ep -> withClose until me ep (readUntil until me ep 0).
+writeOnceUntil until me ns url bytes = case openUntil until me ns url "write" of
+    Err why -> Err why
+  | Ok ep -> withClose until me ep (writeUntil until me ep bytes).
+withClose until me ep primary = case closeUntil until me ep of
+    Ok value -> primary
+  | Err cleanup -> (case primary of
+        Ok value -> Err "endpoint close failed: {cleanup}"
+      | Err why -> Err "{why}; endpoint close failed: {cleanup}").

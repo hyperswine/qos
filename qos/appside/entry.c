@@ -52,7 +52,9 @@ static V h_shutdown_complete(V status) {
   __atomic_store_n(&g_shutdown_finished, 1, __ATOMIC_RELEASE);
   if (qos_hal->shutdown_complete) qos_hal->shutdown_complete(code);
   __atomic_store_n(&fpr_process_done, 1, __ATOMIC_RELEASE);
-  fpr_actor_sleep_us(1); /* hand back to the scheduler; it does not resume us */
+  /* A one-microsecond sleep can expire before it parks. Always hand back
+   * to the scheduler so acknowledged failure cannot resume into a panic. */
+  fpr_fuel_exhausted(); /* fpr_process_done makes the scheduler return */
   return (V)&fpr_unit;
 }
 static V h_ready(V u) {

@@ -74,7 +74,7 @@
 #     and versions share nothing but the registry.
 # ============================================================================
 
-QL = use "../programs/mods/qlog".
+QL = use "../programs/mods/qlog#7022992c8e4a9fba".
 Plug = use "../programs/mods/plug".
 
 LRMsg = Type (LiveReload url).

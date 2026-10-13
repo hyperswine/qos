@@ -18,7 +18,7 @@
 
 unsafe program.
 
-FS = use "std/fs".
+FS = use "std/fs#84826bc9e8ddb4b5".
 LD = use "std/loader".
 
 Sys.images : Int -> Int .

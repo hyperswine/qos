@@ -1,6 +1,6 @@
 # Packet TX deadline kills the network owner; requests fail without replay.
 unsafe program.
-N = use "../std/net#e014c97bab46e124".
+N = use "../std/net#464ca3ee0d89bc64".
 netTestStall : Unit -> Int .
 Sys.alive : Int -> Bool .
 beat boss me = _ = send boss 1; _ = Sys.sleepUs 10000; beat boss me.

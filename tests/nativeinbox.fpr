@@ -1,0 +1,14 @@
+# Execute the real process image against actor plane ABI 3, then reclaim it.
+unsafe program.
+FS = use "std/fs#84826bc9e8ddb4b5".
+NI = use "nativeimage".
+main =
+  me = myself 0;
+  fs = FS.serve (device "blk");
+  qa = case FS.readLatest me fs "apps/CkInbox.qa" of Ok bytes -> bytes | Err why -> error why;
+  (ok, why, root) = NI.place qa;
+  _ = if ok == 2 then Unit else error why;
+  result = NI.result me root;
+  settled = NI.settle 0 400;
+  _ = if settled and result == "inboxproc: ARC identity/retention/refusal and linear identity HOLDS" then Unit else error "nativeinbox: {result} settled={settled}";
+  "nativeinbox: aggregate inbox admission, ARC/linear process-plane ownership and image reclamation HOLDS".

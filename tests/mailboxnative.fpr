@@ -1,6 +1,6 @@
 # Test kernel: the Base mailbox contract holds for a loaded process exactly
 # as it holds for the plane's own actors (tests/mailboxproc.fpr).
-FS = use "std/fs".
+FS = use "std/fs#84826bc9e8ddb4b5".
 QAR = use "../programs/mods/qar".
 QaImg = use "../programs/mods/qaimg".
 

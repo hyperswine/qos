@@ -1,24 +1,30 @@
 unsafe program.
 # Test kernel: execute actual relocatable process images against a full,
 # dead and killed-during-request storage actor. Then serve a real request.
-FS = use "std/fs".
-S = use "../programs/mods/svc".
+FS = use "std/fs#84826bc9e8ddb4b5".
+S = use "../programs/mods/svc#75479fb6d5f34670".
 NI = use "nativeimage".
 Sys.bindStore : Int -> S.Rpc -> Unit .
 Sys.bindApp : String -> Unit .
 Sys.images : Int -> Int .
 Sys.arenaFree : Int -> Int .
 Sys.testFillFrom : Int -> Int -> Int -> Result Unit String .
+Sys.alive : Int -> Bool .
 stuck self = _ = Sys.sleepUs 1000000; stuck self.
 
-pending boss self = case receive self of S.Rpc caller tag key pay -> _ = send boss 88; Sys.sleepUs 3000000 >> Unit.
+pending boss self = _ = S.requestFields (receive self); _ = send boss 88; Sys.sleepUs 3000000 >> Unit.
+malformed self =
+  ((from, id, correlated), rest) = S.requestFields (receive self);
+  _ = send from (id, 42); Unit.
+silent self = _ = S.requestFields (receive self); Sys.sleepUs 30000000 >> Unit.
 start qa =
   (ok, why, root) = NI.place qa;
   _ = case ok == 2 of True -> Unit | False -> error "probe placement: {why}";
   root.
-probe me qa =
+probe me qa = probeTag me qa 3.
+probeTag me qa tag =
   root = start qa;
-  _ = send root 0;
+  _ = send root tag;
   _ = send root (Err "unrelated");
   NI.result me root.
 main =
@@ -28,7 +34,7 @@ main =
   failqa = case FS.readLatest me fs "apps/CkFail.qa" of Ok s -> s | Err e -> error e;
   _ = Sys.bindApp "CkSlow";
   full = spawnCap 0 1 stuck;
-  _ = Sys.bindStore full (S.Rpc full 0 "" "");
+  _ = Sys.bindStore full (S.TimedRpc full 0 0 0 "" "");
   fullroot = start qa;
   _ = case Sys.testFillFrom full fullroot 8 of Err "mailbox full" -> Unit | _ -> error "process channel not full";
   _ = send fullroot 0;
@@ -37,7 +43,7 @@ main =
   _ = kill full;
   dead = probe me qa;
   waiting = spawn (pending me);
-  _ = Sys.bindStore waiting (S.Rpc waiting 0 "" "");
+  _ = Sys.bindStore waiting (S.TimedRpc waiting 0 0 0 "" "");
   (ok, why, root) = NI.place qa;
   _ = case ok == 2 of True -> Unit | False -> error why;
   _ = send root 0;
@@ -45,11 +51,20 @@ main =
   _ = case receiveFromRes me waiting of Ok 88 -> Unit | _ -> error "storage never received request";
   _ = kill waiting;
   during = NI.result me root;
-  _ = Sys.bindStore fs (S.Rpc fs 0 "" "");
+  bad = spawn malformed;
+  _ = Sys.bindStore bad (S.TimedRpc bad 0 0 0 "" "");
+  invalid = probeTag me qa 2;
+  hung = spawn silent;
+  _ = Sys.bindStore hung (S.TimedRpc hung 0 0 0 "" "");
+  deadline = probe me qa;
+  mutation = probeTag me qa 2;
+  live = Sys.alive hung;
+  _ = kill hung;
+  _ = Sys.bindStore fs (S.TimedRpc fs 0 0 0 "" "");
   healthy = probe me qa;
   (failok, failwhy, failroot) = NI.place failqa;
   _ = case failok == 2 of True -> Unit | False -> error failwhy;
   failed = NI.result me failroot;
   freed = NI.settle 0 400;
-  verdict = if refused == "storeprobe: Err storage: the storage actor refused the request noise=True" and dead == refused and during == "storeprobe: Err dead actor noise=True" and healthy == "storeprobe: Ok  noise=True" and failed == "failed: dead actor" and freed then "HOLDS" else "FAILED";
-  "nativerefusal: full=[{refused}] dead=[{dead}] during=[{during}] healthy=[{healthy}] routed=[{failed}] freed={freed} {verdict}".
+  verdict = if refused == "storeprobe: Err storage: the storage actor refused the request noise=True" and dead == refused and during == "storeprobe: Err storage service: dead actor noise=True" and deadline == "storeprobe: Err storage service: deadline exceeded noise=True" and mutation == "storeprobe: Err storage service: deadline exceeded (outcome unknown) noise=True" and invalid == "storeprobe: Err storage: invalid reply value (outcome unknown) noise=True" and live and healthy == "storeprobe: Ok  noise=True" and failed == "failed: dead actor" and freed then "HOLDS" else "FAILED";
+  "nativerefusal: full=[{refused}] dead=[{dead}] during=[{during}] deadline=[{deadline}] mutation=[{mutation}] invalid=[{invalid}] live={live} healthy=[{healthy}] routed=[{failed}] freed={freed} {verdict}".

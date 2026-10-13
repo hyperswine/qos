@@ -42,20 +42,21 @@
 # (EP.grant, registered by the launcher); the shell's own actors are pid 0.
 # ============================================================================
 
-FS = use "std/fs#cc97de9b0dbf26f7".
-Lifecycle = use "std/lifecycle#58d436d59e44b03f".
+FS = use "std/fs#84826bc9e8ddb4b5".
+Lifecycle = use "std/lifecycle#6e7bea28db71815a".
 AK  = use "appkit".
-BlockEP = use "blockep#79e7fec72bb2452e".
-SVC = use "svc".
-EP  = use "ep".
+BlockEP = use "blockep#bd295a609815dadd".
+SVC = use "svc#75479fb6d5f34670".
+EP  = use "ep#c66ad65e68dd97f5".
 Core = use "coreutil".
 QAR = use "qar".
 Plug = use "plug".
 AppsEP = use "appsep".
-Endpoint = use "epservice".
-AC = use "std/actor".
+Endpoint = use "epservice#e8bce05a1ddf73db".
+AC = use "std/actor#201a0e9bf98a5154".
 GX = use "graphics".
 GL = use "glsvc".
+Wire = use "std/storage#a8f7ee14e1efae76".
 
 glHas : Int -> Int .
 
@@ -93,9 +94,7 @@ call me a q = AC.call me a q.
 # storage actor sends its callers nothing else): the send is checked and
 # a storage actor that has ended is an Err, like any storage failure
 rpc : unsafe Int -> Int -> Int -> String -> String -> Result String String .
-rpc me st tag url pay = case AC.sendAwait me st (Rpc me tag url pay) of
-    Ok r -> r
-  | Err e -> Err "storage service: {e}".
+rpc me st tag url pay = FS.rpc me st tag url pay.
 
 hasPrefix : unsafe String -> String -> Bool .
 hasPrefix s pre = EP.startsWith pre s.
@@ -223,8 +222,9 @@ fileServe st path me body next =
   borrowed = receive me;
   m = keep borrowed;
   _ = drop borrowed;
-  (replyTo, id, q) = m;
-  fileMsg st path me (fileLoaded st path me body) next (replyTo, id) q.
+  case m of
+    (replyTo, id, q) -> fileMsg st path me body next (replyTo, id) q
+  | stale -> fileServe st path me body next.
 # not loaded yet (storage was unreachable): try again on this request
 fileLoaded : unsafe Int -> String -> Int -> Result String String -> Result String String .
 fileLoaded st path me body = case body of
@@ -232,10 +232,21 @@ fileLoaded st path me body = case body of
   | Err e -> rpc me st 3 path "".
 fileMsg : unsafe Int -> String -> Int -> Result String String -> Int -> (Int, Int) -> EP.Ep -> a .
 fileMsg st path me body next ret q = case q of
-    Open url mode -> AC.reply ret (Opened next) >> fileServe st path me body (next + 1)
-  | Read h n -> AC.reply ret (fileText path body) >> fileServe st path me body next
-  | Write h v -> fileWr st path me body next ret v
+    EP.Timed until command -> fileTimed until st path me body next ret command
+  | Open url mode -> AC.reply ret (Opened next) >> fileServe st path me body (next + 1)
+  | Read h n -> loaded = fileLoaded st path me body; AC.reply ret (fileText path loaded) >> fileServe st path me loaded next
+  | Write h v -> fileWr st path me (fileLoaded st path me body) next ret v
   | Close h -> AC.reply ret (Ok 0) >> fileServe st path me body next.
+fileTimed until st path me body next ret q =
+  if AC.nowUs Unit >= until then AC.reply ret (Err "endpoint: deadline exceeded before execution") >> fileServe st path me body next else
+  case q of
+      Read h n -> loaded = fileLoadedUntil until st path me body; AC.reply ret (fileText path loaded) >> fileServe st path me loaded next
+    | Write h (IStr text) -> loaded = fileLoadedUntil until st path me body; (case loaded of
+        Err why -> AC.reply ret (Err "write failed: {path} could not be read ({why})") >> fileServe st path me loaded next
+      | Ok bytes -> fileWr2 st path me bytes next ret text (FS.rpcUntil until me st 2 path text))
+    | EP.Timed other command -> fileTimed (if other < until then other else until) st path me body next ret command
+    | command -> fileMsg st path me body next ret command.
+fileLoadedUntil until st path me body = case body of Ok bytes -> body | Err why -> FS.rpcUntil until me st 3 path "".
 fileText : unsafe String -> Result String String -> Result EP.IoV String .
 fileText path body = case body of
     Ok b -> Ok (IStr (emptyAs b "(empty file)"))
@@ -251,7 +262,8 @@ fileWr1 st path me body next ret text = case body of
 fileWr2 : unsafe Int -> String -> Int -> String -> Int -> (Int, Int) -> String -> Result String String -> a .
 fileWr2 st path me b next ret text r = case r of
     Ok u -> AC.reply ret (Ok (IInt (strlen text))) >> fileServe st path me (Ok (strcat b text)) next
-  | Err e -> AC.reply ret (Err "write failed: {e}") >> fileServe st path me (Ok b) next.
+  | Err e -> AC.reply ret (Err "write failed: {e}") >> fileServe st path me
+      (if strIndexOf "outcome unknown" e >= 0 then Err "write outcome unknown: {e}" else Ok b) next.
 
 # the manager owns the file NAMESPACES (/tmp, /home): an open of a path
 # nobody has claimed yet spawns the file's actor, registers the path (so
@@ -266,7 +278,8 @@ filesServe st ns me act =
   filesMsg st ns me act (from, id) from q.
 filesMsg : unsafe Int -> Int -> Int -> List (String, Int) -> (Int, Int) -> Int -> EP.Ep -> a .
 filesMsg st ns me act ret from q = case q of
-    Open url mode -> filesOpen st ns me act ret from url mode
+    EP.Timed until command -> if AC.nowUs Unit >= until then AC.reply ret (Err "endpoint: deadline exceeded before execution") >> filesServe st ns me act else filesMsg st ns me act ret from command
+  | Open url mode -> filesOpen st ns me act ret from url mode
   | Read h n -> AC.reply ret (Err "a file namespace: open a path under it") >> filesServe st ns me act
   | Write h v -> AC.reply ret (Err "a file namespace: open a path under it") >> filesServe st ns me act
   | Close h -> AC.reply ret (Ok 0) >> filesServe st ns me act.
@@ -280,9 +293,15 @@ filesOpen st ns me act ret from url mode =
     | False -> filesMake st ns me act ret from url mode).
 filesMake : unsafe Int -> Int -> Int -> List (String, Int) -> (Int, Int) -> Int -> String -> String -> a .
 filesMake st ns me act ret from url mode =
+  if fileCount act >= 64 or strlen url > 1024 then
+    AC.reply ret (Refused "file actor budget exhausted") >> filesServe st ns me act
+  else filesMakeAdmitted st ns me act ret from url mode.
+fileCount Nil = 0.
+fileCount (_ :: rest) = 1 + fileCount rest.
+filesMakeAdmitted st ns me act ret from url mode =
   _ = Sys.logAt 0 "system: creating {url}";
   p2 = strcat url "";      # OWN COPY: curried into the actor + the set
-  a = spawnD (fileActor st p2);
+  a = Wire.spawn 8 Wire.inboxBytes (fileActor st p2);
   _ = EP.register me ns p2 a;
   filesHand st ns me ((p2, a) :: act) ret from url mode a.
 # forward the client's own envelope to the file and point the client at it
@@ -427,10 +446,10 @@ caStep me ns appsA r a = case a of App aid anm ati ->
 # files that have always been there
 bootDiskUrls : unsafe Int -> Int -> Int -> Unit .
 bootDiskUrls me ns st =
-  _ = claim me ns "/services/storage" (spawnD (Endpoint.simple (stR st) (stW st)));
-  mgr = spawnD (filesMgr st ns);
+  _ = claim me ns "/services/storage" (Wire.spawn 8 Wire.inboxBytes (Endpoint.simple (stR st) (stW st)));
+  mgr = Wire.spawn 8 Wire.inboxBytes (filesMgr st ns);
   _ = claim me ns "/tmp" mgr;
   _ = claim me ns "/home" mgr;
-  _ = claim me ns "/home/notes.txt" (spawnD (fileActor st "/home/notes.txt"));
-  _ = claim me ns "/tmp/scratch.txt" (spawnD (fileActor st "/tmp/scratch.txt"));
+  _ = claim me ns "/home/notes.txt" (Wire.spawn 8 Wire.inboxBytes (fileActor st "/home/notes.txt"));
+  _ = claim me ns "/tmp/scratch.txt" (Wire.spawn 8 Wire.inboxBytes (fileActor st "/tmp/scratch.txt"));
   Unit.

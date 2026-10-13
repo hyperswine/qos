@@ -1,0 +1,63 @@
+# Files.qa: one disk owner, namespace endpoints for named log records.
+# /services/files/<record>/{latest,replay,stats,append,delete}
+# Only System (pid 0) may compact the whole log. Apps receive grants to
+# their record prefix; opening a record does not give them a raw disk.
+unsafe module.
+Endpoint = use "epservice#878fb2196060eb47".
+EP = use "ep#51c4e7b2f4821669".
+FS = use "std/fs#4f83962b53879302".
+AC = use "std/actor#f361991e7cea6106".
+
+serve fs me = Endpoint.simpleUntil (readRecordUntil fs) (writeRecordUntil fs) me.
+result (Ok text) = Ok (EP.IStr text).
+result (Err why) = Err why.
+
+readRecord fs me client url | EP.strEq url "/services/files/status" = Ok (EP.IInt (case fs == 0 of True -> 0 | False -> 1)).
+readRecord 0 _ _ _ = Err "no disk".
+readRecord fs me client url =
+  (key, op) = recordOp url;
+  readOp fs me key op.
+readOp fs me key "latest" = FS.readLatest me fs key |> result.
+readOp fs me key "replay" = FS.replay me fs key |> result.
+readOp fs me key "stats" = FS.stats me fs key |> result.
+readOp _ _ _ _ = Err "unknown file read operation".
+
+writeRecord 0 _ _ _ _ = Err "no disk".
+writeRecord fs me client url value | EP.strEq url "/services/files/compact" =
+  case Sys.pidOf client == 0 of
+    True -> FS.compact me fs |> result
+  | False -> Err "compaction is system-only".
+writeRecord fs me client url (EP.IStr text) =
+  (key, op) = recordOp url;
+  writeOp fs me key op text.
+writeRecord _ _ _ _ _ = Err "file writes require bytes".
+writeOp fs me key "append" text = FS.append me fs key text |> result.
+writeOp fs me key "delete" _ = FS.del me fs key |> result.
+writeOp _ _ _ _ _ = Err "unknown file write operation".
+
+recordOp url =
+  rest = substr url 16 (strlen url - 16);
+  split rest (strlen rest - 1).
+split text i | i < 0 = ("", "").
+split text i | charAt text i == 47 = (substr text 0 i, substr text (i + 1) (strlen text - i - 1)).
+split text i = split text (i - 1).
+
+readRecordUntil fs until me client url | EP.strEq url "/services/files/status" = Ok (EP.IInt (if fs == 0 then 0 else 1)).
+readRecordUntil 0 _ _ _ _ = Err "no disk".
+readRecordUntil fs until me client url =
+  (key, op) = recordOp url;
+  case op of
+      "latest" -> result (FS.rpcUntil until me fs 1 key "")
+    | "replay" -> result (FS.rpcUntil until me fs 3 key "")
+    | "stats" -> result (FS.rpcUntil until me fs 5 key "")
+    | other -> Err "unknown file read operation".
+writeRecordUntil 0 _ _ _ _ _ = Err "no disk".
+writeRecordUntil fs until me client url value | EP.strEq url "/services/files/compact" =
+  if Sys.pidOf client == 0 then result (FS.rpcUntil until me fs 6 "" "") else Err "compaction is system-only".
+writeRecordUntil fs until me client url (EP.IStr text) =
+  (key, op) = recordOp url;
+  case op of
+      "append" -> result (FS.rpcUntil until me fs 2 key text)
+    | "delete" -> result (FS.rpcUntil until me fs 4 key "")
+    | other -> Err "unknown file write operation".
+writeRecordUntil _ _ _ _ _ _ = Err "file writes require bytes".

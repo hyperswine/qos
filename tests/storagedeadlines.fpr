@@ -1,0 +1,86 @@
+# One storage budget through a live relay, recovery, namespace and shutdown.
+unsafe program.
+FS = use "std/fs#84826bc9e8ddb4b5".
+B = use "std/blockio#8b4ffa1467ca03a5".
+AC = use "std/actor#201a0e9bf98a5154".
+W = use "std/storage#a8f7ee14e1efae76".
+S = use "../programs/mods/svc#75479fb6d5f34670".
+EP = use "../programs/mods/ep#c66ad65e68dd97f5".
+ED = use "../programs/mods/epdeadline#08a8ecf9d7c57d85".
+Endpoint = use "../programs/mods/epservice#e8bce05a1ddf73db".
+Files = use "../programs/mods/files#2b1a808ceef52eb5".
+Sys.alive : Int -> Bool .
+ok (Ok value) = value.
+ok (Err why) = error why.
+failed (Err why) = True.
+failed _ = False.
+check yes why = if yes then Unit else error "storagedeadlines: {why}".
+hung me = _ = receive me; _ = Sys.sleepUs 3000000; hung me.
+late first me =
+  (ret, _) = S.requestFields (receive me);
+  _ = if first then Sys.sleepUs 60000 else Unit;
+  _ = S.reply ret (Ok (if first then "old" else "fresh"));
+  late False me.
+noise target me = send target "unrelated".
+# Configuration arms one delayed forwarded page command. The relay forwards
+# the original deadline; a request that expired while queued cannot execute.
+relayStart me = target = receive me; relay target False me.
+relay target delayed me =
+  borrowed = receive me;
+  (from, id, wire) = keep borrowed;
+  _ = drop borrowed;
+  (until, q) = case wire of B.Timed d command -> (d, command) | command -> (AC.nowUs Unit + 10000000, command);
+  next = case q of
+      B.Configure policy -> _ = AC.reply (from, id) (Ok (B.Budget policy)); True
+    | command ->
+        _ = if delayed then Sys.sleepUs 60000 else Unit;
+        _ = AC.reply (from, id) (B.callUntil until me target command);
+        False;
+  relay target next me.
+main =
+  me = myself 0;
+  stuck = spawn hung;
+  start = AC.nowUs Unit;
+  _ = check (failed (FS.rpcWithin 20 me stuck 2 "value" "x")) "live service accepted";
+  _ = check (AC.nowUs Unit - start < 250000 and Sys.alive stuck) "live service budget";
+  _ = kill stuck;
+  lateService = spawn (late True);
+  event = spawn (noise me);
+  _ = check (failed (FS.rpcWithin 10 me lateService 1 "value" "")) "late service accepted";
+  _ = check (ok (FS.rpcWithin 250 me lateService 1 "value" "") == "fresh") "stale reply answered next call";
+  _ = check (receiveFrom me event == "unrelated") "unrelated message consumed";
+  _ = kill lateService;
+  proxy = spawn relayStart;
+  block = B.serve proxy (device "blk");
+  _ = send proxy block;
+  fs = ok (FS.startBlock me proxy);
+  _ = ok (FS.append me fs "deadline/value" "before");
+  _ = B.call me proxy (B.Configure (0, 0, 0, 0));
+  start2 = AC.nowUs Unit;
+  _ = check (failed (FS.rpcWithin 20 me fs 2 "deadline/value" "unwanted")) "delayed append accepted";
+  _ = check (AC.nowUs Unit - start2 < 250000) "nested budget restarted";
+  _ = Sys.sleepUs 100000;
+  _ = check (ok (FS.readLatest me fs "deadline/value") == "before") "expired append changed record";
+  _ = check (ok (FS.replay me fs "deadline/value") == "before") "failed append replayed";
+  ns = spawn Endpoint.namespace;
+  endpoint = spawn (Files.serve fs);
+  _ = ok (EP.register me ns "/services/files" endpoint);
+  _ = B.call me proxy (B.Configure (0, 0, 0, 0));
+  deadline = ok (AC.deadlineAfter 20);
+  start3 = AC.nowUs Unit;
+  _ = check (failed (ED.readOnceUntil deadline me ns "/services/files/deadline/value/latest")) "namespace read accepted";
+  _ = check (AC.nowUs Unit - start3 < 250000) "namespace budget restarted";
+  _ = Sys.sleepUs 100000;
+  _ = check (ok (FS.readLatest me fs "deadline/value") == "before") "namespace recovery";
+  # A hung live quiesce owner cannot make shutdown report success.
+  stuck2 = spawn hung;
+  _ = check (failed (FS.shutdownWithin 20 me stuck2 block)) "hung shutdown accepted";
+  _ = kill stuck2;
+  _ = check (failed (FS.rpcWithin 0 me fs 2 "deadline/value" "expired")) "zero budget admitted";
+  _ = check (failed (W.optional (Err "disk offline")) and ok (W.optional (Err "no such file")) == "") "missing classification";
+  _ = B.call me proxy (B.Configure (0, 0, 0, 0));
+  _ = check (failed (FS.rpcWithin 20 me fs 1 "deadline/value" "")) "third generation survived hang";
+  _ = Sys.sleepUs 100000;
+  _ = check (case FS.readLatest me fs "deadline/value" of Err why -> why == "storage offline: recovery budget exhausted" | Ok value -> False) "Files recovery quota";
+  _ = ok (FS.shutdown me fs proxy);
+  "storagedeadlines: live hang, stale replies, end-to-end append/read, no replay, recovery and shutdown HOLDS".

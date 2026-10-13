@@ -18,6 +18,8 @@ echo "== virtio raw policy: register programming and full-word deadlines against
 echo "== native block service: configurable budgets and failure isolation ==" && (python3 tools/block-service-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
 echo "== block lifecycle: cancellation, drain and bounded reusable helpers ==" && (python3 tools/block-lifecycle-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
 echo "== Qlog and bootstrap block routing ==" && (python3 tools/qlog-routing-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
+echo "== Storage deadlines, late replies and finite service budgets ==" && (python3 tools/storage-reliability-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
+echo "== Bootstrap missing-only storage fallbacks ==" && (python3 tools/storage-fallback-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
 echo "== Qlog scratch reclamation, binary reads and two-boot persistence ==" && (python3 tools/qlog-memory-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
 echo "== Portable durable storage: barriers, dual metadata and staged recovery ==" && (python3 tools/portable-durable-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
 echo "== Portable compatibility KV durability and torn-tail recovery ==" && (sh qos/tests-host/store-check.sh) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
@@ -28,6 +30,7 @@ echo "== Buildroot service supervision and finite restart ==" && (python3 tools/
 echo "== Buildroot persistent state directory installation ==" && (python3 tools/buildroot/package-install-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
 echo "== disk hardening: deadlines, stalled devices, reset, offline refusal, overload refusal (native + Portable) ==" && (python3 tools/disk-harden-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
 echo "== native image integrity: corrupt sections and missing digests refuse before allocation ==" && (python3 tools/native-integrity-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
+echo "== opt-in inbox admission: native process-plane ownership and reclamation ==" && (python3 tools/native-inbox-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
 echo "== initial memory admission: routed native process, refusal and reclamation ==" && (sh tools/admission-check.sh) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
 echo "== the mailbox contract as a loaded process: Static refuses through the plane's actors table ==" && (sh tools/mailbox-process-check.sh) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
 echo "== error in a loaded process ends that actor, not the machine (S8) ==" && (sh tools/error-process-check.sh) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }

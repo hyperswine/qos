@@ -1,5 +1,5 @@
 # Test kernel: a loaded process uses the plane's fixed heap admission.
-FS = use "std/fs".
+FS = use "std/fs#84826bc9e8ddb4b5".
 QAR = use "../programs/mods/qar".
 QaImg = use "../programs/mods/qaimg".
 

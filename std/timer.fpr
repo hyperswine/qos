@@ -19,7 +19,7 @@
 # ============================================================================
 
 TM = use "../programs/mods/timer".
-AC = use "std/actor".
+AC = use "std/actor#201a0e9bf98a5154".
 
 TAfter = TM.TAfter.
 TPing = TM.TPing.

@@ -32,12 +32,12 @@
 # url and its client, and each request is one function.
 # ============================================================================
 
-EP = use "ep".
-SV = use "svc".
+EP = use "ep#c66ad65e68dd97f5".
+SV = use "svc#75479fb6d5f34670".
 UM = use "uart#cdee34460c2ad81a".
 TM = use "timer#38fa906125d48580".
-Endpoint = use "epservice".
-AC = use "std/actor".
+Endpoint = use "epservice#e8bce05a1ddf73db".
+AC = use "std/actor#201a0e9bf98a5154".
 
 IStr = EP.IStr. IInt = EP.IInt. IUnit = EP.IUnit. IFn = EP.IFn. IErr = EP.IErr.
 Open = EP.Open. Read = EP.Read. Write = EP.Write. Close = EP.Close.
@@ -261,7 +261,8 @@ kPush usvc me hs next pend rxq push = case push of
     UM.URx s -> kLoop usvc me hs next pend (strcat rxq s).
 kMsg : unsafe Int -> Int -> List (Int, String, Int) -> Int -> (Int, Int, Int) -> String -> (Int, Int) -> Int -> EP.Ep -> a .
 kMsg usvc me hs next pend rxq ret from q = case q of
-    Open url mode -> AC.reply ret (Opened next) >> kLoop usvc me ((next, strcat url "", from) :: hs) (next + 1) pend rxq
+    EP.Timed until command -> AC.reply ret (Err "keyboard: timed reads require polling") >> kLoop usvc me hs next pend rxq
+  | Open url mode -> AC.reply ret (Opened next) >> kLoop usvc me ((next, strcat url "", from) :: hs) (next + 1) pend rxq
   | Read h n -> kRead usvc me hs next pend rxq ret h (EP.hFind hs h)
   | Write h v -> AC.reply ret (Err "/services/keyboard is read-only") >> kLoop usvc me hs next pend rxq
   | Close h -> kClose usvc me hs next pend rxq ret h.

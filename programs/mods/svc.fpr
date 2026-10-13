@@ -23,7 +23,8 @@
 # protocol, which System.qa's trampoline speaks from C.
 # ============================================================================
 
-EP = use "ep#f5a7c81840106100".
+EP = use "ep#c66ad65e68dd97f5".
+Wire = use "std/storage#a8f7ee14e1efae76".
 
 IoV = EP.IoV.
 IUnit = EP.IUnit. IInt = EP.IInt. IStr = EP.IStr. IFn = EP.IFn. IErr = EP.IErr.
@@ -49,7 +50,7 @@ parseNum s = EP.parseNum s.
 Caps = Type (Caps con me clk granted aid st).
 
 # the RPC envelope the storage actor speaks: (replyTo, tag, url, payload)
-Rpc = Type (Rpc me tag url pay).
+Rpc = Type (Rpc Int Int String String | TimedRpc Int Int Int Int String String).
 
 capCon (Caps c _ _ _ _ _) = c.
 capMe  (Caps _ m _ _ _ _) = m.
@@ -108,13 +109,7 @@ viaOp me ep want v =
 # storage actor is Err); the reply is the storage actor's bare Result
 storeRpc caps tag url pay = storeRpcAt (capMe caps) (capSt caps) tag url pay.
 storeRpcAt me st tag url pay =
-  case stHas st of
-    True -> (case send (stAct st) (Rpc me tag url pay) of
-      Err e -> Err e
-    | Ok u -> (case receiveFromRes me (stAct st) of
-        Err e -> Err e
-      | Ok reply -> resultKept reply))
-  | False -> Err "no disk".
+  if stHas st then Wire.call Wire.defaultMs me (stAct st) TimedRpc tag url pay else Err "no disk".
 
 resultKept reply =
   r = keep reply;
@@ -125,3 +120,8 @@ Svc = Struct {
   read  = fn caps url -> route caps url "read" IUnit,
   write = fn caps url v -> route caps url "write" v
 }.
+
+requestFields message = case message of
+    TimedRpc caller id until tag key payload -> ((caller, id, True), (until, (tag, key, payload)))
+  | Rpc caller tag key payload -> ((caller, 0, False), (Wire.now Unit + Wire.defaultMs * 1000, (tag, key, payload))).
+reply ret answer = Wire.reply ret answer.

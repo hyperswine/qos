@@ -1,7 +1,7 @@
 # A shutdown queued behind interrupted Files I/O must never start recovery.
-FS = use "../std/fs".
-B = use "../std/blockio".
-Native = use "../std/block".
+FS = use "../std/fs#84826bc9e8ddb4b5".
+B = use "../std/blockio#8b4ffa1467ca03a5".
+Native = use "../std/block#615ea5947fe13b00".
 blkTestStallNth : Int -> Int .
 blkTestBusy : Unit -> Int .
 ok (Ok _) = True.

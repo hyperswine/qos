@@ -1,0 +1,52 @@
+# Storage wire v2: Svc.TimedRpc caller correlation deadline tag key bytes.
+# One budget covers admission, queued time, recovery and all page operations.
+# A timed-out mutation is never replayed: its commit outcome may be unknown.
+AC = use "std/actor#201a0e9bf98a5154".
+defaultMs = 10000.
+now u = AC.nowUs u.
+deadline ms = AC.deadlineAfter ms.
+expired until = now Unit >= until.
+missing why = why == "no such file".
+mutates tag = tag == 2 or tag == 4 or tag == 6 or tag == 7.
+# Payload admission and opt-in aggregate inbox reservations. Charges include
+# a conservative message-slab floor/rounding; these do not cap OS arenas.
+Sys.spawnInbox : Int -> Int -> Int -> (Int -> a) -> Result Int String .
+inboxBytes = 16777216.
+spawn messages bytes entry = spawnOn (0 - 1) messages bytes entry.
+spawnOn hart messages bytes entry = case Sys.spawnInbox hart messages bytes entry of
+    Ok actor -> actor
+  | Err why -> error "storage actor admission: {why}".
+spawnResult hart messages bytes entry = Sys.spawnInbox hart messages bytes entry.
+maxKeyBytes = 1024.
+maxPayloadBytes = 4194304.
+validate key bytes = if strlen key > maxKeyBytes then Err "storage: key too large" else
+  if strlen bytes > maxPayloadBytes then Err "storage: payload too large" else Ok Unit.
+call ms me target make tag key bytes = case deadline ms of
+    Err why -> Err why
+  | Ok until -> callUntil until me target make tag key bytes.
+callUntil : unsafe Int -> Int -> Int -> (Int -> Int -> Int -> Int -> String -> String -> q) -> Int -> String -> String -> Result String String .
+callUntil until me target make tag key bytes = case callRawUntil until me target make tag key bytes of
+    Err why -> Err why
+  | Ok result -> result.
+callRawUntil : unsafe Int -> Int -> Int -> (Int -> Int -> Int -> Int -> String -> String -> q) -> Int -> String -> String -> Result (Result String String) String .
+callRawUntil until me target make tag key bytes =
+  case validate key bytes of
+    Err why -> Err why
+  | Ok u -> sendUntil until me target make tag key bytes.
+sendUntil until me target make tag key bytes =
+  id = Sys.nextId Unit;
+  if expired until then Err "storage service: deadline exceeded before admission" else
+  case send target (make me id until tag key bytes) of
+      Err why -> Err "storage service: {why}"
+    | Ok u -> case AC.awaitReplyUntil until me target id of
+          Err why -> Err "storage service: {uncertain tag why}"
+        | Ok result -> Ok result.
+uncertain tag why = if mutates tag and strIndexOf "outcome unknown" why < 0 then "{why} (outcome unknown)" else why.
+# Return address (actor, id, correlated); legacy id is unused.
+reply (from, id, correlated) result =
+  if correlated then AC.reply (from, id) result else send from result.
+# No disk and no record are distinct. Only this exact record-absence error
+# permits callers to select a built-in/default value.
+optional result = case result of
+    Ok bytes -> Ok bytes
+  | Err why -> if missing why then Ok "" else Err why.

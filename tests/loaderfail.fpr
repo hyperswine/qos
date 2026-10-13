@@ -8,21 +8,19 @@
 #: plugins tests/sysed1.fpr
 #: expect loaderfail: refused=rolled back live=[] bound=no replay=0 HOLDS
 
-FS = use "std/fs".
+FS = use "std/fs#84826bc9e8ddb4b5".
 LD = use "std/loader".
-SVC = use "../programs/mods/svc".
+SVC = use "../programs/mods/svc#75479fb6d5f34670".
 Rpc = SVC.Rpc.
 
 # forwards every request to `fs`, except an append to sys/live
 proxy : unsafe Int -> Int -> a .
 proxy fs me =
   m = receive me;
-  case m of Rpc replyTo tag url pay -> proxy2 fs me replyTo tag url pay.
-proxy2 : unsafe Int -> Int -> Int -> Int -> String -> String -> a .
-proxy2 fs me replyTo tag url pay =
-  case tag == 2 and url == "sys/live" of
-    True -> send replyTo (Err "data partition full") >> proxy fs me
-  | False -> send replyTo (FS.rpc me fs tag url pay) >> proxy fs me.
+  (ret, (until, (tag, url, pay))) = SVC.requestFields m;
+  result = if tag == 2 and url == "sys/live" then Err "data partition full" else FS.rpcUntil until me fs tag url pay;
+  _ = SVC.reply ret result;
+  proxy fs me.
 
 has s sub = strIndexOf sub s >= 0.
 

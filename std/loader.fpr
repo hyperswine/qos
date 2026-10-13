@@ -43,11 +43,11 @@
 #   f  = bind "editLine";
 # ============================================================================
 
-FS = use "fs".
-AC = use "std/actor".
+FS = use "fs#84826bc9e8ddb4b5".
+AC = use "std/actor#201a0e9bf98a5154".
 Plug = use "../programs/mods/plug".
 Manifest = use "../programs/mods/manifest".
-EP = use "../programs/mods/ep#f5a7c81840106100".
+EP = use "../programs/mods/ep#c66ad65e68dd97f5".
 
 Sys.pidOf : Int -> Int .
 
@@ -206,7 +206,7 @@ lReplay : unsafe Int -> Int -> Int -> List String -> (Int, Int) -> a .
 lReplay fs ns me chain from =
   r = FS.readLatest me fs "sys/live";
   case r of
-    Err e -> AC.reply from (Ok 0) >> lLoop fs ns me chain    # empty disk: nothing live
+    Err e -> AC.reply from (if FS.missing e then Ok 0 else Err "boot replay failed: {e}") >> lLoop fs ns me chain
   | Ok mf -> lRep fs ns me chain from (splitNl mf 0 0 Nil) 0.
 lRep : unsafe Int -> Int -> Int -> List String -> (Int, Int) -> List String -> Int -> a .
 lRep fs ns me chain from ids n = case ids of

@@ -27,7 +27,7 @@
 #   by hand: python3 tools/fprd.py &  then the usual qos-app + qosp run
 
 CP = use "std/compile".
-FS = use "std/fs".
+FS = use "std/fs#84826bc9e8ddb4b5".
 LD = use "std/loader".
 
 srcV1 = "editLine : String -> String .\neditLine s = s.\neditName u = \"self.v1\".".

@@ -1,5 +1,5 @@
 # Test kernel: does `error` inside a loaded process halt the machine?
-FS = use "std/fs".
+FS = use "std/fs#84826bc9e8ddb4b5".
 QAR = use "../programs/mods/qar".
 QaImg = use "../programs/mods/qaimg".
 

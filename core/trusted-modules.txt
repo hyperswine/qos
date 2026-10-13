@@ -53,3 +53,26 @@
 
 # Exact prior Files interface checked while updating the reusable block owner.
 ../.fpr/store/aeb97cb13f0aff84.fpr
+
+# Deadline-aware storage wire and endpoint client contracts.
+../std/storage.fpr
+../programs/mods/epdeadline.fpr
+# Reviewed Files endpoint lease owner and deadline-aware callback loop.
+../programs/mods/epservice.fpr
+# Exact prior Files interface inspected while minting deadline wire v4.
+../.fpr/store/cc97de9b0dbf26f7.fpr
+
+# Byte-identical immutable snapshot of the already trusted Svc source.
+../.fpr/store/5cdc09080d40a300.fpr
+# Exact prior actor interface, byte-identical to the reviewed source candidate.
+../.fpr/store/f361991e7cea6106.fpr
+# Exact prior storage interface, byte-identical to the reviewed source candidate.
+../.fpr/store/6b6dbf90d264ba8c.fpr
+# Exact prior deadline client, byte-identical to the reviewed source candidate.
+../.fpr/store/ddc83d81fd6bd669.fpr
+# Exact prior Files interface, byte-identical to the reviewed source candidate.
+../.fpr/store/4f83962b53879302.fpr
+# Exact prior lease owner, byte-identical to the reviewed source candidate.
+../.fpr/store/878fb2196060eb47.fpr
+# Current Svc snapshot, byte-identical to the trusted source above.
+../.fpr/store/75479fb6d5f34670.fpr

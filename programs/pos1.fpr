@@ -39,7 +39,7 @@
 unsafe program.
 
 MV = use "std/mvu".
-FS = use "std/fs".
+FS = use "std/fs#84826bc9e8ddb4b5".
 Services = use "mods/services".
 G  = use "std/view".
 FL = use "mods/fprlive".

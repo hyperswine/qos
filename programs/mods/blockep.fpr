@@ -1,9 +1,9 @@
 # Namespace adapter over the system-owned block protocol, with no Device handle.
 # Explicit grants authorize raw pages; no application gets such a grant by default.
 # Lifecycle administration stays with the direct protocol's creator.
-EP = use "ep#f5a7c81840106100".
-AC = use "std/actor#06e72a5feec8a6d4".
-B = use "std/blockio#2dcfa109efe528e5".
+EP = use "ep#c66ad65e68dd97f5".
+AC = use "std/actor#201a0e9bf98a5154".
+B = use "std/blockio#8b4ffa1467ca03a5".
 serve : unsafe Int -> Int -> a .
 Handle = Type (Handle Int String Int String).
 serve block me = loop block Nil me.
@@ -19,7 +19,8 @@ again : unsafe (Int, List Handle) -> Int -> a .
 again state me = (block, handles) = state; loop block handles me.
 step : unsafe Int -> List Handle -> Int -> Int -> Int -> EP.Ep -> List Handle .
 step block handles me from id q = case q of
-    EP.Open url mode -> opened handles from id url mode
+    EP.Timed until command -> _ = AC.reply (from, id) (Err "block endpoint: use the timed block protocol"); handles
+  | EP.Open url mode -> opened handles from id url mode
   | EP.Read h n -> result = readHandle block me from (find handles h from);
                    answered handles from id h result
   | EP.Write h value -> result = writeHandle block me from value (find handles h from);

@@ -3,12 +3,12 @@
 unsafe module.
 QS = use "qsys".
 GX = use "graphics".
-EP = use "ep".
+EP = use "ep#c66ad65e68dd97f5".
 AK = use "appkit".
 S2 = use "scene2d".
 ST = use "scrolltext".
-FS = use "std/fs".
-AC = use "std/actor".
+FS = use "std/fs#84826bc9e8ddb4b5".
+AC = use "std/actor#201a0e9bf98a5154".
 MV = use "std/mvu".
 
 Box = S2.Box. Lbl = S2.Lbl.
@@ -40,7 +40,7 @@ shortcuts = [Tile "clock" "Clock" "A moment of calm" (0 - 1),
 installed me st apps = case st == 0 of
     True -> Nil
   | False -> case FS.readLatest me st "apps/index" of
-      Err _ -> Nil
+      Err why -> _ = Sys.logAt (if FS.missing why then 1 else 2) "shell: app index unavailable ({why})"; Nil
     | Ok s -> diskTiles (AK.lines s) apps.
 diskTiles Nil apps = Nil.
 diskTiles (id :: rest) apps = diskTile id apps :: diskTiles rest apps.

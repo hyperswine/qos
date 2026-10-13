@@ -1,4 +1,4 @@
-N = use "../std/net#e014c97bab46e124".
+N = use "../std/net#464ca3ee0d89bc64".
 # Exercise the unchanged native net API with four simultaneous binary peers.
 unsafe program.
 loop : unsafe Int -> String -> String -> String -> String -> Int -> String .

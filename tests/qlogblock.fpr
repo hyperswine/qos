@@ -1,14 +1,14 @@
 # Routed page requests must not let Qlog continue a partial append with an
 # obsolete in-memory index. Restart rescans/rolls back on the same service.
-FS = use "../std/fs".
-B = use "../std/blockio".
-Native = use "../std/block".
-QL = use "../programs/mods/qlog#564887d89849d201".
+FS = use "../std/fs#84826bc9e8ddb4b5".
+B = use "../std/blockio#8b4ffa1467ca03a5".
+Native = use "../std/block#615ea5947fe13b00".
+QL = use "../programs/mods/qlog#7022992c8e4a9fba".
 blkTestStallNth : Int -> Int .
 blkTestNow : Unit -> Int .
 ok r = case r of Ok v -> True | Err why -> False.
 text r = case r of Ok v -> v | Err why -> "error".
-dead r = case r of Err why -> why == "storage service: dead actor" | Ok v -> False.
+dead r = case r of Err why -> strIndexOf "storage service: dead actor" why == 0 | Ok v -> False.
 metadata r = case r of Ok (B.Page bytes) -> QL.sbMeta bytes | Err why -> Err why | other -> Err "bad page".
 headOf r = case r of Ok (QL.Meta h v w c d sw mr) -> h | Err why -> -1.
 pending r = case r of Ok (QL.Meta h v w c d sw mr) -> w == 1 and c == 0 | Err why -> False.

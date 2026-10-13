@@ -1,0 +1,15 @@
+# Native virt composition of the shared correlated page protocol.
+IO = use "std/blockio#cddf1f9fda3868e0".
+blkBudgetGet : Unit -> (Int, Int, Int, Int) .
+blkBudgetSet : (Int, Int, Int, Int) -> Int .
+serve : unsafe Int -> Device -> Int .
+serve admin dev = IO.serveWith admin dev query update.
+serveOn : unsafe Int -> Int -> Device -> Int .
+serveOn hart admin dev = IO.serveWithOn hart admin dev query update.
+call me service q = IO.call me service q.
+query u = Ok (IO.Budget (blkBudgetGet Unit)).
+update policy = configured policy (blkBudgetSet policy).
+configured policy code = case code >= 0 of
+    True -> (v, us, probes, factor) = policy; Ok (IO.Budget (code, us, probes, factor))
+  | False -> Err (budgetError code).
+budgetError code = if code == -1 then "block: invalid budget" else if code == -2 then "block: device busy" else if code == -3 then "block: stale budget version" else "block: device offline".

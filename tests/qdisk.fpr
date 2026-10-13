@@ -14,7 +14,7 @@
 # exists.  URLs are boot-scoped ({boot}) so every run's own assertions
 # stay deterministic while the log underneath only ever grows.
 
-QL = use "../programs/mods/qlog".
+QL = use "../programs/mods/qlog#7022992c8e4a9fba".
 
 rep : String -> Int -> String .
 rep s n = repGo s n "".

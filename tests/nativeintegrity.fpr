@@ -1,5 +1,5 @@
 # Real placement gate: corrupted archives never reserve an image block.
-FS = use "std/fs".
+FS = use "std/fs#84826bc9e8ddb4b5".
 QAR = use "../programs/mods/qar".
 QI = use "../programs/mods/qaimg".
 Sys.checkImage : String -> List Int -> List Int -> String -> String -> Result Unit String.

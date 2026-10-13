@@ -1,5 +1,5 @@
 # Native virt composition of the shared correlated page protocol.
-IO = use "std/blockio#2dcfa109efe528e5".
+IO = use "std/blockio#8b4ffa1467ca03a5".
 blkBudgetGet : Unit -> (Int, Int, Int, Int) .
 blkBudgetSet : (Int, Int, Int, Int) -> Int .
 serve : unsafe Int -> Device -> Int .

@@ -1,0 +1,127 @@
+# ============================================================================
+# svc.fpr -- the compatibility surface: `Svc.read caps url` and `Svc.write
+# caps url v`, now ONE open, one operation, one close through the
+# namespace (mods/ep.fpr).
+#
+# There is no router here any more.  Every url an app names is resolved
+# by the namespace to the actor that claimed it (mods/sysep.fpr claims
+# System.qa's own at boot; any service may claim one), the operation goes
+# to that actor directly, and absence is data: an unregistered url, an
+# owner that refused, an owner that has ended are all IErr with the
+# reason.  Only an UNGRANTED url faults loudly (a bug, not a condition):
+# the capability check is the app's granted (url, mode) list, derived from
+# the manifest, checked here before the open -- and the namespace checks
+# its own grants again for a process launched under a pid.
+#
+# One url is rewritten on the way: "/services/storage/kv" becomes
+# "/services/storage/kv/<app id>" from the capability, so the kv stream an
+# app reaches is fixed by its id -- naming another app's stream is
+# structurally impossible for a routed caller.
+#
+# The value moved is IoV, one shape both directions (mods/ep.fpr).  The
+# Rpc envelope and storeRpcAt stay: they are the storage actor's own
+# protocol, which System.qa's trampoline speaks from C.
+# ============================================================================
+
+EP = use "ep#c66ad65e68dd97f5".
+Wire = use "std/storage#a8f7ee14e1efae76".
+
+IoV = EP.IoV.
+IUnit = EP.IUnit. IInt = EP.IInt. IStr = EP.IStr. IFn = EP.IFn. IErr = EP.IErr.
+
+# ---- module-local helpers ---------------------------------------------------
+
+strEq : unsafe String -> String -> Bool .
+strEq a b = EP.strEq a b.
+prefixOf : unsafe String -> String -> Bool .
+prefixOf p u = EP.prefixOf p u.
+segAfter : unsafe String -> Int -> String .
+segAfter url start = EP.segAfter url start.
+parseNum : unsafe String -> Int .
+parseNum s = EP.parseNum s.
+
+# ---- the caps value (System.qa's ABI) ---------------------------------------
+# A declared constructor, NOT a tuple: the ABI has Tup2/Tup3 only (a wider
+# tuple used to pack into a Tup2 header and silently truncate under any
+# header-arity-driven copy). Tids are content-addressed by (declaring
+# unit, type name), so every importer of THIS module -- System.qa and apps
+# compiled separately -- agrees on the tag.
+
+Caps = Type (Caps con me clk granted aid st).
+
+# the RPC envelope the storage actor speaks: (replyTo, tag, url, payload)
+Rpc = Type (Rpc Int Int String String | TimedRpc Int Int Int Int String String).
+
+capCon (Caps c _ _ _ _ _) = c.
+capMe  (Caps _ m _ _ _ _) = m.
+capClk (Caps _ _ k _ _ _) = k.
+capGranted (Caps _ _ _ g _ _) = g.
+capId  (Caps _ _ _ _ a _) = a.
+capSt  (Caps _ _ _ _ _ s) = s.
+# the st slot is a RECORD {has, act, uart, timer, ns, ...}: row-typed, so its
+# shape id hashes the FIELD NAMES only -- adding a service actor is a
+# new field, never an arity change rippling through every constructor
+stHas st = st.has.
+stAct st = st.act.
+stUart st = st.uart.
+stTimer st = st.timer.
+stNs st = st.ns.
+
+# is url covered by any granted (prefix, mode)?
+covered : unsafe List (String, String) -> String -> String -> Bool .
+covered g url want = EP.covered g url want.
+
+capBug url = error (strcat "capability fault: app used ungranted url " url).
+
+# ---- the surface: the gate, then the namespace ---------------------------------
+
+# the one gate: the grant, checked against the url the app named; then
+# open (the namespace resolves and authorizes), one operation, close.
+route : unsafe Caps -> String -> String -> IoV -> IoV .
+route caps url want v =
+  case covered (capGranted caps) url want of
+    False -> capBug url
+  | True -> viaNs caps (kvScope caps url) want v.
+
+# the app-scoped kv url: fixed by the capability's id
+kvScope : unsafe Caps -> String -> String .
+kvScope caps url = case strEq url "/services/storage/kv" of
+    True -> "/services/storage/kv/{capId caps}"
+  | False -> url.
+
+viaNs : unsafe Caps -> String -> String -> IoV -> IoV .
+viaNs caps url want v =
+  case EP.open (capMe caps) (stNs (capSt caps)) url want of
+    Err e -> IErr e
+  | Ok ep -> viaOp (capMe caps) ep want v.
+viaOp : unsafe Int -> (Int, Int) -> String -> IoV -> IoV .
+viaOp me ep want v =
+  r = case strEq want "write" of
+      True -> EP.write me ep v
+    | False -> EP.read me ep 0;
+  _ = EP.close me ep;
+  case r of
+    Ok out -> out
+  | Err e -> IErr e.
+
+# ---- the storage actor's own protocol ----------------------------------------
+# the actor-backed RPC: the send is checked and the wait answers (a dead
+# storage actor is Err); the reply is the storage actor's bare Result
+storeRpc caps tag url pay = storeRpcAt (capMe caps) (capSt caps) tag url pay.
+storeRpcAt me st tag url pay =
+  if stHas st then Wire.call Wire.defaultMs me (stAct st) TimedRpc tag url pay else Err "no disk".
+
+resultKept reply =
+  r = keep reply;
+  _ = drop reply;
+  r.
+
+Svc = Struct {
+  read  = fn caps url -> route caps url "read" IUnit,
+  write = fn caps url v -> route caps url "write" v
+}.
+
+requestFields message = case message of
+    TimedRpc caller id until tag key payload -> ((caller, id, True), (until, (tag, key, payload)))
+  | Rpc caller tag key payload -> ((caller, 0, False), (Wire.now Unit + Wire.defaultMs * 1000, (tag, key, payload))).
+reply ret answer = Wire.reply ret answer.

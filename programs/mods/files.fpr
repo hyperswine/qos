@@ -3,12 +3,12 @@
 # Only System (pid 0) may compact the whole log. Apps receive grants to
 # their record prefix; opening a record does not give them a raw disk.
 unsafe module.
-Endpoint = use "epservice".
-EP = use "ep".
-FS = use "std/fs#cc97de9b0dbf26f7".
-AC = use "std/actor".
+Endpoint = use "epservice#e8bce05a1ddf73db".
+EP = use "ep#c66ad65e68dd97f5".
+FS = use "std/fs#84826bc9e8ddb4b5".
+AC = use "std/actor#201a0e9bf98a5154".
 
-serve fs me = Endpoint.simple (readRecord fs) (writeRecord fs) me.
+serve fs me = Endpoint.simpleUntil (readRecordUntil fs) (writeRecordUntil fs) me.
 result (Ok text) = Ok (EP.IStr text).
 result (Err why) = Err why.
 
@@ -41,3 +41,23 @@ recordOp url =
 split text i | i < 0 = ("", "").
 split text i | charAt text i == 47 = (substr text 0 i, substr text (i + 1) (strlen text - i - 1)).
 split text i = split text (i - 1).
+
+readRecordUntil fs until me client url | EP.strEq url "/services/files/status" = Ok (EP.IInt (if fs == 0 then 0 else 1)).
+readRecordUntil 0 _ _ _ _ = Err "no disk".
+readRecordUntil fs until me client url =
+  (key, op) = recordOp url;
+  case op of
+      "latest" -> result (FS.rpcUntil until me fs 1 key "")
+    | "replay" -> result (FS.rpcUntil until me fs 3 key "")
+    | "stats" -> result (FS.rpcUntil until me fs 5 key "")
+    | other -> Err "unknown file read operation".
+writeRecordUntil 0 _ _ _ _ _ = Err "no disk".
+writeRecordUntil fs until me client url value | EP.strEq url "/services/files/compact" =
+  if Sys.pidOf client == 0 then result (FS.rpcUntil until me fs 6 "" "") else Err "compaction is system-only".
+writeRecordUntil fs until me client url (EP.IStr text) =
+  (key, op) = recordOp url;
+  case op of
+      "append" -> result (FS.rpcUntil until me fs 2 key text)
+    | "delete" -> result (FS.rpcUntil until me fs 4 key "")
+    | other -> Err "unknown file write operation".
+writeRecordUntil _ _ _ _ _ _ = Err "file writes require bytes".

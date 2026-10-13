@@ -307,8 +307,9 @@ for program in (() if args.network_only else ('fib', 'sha', 'pingpong', 'xpingpo
 for harts in (() if args.network_only else (1, 4)):
     name = f'main-soak-h{harts}'
     directory = f'{remote}/{name}'
-    ssh(f'mkdir -p {directory}; cp /var/lib/qosp/Main.disk {directory}/disk; '
-        f'cp /usr/share/qosp/app.qa {remote}/main.qa')
+    if not (args.bundle / 'main.qa').is_file() or not (args.bundle / 'Main.disk').is_file():
+        raise SystemExit('Main soak requires matching main.qa and Main.disk in the candidate bundle')
+    ssh(f'mkdir -p {directory}; cp {remote}/Main.disk {directory}/disk')
     case(name, 'main.qa', harts, stop=args.soak_seconds,
          deadline=args.soak_seconds + 12,
          contains=('Main Profile ready', 'qosp: shutdown complete'))

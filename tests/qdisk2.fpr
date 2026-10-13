@@ -24,7 +24,7 @@
 # URLs are boot-scoped ({boot}) so every run's own assertions stay
 # deterministic while the log underneath only ever grows.
 
-QL = use "../programs/mods/qlog".
+QL = use "../programs/mods/qlog#7022992c8e4a9fba".
 Meta = QL.Meta.
 
 okOr r alt = case r of Ok s -> s | Err e -> alt.

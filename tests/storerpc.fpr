@@ -1,7 +1,7 @@
 # Mixed traffic stays queued; storage send refusal and death are results.
-S = use "../programs/mods/svc".
+S = use "../programs/mods/svc#75479fb6d5f34670".
 Rpc = S.Rpc.
-store me = case receive me of Rpc ret tag url pay -> send ret (Ok "storage reply").
+store me = (ret, _) = S.requestFields (receive me); S.reply ret (Ok "storage reply").
 event target me = send target (Err "unrelated event").
 gone me = Unit.
 stuck me = _ = Sys.sleepUs 3000000; Unit.
@@ -24,6 +24,6 @@ main =
   _ = fill full 8;
   refused = S.storeRpcAt me {has = True, act = full} 3 "test" "";
   missing = S.storeRpcAt me {has = False, act = 0} 3 "test" "";
-  case good and isErr queued "unrelated event" and isErr no "dead actor" and isErr refused "mailbox full" and isErr missing "no disk" of
+  case good and isErr queued "unrelated event" and isErr no "storage service: dead actor" and isErr refused "storage service: mailbox full" and isErr missing "no disk" of
     True -> "storerpc: HOLDS"
   | False -> error "storerpc: FAILED".

@@ -19,9 +19,9 @@
 
 unsafe program.
 
-Endpoint = use "../programs/mods/epservice".
-EP = use "../programs/mods/ep".
-AC = use "std/actor".
+Endpoint = use "../programs/mods/epservice#e8bce05a1ddf73db".
+EP = use "../programs/mods/ep#c66ad65e68dd97f5".
+AC = use "std/actor#201a0e9bf98a5154".
 
 Open = EP.Open. Read = EP.Read. Write = EP.Write. Close = EP.Close.
 Opened = EP.Opened. Refused = EP.Refused.
@@ -41,7 +41,8 @@ eLoop me hs next pend =
   eMsg me hs next pend (from, id) q.
 eMsg : unsafe Int -> List (Int, String) -> Int -> (Int, Int, Int) -> (Int, Int) -> EP.Ep -> a .
 eMsg me hs next pend ret q = case q of
-    Open url mode -> AC.reply ret (Opened next) >> eLoop me ((next, "") :: hs) (next + 1) pend
+    EP.Timed until command -> AC.reply ret (Err "echo: timed held reads unsupported") >> eLoop me hs next pend
+  | Open url mode -> AC.reply ret (Opened next) >> eLoop me ((next, "") :: hs) (next + 1) pend
   | Write h v -> eWrite me hs next pend ret h v
   | Read h n -> eRead me hs next pend ret h
   | Close h -> eClose me hs next pend ret h.

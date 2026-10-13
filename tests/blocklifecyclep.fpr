@@ -1,7 +1,7 @@
 # Delayed Portable read: control remains responsive, queued write never starts,
 # cancellation leaves the HAL worker to drain, and service drain stays closed.
 unsafe program.
-B = use "../std/blockio".
+B = use "../std/blockio#8b4ffa1467ca03a5".
 err why (Err text) = why == text.
 err why other = False.
 client boss svc me =

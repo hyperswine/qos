@@ -1,4 +1,4 @@
-N = use "std/net#e014c97bab46e124".
+N = use "std/net#464ca3ee0d89bc64".
 # ============================================================================
 # fprlive.fpr -- FPRLive: LiveView over a real websocket, for FP-RISC apps
 # on the socket tier (qosp / virt).  The browser driver for a
@@ -49,7 +49,7 @@ MV = use "std/mvu".
 G  = use "std/view".
 LJ = use "std/livejs".
 Core = use "coreutil".
-AC = use "std/actor".
+AC = use "std/actor#201a0e9bf98a5154".
 
 STick = MV.STick.
 MQuit = MV.MQuit.

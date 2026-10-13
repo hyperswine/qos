@@ -18,7 +18,7 @@
 
 unsafe program.
 
-EP = use "../programs/mods/ep".
+EP = use "../programs/mods/ep#c66ad65e68dd97f5".
 
 Sys.ns : Int -> Int .
 Sys.caps : Int -> String .

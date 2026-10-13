@@ -54,11 +54,11 @@ getcRes r = case r of
 # mod-service URL; the app that asks for it never links the module's
 # name, only the (hash, fn) identity -- the FPRLive wire shape.
 TimeFmt = use "mods/timefmt#39dff276efd647a1".
-SVCM    = use "mods/svc".
-EP      = use "mods/ep".
+SVCM    = use "mods/svc#75479fb6d5f34670".
+EP      = use "mods/ep#c66ad65e68dd97f5".
 SysEp   = use "mods/sysep".
 AppsEP  = use "mods/appsep".
-AC      = use "std/actor".
+AC      = use "std/actor#201a0e9bf98a5154".
 QAR     = use "mods/qar".
 Manifest = use "mods/manifest".
 QaImg   = use "mods/qaimg".
@@ -71,13 +71,13 @@ IInt = EP.IInt.
 IStr = EP.IStr.
 IFn  = EP.IFn.
 IErr = EP.IErr.
-Net = use "std/net#e014c97bab46e124".
-Lifecycle = use "std/lifecycle#58d436d59e44b03f".
-FS = use "std/fs#cc97de9b0dbf26f7".
-Block = use "std/block#aa23ed9d50ed91c7".
-Endpoint = use "mods/epservice".
-BlockEP = use "mods/blockep#79e7fec72bb2452e".
-BlockIO = use "std/blockio#2dcfa109efe528e5".
+Net = use "std/net#464ca3ee0d89bc64".
+Lifecycle = use "std/lifecycle#6e7bea28db71815a".
+FS = use "std/fs#84826bc9e8ddb4b5".
+Block = use "std/block#615ea5947fe13b00".
+Endpoint = use "mods/epservice#e8bce05a1ddf73db".
+BlockEP = use "mods/blockep#bd295a609815dadd".
+BlockIO = use "std/blockio#8b4ffa1467ca03a5".
 UartM   = use "mods/uart".
 TimerM  = use "mods/timer".
 MK      = use "mods/matrixkpd".
@@ -221,10 +221,24 @@ bNot b = case b of True -> False | False -> True.
 # a QDEL (storage tag 4) on sys/perms/<aid> forgets one app.
 permsUrl aid = strcat "sys/perms/" aid.
 
+permsStored : unsafe Io4 -> String -> Result String String .
 permsStored io aid =
+  if not (stHas (ioSt io)) then Ok "" else
   case storeRpc1 (ioMe io) (ioSt io) 1 (permsUrl aid) "" of
-    Ok s -> s
-  | Err _ -> "".
+    Ok s -> if validPerms s then Ok s else Err "malformed permission decisions"
+  | Err why -> if why == "no such file" then Ok "" else Err why.
+validPerms : unsafe String -> Bool .
+validPerms s = validPermLines s 0 (strlen s).
+validPermLines : unsafe String -> Int -> Int -> Bool .
+validPermLines s i n = if i >= n then True else
+  j = plEnd s i n;
+  sp = findByte s 32 (i + 2);
+  if j - i < 5 or (charAt s i != 121 and charAt s i != 110) or charAt s (i + 1) != 32 or sp <= i + 2 or sp >= j then False else
+  validPermAtom s (i + 2) (sp - 1) and validPermAtom s (sp + 1) j and validPermLines s (j + 2) n.
+validPermAtom : unsafe String -> Int -> Int -> Bool .
+validPermAtom s i end = if i > end then True else
+  b = charAt s i;
+  b > 32 and b != 127 and validPermAtom s (i + 1) end.
 
 # end index (inclusive) of the line starting at i; \n excluded
 plEnd : unsafe String -> Int -> Int -> Int .
@@ -304,16 +318,18 @@ sayRem io url mode b =
   b.
 
 # persist the full set iff a prompt was shown this launch
-persistPerms : unsafe Io4 -> String -> String -> List (String, String) -> List Bool -> List (String, String) -> List Bool -> Unit .
+persistPerms : unsafe Io4 -> String -> String -> List (String, String) -> List Bool -> List (String, String) -> List Bool -> Result Unit String .
 persistPerms io aid stored req reqG opt optG =
   case or2 (permsNeedAsk stored req True) (permsNeedAsk stored opt False) of
-    False -> Unit
+    False -> Ok Unit
   | True -> persistPerms1 io aid req reqG opt optG.
-persistPerms1 : unsafe Io4 -> String -> List (String, String) -> List Bool -> List (String, String) -> List Bool -> Unit .
+persistPerms1 : unsafe Io4 -> String -> List (String, String) -> List Bool -> List (String, String) -> List Bool -> Result Unit String .
 persistPerms1 io aid req reqG opt optG =
-  _ = storeRpc1 (ioMe io) (ioSt io) 2 (permsUrl aid)
-        (strcat (rendPerms req reqG) (rendPerms opt optG));
-  Unit.
+  if not (stHas (ioSt io)) then Ok Unit else
+  case storeRpc1 (ioMe io) (ioSt io) 2 (permsUrl aid)
+        (strcat (rendPerms req reqG) (rendPerms opt optG)) of
+      Ok value -> Ok Unit
+    | Err why -> Err why.
 
 # ============================================================================
 # CAPABILITIES  -- what a launched app actually receives
@@ -476,7 +492,7 @@ kpdMap caps =
   case stHas (capSt caps) of
     False -> kpdDefaultMap
   | True -> kpdMap1 (storeRpc caps 1 "sys/pinmap.keypad" "").
-kpdMap1 r = case r of Ok s -> s | Err _ -> kpdDefaultMap.
+kpdMap1 r = case r of Ok s -> s | Err why -> if why == "no such file" then kpdDefaultMap else error "keypad map unavailable: {why}".
 kpdPins : unsafe String -> List Int .
 kpdPins s = kpParse s 0 (strlen s) Nil.
 kpNum : unsafe String -> Int .
@@ -539,9 +555,7 @@ capBug url = error (strcat "capability fault: app used ungranted service " url).
 # read a .qa by id: an image is a URL object, /apps/<id>.qa, served by
 # the /apps endpoint below ("" if absent everywhere)
 qaFor io id =
-  case AppsEP.read (ioMe io) (stNs (ioSt io)) id of
-    Ok qa -> qa
-  | Err _ -> "".
+  AppsEP.read (ioMe io) (stNs (ioSt io)) id.
 stNs st = st.ns.
 
 # the /apps endpoint's fetch: the DISK is the install target and overrides
@@ -555,16 +569,17 @@ qaFromDisk st me id =
   r = storeRpc1 me st 1 (strcat "apps/" (strcat id ".qa")) "";
   case r of
     Ok qa -> Ok qa
-  | Err _ -> Ok (Apps.read id).
+  | Err why -> if why == "no such file" then Ok (Apps.read id) else Err why.
 appsText url = "the app images: /apps/<id>.qa".
 
 launch : unsafe Io4 -> String -> Unit .
 launch io id =
   con = ioCon io;
-  qa = qaFor io id;
-  case strlen qa == 0 of
-    True -> putLn con (strcat "No such app: " id)
-  | False -> launchParsed io id qa (Manifest.parseQa qa).
+  case qaFor io id of
+    Err why -> putLn con "Cannot read app {id}: {why}"
+  | Ok qa -> case strlen qa == 0 of
+      True -> putLn con (strcat "No such app: " id)
+    | False -> launchParsed io id qa (Manifest.parseQa qa).
 
 ioCon (Io4 c _ _ _) = c.
 
@@ -578,10 +593,14 @@ launchParsed io id qa pr =
 # m = (aid, entry, req, opt, mode); ask required perms, gate, then run
 launchMan : unsafe Io4 -> String -> Manifest.Man -> Unit .
 launchMan io qa m =
+  case permsStored io (manId m) of
+    Err why -> putLn (ioCon io) "Cannot read permission decisions: {why}"
+  | Ok stored -> launchManStored io qa m stored.
+launchManStored : unsafe Io4 -> String -> Manifest.Man -> String -> Unit .
+launchManStored io qa m stored =
   con = ioCon io;
   aid = manId m;
   req = manReq m;
-  stored = permsStored io aid;
   _ = putLn con (strcat "Launching " aid);
   _ = putLn con "Required permissions:";
   reqG = askAllRem io stored True req;
@@ -598,7 +617,13 @@ launchGranted io qa m stored reqG =
   opt = manOpt m;
   _ = case opt of Nil -> Unit | _ :: _ -> putLn con "Optional permissions:";
   optG = askAllRem io stored False opt;
-  _ = persistPerms io (manId m) stored (manReq m) reqG opt optG;
+  case persistPerms io (manId m) stored (manReq m) reqG opt optG of
+    Err why -> putLn con "Cannot persist permission decisions; launch refused: {why}"
+  | Ok u -> launchPersisted io qa m reqG optG.
+launchPersisted : unsafe Io4 -> String -> Manifest.Man -> List Bool -> List Bool -> Unit .
+launchPersisted io qa m reqG optG =
+  con = ioCon io;
+  opt = manOpt m;
   granted = append (keepGranted (manReq m) reqG) (keepGranted opt optG);
   caps = mkCaps con (ioMe io) (ioClk io) granted (manId m) (ioSt io);
   runEntry con qa m caps.
@@ -851,11 +876,12 @@ appsListFrom caps =
   case stHas (capSt caps) of
     False -> splitLines (Apps.list Unit)
   | True -> appsListDisk caps (storeRpc caps 1 "apps/index" "").
-appsListDisk : unsafe o301 -> Result String p301 -> List String .
+appsListDisk : unsafe o301 -> Result String String -> List String .
 appsListDisk caps r =
   case r of
     Ok s -> splitLines s
-  | Err _ -> splitLines (Apps.list Unit).
+  | Err why -> if why == "no such file" then splitLines (Apps.list Unit) else
+      _ = Sys.logAt 2 "app index unavailable: {why}"; Nil.
 
 splitLines : unsafe String -> List String .
 splitLines s = slGo s 0 0 (strlen s) Nil.
@@ -1072,7 +1098,7 @@ main =
   block = Lifecycle.block lifecycle;
   _ = SysEp.claim me ns "/services/block" (AC.spawnWithOn diskHart (AC.Dynamic 64) (BlockEP.serve block));
   store = Lifecycle.files lifecycle;
-  _ = if store == 0 then Unit else Sys.bindStore store (Rpc store 0 "" "");
+  _ = if store == 0 then Unit else Sys.bindStore store (SVCM.TimedRpc store 0 0 0 "" "");
   st = {has = store != 0, act = store, uart = usvc, timer = tsvc, ns = ns};
   _ = SysEp.boot me ns usvc tsvc clk st;
   _ = SysEp.claim me ns "/apps" (AC.spawnWith (AC.Dynamic 64) (Endpoint.simple (AppsEP.images (qaImage st) appsText) EP.noWrite));

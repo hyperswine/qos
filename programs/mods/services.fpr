@@ -2,14 +2,15 @@
 # attach to Graphics.qa and access Files.qa through their namespace.
 # Clock capability remains the legacy MVU mtime handle for now.
 unsafe module.
-Endpoint = use "epservice".
-EP = use "ep".
-AC = use "std/actor".
-Lifecycle = use "std/lifecycle#58d436d59e44b03f".
-BlockEP = use "blockep#79e7fec72bb2452e".
-Files = use "files".
+Endpoint = use "epservice#e8bce05a1ddf73db".
+EP = use "ep#c66ad65e68dd97f5".
+AC = use "std/actor#201a0e9bf98a5154".
+Lifecycle = use "std/lifecycle#6e7bea28db71815a".
+BlockEP = use "blockep#bd295a609815dadd".
+Files = use "files#2b1a808ceef52eb5".
 GX = use "graphics".
 GL = use "glsvc".
+Wire = use "std/storage#a8f7ee14e1efae76".
 
 claim me ns url owner = case EP.register me ns url owner of
     Ok _ -> Unit
@@ -22,7 +23,7 @@ boot =
   block = Lifecycle.block lifecycle;
   _ = claim me ns "/services/block" (AC.spawnWith (AC.Dynamic 64) (BlockEP.serve block));
   fs = Lifecycle.files lifecycle;
-  _ = claim me ns "/services/files" (AC.spawnWith (AC.Dynamic 64) (Files.serve fs));
+  _ = claim me ns "/services/files" (Wire.spawn 8 Wire.inboxBytes (Files.serve fs));
   clk = reg32 (device "clint") 49144;
   {ns = ns, mt = clk, lifecycle = lifecycle}.
 ready hub = case Lifecycle.files hub.lifecycle == 0 of True -> Unit | False -> Sys.ready Unit.

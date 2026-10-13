@@ -1,9 +1,9 @@
 # Portable/native namespace adapter: raw page grants are explicit and bounded.
 unsafe program.
-B = use "../std/blockio".
-BlockEP = use "../programs/mods/blockep".
-EP = use "../programs/mods/ep".
-AC = use "std/actor".
+B = use "../std/blockio#8b4ffa1467ca03a5".
+BlockEP = use "../programs/mods/blockep#bd295a609815dadd".
+EP = use "../programs/mods/ep#c66ad65e68dd97f5".
+AC = use "std/actor#201a0e9bf98a5154".
 S = use "std/string".
 ok (Ok value) = True.
 ok other = False.

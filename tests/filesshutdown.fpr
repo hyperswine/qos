@@ -1,7 +1,7 @@
 # Creator-only quiesce, ordered logical drain, permanent refusal and persistence.
 unsafe program.
-FS = use "../std/fs".
-B = use "../std/blockio".
+FS = use "../std/fs#84826bc9e8ddb4b5".
+B = use "../std/blockio#8b4ffa1467ca03a5".
 ok (Ok _) = True.
 ok (Err _) = False.
 err text (Err why) = why == text.

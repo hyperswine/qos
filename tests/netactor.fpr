@@ -1,7 +1,7 @@
 # Correlated callers, creator stop and permanent dead-owner refusal.
 unsafe program.
-N = use "../std/net#e014c97bab46e124".
-AC = use "std/actor#06e72a5feec8a6d4".
+N = use "../std/net#464ca3ee0d89bc64".
+AC = use "std/actor#201a0e9bf98a5154".
 netRxFrame : Unit -> String .
 client boss me = owner = case N.start me of Ok a -> a | Err why -> error why;
   denied = case N.call me owner N.Stop of Err why -> why == "net: stop requires administrator" | other -> False;

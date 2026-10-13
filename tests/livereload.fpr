@@ -4,7 +4,7 @@
 #: plugins tests/mathv1.fpr tests/mathv2.fpr tests/mathbad.fpr tests/mathother.fpr tests/mathtypebad.fpr tests/mathcontractbad.fpr tests/mathboundbad.fpr tests/mathopaquebad.fpr
 #: expect livereload: v1: 20 22 | v2 (same actor, acc kept): 30 | bad: refused | still v2: 36 | acc=108
 unsafe program.
-FS = use "std/fs".
+FS = use "std/fs#84826bc9e8ddb4b5".
 LD = use "std/loader".
 LR = use "std/mvureload".
 MV = use "std/mvu".

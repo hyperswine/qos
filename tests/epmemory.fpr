@@ -2,9 +2,9 @@
 # The old pinned client also verifies that service changes preserve wire tags.
 #: expect epmemory: HOLDS
 unsafe program.
-EP = use "../programs/mods/epservice".
-Wire = use "ep#f5a7c81840106100".
-AC = use "std/actor".
+EP = use "../programs/mods/epservice#e8bce05a1ddf73db".
+Wire = use "ep#c66ad65e68dd97f5".
+AC = use "std/actor#201a0e9bf98a5154".
 freeKiB u = case Sys.memInfo 0 of _ :: f :: _ -> f | _ -> 0.
 must r = case r of Ok v -> v | Err e -> error "epmemory: {e}".
 check yes why = if yes then Unit else error "epmemory: {why}".

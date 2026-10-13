@@ -1,5 +1,5 @@
 # A one-hart disk wait must let another actor send before it completes.
-A = use "std/actor".
+A = use "std/actor#201a0e9bf98a5154".
 ticker : Int -> Int -> Unit .
 ticker parent self = _ = A.sendSure self parent 77; Unit.
 main : Unit .

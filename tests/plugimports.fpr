@@ -14,7 +14,7 @@
 # Expected: "plugimports: plugmini under a second shell: 40+2=42;
 # plugneeds: the plugin needs ..., which this app does not export HOLDS"
 
-QL = use "../programs/mods/qlog".
+QL = use "../programs/mods/qlog#7022992c8e4a9fba".
 Plug = use "../programs/mods/plug".
 
 has s sub = strIndexOf sub s >= 0.

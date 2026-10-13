@@ -1,14 +1,14 @@
 #: plugins tests/mathv1.fpr tests/mathv2.fpr
 #: expect publication: old=20 new=30 rows=2 owned=stopped PASS
 unsafe program.
-FS = use "std/fs".
+FS = use "std/fs#84826bc9e8ddb4b5".
 P = use "std/qpublication".
 C = use "std/reloadcatalog".
 LR = use "std/mvureload".
 Plug = use "../programs/mods/plug".
 MV = use "std/mvu".
-SVC = use "../programs/mods/svc".
-AC = use "std/actor".
+SVC = use "../programs/mods/svc#75479fb6d5f34670".
+AC = use "std/actor#201a0e9bf98a5154".
 S = use "std/string".
 Sys.alive : Int -> Bool .
 ok r = case r of Ok x -> x | Err why -> error why.
@@ -35,8 +35,8 @@ info from to version = {name = "math", from = from, to = to, version = version}.
 # A Files proxy injects failures at each publication boundary.
 proxy fs mode me =
   m = receive me;
-  SVC.Rpc caller tag url bytes = m;
-  _ = send caller (proxyReply fs mode me tag url bytes);
+  (ret, (until, (tag, url, bytes))) = SVC.requestFields m;
+  _ = SVC.reply ret (proxyReply fs mode me tag url bytes);
   proxy fs mode me.
 proxyReply fs mode me tag url bytes = case mode of
     "read" -> Err "injected storage read failure"

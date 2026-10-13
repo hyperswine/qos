@@ -20,22 +20,25 @@ unsafe program.
 
 QS = use "../programs/mods/qsys".
 AK = use "../programs/mods/appkit".
-EP = use "../programs/mods/ep".
-AC = use "std/actor".
-SVC = use "../programs/mods/svc".
+EP = use "../programs/mods/ep#c66ad65e68dd97f5".
+AC = use "std/actor#201a0e9bf98a5154".
+SVC = use "../programs/mods/svc#75479fb6d5f34670".
 Rpc = SVC.Rpc.
 
 # storage whose replay answers `body` and whose append answers `ap`
 store : unsafe String -> Result String String -> Int -> a .
 store body ap me =
   m = receive me;
-  case m of Rpc replyTo tag url pay ->
-    (case tag == 3 of
-       True -> send replyTo (Ok body) >> store body ap me
-     | False -> send replyTo ap >> store body ap me).
+  (ret, (until, (tag, url, pay))) = SVC.requestFields m;
+  _ = SVC.reply ret (if tag == 3 then Ok body else ap);
+  store body ap me.
 
 # answers one replay, then ends
-storeOnce me = case receive me of Rpc replyTo tag url pay -> send replyTo (Ok "abc").
+storeOnce me = (ret, _) = SVC.requestFields (receive me); SVC.reply ret (Ok "abc").
+uncertainStore body me =
+  (ret, (until, (tag, url, pay))) = SVC.requestFields (receive me);
+  _ = SVC.reply ret (if tag == 3 then Ok body else Err "storage service: deadline exceeded (outcome unknown)");
+  uncertainStore (if tag == 2 then "abcX" else body) me.
 
 # ends at once
 gone me = Unit.
@@ -110,6 +113,12 @@ main =
   r6 = AK.vfsRead me ns "/tmp/e";
   ev = receive me;
   ok6 = expect "reply with an event queued" r6 "note" and expect "the event" ev "tick";
-  case ok1 and ok2 and ok3 and ok4 and ok5 and ok6 of
+  st7 = spawn (uncertainStore "abc");
+  _ = fileAt me ns st7 "/tmp/f";
+  w7 = AK.vfsWrite me ns "/tmp/f" "X";
+  r7 = AK.vfsRead me ns "/tmp/f";
+  ok7 = expect "unknown write" w7 "write failed: storage service: deadline exceeded (outcome unknown)"
+    and expect "reloaded unknown outcome" r7 "abcX";
+  case ok1 and ok2 and ok3 and ok4 and ok5 and ok6 and ok7 of
     True -> "qsysfail: HOLDS"
   | False -> "qsysfail: FAILED".

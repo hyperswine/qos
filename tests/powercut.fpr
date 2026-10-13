@@ -5,8 +5,8 @@
 # record every 50 ms and report each commit.  The check kills the machine at
 # random moments and asserts the next boot recovers at least every record it
 # saw committed.
-Lifecycle = use "std/lifecycle".
-FS = use "std/fs".
+Lifecycle = use "std/lifecycle#6e7bea28db71815a".
+FS = use "std/fs#84826bc9e8ddb4b5".
 S = use "std/string".
 L = use "std/list".
 O = use "std/option".

@@ -3,7 +3,7 @@
 unsafe program.
 GX = use "../programs/mods/graphics".
 MV = use "std/mvu".
-AC = use "std/actor".
+AC = use "std/actor#201a0e9bf98a5154".
 freeKiB u = case Sys.memInfo 0 of _ :: f :: _ -> f | _ -> 0.
 init label w h = (w, h).
 mesh label name text = 0.

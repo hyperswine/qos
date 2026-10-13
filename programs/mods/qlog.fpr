@@ -77,29 +77,39 @@ unsafe module.
 # ============================================================================
 
 # ---- format helpers over the shared pure core -------------------------------
-SVC = use "svc#0c925c3cb42f0f77".
+SVC = use "svc#75479fb6d5f34670".
 Core = use "coreutil#00b87d7442c69e95".
 Rpc = SVC.Rpc.
+Wire = use "std/storage#a8f7ee14e1efae76".
 
 # Page-source choice is explicit. Raw access is for standalone tools/tests;
 # all storage actors and native bootstrap use a routed block service.
-B = use "std/blockio#2dcfa109efe528e5".
-AC = use "std/actor#06e72a5feec8a6d4".
-PageSource = Type (Direct Device | Routed Int).
+B = use "std/blockio#8b4ffa1467ca03a5".
+AC = use "std/actor#201a0e9bf98a5154".
+PageSource = Type (Direct Device | Routed Int | Bounded Int Int).
+baseSource source = case source of Bounded service until -> Routed service | other -> other.
+withDeadline source until = case source of
+    Direct dev -> Direct dev
+  | Routed service -> Bounded service until
+  | Bounded service old -> Bounded service until.
 direct dev = Direct dev.
 routed service = Routed service.
 pageRead source p = case source of
     Direct dev -> blkRead dev p
-  | Routed service -> readReply (B.call (myself 0) service (B.Read p)).
+  | Routed service -> readReply (B.call (myself 0) service (B.Read p))
+  | Bounded service until -> readReply (B.callUntil until (myself 0) service (B.Read p)).
 pageWrite source p bytes = case source of
     Direct dev -> blkWrite dev p bytes
-  | Routed service -> writeReply (B.call (myself 0) service (B.Write p bytes)).
+  | Routed service -> writeReply (B.call (myself 0) service (B.Write p bytes))
+  | Bounded service until -> writeReply (B.callUntil until (myself 0) service (B.Write p bytes)).
 pageCount source = case source of
     Direct dev -> blkPages dev
-  | Routed service -> countReply (B.call (myself 0) service B.Capacity).
+  | Routed service -> countReply (B.call (myself 0) service B.Capacity)
+  | Bounded service until -> countReply (B.callUntil until (myself 0) service B.Capacity).
 pageFlush source = case source of
     Direct dev -> flushDirect (blkFlush 0)
-  | Routed service -> flushReply (B.call (myself 0) service B.Flush).
+  | Routed service -> flushReply (B.call (myself 0) service B.Flush)
+  | Bounded service until -> flushReply (B.callUntil until (myself 0) service B.Flush).
 flushDirect n = case n == 0 of True -> True | False -> case n == 1 of True -> False | False -> stop "flush failed".
 flushReply r = case r of Ok (B.Flushed durable) -> durable | Err why -> stop why | other -> stop "invalid flush reply".
 durableFlush dev = case pageFlush dev of True -> Unit | False -> stop "durable image requires a flush-capable block service".
@@ -1088,13 +1098,17 @@ icStep r url e =
 # Compatibility composition for callers opening their own disk. Native boot
 # supplies the already-created service through actorWith instead.
 actor dev me = block = B.serve me dev; actorWith (routed block) me.
-actorWith dev me =
+actorWith source me = case Wire.deadline Wire.defaultMs of
+    Err why -> stop why
+  | Ok until -> actorWithUntil until source me.
+actorWithUntil until source me = actorStart (withDeadline source until) me.
+actorStart dev me =
   head = Sys.arena (fn u -> ensure dev);
   _ = Sys.arena (fn u -> verifyDurable dev head);
   idx = Sys.arena (fn u -> scanIdxE dev head);
   # Reclaim boot temporaries before publishing the first reply. Thereafter
   # reclaim adaptively: copying a large index on every read is unnecessary.
-  aAgain me (AC.tidied me 1048576 (AC.boundary me (dev, head, idx))).
+  aAgain me (AC.tidied me 1048576 (AC.boundary me (baseSource dev, head, idx))).
 aLoop : unsafe PageSource -> Int -> Int -> List Ent -> AC.Tidy -> zz .
 aLoop dev me head idx tidy = aAgain me (AC.tidy me ((dev, head, idx), tidy)).
 aAgain : unsafe Int -> ((PageSource, Int, List Ent), AC.Tidy) -> zz .
@@ -1103,29 +1117,38 @@ aAgain me fresh =
   borrowed = receive me;
   m = keep borrowed;
   _ = drop borrowed;
-  case m of Rpc replyTo tag url pay -> aServe dev me head idx tidy replyTo tag url pay.
-aServe : unsafe PageSource -> Int -> Int -> List Ent -> AC.Tidy -> Int -> Int -> String -> String -> zz .
+  case m of
+      SVC.TimedRpc from id until tag url pay -> aTimed (baseSource dev) me head idx tidy (from, id, True) until tag url pay
+    | SVC.Rpc replyTo tag url pay -> case Wire.deadline Wire.defaultMs of
+          Err why -> stop why
+        | Ok until -> aTimed (baseSource dev) me head idx tidy (replyTo, 0, False) until tag url pay.
+aTimed dev me head idx tidy ret until tag url pay =
+  if Wire.expired until then _ = Wire.reply ret (Err "storage: deadline exceeded before execution"); aLoop dev me head idx tidy
+  else case Wire.validate url pay of
+      Err why -> _ = Wire.reply ret (Err why); aLoop dev me head idx tidy
+    | Ok u -> aServe (withDeadline dev until) me head idx tidy ret tag url pay.
+aServe : unsafe PageSource -> Int -> Int -> List Ent -> AC.Tidy -> (Int, Int, Bool) -> Int -> String -> String -> zz .
 aServe dev me head idx tidy replyTo tag url pay =
   case tag of
-    1 -> send replyTo (idxLatestE dev idx url)           >> aLoop dev me head idx tidy
+    1 -> Wire.reply replyTo (idxLatestE dev idx url)           >> aLoop dev me head idx tidy
   | 2 -> aAppend dev me head idx tidy replyTo "QREC" url pay
-  | 3 -> send replyTo (Ok (idxReplayE dev idx url ""))   >> aLoop dev me head idx tidy
+  | 3 -> Wire.reply replyTo (Ok (idxReplayE dev idx url ""))   >> aLoop dev me head idx tidy
   | 4 -> aAppend dev me head idx tidy replyTo "QDEL" url ""
-  | 5 -> send replyTo (Ok (aStats dev head idx url))     >> aLoop dev me head idx tidy
+  | 5 -> Wire.reply replyTo (Ok (aStats dev head idx url))     >> aLoop dev me head idx tidy
   | 6 -> aCompact dev me head tidy replyTo
   | 7 -> aAppendBulk dev me head idx tidy replyTo pay
-  | 8 -> send replyTo (verifyLog dev head)               >> aLoop dev me head idx tidy
-  | _ -> send replyTo (Err "storage: unknown request tag") >> aLoop dev me head idx tidy.
+  | 8 -> Wire.reply replyTo (verifyLog dev head)               >> aLoop dev me head idx tidy
+  | _ -> Wire.reply replyTo (Err "storage: unknown request tag") >> aLoop dev me head idx tidy.
 aStats dev head idx url = aStats2 head idx url (metaOr dev head).
 aStats2 head idx url m =
   Meta h v w c d sw mr = m;
   "head={head} url-records={idxCountE idx url} v={v} w={w} c={c} data-end={d} swap-head={sw} merkle={mr} pool-bytes={heapUsed Unit}".
-aAppend : unsafe PageSource -> Int -> Int -> List Ent -> AC.Tidy -> Int -> String -> String -> String -> zz .
+aAppend : unsafe PageSource -> Int -> Int -> List Ent -> AC.Tidy -> (Int, Int, Bool) -> String -> String -> String -> zz .
 aAppend dev me head idx tidy replyTo tag url pay =
   case appendRes dev head tag url pay of
-    Err e -> send replyTo (Err e) >> aLoop dev me head idx tidy
+    Err e -> Wire.reply replyTo (Err e) >> aLoop dev me head idx tidy
   | Ok h2 -> aAppendOk dev me head idx tidy replyTo tag url pay h2.
-aAppendOk : unsafe PageSource -> Int -> Int -> List Ent -> AC.Tidy -> Int -> String -> String -> String -> Int -> zz .
+aAppendOk : unsafe PageSource -> Int -> Int -> List Ent -> AC.Tidy -> (Int, Int, Bool) -> String -> String -> String -> Int -> zz .
 aAppendOk dev me head idx tidy replyTo tag url pay h2 =
   # OWN COPY of the url before it goes into the long-lived index: the
   # message's url string lives in the SENDER's slab -- freed when that
@@ -1137,23 +1160,23 @@ aAppendOk dev me head idx tidy replyTo tag url pay h2 =
   idx2 = case strEq tag "QDEL" of
            True -> dropUrlE idx url
          | False -> append idx ((Ent u2 head (strlen pay) 0 (strlen pay)) :: Nil);
-  _ = send replyTo (Ok "");
+  _ = Wire.reply replyTo (Ok "");
   aLoop dev me h2 idx2 tidy.
-aAppendBulk : unsafe PageSource -> Int -> Int -> List Ent -> AC.Tidy -> Int -> String -> zz .
+aAppendBulk : unsafe PageSource -> Int -> Int -> List Ent -> AC.Tidy -> (Int, Int, Bool) -> String -> zz .
 aAppendBulk dev me head idx tidy replyTo pay =
   case appendPackedRes dev head pay (bulkCntAll pay) of
-    Err e -> send replyTo (Err e) >> aLoop dev me head idx tidy
+    Err e -> Wire.reply replyTo (Err e) >> aLoop dev me head idx tidy
   | Ok h2 -> aAppendBulkOk dev me head idx tidy replyTo pay h2.
-aAppendBulkOk : unsafe PageSource -> Int -> Int -> List Ent -> AC.Tidy -> Int -> String -> Int -> zz .
+aAppendBulkOk : unsafe PageSource -> Int -> Int -> List Ent -> AC.Tidy -> (Int, Int, Bool) -> String -> Int -> zz .
 aAppendBulkOk dev me head idx tidy replyTo pay h2 =
   # bulkEnts rebuilds each chunk url via takeWord/strcat, so the index
   # entries own their strings in THIS actor's slab (same discipline as
   # aAppendOk's u2)
   idx2 = append idx (bulkEnts pay head (strlen pay));
-  _ = send replyTo (Ok "");
+  _ = Wire.reply replyTo (Ok "");
   aLoop dev me h2 idx2 tidy.
-aCompact : unsafe PageSource -> Int -> Int -> AC.Tidy -> Int -> zz .
+aCompact : unsafe PageSource -> Int -> Int -> AC.Tidy -> (Int, Int, Bool) -> zz .
 aCompact dev me head tidy replyTo =
   case compactRes dev head of
-    Err why -> send replyTo (Err why) >> aLoop dev me head (scanIdxE dev head) tidy
-  | Ok h2 -> send replyTo (Ok "compacted head={h2}") >> aLoop dev me h2 (scanIdxE dev h2) tidy.
+    Err why -> Wire.reply replyTo (Err why) >> aLoop dev me head (scanIdxE dev head) tidy
+  | Ok h2 -> Wire.reply replyTo (Ok "compacted head={h2}") >> aLoop dev me h2 (scanIdxE dev h2) tidy.

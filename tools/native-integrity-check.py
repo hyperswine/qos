@@ -79,7 +79,7 @@ def native_checks(out):
     actors_abi=re.search(r'^#define FPR_PLANE_ACTORS_ABI (\d+)u',(FPRISC/'runtime/fpr.h').read_text(),re.M)[1].encode()
     memory_abi=re.search(r'^#define FPR_PLANE_MEMORY_ABI (\d+)u',(FPRISC/'runtime/fpr.h').read_text(),re.M)[1].encode()
     assert b'planeactors '+actors_abi+b'\nplanememory '+memory_abi+b'\n' in sections['LOAD'], sections['LOAD']
-    changed=dict(sections);changed['LOAD']=changed['LOAD'].replace(b'planeactors '+actors_abi+b'\n',b'planeactors 999\n');variants['OldActors']=changed
+    changed=dict(sections);changed['LOAD']=changed['LOAD'].replace(b'planeactors '+actors_abi+b'\n',(b'planeactors 2\n' if actors_abi == b'3' else b'planeactors 999\n'));variants['OldActors']=changed
     changed=dict(sections);changed['LOAD']=changed['LOAD'].replace(b'planememory '+memory_abi+b'\n',b'planememory 999\n');variants['OldMemory']=changed
     if actors_abi != b'1':
         changed=dict(sections);changed['LOAD']=changed['LOAD'].replace(b'planeactors '+actors_abi+b'\n',b'planeactors 1\n');variants['LegacyActors']=changed

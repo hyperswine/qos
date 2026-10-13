@@ -25,6 +25,9 @@ def main():
     ap.add_argument('--known-hosts', required=True)
     ap.add_argument('--host-key-alias')
     ap.add_argument('--remote-dir', required=True)
+    ap.add_argument('--harts', type=int, choices=(1, 4), default=4)
+    ap.add_argument('--reliability-probe', action='store_true',
+                    help='require tests/mainreliability.fpr; F11 checks real reload and a live hung storage peer')
     ap.add_argument('--seconds', type=int, default=1800)
     ap.add_argument('--interval', type=int, default=30)
     ap.add_argument('--max-growth-mib', type=int, default=16)
@@ -57,7 +60,8 @@ def main():
     ssh('set -e\nmkdir '+quote(work)+' '+quote(store)+'\ncp '+quote(base+'/Main.disk')+' '+quote(store+'/Main.disk'))
     result = {'remote_dir': base, 'work': work, 'store': store, 'bundle_hashes': hashes,
               'production_before': production, 'boots': [], 'memory_probe': a.memory_probe,
-              'arena_limit_mib': a.arena_mib, 'scope':
+              'arena_limit_mib': a.arena_mib, 'harts': a.harts,
+              'reliability_probe': a.reliability_probe, 'scope':
               'isolated Main UI workload and two graceful shutdown paths; residency and optional allocator reservations/root counts, not reachability proof'}
     (a.output/'started.json').write_text(json.dumps(result, indent=2)+'\n')
 
@@ -84,7 +88,7 @@ def main():
     def start(boot, seconds, stop):
         ready, keys = work+f'/ready{boot}', work+f'/keys{boot}'
         command = ('cd '+quote(work)+'\nmkfifo '+quote(keys)+'\n'
-                   + f'FPR_HARTS=4 FPR_HEAP_MB=256 QOSP_ARENA_MB={a.arena_mib} FPR_PORT=0 FPR_EVDEV='+quote(keys)
+                   + f'FPR_HARTS={a.harts} FPR_HEAP_MB=256 QOSP_ARENA_MB={a.arena_mib} FPR_PORT=0 FPR_EVDEV='+quote(keys)
                    + ' QOSP_READY_FILE='+quote(ready)+' FPR_DISK='+quote(store+'/Main.disk')
                    + ' '+quote(base+'/runner')+f' {seconds+60} {stop} '+quote(work+f'/boot{boot}.log')
                    + ' '+quote(base+'/qosp-es')+' --yes '+quote(base+'/main.qa')
@@ -128,6 +132,9 @@ def main():
                 wait_log(1, 'shell: open browser', cycles+1)
                 for code in (108, 28, 1, 104): key(1, code)
                 cycles += 1
+                if a.reliability_probe:
+                    key(1, 87)
+                    wait_log(1, 'main-reliability: reload=20/30/20 storage-fault=bounded state=kept', cycles)
                 logical = None
                 if a.memory_probe:
                     key(1, 88)

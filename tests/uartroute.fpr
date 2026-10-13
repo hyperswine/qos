@@ -11,11 +11,11 @@
 
 unsafe program.
 
-SV = use "../programs/mods/svc".
-EP = use "../programs/mods/ep".
+SV = use "../programs/mods/svc#75479fb6d5f34670".
+EP = use "../programs/mods/ep#c66ad65e68dd97f5".
 SE = use "../programs/mods/sysep".
 UM = use "../programs/mods/uart".
-AC = use "std/actor".
+AC = use "std/actor#201a0e9bf98a5154".
 
 Caps = SV.Caps.
 Svc = SV.Svc.

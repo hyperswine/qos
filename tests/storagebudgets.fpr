@@ -1,0 +1,57 @@
+# Service-owned limits: page bytes, pending count, handles and finite helpers.
+unsafe program.
+B = use "std/blockio#8b4ffa1467ca03a5".
+FS = use "std/fs#84826bc9e8ddb4b5".
+AC = use "std/actor#201a0e9bf98a5154".
+W = use "std/storage#a8f7ee14e1efae76".
+EP = use "../programs/mods/ep#c66ad65e68dd97f5".
+Endpoint = use "../programs/mods/epservice#e8bce05a1ddf73db".
+S = use "std/string".
+ok (Ok value) = value.
+ok (Err why) = error why.
+check yes why = if yes then Unit else error "storagebudgets: {why}".
+err (Err why) want = why == want.
+err _ _ = False.
+rd until me client url = Ok (EP.IStr "value").
+wr until me client url value = Ok EP.IUnit.
+openN me service 0 = Unit.
+openN me service n =
+  _ = case AC.call me service (EP.Open "/test" "read") of Ok (EP.Opened h) -> Unit | other -> error "handle refused early";
+  openN me service (n - 1).
+closeN me service 0 = Unit.
+closeN me service n = _ = AC.call me service (EP.Close n); closeN me service (n - 1).
+stranger boss service me = _ = AC.call me service (EP.Close 1); _ = send boss True; Unit.
+cancelN me service 0 = Unit.
+cancelN me service n =
+  token = ok (B.submit me service (B.Read 0));
+  _ = check (case B.call me service (B.Cancel token) of Ok (B.Cancelled True) -> True | other -> False) "cancel active helper";
+  _ = check (err (B.await me service token) "block: request cancelled (outcome unknown)") "cancel completion";
+  cancelN me service (n - 1).
+refusedN me service 0 = Unit.
+refusedN me service n =
+  _ = Sys.arena (fn u -> check (err (B.call me service (B.Read 0)) "block: helper restart budget exhausted") "helper quota not latched");
+  refusedN me service (n - 1).
+freeKiB u = case Sys.memInfo 0 of _ :: f :: _ -> f | _ -> 0.
+main =
+  me = myself 0;
+  endpoint = spawn (Endpoint.simpleUntil rd wr);
+  _ = openN me endpoint 64;
+  _ = check (case AC.call me endpoint (EP.Open "/overflow" "read") of Ok (EP.Refused why) -> why == "endpoint: handle budget exhausted" | other -> False) "handle quota";
+  intruder = spawn (stranger me endpoint);
+  _ = receiveFrom me intruder;
+  _ = check (case AC.call me endpoint (EP.Read 1 0) of Ok (Ok (EP.IStr text)) -> text == "value" | other -> False) "foreign close removed lease";
+  _ = closeN me endpoint 64;
+  _ = openN me endpoint 1;
+  _ = kill endpoint;
+  _ = check (err (W.validate (S.repeat 1025 "k") "") "storage: key too large") "key quota";
+  _ = check (err (W.validate "key" (S.repeat 4194305 "x")) "storage: payload too large") "payload quota";
+  service = B.serve me (device "blk");
+  _ = check (err (B.call me service (B.Write 0 (S.repeat 4097 "x"))) "block: payload exceeds one page") "page admission quota";
+  _ = cancelN me service 16;
+  _ = check (err (B.call me service (B.Read 0)) "block: helper restart budget exhausted") "helper quota";
+  _ = refusedN me service 100;
+  before = freeKiB Unit;
+  _ = refusedN me service 1000;
+  _ = Sys.sleepUs 20000;
+  _ = check (before - freeKiB Unit < 1024) "refusals retain over 1 MiB";
+  "storagebudgets: handles, ownership, key/payload/page limits, finite helpers and refusal retention HOLDS".

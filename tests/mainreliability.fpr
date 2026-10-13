@@ -1,0 +1,44 @@
+# Pi soak entry: normal Main boot plus opt-in F11 reload/storage probes and
+# F12 allocator samples. The shipping Main entry has no validation hotkeys.
+unsafe program.
+Shell = use "../programs/mods/guishell".
+QS = use "../programs/mods/qsys".
+FS = use "std/fs#84826bc9e8ddb4b5".
+AC = use "std/actor#201a0e9bf98a5154".
+MV = use "std/mvu".
+Plug = use "../programs/mods/plug".
+ok (Ok value) = value.
+ok (Err why) = error why.
+hung me = _ = receive me; hung me.
+probe stuck me env (MV.EKey 87) model =
+  (q, tiles, mt) = env;
+  QS.Qsys ns fs vfs log apps = q;
+  # This loader retains mapped plugin images after detachment. Load exactly
+  # two generations once; subsequent cycles check their scoped bindings.
+  (existing, ignored) = Mod.find "mathOp";
+  _ = if existing == 1 then Unit else loadPair me fs;
+  baseline = Mod.plugs 0 - 2;
+  (hasOld, old) = Mod.findAt baseline "mathOp";
+  (hasNew, fresh) = Mod.findAt (baseline + 1) "mathOp";
+  _ = if hasOld == 1 and hasNew == 1 and old 10 == 20 and fresh 10 == 30 and old 10 == 20 then Unit else error "main-reliability: reload contract";
+  begin = AC.nowUs Unit;
+  refused = FS.rpcWithin 20 me stuck 2 "soak/fault" "unconfirmed";
+  _ = case refused of Err why -> if AC.nowUs Unit - begin < 250000 then Unit else error "main-reliability: live hang exceeded budget" | Ok _ -> error "main-reliability: hung service accepted";
+  _ = ok (FS.append me fs "soak/progress" "x");
+  # The real Main state is returned intact across both faults and reload.
+  _ = print "main-reliability: reload=20/30/20 storage-fault=bounded state=kept";
+  (model, Nil).
+loadPair me fs =
+  qa1 = ok (FS.readLatest me fs "soak/reload-a");
+  qa2 = ok (FS.readLatest me fs "soak/reload-b");
+  _ = ok (Plug.attach qa1);
+  _ = ok (Plug.attach qa2);
+  Unit.
+probe stuck me env (MV.EKey 88) model =
+  ledger = Sys.memInfo 0;
+  roots = arcLive 0;
+  bumped = heapUsed Unit;
+  _ = case ledger of arena :: free :: _ -> print "main-memory: arena_kib={arena} free_kib={free} roots={roots} owner_bumped_bytes={bumped}" | _ -> error "main-memory: missing ledger";
+  (model, Nil).
+probe stuck me env ev model = Shell.update me env ev model.
+main = stuck = spawn hung; result = Shell.runWith "qos-shell-reliability" (probe stuck); _ = kill stuck; result.

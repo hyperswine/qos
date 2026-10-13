@@ -16,7 +16,7 @@
 # not part of it yet: the endpoint is read-only.
 # ============================================================================
 
-EP = use "ep".
+EP = use "ep#c66ad65e68dd97f5".
 
 IStr = EP.IStr.
 

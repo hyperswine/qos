@@ -1,6 +1,6 @@
 #: expect development publication: old=20 new=30 state=kept owned=stopped PASS
 unsafe program.
-FS = use "std/fs".
+FS = use "std/fs#84826bc9e8ddb4b5".
 P = use "std/qpublication".
 D = use "std/devreload".
 CP = use "std/compile".
@@ -8,7 +8,7 @@ LR = use "std/mvureload".
 Plug = use "../programs/mods/plug".
 MV = use "std/mvu".
 S = use "std/string".
-SVC = use "../programs/mods/svc".
+SVC = use "../programs/mods/svc#75479fb6d5f34670".
 Sys.alive : Int -> Bool .
 ok r = case r of Ok x -> x | Err why -> error why.
 source = "mathOp v = v * 2.\n".
@@ -69,9 +69,9 @@ renderer me =
 # be retried without advancing the watcher baseline or adding extra records.
 uploadProxy fs denied me =
   message = receive me;
-  SVC.Rpc caller tag key bytes = message;
+  (ret, (until, (tag, key, bytes))) = SVC.requestFields message;
   reject = not denied and tag == 2 and key == P.journal Unit and S.contains "\tv1.1\t" bytes;
   _ = case reject of
-      True -> print "development upload: injected journal refusal" >> send caller (Err "injected upload failure")
-    | False -> send caller (FS.rpc me fs tag key bytes);
+      True -> print "development upload: injected journal refusal" >> SVC.reply ret (Err "injected upload failure")
+    | False -> SVC.reply ret (FS.rpcUntil until me fs tag key bytes);
   uploadProxy fs (denied or reject) me.
