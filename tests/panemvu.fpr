@@ -1,0 +1,134 @@
+# Pure child transitions plus the real bounded command owner/message adapter.
+#: expect panemvu: HOLDS
+unsafe program.
+PN = use "../programs/mods/panemvu".
+PJ = use "../programs/mods/panejobs".
+EP = use "../programs/mods/ep#c66ad65e68dd97f5".
+S = use "../programs/mods/guishell".
+QS = use "../programs/mods/qsys".
+AC = use "std/actor#201a0e9bf98a5154".
+MV = use "std/mvu".
+check True = Unit.
+check False = error "panemvu: invariant failed".
+ok (Ok value) = value.
+ok (Err why) = error why.
+failed pane = case pane.phase of PN.Failed why -> strlen why > 0 | other -> False.
+ready pane = case pane.phase of PN.Ready -> True | other -> False.
+provider me = providerLoop me False.
+providerLoop me passed =
+  (from, id, EP.NsList pre) = receive me;
+  _ = AC.reply (from, id) (case passed of True -> Ok "/one\n/two\n" | False -> Err "temporarily unavailable");
+  providerLoop me True.
+stuck me = _ = receive me; _ = Sys.sleepUs 5000000; Unit.
+reply me port remaining =
+  case remaining <= 0 of True -> error "panemvu: missing completion" | False ->
+    case ok (MV.portEvsRes me port) of
+      MV.EMsg tag body :: _ -> ok (PJ.decode tag body)
+    | Nil -> _ = Sys.sleepUs 1000; reply me port (remaining - 1)
+    | _ -> error "panemvu: unexpected event".
+apply msg model = (next, commands) = PN.update msg model; next.
+ticks 0 model = model.
+ticks n model = ticks (n - 1) (apply PN.Tick model).
+repeatReads 0 me jobs port worker = Unit.
+repeatReads n me jobs port worker =
+  _ = ok (PJ.run me jobs [PN.Fetch (100 + n) 1]);
+  _ = reply me port 1000;
+  state = ok (AC.callWithin 100 me jobs PJ.Inspect);
+  _ = check (state.worker == worker and not state.busy);
+  repeatReads (n - 1) me jobs port worker.
+main =
+  me = myself 0;
+  (opening, commands) = PN.update (PN.Open 1) PN.init;
+  _ = check (PN.loading opening and opening.generation == 1);
+  _ = check (case commands of [PN.Fetch 1 1] -> True | other -> False);
+  loadingAgain = apply PN.Refresh opening;
+  _ = check (loadingAgain.generation == 1);
+  loaded = apply (PN.Complete 1 1 (Ok "one\ntwo\nthree")) opening;
+  _ = check (ready loaded and loaded.rows == ["one", "two", "three"]);
+  refreshing = apply PN.Refresh loaded;
+  _ = check (PN.loading refreshing and refreshing.generation == 2 and refreshing.rows == loaded.rows);
+  failure = apply (PN.Complete 2 1 (Err "deadline exceeded")) refreshing;
+  _ = check (failed failure and failure.rows == loaded.rows);
+  late = apply (PN.Complete 1 1 (Ok "obsolete")) failure;
+  _ = check (late == failure);
+  retrying = apply PN.Refresh failure;
+  _ = check (retrying.generation == 3 and PN.loading retrying);
+  home = apply PN.Leave retrying;
+  ignored = apply (PN.Complete 3 1 (Ok "obsolete")) home;
+  _ = check (ignored == home and home.source == 0);
+  logs = apply (PN.Open 2) home;
+  wrongSource = apply (PN.Complete logs.generation 1 (Ok "wrong source")) logs;
+  _ = check (wrongSource == logs);
+  readyLogs = apply (PN.Complete logs.generation 2 (Ok "cached log")) logs;
+  periodic = ticks 10 readyLogs;
+  _ = check (PN.loading periodic and periodic.rows == readyLogs.rows and periodic.generation == logs.generation + 1);
+  duringRead = ticks 20 periodic;
+  _ = check (duringRead.generation == periodic.generation and PN.loading duringRead);
+  lost = ticks 60 periodic;
+  _ = check (failed lost and lost.rows == periodic.rows);
+  _ = check (apply (PN.Complete periodic.generation 2 (Ok "too late")) lost == lost);
+  _ = check (ticks 20 failure == failure);
+  _ = check (ticks 20 loaded == loaded);
+  _ = check (case PJ.decode "pane-ready" "1 1\none\ntwo" of Ok (PN.Complete 1 1 (Ok text)) -> text == "one\ntwo" | other -> False);
+  _ = check (case PJ.decode "pane-failed" "2 1\ndead actor" of Ok (PN.Complete 2 1 (Err why)) -> why == "dead actor" | other -> False);
+  _ = check (case PJ.decode "pane-ready" "01 1\nbad" of Err why -> True | other -> False);
+  _ = check (case PJ.decode "pane-ready" "99999999999999999999999 1\nbad" of Err why -> True | other -> False);
+  _ = check (case PJ.decode "pane-ready" "x 1\nbad" of Err why -> True | other -> False);
+  _ = check (case PJ.decode "other" "1 1\nbad" of Err why -> True | other -> False);
+  port = spawn MV.port;
+  ns = spawn provider;
+  jobs = spawn (PJ.owner ns port 80);
+  _ = ok (PJ.run me jobs commands);
+  refused = apply (reply me port 1000) opening;
+  _ = check (failed refused);
+  (next, retryCommands) = PN.update PN.Refresh refused;
+  _ = ok (PJ.run me jobs retryCommands);
+  recovered = apply (reply me port 1000) next;
+  _ = check (ready recovered and recovered.rows == ["/one", "/two", ""]);
+  state = ok (AC.callWithin 100 me jobs PJ.Inspect);
+  _ = repeatReads 32 me jobs port state.worker;
+  _ = ok (PJ.stop me jobs);
+  _ = check (case send state.worker (99, 1) of Err why -> True | other -> False);
+  _ = check (case PJ.run me jobs [PN.Fetch 3 1] of Err why -> True | other -> False);
+  _ = kill ns;
+  hung = spawn stuck;
+  limited = spawn (PJ.owner hung port 80);
+  started = AC.nowUs Unit;
+  _ = ok (PJ.run me limited [PN.Fetch 10 1]);
+  completion = reply me port 1000;
+  _ = check (AC.nowUs Unit - started < 750000);
+  _ = check (case completion of PN.Complete 10 1 (Err why) -> True | other -> False);
+  _ = ok (PJ.stop me limited);
+  _ = kill hung;
+  dead = spawn (fn self -> Unit);
+  _ = Sys.sleepUs 10000;
+  deadJobs = spawn (PJ.owner dead port 80);
+  _ = ok (PJ.run me deadJobs [PN.Fetch 11 1]);
+  _ = check (case reply me port 1000 of PN.Complete 11 1 (Err why) -> True | other -> False);
+  _ = ok (PJ.stop me deadJobs);
+  # Cancel and Stop do not wait for a live read's service deadline.
+  forever = spawn stuck;
+  closing = spawn (PJ.owner forever port 5000);
+  _ = ok (PJ.run me closing [PN.Fetch 12 1]);
+  _ = Sys.sleepUs 10000;
+  startedClose = AC.nowUs Unit;
+  _ = ok (PJ.run me closing [PN.Cancel]);
+  _ = ok (PJ.stop me closing);
+  _ = check (AC.nowUs Unit - startedClose < 250000);
+  _ = Sys.sleepUs 100000;
+  _ = check (ok (MV.portEvsRes me port) == Nil);
+  _ = kill forever;
+  # An idle persistent reader observes its owner's death, rather than leaking.
+  parent = spawn (PJ.owner dead port 80);
+  _ = ok (PJ.run me parent [PN.Fetch 30 2]);
+  _ = reply me port 1000;
+  child = ok (AC.callWithin 100 me parent PJ.Inspect);
+  _ = kill parent;
+  _ = Sys.sleepUs 20000;
+  _ = check (case send child.worker (31, 2) of Err why -> True | other -> False);
+  _ = kill port;
+  # A view of a cached Files pane needs no live namespace capability.
+  model = {S.init 0 | active = 0 - 2, pane = recovered};
+  env = (QS.Qsys 0 0 0 0 Nil, S.shortcuts, 0, 0);
+  _ = S.view me env (960, 600) model;
+  "panemvu: HOLDS".

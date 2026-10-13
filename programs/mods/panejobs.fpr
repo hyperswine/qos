@@ -1,0 +1,94 @@
+# Effect interpreter/owner for pane commands. One active, bounded read job.
+# The existing MVU port is a string-pair wire; decoding validates its header.
+unsafe module.
+PN = use "panemvu".
+EP = use "ep#c66ad65e68dd97f5".
+AC = use "std/actor#201a0e9bf98a5154".
+Work = Type (Execute PN.Cmd | Completed Int Int (Result String String) | Inspect | Stop).
+owner ns port budget me =
+  _ = Sys.loop {worker = 0, busy = False, generation = 0, source = 0} (step ns port budget me);
+  Unit.
+step ns port budget me state =
+  received = receive me;
+  (from, id, command) = received;
+  case command of
+    Execute cmd -> (case cmd of
+        PN.Cancel -> (True, cancel state)
+      | PN.Fetch gen source ->
+          idle = cancel state;
+          worker = case idle.worker == 0 of True -> spawn (readWorker ns me budget) | False -> idle.worker;
+          next = {worker = worker, busy = True, generation = gen, source = source};
+          (case send worker (gen, source) of
+              Ok u -> (True, next)
+            | Err why -> _ = publish port gen source (Err why); _ = cancelJob worker; (True, {next | worker = 0, busy = False})))
+  | Completed gen source result ->
+      valid = state.busy and from == state.worker and gen == state.generation and source == state.source;
+      _ = case valid of True -> publish port gen source result | False -> Unit;
+      (True, (case valid of True -> {state | busy = False} | False -> state))
+  | Inspect -> _ = AC.reply (from, id) state; (True, state)
+  | Stop -> _ = cancelJob state.worker; _ = AC.reply (from, id) Unit; (False, {state | worker = 0, busy = False}).
+# Reuse after completed reads/errors. Only an in-flight cancellation replaces
+# a worker, since it may be blocked in a service conversation.
+cancel state = case state.busy of
+    False -> state
+  | True -> _ = cancelJob state.worker; {state | worker = 0, busy = False}.
+readWorker ns owner budget me =
+  _ = Sys.loop 0 (readStep ns owner budget me);
+  Unit.
+readStep ns owner budget me state = case receiveFromRes me owner of
+    Err why -> (False, state)
+  | Ok request -> readRequest ns owner budget me state request.
+readRequest ns owner budget me state request =
+  (gen, source) = request;
+  result = case source == 1 of
+      True -> EP.flat (AC.callWithin budget me ns (EP.NsList "/"))
+    | False -> Ok (join (Sys.logSnap 0));
+  case send owner (me, 0, Completed gen source result) of
+      Ok u -> (True, state)
+    | Err why -> (False, state).
+publish port gen source result =
+  _ = case result of
+      Ok text -> send port ("pane-ready", "{gen} {source}\n{text}")
+    | Err why -> send port ("pane-failed", "{gen} {source}\n{why}");
+  Unit.
+join Nil = "".
+join [line] = line.
+join (line :: rest) = strcat line (strcat "\n" (join rest)).
+run me worker commands = case commands of
+    Nil -> Ok Unit
+  | command :: rest -> case send worker (me, 0, Execute command) of
+      Err why -> Err "pane worker: {why}"
+    | Ok u -> run me worker rest.
+stop me worker = AC.callWithin 1000 me worker Stop.
+
+# Only canonical positive decimal generation/source headers are accepted.
+decode tag text =
+  case tag == "pane-ready" or tag == "pane-failed" of
+    False -> Err "not a pane message"
+  | True -> header tag text (findLf text 0).
+findLf s i | i >= strlen s or i > 20 = 0 - 1.
+findLf s i | charAt s i == 10 = i.
+findLf s i = findLf s (i + 1).
+header tag text end = case end < 0 of
+    True -> Err "invalid pane reply"
+  | False ->
+      line = substr text 0 end;
+      split = findSpace line 0;
+      gen = substr line 0 (case split < 0 of True -> 0 | False -> split);
+      src = substr line (split + 1) (strlen line - split - 1);
+      valid = split > 0 and split <= 18 and digits gen 0 and (src == "1" or src == "2");
+      g = case valid of True -> EP.parseNum gen | False -> 0;
+      s = case src == "1" of True -> 1 | False -> 2;
+      case valid and g > 0 and line == "{g} {s}" of
+        False -> Err "invalid pane reply"
+      | True ->
+          body = substr text (end + 1) (strlen text - end - 1);
+          Ok (PN.Complete g s (case tag == "pane-ready" of True -> Ok body | False -> Err body)).
+
+findSpace s i | i >= strlen s = 0 - 1.
+findSpace s i | charAt s i == 32 = i.
+findSpace s i = findSpace s (i + 1).
+digits s i | i >= strlen s = True.
+digits s i = charAt s i >= 48 and charAt s i <= 57 and digits s (i + 1).
+
+cancelJob job = case job == 0 of True -> Unit | False -> kill job.

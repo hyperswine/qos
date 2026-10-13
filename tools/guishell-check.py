@@ -61,6 +61,127 @@ def check_live_deadline(out, env, profile):
     print('guishell: live render-worker deadline drains storage before failed exit HOLDS')
 
 
+def check_pane_recovery(out, env, profile):
+    # Change only the pane's namespace in a test-local copy. The real shell,
+    # renderer and lifecycle services still run, without production fault hooks.
+    import re
+    tag = f'qos-pane-recovery-{os.getpid()}'
+    module = out / 'pane-shell.fpr'
+    text = (ROOT / 'programs/mods/guishell.fpr').read_text()
+    text = re.sub(r'use "(?!std/)([^"\n]+)"',
+                  lambda m: 'use "' + str(ROOT / 'programs/mods' / m[1]) + '"', text)
+    text = text.replace('jobs = spawn (PJ.owner ns port serviceBudgetMs);',
+                        'paneProvider = spawn fixtureNamespace;\n  jobs = spawn (PJ.owner paneProvider port serviceBudgetMs);')
+    text = text.replace('_ = kill jobs;', '_ = kill jobs;\n  _ = kill paneProvider;')
+    text += '''
+fixtureNamespace me = fixtureLoop me False.
+fixtureLoop me recovered =
+  (from, id, EP.NsList prefix) = receive me;
+  _ = AC.reply (from, id) (case recovered of
+      True -> Ok "/recovered/\\n/data/\\n"
+    | False -> Err "fixture service offline");
+  fixtureLoop me True.
+'''
+    module.write_text(text)
+    entry = out / 'pane-entry.fpr'
+    entry.write_text('unsafe program.\nS = use "' + str(module.with_suffix('')) +
+                     '".\nmain = S.run "' + tag + '".\n')
+    built = subprocess.run(['make', '-s', 'qos-app', f'PROG={entry}',
+                            f'QA_OUT={out / "pane-recovery.qa"}', f'BUILD={out / "pane-recovery-build"}'],
+                           cwd=ROOT, env=env, capture_output=True, text=True, timeout=240)
+    (out / 'pane-recovery-build.log').write_text(built.stdout + built.stderr)
+    assert built.returncode == 0, built.stdout + built.stderr
+    shutil.copyfile(profile / 'Main.disk', out / 'pane-recovery.disk')
+    fifo, ready = out / 'pane-keys.evd', out / 'pane.ready'
+    os.mkfifo(fifo)
+    fd = os.open(fifo, os.O_RDWR | os.O_NONBLOCK)
+    proc = subprocess.Popen([str(ROOT / 'qos/qosp-gl'), '--yes', str(out / 'pane-recovery.qa')],
+                            cwd=out, env=dict(env, FPR_DISK=str(out / 'pane-recovery.disk'),
+                                              FPR_EVDEV=str(fifo), QOSP_READY_FILE=str(ready)),
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+    messages, log = queue.Queue(), []
+
+    def reader():
+        for line in proc.stdout:
+            messages.put(line)
+        messages.put(None)
+
+    thread = threading.Thread(target=reader, daemon=True)
+    thread.start()
+
+    def wait_for(expected):
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            line = messages.get(timeout=max(.1, deadline - time.monotonic()))
+            assert line is not None, ''.join(log)
+            log.append(line)
+            assert 'PANIC' not in line and 'SIGSEGV' not in line, line
+            if expected in line:
+                return
+        raise TimeoutError(expected)
+
+    def key(code):
+        for value in (1, 0):
+            os.write(fd, struct.pack('llHHi', 0, 0, 1, code, value))
+        time.sleep(.25)
+
+    def snapshot(n):
+        path = Path(f'/tmp/{tag}-{n}.ppm')
+        assert not path.exists(), path
+        key(25)
+        wait_for(f'shell: snapshot {n}')
+        deadline = time.monotonic() + 10
+        while not path.exists() or path.stat().st_size < 960 * 600 * 3:
+            if time.monotonic() >= deadline:
+                raise TimeoutError(path)
+            time.sleep(.05)
+        data = path.read_bytes()
+        rgb = data.split(b'\n', 3)[3]
+        png(out / f'pane-recovery-{n}.png', rgb)
+        shutil.move(path, out / f'pane-recovery-{n}.ppm')
+        return rgb
+
+    try:
+        wait_for('Main Profile ready')
+        key(106); key(28)
+        wait_for('shell: pane 1 Unavailable: fixture service offline')
+        refused = snapshot(1)
+        key(19)
+        wait_for('shell: pane 1 R Refresh')
+        recovered = snapshot(2)
+        assert refused != recovered, 'retry did not change the rendered pane'
+        assert proc.poll() is None and ready.read_text().strip() == str(proc.pid)
+        key(1); wait_for('shell: home')
+        key(16)
+        proc.wait(timeout=10)
+        thread.join(timeout=5)
+        assert not thread.is_alive()
+        while not messages.empty():
+            line = messages.get_nowait()
+            if line is not None:
+                log.append(line)
+        text = ''.join(log)
+        assert proc.returncode == 0 and 'storage drained and flushed' in text, text
+        assert not ready.exists()
+        print('guishell: visible pane failure, explicit retry, Home and clean shutdown HOLDS')
+    finally:
+        if proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill(); proc.wait(timeout=5)
+        thread.join(timeout=5)
+        proc.stdout.close()
+        os.close(fd)
+        fifo.unlink(missing_ok=True)
+        (out / 'pane-recovery.log').write_text(''.join(log))
+        for n in (1, 2, 3):
+            path = Path(f'/tmp/{tag}-{n}.ppm')
+            if path.exists():
+                shutil.move(path, out / f'pane-recovery-{n}.ppm')
+
+
 def check(out):
     out.mkdir(parents=True, exist_ok=False)
     tag = f'qos-shell-check-{os.getpid()}'
@@ -115,6 +236,8 @@ def check(out):
         f'QA_OUT={out / "unit.qa"}', f'BUILD={out / "unit-build"}')
     run('make', '-s', 'qos-app', 'PROG=tests/scrolltext.fpr',
         f'QA_OUT={out / "scrolltext.qa"}', f'BUILD={out / "scrolltext-build"}')
+    run('make', '-s', 'qos-app', 'PROG=tests/panemvu.fpr',
+        f'QA_OUT={out / "panemvu.qa"}', f'BUILD={out / "panemvu-build"}')
     run('make', '-s', '-C', 'qos', 'portable-gl')
     unit = subprocess.run([str(ROOT / 'qos/qosp-gl'), '--yes', str(out / 'unit.qa')],
                           cwd=out, env=env, capture_output=True, text=True, timeout=30)
@@ -125,6 +248,10 @@ def check(out):
                             cwd=out, env=env, capture_output=True, text=True, timeout=30)
     (out / 'scrolltext.log').write_text(scroll.stdout + scroll.stderr)
     assert scroll.returncode == 0 and 'scrolltext: HOLDS' in scroll.stdout, scroll.stdout + scroll.stderr
+    pane = subprocess.run([str(ROOT / 'qos/qosp-gl'), '--yes', str(out / 'panemvu.qa')],
+                          cwd=out, env=env, capture_output=True, text=True, timeout=30)
+    (out / 'panemvu.log').write_text(pane.stdout + pane.stderr)
+    assert pane.returncode == 0 and 'panemvu: HOLDS' in pane.stdout, pane.stdout + pane.stderr
     env['FPR_DISK'] = str(disk)
     command = [str(ROOT / 'qos/qosp-gl'), '--yes', str(out / 'check.qa')]
 
@@ -218,7 +345,7 @@ def check(out):
             assert clock != first, 'loaded clock did not draw'
             key(1); wait_for('shell: home'); await_capture(Path(f'/tmp/{tag}-9.ppm'))
             shutil.move(f'/tmp/{tag}-9.ppm', out / f'boot{boot}-9.ppm')
-            key(105); key(105); key(105); key(28); wait_for('shell: open files')
+            key(105); key(105); key(105); key(28); wait_for('shell: open files'); wait_for('shell: pane 1 R Refresh')
             files = shot(10)
             # Each namespace entry occupies its own row in the fixed viewport.
             # Count bright text in separate row bands, excluding the scrollbar.
@@ -233,7 +360,7 @@ def check(out):
             assert shot(12) == files, 'Files Home did not return to the first row'
             key(1); wait_for('shell: home'); await_capture(Path(f'/tmp/{tag}-13.ppm'))
             shutil.move(f'/tmp/{tag}-13.ppm', out / f'boot{boot}-13.ppm')
-            key(106); key(28); wait_for('shell: open logs')
+            key(106); key(28); wait_for('shell: open logs'); wait_for('shell: pane 2 R Refresh')
             logs = shot(14)
             assert sum(row_ink(logs, 236 + row * 26) > 20 for row in range(9)) >= 6, 'Logs is not a vertical list'
             key(107)
@@ -284,7 +411,7 @@ def check(out):
         'GX = use "' + str(ROOT/'programs/mods/graphics') + '".\n' +
         'MV = use "std/mvu".\n' +
         'fault me env event model = case event of\n' +
-        '    MV.ETick -> (q, tiles, mt) = env; QS.Qsys ns st vfs log apps = q;\n' +
+        '    MV.ETick -> (q, tiles, mt, jobs) = env; QS.Qsys ns st vfs log apps = q;\n' +
         '      ep = case GX.attach me ns "failure" of Ok value -> value | Err why -> error why;\n' +
         '      (graphics, handle) = ep; _ = kill graphics; (model, Nil)\n' +
         '  | other -> S.update me env event model.\n' +
@@ -305,6 +432,7 @@ def check(out):
     assert not (out/'failure.ready').exists(), text
     print('guishell: graphics death drains storage before failed exit HOLDS')
     check_live_deadline(out, env, profile)
+    check_pane_recovery(out, env, profile)
     print('guishell: real GL, Files/Logs vertical scrolling, two pages, onboard clock/browser, refusals, pointer protocol and two boots HOLDS')
 
 

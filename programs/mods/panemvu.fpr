@@ -1,0 +1,50 @@
+# Pure child MVU for the built-in Files/Logs snapshots. No service calls.
+ST = use "scrolltext".
+Phase = Type (Idle | Loading | Ready | Failed String).
+Msg = Type (Open Int | Refresh | Complete Int Int (Result String String)
+          | Scroll Int | Seek Int | Click Int | Tick | Leave).
+Cmd = Type (Fetch Int Int | Cancel).
+init = {source = 0, generation = 0, phase = Idle, rows = Nil, scroll = 0, ticks = 0}.
+loading m = case m.phase of Loading -> True | other -> False.
+update msg m = case msg of
+    Open source -> begin source {m | rows = Nil, scroll = 0}
+  | Refresh -> (case m.source == 0 or loading m of True -> (m, Nil) | False -> begin m.source m)
+  | Complete generation source result -> complete generation source result m
+  | Tick -> tick m
+  | Scroll delta -> ({m | scroll = ST.offset (ST.count m.rows) (m.scroll + delta)}, Nil)
+  | Seek requested -> ({m | scroll = ST.offset (ST.count m.rows) requested}, Nil)
+  | Click y -> ({m | scroll = ST.click (ST.count m.rows) y}, Nil)
+  | Leave -> ({m | source = 0, generation = m.generation + 1, phase = Idle, rows = Nil, scroll = 0, ticks = 0}, [Cancel]).
+begin source m =
+  gen = m.generation + 1;
+  ({m | source = source, generation = gen, phase = Loading, ticks = 0}, [Fetch gen source]).
+complete generation source result m =
+  case generation == m.generation and source == m.source and loading m of
+    False -> (m, Nil)
+  | True -> case result of
+      Err why -> ({m | phase = Failed why}, Nil)
+    | Ok text ->
+        rows = ST.wrap text;
+        ({m | phase = Ready, rows = rows, scroll = ST.offset (ST.count rows) m.scroll}, Nil).
+status m = case m.phase of
+    Idle -> ""
+  | Loading -> "Loading...   ESC Home"
+  | Ready -> "R Refresh   ESC Home"
+  | Failed why -> "Unavailable: {why}   R Retry   ESC Home".
+
+# Shell ETick is paced at 100 ms. These are UI policy, separate from the
+# worker's service deadline. The outer fuse also covers a lost completion.
+logRefreshTicks = 10.
+loadingTicks = 60.
+tick m = case m.phase of
+    Loading -> loadingTick m
+  | Ready -> readyTick m
+  | other -> (m, Nil).
+loadingTick m = case m.ticks >= loadingTicks - 1 of
+    True -> ({m | phase = Failed "read did not complete"}, [Cancel])
+  | False -> ({m | ticks = m.ticks + 1}, Nil).
+readyTick m = case m.source == 2 of
+    False -> (m, Nil)
+  | True -> case m.ticks >= logRefreshTicks - 1 of
+      True -> begin 2 m
+    | False -> ({m | ticks = m.ticks + 1}, Nil).

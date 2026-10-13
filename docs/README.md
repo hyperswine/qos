@@ -112,3 +112,4 @@ Source-adjacent READMEs under `tools/` stay beside the tools they explain.
 | 2026-10-12 | [STAR64-BUILDROOT.md](2026-10-12-STAR64-BUILDROOT.md) | First STAR64 Linux image: pinned vendor board support, modern Buildroot userspace, RV64 QEMU boot and software EGL checks; physical board validation pending |
 | 2026-10-12 | [STAR64-FIRST-BOOT.md](2026-10-12-STAR64-FIRST-BOOT.md) | Public-key SSH and HDMI text login; authenticated SSH and USB keyboard console-login checks on the rebuilt RV64 image |
 | 2026-10-12 | [STAR64-BOOT-DIAGNOSIS.md](2026-10-12-STAR64-BOOT-DIAGNOSIS.md) | Physical boot failure investigation: missing SD boot target fixed, firmware video error made nonfatal, rebuilt image and QEMU validation |
+| 2026-10-14 | [RECURSIVE-MVU-SHELL.md](2026-10-14-RECURSIVE-MVU-SHELL.md) | Recursive MVU and explicit message/effect contracts; first Files/Logs pane migration, visible retry, persistent reader ownership, host GL and isolated Pi validation |

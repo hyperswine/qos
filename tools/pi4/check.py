@@ -192,7 +192,7 @@ for harts in (() if args.skip_runtime else (1, 4)):
 
 for harts in (() if args.skip_runtime else (1, 4)):
     for name in ('blockportable', 'blocknamespace', 'blocklifecyclep', 'blockmemory',
-                 'filesshutdown', 'gfxshare', 'guishell'):
+                 'filesshutdown', 'gfxshare', 'guishell', 'panemvu'):
         fault = {'QOS_BLK_TEST_DELAY_US': '800000', 'QOS_BLK_TEST_DELAY_READS': '1',
                  'QOS_BLK_DEADLINE_MS': '300'} if name == 'blocklifecyclep' else {}
         if name == 'blockmemory':
