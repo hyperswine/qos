@@ -121,5 +121,52 @@ power-loss durability.
 
 ## Results
 
-Validation is still running. Final evidence and exact Pi metrics will be added
-after both physical soak legs finish.
+The implementation is checkpointed in QOS `60da4b4` and uses FP-RISC
+`bfbdd8d`. The runtime commits were pushed through FP-RISC merge `0f4f6c2`,
+which preserves concurrent view/deployment commits. QOS retains the tested
+`bfbdd8d` toolchain pin; the merged runtime/compiler/actor contents are identical.
+The final Pi bundle's 572 implementation files were checked against
+the QOS checkpoint with no mismatches; documentation and concurrent STAR64
+files were excluded. Exact source and artifact manifests are retained under
+`.qos/pi4/validation/inbox-release-20261013/`.
+
+Fresh checks passed: the full FP-RISC Base suite, including twelve 10-hart
+Task.map stress runs per inliner setting and the original unread-mail memory
+threshold; QOS smoke 16/16; inbox ownership, cancellation and six
+admission rollback phases; RV64 loaded-process ownership/sleep/reclamation;
+storage reliability on one/four workers; malformed permission/offline fallback
+checks; native image integrity and actor ABI refusal; durable crash snapshots;
+block queue/cancellation/drain and 8,192-read retention; Files shutdown with
+orphan DMA accounting; Qlog stable-owner recovery and two System boots; native
+read/mutation deadlines and malformed reply handling; real Main GL controls,
+graphics death and live render deadline cleanup. The native stress test allows
+60 seconds for its whole 8,192-read campaign after measured runs took 28-30
+seconds; per-request budgets remain unchanged.
+
+All 16 final physical Pi inbox/storage cases passed on one/four workers. The
+installed service remained `running pid=31331 restarts=0`. Both final Main soaks passed, with normal quit and a separate SIGTERM boot
+exiting cleanly in each leg. Each workload cycle switched Files/Logs/Browser,
+checked both reload generations plus the old scoped function, bounded a live
+hung peer, and appended an SD-backed progress record.
+
+| Workers | Cycles | Sampling duration | RSS first / last / sampled peak (MiB) | Process high-water RSS (MiB) | ARC roots | Reserved first / last (MiB) |
+| --- | ---: | ---: | --- | ---: | --- | --- |
+| 1 | 42 | 1214.5 s | 41.9 / 44.5 / 44.9 | 48.8 | 11-11 | 29.4 / 31.4 |
+| 4 | 41 | 1201.4 s | 42.5 / 44.7 / 45.6 | 49.7 | 11-11 | 29.4 / 31.3 |
+
+Allocator reservations and root counts remain diagnostics rather than
+reachability proof. The Pi reported 600 MHz during both legs; peak temperatures
+were 59.9 C and 60.9 C. These are reliability results, not a frame-latency or
+full-speed performance benchmark. Physical power-loss durability remains
+untested. The installed service stayed at PID 31331 with zero restarts; only
+the isolated successful test disks were removed. Aggregate results and raw
+logs are retained in `inbox-release-20261013/complete.json` and its sibling
+folders under the validation directory above.
+
+Final candidate SHA-256 values:
+
+| Artifact | SHA-256 |
+| --- | --- |
+| `qosp-es` | `35cad357c96216fca3a9c7dec266deab99e120d216cd4db5b7c082f9a93d0d62` |
+| `main.qa` | `04966a3d23b6f6f3245d36014ed2aff0e1dce34b49c0d1d76ba92ad5b642e9b9` |
+| `Main.disk` | `18e0ae2de7def7add54c0eb1370ebea2d5593b586fa91b63dcb029ca2593663c` |
