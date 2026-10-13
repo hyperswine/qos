@@ -11,7 +11,7 @@ ok (Ok value) = value.
 ok (Err why) = error why.
 hung me = _ = receive me; hung me.
 probe stuck me env (MV.EKey 87) model =
-  (q, tiles, mt, jobs) = env;
+  (q, tiles, mt, jobs, sessions) = env;
   QS.Qsys ns fs vfs log apps = q;
   # This loader retains mapped plugin images after detachment. Load exactly
   # two generations once; subsequent cycles check their scoped bindings.

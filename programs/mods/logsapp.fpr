@@ -1,11 +1,8 @@
-# logsapp.fpr -- Logs.qa over the /logs severity axis: n/w/e/h switch
-# between /logs/normal, /logs/warns, /logs/errors, /logs/host (sev 3:
-# the UNIFIED LOG PLANE -- every qos_hostlog line the host emits, DRM
-# probes, evdev opens, plugin ranges, replayed boot story included).
-# Snapshots come
-# straight from the runtime ring (Sys.logSnap) -- fresh copies in THIS
-# worker's pool, dead with the frame; the capability service remains
-# the WRITE path for app actors.
+# Recursive MVU: cached model, pure update/view, explicit effect messages.
+unsafe module.
+AW = use "appwire".
+AS = use "appsession".
+AC = use "std/actor#201a0e9bf98a5154".
 S2 = use "scene2d".
 AK = use "appkit".
 Box = S2.Box. Lbl = S2.Lbl. Slot = S2.Slot.
@@ -13,18 +10,29 @@ Row = S2.Row. Col = S2.Col. Pad = S2.Pad. Gap = S2.Gap.
 W = S2.W. H = S2.H. Grow = S2.Grow. Sc = S2.Sc.
 Bg = S2.Bg. Fg = S2.Fg. Bord = S2.Bord.
 
-appMeta u = ("LOGS", "/LOGS RINGS").
-appInit self env = 0.
-appUpdate self env k sev | k == 49 = 0.       # n
-appUpdate self env k sev | k == 17 = 1.       # w
-appUpdate self env k sev | k == 18 = 2.       # e
-appUpdate self env k sev | k == 35 = 3.       # h
-appUpdate self env k sev = sev.
+
+init = ({sev = 0, wanted = 0, rows = Nil, total = "", token = 1, busy = True, ticks = 0, phase = AW.Loading}, [AW.Fetch 1 (AW.Logs 0)]).
+fetch m = if m.busy then (m, Nil) else
+  ({m | rows = (if m.sev == m.wanted then m.rows else Nil), total = (if m.sev == m.wanted then m.total else ""), sev = m.wanted, token = m.token + 1, busy = True, ticks = 0, phase = AW.Loading}, [AW.Fetch (m.token + 1) (AW.Logs m.wanted)]).
+update (AW.Key k) m = if k == 49 or k == 17 or k == 18 or k == 35 then
+  fetch {m | wanted = (case k of 49 -> 0 | 17 -> 1 | 18 -> 2 | other -> 3)}
+  else if k == 19 then fetch m else (m, Nil).
+update AW.Tick m = case m.phase of
+    AW.Ready -> if m.ticks >= 9 then fetch m else ({m | ticks = m.ticks + 1}, Nil)
+  | other -> (m, Nil).
+update (AW.Arrived token result) m = if token != m.token or not m.busy then (m, Nil) else
+  if m.sev != m.wanted then fetch {m | busy = False} else case result of
+    Ok (AW.Lines rows total) -> ({m | rows = rows, total = total, busy = False, phase = AW.Ready}, Nil)
+  | Err why -> ({m | busy = False, phase = AW.Failed why}, Nil)
+  | other -> ({m | busy = False, phase = AW.Failed "invalid logs result"}, Nil).
+update other m = (m, Nil).
+view vp m = (tree vp, [sevPath m.sev, lgNth m.rows 0, lgNth m.rows 1, lgNth m.rows 2, lgNth m.rows 3,
+  lgNth m.rows 4, lgNth m.rows 5, lgNth m.rows 6, lgNth m.rows 7, m.total]).
 
 lgLine i =
   Box [Row, Pad 1] [ Slot [Fg (930, 940, 960)] i 44 ].
 
-appTree vp =
+tree vp =
   (vw, vh) = vp;
   Box [Col, Pad 8, Gap 4, W vw, H vh, Bg (62, 70, 88)]
     [ Box [Row, Gap 6]
@@ -43,13 +51,34 @@ sevPath 2 = "/logs/errors".
 sevPath 3 = "/logs/host".
 sevPath sev = error "logs: invalid severity {sev}".
 
-appVals self env sev =
-  sn = Sys.logSnap sev;
-  [ sevPath sev
-  , lgNth sn 0, lgNth sn 1, lgNth sn 2, lgNth sn 3
-  , lgNth sn 4, lgNth sn 5, lgNth sn 6, lgNth sn 7
-  , "{Sys.logSeq sev} TOTAL" ].
-
 lgNth Nil i = "".
 lgNth (v :: r) 0 = v.
 lgNth (v :: r) i = lgNth r (i - 1).
+
+# This actor owns the child model. Transport and effects exchange data only.
+run me = case AS.start me of
+    Err why -> Unit
+  | Ok ctx ->
+      (model, commands) = init;
+      _ = AS.issue me ctx commands;
+      _ = Sys.loop (ctx, model) (step me); Unit.
+step me state =
+  (ctx, model) = state;
+  case AS.next me ctx of
+    AS.Idle -> _ = Sys.sleepUs 1000; (True, state)
+  | AS.Gone -> _ = AS.abandon me ctx; (False, state)
+  | AS.JobResult token result ->
+      (fresh, commands) = update (AW.Arrived token result) model;
+      _ = AS.issue me ctx commands;
+      (True, (AS.advance ctx ctx.sequence, fresh))
+  | AS.Message ret request -> case request of
+      AW.Close session -> (AS.close me ctx ret session, state)
+    | AW.Event session sequence event -> case AS.valid ctx session sequence of
+        False -> _ = AC.reply ret (AW.Refused "stale session or sequence"); (True, state)
+      | True ->
+          next = AS.advance (AS.resized ctx event) sequence;
+          (fresh, commands) = update event model;
+          _ = AS.issue me next commands;
+          (tree, vals) = view (next.w, next.h) fresh;
+          _ = AC.reply ret (AW.Frame next.session next.revision tree vals (AW.status fresh.phase));
+          (True, (next, fresh)).

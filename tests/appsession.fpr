@@ -1,0 +1,98 @@
+#: expect appsession: HOLDS
+unsafe program.
+C = use "../programs/mods/clockapp".
+L = use "../programs/mods/logsapp".
+B = use "../programs/mods/browserapp".
+D = use "../programs/mods/diskapp".
+AS = use "../programs/mods/appsession".
+AW = use "../programs/mods/appwire".
+AP = use "../programs/mods/appclient".
+AC = use "std/actor#201a0e9bf98a5154".
+check tag True = Unit.
+check tag False = error "appsession: {tag}".
+appMain : unsafe Int -> Unit .
+appMain me = C.run me.
+silent me = _ = receive me; _ = Sys.sleepUs 3000000; Unit.
+adopt parent me =
+  app = spawn C.run;
+  _ = AC.callWithin 500 me app (AW.magic, AW, (7, (800, 480), (0, 0)));
+  _ = send parent app;
+  _ = receive me; Unit.
+main =
+  (c, _) = C.init;
+  (ready, _) = C.update (AW.Arrived 1 (Ok (AW.Time 123))) c;
+  _ = check "check 1" (ready.time == 123 and not ready.busy);
+  (stale, _) = C.update (AW.Arrived 2 (Ok (AW.Time 999))) ready;
+  _ = check "check 2" (stale.time == 123);
+  (b, _) = B.init;
+  (paths, _) = B.update (AW.Arrived 1 (Ok (AW.Lines ["/one", "/two"] ""))) b;
+  (reading, _) = B.update (AW.Key 28) paths;
+  (back, _) = B.update (AW.Key 14) reading;
+  (late, _) = B.update (AW.Arrived reading.token (Ok (AW.Text "late"))) back;
+  _ = check "check 3" (late.mode == 0 and late.lines == Nil and not late.busy);
+  me = myself 0;
+  app = spawn C.run;
+  boot = AC.callWithin 500 me app (AW.magic, AW, (1, (800, 480), (0, 0)));
+  _ = check "check 4" (case boot of Ok (magic, schema, session) -> magic == AW.magic and schema == AW and session == 1 | other -> False);
+  answer = AC.callWithin 500 me app (AW.Event 1 1 (AW.Key 30));
+  _ = check "check 5" (case answer of Ok (AW.Frame session revision tree vals status) -> session == 1 and revision >= 2 | other -> False);
+  staleReply = AC.callWithin 500 me app (AW.Event 1 1 AW.Tick);
+  _ = check "check 6" (case staleReply of Ok (AW.Refused why) -> True | other -> False);
+  wrongClose = AC.callWithin 500 me app (AW.Close 2);
+  _ = check "check 7" (case wrongClose of Ok (AW.Refused why) -> True | other -> False);
+  closed = AC.callWithin 1500 me app (AW.Close 1);
+  _ = check "check 8" (case closed of Ok (AW.Closed 1 (Ok u)) -> True | other -> False);
+  _ = Sys.sleepUs 10000;
+  _ = check "check 9" (not (Sys.alive app));
+  bad = spawn C.run;
+  refused = AC.callWithin 500 me bad ("wrong-version", AW, (2, (800, 480), (0, 0)));
+  _ = check "check 10" (case refused of Ok (magic, schema, session) -> magic == "refused" and session == 0 | other -> False);
+  managed = spawn C.run;
+  _ = AC.callWithin 500 me managed (AW.magic, AW, (3, (800, 480), (0, 0)));
+  (live, frame) = AP.exchange me AW.Tick {AP.empty | actor = managed, session = 3};
+  _ = check "client frame" (case frame of Ok (AW.Frame sid rev tree vals status) -> sid == 3 and rev > 0 | other -> False);
+  (idle, left) = AP.leave me live;
+  _ = check "client close" (case left of Ok (AW.Closed sid (Ok u)) -> idle.actor == 0 | other -> False);
+  _ = check "missing entry" (case AP.entry 99999 of Err why -> True | other -> False);
+  client = spawn (AP.run me 0 0 800 480);
+  _ = check "client rejection" (case AP.call me client (AP.Open 99999) of Err why -> True | other -> False);
+  _ = check "client stop" (case AP.stop me client of Ok u -> True | other -> False);
+  hung = spawn silent;
+  start = AC.nowUs Unit;
+  (forced, failure) = AP.exchange me AW.Tick {AP.empty | actor = hung, session = 9};
+  _ = check "check 15" (case failure of Err why -> strlen why > 0 and forced.actor == 0 and forced.cleanup != "" and forced.failures == 1 | other -> False);
+  _ = check "check 16" (AC.nowUs Unit - start < 2200000 and not (Sys.alive hung));
+  (retryIdle, retryAnswer) = AP.launch 0 0 800 480 me 99999 forced;
+  _ = check "retry reaches entry validation" (case retryAnswer of Err why -> why == "no app-session entry" and retryIdle.failures == 1 | other -> False);
+  (exhausted, deniedRetry) = AP.launch 0 0 800 480 me 99999 {forced | failures = 3};
+  _ = check "bounded recovery" (case deniedRetry of Err why -> why == "app recovery budget exhausted; restart Main" | other -> False);
+  notNegotiated = spawn silent;
+  (aborted, startupError) = AP.abortStartup {AP.empty | actor = notNegotiated} "wrong schema";
+  _ = check "bootstrap abort" (not (Sys.alive notNegotiated) and aborted.failures == 1 and aborted.cleanup != "");
+  _ = check "retain primary cleanup" (AP.retain "first failure" "second failure" == "first failure; second failure");
+  schemaBad = spawn C.run;
+  rejected = AC.callWithin 500 me schemaBad (AW.magic, "old-schema", (4, (800, 480), (0, 0)));
+  _ = check "schema refused" (case rejected of Ok (magic, schema, sid) -> magic == "refused" | other -> False);
+  slow = spawn silent;
+  browser = spawn B.run;
+  _ = AC.callWithin 500 me browser (AW.magic, AW, (5, (800, 480), (slow, 0)));
+  closing = AC.callWithin 1500 me browser (AW.Close 5);
+  _ = check "close during namespace read" (case closing of Ok (AW.Closed 5 (Ok u)) -> True | other -> False);
+  _ = kill slow;
+  owner = spawn (adopt me);
+  orphan = case receiveFromRes me owner of Ok app -> app | Err why -> error why;
+  _ = send owner Unit;
+  _ = Sys.sleepUs 50000;
+  _ = check "app owner death" (not (Sys.alive orphan));
+  unstarted = spawn C.run;
+  _ = Sys.sleepUs 1100000;
+  _ = check "startup fuse" (not (Sys.alive unstarted));
+  (logs, _) = L.init;
+  (wanted, _) = L.update (AW.Key 18) logs;
+  (follow, commands) = L.update (AW.Arrived 1 (Ok (AW.Lines ["old severity"] ""))) wanted;
+  _ = check "latest severity only" (follow.sev == 2 and follow.busy and follow.rows == Nil and commands != Nil);
+  (disk, _) = D.init;
+  (failedDisk, _) = D.update (AW.Arrived 1 (Err "storage unavailable")) disk;
+  (retryDisk, commands) = D.update (AW.Key 19) failedDisk;
+  _ = check "disk retry" (retryDisk.busy and retryDisk.token == 2 and commands != Nil);
+  "appsession: HOLDS".

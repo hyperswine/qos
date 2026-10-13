@@ -1,0 +1,75 @@
+# One persistent, read-only worker owned by one app model actor. Endpoint
+# cleanup has its own budget; uncertain opens block further endpoint reads.
+unsafe module.
+AW = use "appwire".
+EP = use "ep#c66ad65e68dd97f5".
+ED = use "epdeadline".
+AC = use "std/actor#201a0e9bf98a5154".
+FS = use "std/fs#84826bc9e8ddb4b5".
+AK = use "appkit".
+run owner ns storage me =
+  _ = Sys.loop {held = (0, 0), uncertain = ""} (step owner ns storage me); Unit.
+step owner ns storage me state = case receiveFromRes me owner of
+    Err why -> _ = cleanup me state; (False, state)
+  | Ok request ->
+      (from, token, command) = request;
+      case command of
+        AW.Inspect -> _ = AC.reply (from, token) state; (True, state)
+      | AW.Stop -> _ = AC.reply (from, token) (AW.Stopped (cleanup me state)); (False, state)
+      | AW.Read tag job ->
+          (result, next) = execute me ns storage job state;
+          _ = AC.reply (from, token) (AW.Completed tag result);
+          (True, next).
+execute me ns storage AW.Clock state = (Ok (AW.Time (Sys.mtime Unit / 10000000)), state).
+execute me ns storage (AW.Logs sev) state =
+  (Ok (AW.Lines (Sys.logSnap sev) "{Sys.logSeq sev} TOTAL"), state).
+execute me ns storage AW.ListRoot state =
+  result = EP.flat (AC.callWithin 500 me ns (EP.NsList "/"));
+  (case result of Ok text -> Ok (AW.Lines (AK.lines text) "") | Err why -> Err why, state).
+execute me ns storage AW.Disk state =
+  result = FS.rpcWithin 500 me storage 5 "" "";
+  (case result of Ok text -> Ok (AW.Lines (AK.lines text) "STORAGE STATS") | Err why -> Err why, state).
+execute me ns storage (AW.ReadPath path) state =
+  case cleanup me state of
+    Err why -> (Err why, state)
+  | Ok u -> case AC.deadlineAfter 500 of
+      Err why -> (Err why, state)
+    | Ok deadline -> case openTracked deadline me ns path of
+        Err (why, unknown) ->
+          # A queued Open has no cancellation/lease acknowledgement in v1.
+          # Do not claim cleanup or admit more opens with an unknown handle.
+          next = {state | held = (0, 0), uncertain = (if unknown then "open cleanup unconfirmed: {why}" else "")};
+          (Err (if unknown then next.uncertain else why), next)
+      | Ok ep ->
+          result = ED.readUntil deadline me ep 0;
+          pending = {state | held = ep};
+          closed = cleanup me pending;
+          next = case closed of Ok u -> {state | held = (0, 0)} | Err why -> pending;
+          (case closed of
+              Err why -> Err "{readError result}; {why}"
+            | Ok u -> case result of
+                Err why -> Err why
+              | Ok (EP.IStr text) -> Ok (AW.Text text)
+              | Ok other -> Err "endpoint did not return text", next).
+readError (Ok value) = "read completed".
+readError (Err why) = why.
+cleanup me state = case state.uncertain != "" of
+    True -> Err state.uncertain
+  | False -> case state.held of
+      (0, 0) -> Ok Unit
+    | ep -> case AC.deadlineAfter 150 of
+        Err why -> Err why
+      | Ok deadline -> case ED.closeUntil deadline me ep of
+          Ok value -> Ok Unit
+        | Err why -> Err "endpoint close unconfirmed: {why}".
+
+# Explicit refusals prove no handle was granted. Transport timeouts cannot.
+openTracked deadline me ns path = case AC.callUntil deadline me ns (EP.NsOpen path "read") of
+    Err why -> Err ("namespace: {why}", True)
+  | Ok (Err why) -> Err (why, False)
+  | Ok (Ok (owner, id)) -> awaitTracked deadline me owner id.
+awaitTracked deadline me owner id = case AC.awaitReplyUntil deadline me owner id of
+    Err why -> Err (why, True)
+  | Ok (EP.Refused why) -> Err (why, False)
+  | Ok (EP.Opened handle) -> Ok (owner, handle)
+  | Ok (EP.Redirect other) -> awaitTracked deadline me other id.

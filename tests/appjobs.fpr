@@ -1,0 +1,90 @@
+#: expect appjobs: HOLDS
+unsafe program.
+AJ = use "../programs/mods/appjobs".
+AW = use "../programs/mods/appwire".
+EP = use "../programs/mods/ep#c66ad65e68dd97f5".
+AC = use "std/actor#201a0e9bf98a5154".
+check True = Unit.
+check False = error "appjobs: invariant failed".
+# Test endpoint deliberately reads beyond the operation deadline, then
+# answers a fresh Close. Its open/read/close counts expose handle cleanup.
+endpoint me = _ = Sys.loop (0, 0, 0) (epStep me); Unit.
+epStep me state =
+  (opens, reads, closes) = state;
+  (from, id, request) = receive me;
+  case request of
+    EP.Open path mode -> _ = AC.reply (from, id) (EP.Opened 1); (True, (opens + 1, reads, closes))
+  | EP.Timed until (EP.Read h n) ->
+      _ = Sys.sleepUs 550000;
+      _ = AC.reply (from, id) (Ok (EP.IStr "late")); (True, (opens, reads + 1, closes))
+  | EP.Timed until (EP.Close h) -> _ = AC.reply (from, id) (Ok 0); (True, (opens, reads, closes + 1))
+  | other -> _ = AC.reply (from, id) state; (True, state).
+namespace owner me = _ = Sys.loop 0 (nsStep owner me); Unit.
+nsStep owner me state =
+  (from, id, request) = receive me;
+  case request of
+    EP.NsList path -> _ = AC.reply (from, id) (Ok "/one\n/two\n"); (True, state)
+  | EP.NsOpen path mode ->
+      next = Sys.nextId Unit;
+      _ = send owner (from, next, EP.Open path mode);
+      _ = AC.reply (from, id) (Ok (owner, next)); (True, state)
+  | other -> (True, state).
+refuser me =
+  (from, id, request) = receive me;
+  _ = AC.reply (from, id) (EP.Refused "read denied"); refuser me.
+silent me = _ = receive me; _ = Sys.sleepUs 3000000; Unit.
+fetch me worker job =
+  result = AC.callWithin 1500 me worker (AW.Read 0 job);
+  case result of Ok (AW.Completed token value) -> value | other -> Err "bad worker reply".
+repeat me worker 0 = Unit.
+repeat me worker n =
+  _ = check (case fetch me worker AW.ListRoot of Ok (AW.Lines rows total) -> rows == ["/one", "/two"] | other -> False);
+  repeat me worker (n - 1).
+adopt parent ns busy me =
+  worker = spawn (AJ.run me ns 0);
+  _ = if busy then send worker (me, Sys.nextId Unit, AW.Read 1 (AW.ReadPath "/slow")) else Ok Unit;
+  _ = send parent worker;
+  _ = receive me; Unit.
+main =
+  me = myself 0;
+  ep = spawn endpoint;
+  ns = spawn (namespace ep);
+  worker = spawn (AJ.run me ns 0);
+  _ = repeat me worker 32;
+  start = AC.nowUs Unit;
+  failed = fetch me worker (AW.ReadPath "/one");
+  _ = check (case failed of Err why -> True | other -> False);
+  _ = check (AC.nowUs Unit - start < 900000);
+  counts = AC.callWithin 200 me ep (EP.Close 0);
+  _ = check (case counts of Ok (opens, reads, closes) -> opens == 1 and reads == 1 and closes == 1 | other -> False);
+  state = AC.callWithin 200 me worker AW.Inspect;
+  _ = check (case state of Ok s -> s.held == (0, 0) and s.uncertain == "" | other -> False);
+  stopped = AC.callWithin 1500 me worker AW.Stop;
+  _ = check (case stopped of Ok (AW.Stopped (Ok u)) -> True | other -> False);
+  slow = spawn silent;
+  blocked = spawn (AJ.run me slow 0);
+  _ = check (case fetch me blocked (AW.ReadPath "/slow") of Err why -> True | other -> False);
+  _ = check (case AC.callWithin 1500 me blocked AW.Stop of Ok (AW.Stopped (Err why)) -> True | other -> False);
+  _ = kill slow; _ = kill ns; _ = kill ep;
+  denied = spawn refuser;
+  deniedNs = spawn (namespace denied);
+  deniedWorker = spawn (AJ.run me deniedNs 0);
+  _ = check (case fetch me deniedWorker (AW.ReadPath "/denied") of Err why -> why == "read denied" | other -> False);
+  deniedState = AC.callWithin 200 me deniedWorker AW.Inspect;
+  _ = check (case deniedState of Ok s -> s.uncertain == "" and s.held == (0, 0) | other -> False);
+  _ = check (case fetch me deniedWorker (AW.ReadPath "/denied") of Err why -> why == "read denied" | other -> False);
+  _ = check (case AC.callWithin 1500 me deniedWorker AW.Stop of Ok (AW.Stopped (Ok u)) -> True | other -> False);
+  _ = kill deniedNs; _ = kill denied;
+  idleOwner = spawn (adopt me 0 False);
+  idleWorker = case receiveFromRes me idleOwner of Ok worker -> worker | Err why -> error why;
+  _ = send idleOwner Unit;
+  _ = Sys.sleepUs 30000;
+  _ = check (not (Sys.alive idleWorker));
+  slow2 = spawn silent;
+  busyOwner = spawn (adopt me slow2 True);
+  busyWorker = case receiveFromRes me busyOwner of Ok worker -> worker | Err why -> error why;
+  _ = send busyOwner Unit;
+  _ = Sys.sleepUs 800000;
+  _ = check (not (Sys.alive busyWorker));
+  _ = kill slow2;
+  "appjobs: HOLDS".

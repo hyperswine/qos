@@ -1,0 +1,85 @@
+# Main's one app-session owner. The module table is consulted once at start;
+# subsequent input, views and lifecycle are versioned data conversations.
+unsafe module.
+AW = use "appwire".
+AC = use "std/actor#201a0e9bf98a5154".
+S2 = use "scene2d".
+Cmd = Type (Open Int | Deliver AW.Event | Home | Stop | Inspect).
+empty = {actor = 0, session = 0, sequence = 0, revision = 0, cleanup = "", failures = 0}.
+run owner ns storage w h me = _ = Sys.loop empty (step owner ns storage w h me); Unit.
+step owner ns storage w h me state = if not (Sys.alive owner) then
+  (idle, result) = leave me state; (False, idle)
+  else case receiveNow me of
+    Err why -> _ = Sys.sleepUs 1000; (True, state)
+  | Ok received -> dispatch ns storage w h me state received.
+dispatch ns storage w h me state received =
+  case received of
+    (from, id, command) ->
+      (next, answer) = case command of
+          Open table -> launch ns storage w h me table state
+        | Deliver event -> exchange me event state
+        | Home -> leave me state
+        | Stop -> leave me state
+        | Inspect -> (state, Ok (AW.Refused "actor={state.actor} session={state.session}"));
+      _ = AC.reply (from, id) answer;
+      (case command of Stop -> False | other -> True, next)
+  | stale -> (True, state).
+# Unsafe FP roots have no checked interface stamp. Enforce the root scope and
+# machine arity before entry; ABI/archive trust plus the primitive handshake
+# are the remaining boundary. This is not type or process isolation.
+entry table = findEntry table (Mod.hashAt table) 0 (Mod.rows table).
+findEntry table root i rows = if i >= rows then Err "no app-session entry" else
+  if Mod.rowHash table i == root and Mod.rowName table i == "appMain" then
+    if Mod.rowArity table i == 1 then Ok (Mod.rowFn table i) else Err "appMain must take one actor argument"
+    else findEntry table root (i + 1) rows.
+launch ns storage w h me table old =
+  (idle, closed) = leave me old;
+  if idle.failures >= 3 then (idle, Err "app recovery budget exhausted; restart Main") else
+    case entry table of
+      Err why -> (idle, Err why)
+    | Ok start ->
+        actor = spawn start;
+        session = Sys.nextId Unit;
+        state = {idle | actor = actor, session = session, sequence = 0, revision = 0};
+        boot = AC.callWithin 500 me actor (AW.magic, AW, (session, (w, h), (ns, storage)));
+        case boot of
+          Ok (magic, schema, sid) -> if magic == AW.magic and schema == AW and sid == session then exchange me AW.Tick state
+            else abortStartup state "app-session version/schema refused"
+        | Err why -> abortStartup state "app startup: {why}".
+exchange me event state = if state.actor == 0 then (state, Err "app session is closed") else
+  sequence = state.sequence + 1;
+  case AC.callWithin 500 me state.actor (AW.Event state.session sequence event) of
+    Ok (AW.Frame sid revision tree vals status) ->
+      if sid == state.session and revision > state.revision then
+        ({state | sequence = sequence, revision = revision}, Ok (AW.Frame sid revision tree vals status))
+      else failed me state "stale app view"
+  | Ok (AW.Refused why) -> failed me state "app refused: {why}"
+  | Ok other -> failed me state "invalid app view reply"
+  | Err why -> failed me state "app response: {why}".
+failed me state why =
+  (idle, cleanup) = leave me state;
+  (idle, Err (case cleanup of Ok u -> why | Err detail -> "{why}; {detail}")).
+leave me state =
+  result = if state.actor == 0 then
+      if state.cleanup == "" then Ok Unit else Err state.cleanup
+    else case AC.callWithin 1200 me state.actor (AW.Close state.session) of
+        Ok (AW.Closed sid answer) -> if sid == state.session then answer else Err "close session mismatch"
+      | Ok other -> Err "invalid close acknowledgement"
+      | Err why -> Err "app forced stop; cleanup unconfirmed: {why}";
+  _ = if state.actor == 0 then Unit else kill state.actor;
+  cleanup = case result of Ok u -> state.cleanup | Err why -> retain state.cleanup why;
+  failures = state.failures + (case result of Err why -> if state.actor == 0 then 0 else 1 | Ok u -> 0);
+  ({empty | cleanup = cleanup, failures = failures}, if cleanup != "" then Err cleanup
+    else Ok (AW.Closed state.session (Ok Unit))).
+call me owner command = case AC.callWithin 2500 me owner command of
+    Err why -> Err "session owner: {why}"
+  | Ok answer -> answer.
+stop me owner = case call me owner Stop of Ok reply -> Ok Unit | Err why -> Err why.
+
+# No typed request, including Close, is safe until bootstrap agrees.
+abortStartup state why =
+  _ = kill state.actor;
+  cleanup = retain state.cleanup "startup forced stop; cleanup unconfirmed: {why}";
+  ({empty | cleanup = cleanup, failures = state.failures + 1}, Err cleanup).
+
+retain previous why = if previous == "" or previous == why then why else "{previous}; {why}".

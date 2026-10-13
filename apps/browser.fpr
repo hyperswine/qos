@@ -1,12 +1,6 @@
 unsafe program.
-# browser root: explicitly export the appkit entry points for scoped lookup.
+# One startup entry; all subsequent communication is versioned data.
 A = use "../programs/mods/browserapp".
-appMeta u = A.appMeta u.
-appInit self env = A.appInit self env.
-appUpdate self env key state = A.appUpdate self env key state.
-appTree viewport = A.appTree viewport.
-appVals self env state = A.appVals self env state.
-main : Unit .
-main =
-  _ = A.appMeta 0;
-  Unit.
+appMain : unsafe Int -> Unit .
+appMain me = A.run me.
+main = Unit.

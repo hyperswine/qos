@@ -129,6 +129,6 @@ main =
   _ = kill port;
   # A view of a cached Files pane needs no live namespace capability.
   model = {S.init 0 | active = 0 - 2, pane = recovered};
-  env = (QS.Qsys 0 0 0 0 Nil, S.shortcuts, 0, 0);
+  env = (QS.Qsys 0 0 0 0 Nil, S.shortcuts, 0, 0, 0);
   _ = S.view me env (960, 600) model;
   "panemvu: HOLDS".

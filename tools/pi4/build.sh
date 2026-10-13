@@ -33,7 +33,7 @@ for name in fib sha pingpong xpingpong nbody vecread; do
 done
 cp tests/base/strprims.expected "$out/strprims.expected"
 cd "$qos"
-for name in blockportable blocknamespace blocklifecyclep blockmemory filessvc filesshutdown qlogmemory gfxshare gfxmemory gfxsmoke gfxheadless guishell panemvu portableshutdown qsys netactor netactorstart nettransport; do
+for name in blockportable blocknamespace blocklifecyclep blockmemory filessvc filesshutdown qlogmemory gfxshare gfxmemory gfxsmoke gfxheadless guishell panemvu appsession appjobs portableshutdown qsys netactor netactorstart nettransport; do
   make -s qos-app-a64 PROG="tests/$name.fpr" QA_OUT="$out/$name.qa" BUILD="$out/build-$name"
   echo "built qos/$name"
 done

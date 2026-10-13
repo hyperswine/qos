@@ -1,0 +1,15 @@
+# Data-only Main app sessions. Rebuild Main and its apps together when this
+# module changes. Bootstrap exchanges primitive tuples before these types.
+S2 = use "scene2d".
+Event = Type (Key Int | Tick | Resize Int Int | Arrived Int (Result Snapshot String)).
+Job = Type (Clock | Logs Int | ListRoot | ReadPath String | Disk).
+Snapshot = Type (Time Int | Lines (List String) String | Text String).
+Cmd = Type (Fetch Int Job).
+Request = Type (Event Int Int Event | Close Int).
+Reply = Type (Frame Int Int S2.Sn (List String) String | Closed Int (Result Unit String) | Refused String | Completed Int (Result Snapshot String) | Stopped (Result Unit String)).
+Work = Type (Read Int Job | Stop | Inspect).
+Phase = Type (Loading | Ready | Failed String).
+magic = "qos.app-session/1".
+status Loading = "Loading".
+status Ready = "Ready".
+status (Failed why) = "{why} - R RETRY".

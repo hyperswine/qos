@@ -9,6 +9,8 @@ S2 = use "scene2d".
 ST = use "scrolltext".
 PN = use "panemvu".
 PJ = use "panejobs".
+AP = use "appclient".
+AW = use "appwire".
 FS = use "std/fs#84826bc9e8ddb4b5".
 AC = use "std/actor#201a0e9bf98a5154".
 MV = use "std/mvu".
@@ -51,21 +53,8 @@ diskTile id (QS.App aid name ti :: rest) = case id == aid of
     True -> Tile id name "Onboard .qa application" ti
   | False -> diskTile id rest.
 
-# The existing appkit contract: resolution stays scoped to the archive's table.
-has ti name =
-  (ok, f) = Mod.findAt ti name;
-  ok == 1.
-gui ti = has ti "appInit" and has ti "appUpdate" and has ti "appTree" and has ti "appVals".
-export ti name =
-  (ok, f) = Mod.findAt ti name;
-  f.
-envOf q tiles mt =
-  QS.Qsys ns st vfs log apps = q;
-  (log, mt, (titles tiles, ns)).
-titles Nil = Nil.
-titles (Tile id title hint ti :: r) = title :: titles r.
 
-init env = {page = 0, selected = 0, active = 0, inner = 0, status = "Ready when you are", snap = 0, pane = PN.init, commands = Nil}.
+init env = {page = 0, selected = 0, active = 0, inner = AW.Frame 0 0 (Box Nil Nil) Nil "", appFailed = False, appCommands = Nil, status = "Ready when you are", snap = 0, pane = PN.init, commands = Nil}.
 staticKey m = 0.
 staticView vp m = 0.
 done m = "shell ended".
@@ -75,7 +64,8 @@ update me env (MV.EKey 16) m | m.active == 0 = (m, [MV.MQuit]).
 update me env (MV.EKey k) m = effects me env (key env k m).
 update me env (MV.EWheel dy dx) m | scrollable m.active =
   effects me env (scrollBy env m (0 - dy * 3 / 10)).
-update me env MV.ETick m = effects me env (paneUpdate PN.Tick m).
+update me env MV.ETick m = effects me env (if m.active > 0 and not m.appFailed then
+  {m | appCommands = [AP.Deliver AW.Tick]} else paneUpdate PN.Tick m).
 update me env (MV.EMsg "quit" _) m = (m, [MV.MQuit]).
 update me env (MV.EMsg tag body) m = case PJ.decode tag body of
     Err why -> (m, Nil)
@@ -91,14 +81,15 @@ paneUpdate msg m =
   (pane, commands) = PN.update msg m.pane;
   {m | pane = pane, commands = cat m.commands commands}.
 effects me env m =
-  (q, tiles, mt, jobs) = env;
-  cleared = {m | commands = Nil};
-  case PJ.run me jobs m.commands of
+  (q, tiles, mt, jobs, sessions) = env;
+  applied = appEffects me sessions m m.appCommands;
+  cleared = {applied | commands = Nil, appCommands = Nil};
+  case PJ.run me jobs applied.commands of
       Ok u -> (cleared, Nil)
     | Err why -> (paneUpdate (PN.Complete m.pane.generation m.pane.source (Err why)) cleared, Nil).
 key env 1 m =
   _ = print "shell: home";
-  paneUpdate PN.Leave {m | active = 0, status = "Welcome home", snap = m.snap + 1}.
+  paneUpdate PN.Leave {m | active = 0, appCommands = [AP.Home], status = "Welcome home", snap = m.snap + 1}.
 key env 25 m =
   _ = print "shell: snapshot {m.snap + 1}";
   {m | snap = m.snap + 1}.
@@ -115,11 +106,11 @@ key env 28 m = openTile env m.
 key env 57 m = openTile env m.
 key env k m = m.
 select env m n =
-  (q, tiles, mt, jobs) = env;
+  (q, tiles, mt, jobs, sessions) = env;
   s = clamp 0 (count tiles - 1) n;
   {m | selected = s, page = s / pageSize}.
 page env m delta =
-  (q, tiles, mt, jobs) = env;
+  (q, tiles, mt, jobs, sessions) = env;
   p = clamp 0 (pages tiles - 1) (m.page + delta);
   _ = print "shell: page {p + 1}";
   {m | page = p, selected = p * pageSize}.
@@ -144,14 +135,14 @@ pointerHome env m press x y =
   case (x - 42) % 296 >= 284 or (y - 140) % 178 >= 158 of
     True -> m
   | False ->
-      (q, ts, mt, jobs) = env;
+      (q, ts, mt, jobs, sessions) = env;
       n = m.page * pageSize + row * 3 + col;
       case n >= count ts of True -> m | False ->
         m2 = {m | selected = n};
         case press of True -> openTile env m2 | False -> m2.
 
 openTile env m =
-  (q, tiles, mt, jobs) = env;
+  (q, tiles, mt, jobs, sessions) = env;
   Tile id title hint ti = at tiles m.selected;
   _ = print "shell: open {id}";
   case ti == 0 - 100 of
@@ -162,11 +153,9 @@ openTile env m =
         (case scrollable ti of
           True -> paneUpdate (PN.Open (case ti == 0 - 2 of True -> 1 | False -> 2)) next
         | False -> paneUpdate PN.Leave next)
-    | False -> case gui ti of
-        False -> {m | status = "Cannot open {id}: this .qa has no appkit GUI entry"}
-      | True ->
-          inner = (export ti "appInit") (myself 0) (envOf q tiles mt);
-          {m | active = ti + 1, inner = inner, status = title}.
+    | False -> {m | active = ti + 1, appFailed = False, appCommands = [AP.Open ti],
+        inner = AW.Frame 0 0 (Box Nil Nil) Nil "Loading", status = title}.
+
 scrollable a = a == 0 - 2 or a == 0 - 3.
 scrollBy env m delta = paneUpdate (PN.Scroll delta) m.
 scrollTo env m requested = paneUpdate (PN.Seek requested) m.
@@ -178,10 +167,18 @@ appKey env 109 m | scrollable m.active = scrollBy env m ST.visible.
 appKey env 102 m | scrollable m.active = scrollTo env m 0.
 appKey env 107 m | scrollable m.active = scrollTo env m 1000000.
 appKey env k m | m.active < 0 = m.
-appKey env k m =
-  (q, tiles, mt, jobs) = env;
-  inner = (export (m.active - 1) "appUpdate") (myself 0) (envOf q tiles mt) k m.inner;
-  {m | inner = inner}.
+appKey env 19 m | m.appFailed = {m | appCommands = [AP.Open (m.active - 1)], appFailed = False}.
+appKey env k m | m.appFailed = m.
+appKey env k m = {m | appCommands = [AP.Deliver (AW.Key k)]}.
+appEffects me sessions m Nil = m.
+appEffects me sessions m (command :: rest) =
+  next = case AP.call me sessions command of
+      Err why -> _ = Sys.logAt 2 "shell app: {why}";
+        {m | appFailed = True, status = "{why} - R RETRY / ESC HOME"}
+    | Ok (AW.Frame sid revision tree vals status) -> {m | inner = AW.Frame sid revision tree vals status, appFailed = False}
+    | Ok (AW.Closed sid result) -> m
+    | Ok other -> {m | appFailed = True, status = "Invalid app session reply - R RETRY / ESC HOME"};
+  appEffects me sessions next rest.
 
 text s c size = Lbl [Fs size, Fg c] s.
 spacer = Box [Grow] Nil.
@@ -218,7 +215,7 @@ sheet title body = Box [Col, W width, H height, Pad 42, Gap 24, Bg (18, 30, 60)]
   [header, Box [Col, Grow, Pad 26, Gap 20, Round 24, Bg (65, 98, 155)]
     (text title ink 30 :: body), text "ESC OR CLICK HERE TO GO HOME     P SNAPSHOT" dim 14].
 builtin self env m =
-  (q, tiles, mt, jobs) = env;
+  (q, tiles, mt, jobs, sessions) = env;
   QS.Qsys ns st vfs log apps = q;
   case scrollable m.active of
     True -> scrollSheet (case m.active == 0 - 2 of True -> "Files & services" | False -> "System log")
@@ -239,19 +236,26 @@ builtinTree self ns mt a = sheet "Welcome to QOS" [text "An actor system, writte
        text "ARROWS select   ENTER open   PGUP / PGDN pages" accent 16,
        text "Mouse: move to select, click to open." accent 16].
 view self env vp m =
-  (q, tiles, mt, jobs) = env;
+  (q, tiles, mt, jobs, sessions) = env;
   tree = case m.active == 0 of
       True -> home tiles m
     | False -> case m.active < 0 of
         True -> builtin self env m
-      | False -> (export (m.active - 1) "appTree") (width, height);
+      | False -> appTree m;
   (es, slots) = S2.buildW (width, height) tree;
   vals = case m.active > 0 of
-      True -> (export (m.active - 1) "appVals") self (envOf q tiles mt) m.inner
+      True -> (case m.inner of AW.Frame sid revision tree vals status -> vals | other -> Nil)
     | False -> Nil;
   # The overlay walks text as well as geometry every frame. The 3D static
   # mesh cache does not retain proportional glyphs, so UI belongs here.
   (S2.sceneAt height Nil Nil, (cat es (S2.dyns slots vals), S2.camAt height), m.snap).
+
+appTree m = case m.inner of
+    AW.Frame sid revision tree vals status -> if m.appFailed and sid == 0 then
+      sheet "Application unavailable" [text (substr m.status 0 110) accent 14, text "R RETRY     ESC HOME" ink 16]
+      else Box [Col, W width, H height, Bg (62, 70, 88)]
+      [tree, text (substr (if m.appFailed then m.status else "{status}    ESC HOME") 0 110) accent 12]
+  | other -> sheet "Application unavailable" [text m.status accent 14].
 
 input graphics w h me = inputLoop graphics w h me (width / 2) (height / 2) 0.
 inputLoop graphics w h me x y buttons =
@@ -316,15 +320,18 @@ runSized me upd q lifecycle tiles mt ep dims =
   _ = print "shell: Main Profile ready ({count tiles} shortcuts, {pages tiles} pages)";
   port = spawn MV.port;
   jobs = spawn (PJ.owner ns port serviceBudgetMs);
-  cfg = {env = (q, tiles, mt, jobs), mt = mt, tick = 333330, input = inp, render = graphics};
+  sessions = spawn (AP.run me ns st width (height - 32));
+  cfg = {env = (q, tiles, mt, jobs, sessions), mt = mt, tick = 333330, input = inp, render = graphics};
   app = MV.MApp init upd staticKey staticView view done (subscriptions port);
   _ = QS.ready lifecycle;
   result = MV.runResultWithin serviceBudgetMs me cfg app;
+  appsStopped = AP.stop me sessions;
+  _ = kill sessions;
   stopped = PJ.stop me jobs;
   _ = kill jobs;
   _ = kill inp;
   _ = kill port;
-  finishSession me lifecycle ep (withCleanup result "pane worker close" stopped).
+  finishSession me lifecycle ep (withCleanup (withCleanup result "app sessions close" appsStopped) "pane worker close" stopped).
 finishSession me lifecycle ep result =
   _ = Sys.shutdownBegin Unit;
   (graphics, h) = ep;

@@ -1,15 +1,8 @@
-# ============================================================================
-# browserapp.fpr -- FileBrowser.qa: a UI over the ROOT NAMESPACE.
-#
-# There is no filesystem here to browse.  The list comes from what the
-# system knows how to name -- registry entries, one line each -- and
-# "directories" are nothing but shared prefixes this view groups by.
-# Most rows resolve to virtual things (a service, an app, an actor
-# inside one); a few resolve to bytes, and for those ENTER asks the
-# resolver, which walks to the owner and relays what it serves.  The
-# distinction the user sees (VIRT vs DATA) is the entry's kind, not a
-# property of any storage.
-# ============================================================================
+# Recursive MVU: cached model, pure update/view, explicit effect messages.
+unsafe module.
+AW = use "appwire".
+AS = use "appsession".
+AC = use "std/actor#201a0e9bf98a5154".
 S2 = use "scene2d".
 AK = use "appkit".
 Box = S2.Box. Lbl = S2.Lbl. Slot = S2.Slot.
@@ -17,25 +10,34 @@ Row = S2.Row. Col = S2.Col. Pad = S2.Pad. Gap = S2.Gap.
 W = S2.W. H = S2.H. Grow = S2.Grow. Sc = S2.Sc.
 Bg = S2.Bg. Fg = S2.Fg. Bord = S2.Bord.
 
-appMeta u = ("FILES", "ROOT NAMESPACE").
 
-# state = (cursor, mode): mode 0 = the namespace, 1 = a resolved path
-appInit self env = (0, 0).
-appUpdate self env k st | k == 108 = brMove st 1.       # down
-appUpdate self env k st | k == 103 = brMove st (0 - 1). # up
-appUpdate self env k st | k == 28 = brOpen st.          # enter: resolve
-appUpdate self env k st | k == 14 = brBack st.          # backspace: back to list
-appUpdate self env k st = st.
-brMove (c, m) d | m == 1 = (c, m).
-brMove (c, m) d | c + d < 0 = (c, m).
-brMove (c, m) d = (c + d, m).
-brOpen (c, m) = (c, 1).
-brBack (c, m) = (c, 0).
+init = ({cursor = 0, mode = 0, paths = Nil, lines = Nil, path = "", token = 1, busy = True, stale = False, phase = AW.Loading}, [AW.Fetch 1 AW.ListRoot]).
+fetch job m = if m.busy then (m, Nil) else
+  ({m | token = m.token + 1, busy = True, stale = False, phase = AW.Loading}, [AW.Fetch (m.token + 1) job]).
+update (AW.Key 14) m = ({m | mode = 0, stale = m.busy, phase = AW.Ready}, Nil).
+update (AW.Key 103) m = if m.mode == 0 then ({m | cursor = brClamp (m.cursor - 1) (brLen m.paths)}, Nil) else (m, Nil).
+update (AW.Key 108) m = if m.mode == 0 then ({m | cursor = brClamp (m.cursor + 1) (brLen m.paths)}, Nil) else (m, Nil).
+update (AW.Key 28) m = if m.busy or m.paths == Nil then (m, Nil) else
+  (path, kind) = brNth m.paths m.cursor;
+  fetch (AW.ReadPath path) {m | mode = 1, path = path, lines = Nil}.
+update (AW.Key 19) m = fetch (if m.mode == 0 then AW.ListRoot else AW.ReadPath m.path) m.
+update (AW.Arrived token result) m = if token != m.token or not m.busy then (m, Nil) else
+  if m.stale then ({m | busy = False, stale = False}, Nil) else case result of
+    Ok (AW.Lines rows total) -> paths = AK.withKind rows;
+      ({m | paths = paths, cursor = brClamp m.cursor (brLen paths), busy = False, phase = AW.Ready}, Nil)
+  | Ok (AW.Text text) -> ({m | lines = brLines text, busy = False, phase = AW.Ready}, Nil)
+  | Err why -> ({m | busy = False, phase = AW.Failed why}, Nil)
+  | other -> ({m | busy = False, phase = AW.Failed "invalid browser result"}, Nil).
+update other m = (m, Nil).
+view vp m = (tree vp, if m.mode == 0 then
+  "/  ({brLen m.paths} paths)" :: brPad (brRows (brWindow m.paths (brStart m.cursor)) (brStart m.cursor) m.cursor) 10
+    |> brAppend "{if m.paths == Nil then 0 else m.cursor + 1}/{brLen m.paths}"
+  else m.path :: brPad m.lines 10 |> brAppend "RESOLVED").
 
 brRow i =
   Box [Row, Pad 1] [ Slot [Fg (930, 940, 960)] i 46 ].
 
-appTree vp =
+tree vp =
   (vw, vh) = vp;
   Box [Col, Pad 8, Gap 4, W vw, H vh, Bg (62, 70, 88)]
     [ Box [Row, Gap 6]
@@ -55,7 +57,7 @@ brLen (x :: r) = 1 + brLen r.
 brNth Nil i = ("", 0).
 brNth (x :: r) 0 = x.
 brNth (x :: r) i = brNth r (i - 1).
-brClamp c n | n == 0 = 0.
+brClamp c n | n == 0 or c < 0 = 0.
 brClamp c n | c > n - 1 = n - 1.
 brClamp c n = c.
 
@@ -88,28 +90,34 @@ brPad l n | n == 0 = Nil.
 brPad Nil n = "" :: brPad Nil (n - 1).
 brPad (x :: r) n = x :: brPad r (n - 1).
 
-appVals self env st =
-  (c0, mode) = st;
-  vfs = AK.envVfs env;
-  ents = AK.vfsList self vfs;
-  n = brLen ents;
-  c = brClamp c0 n;
-  (p, k) = brNth ents c;
-  vs = brBody self vfs mode ents c p;
-  _ = drop ents;
-  vs.
-
-brBody self vfs 0 ents c p =
-  n = brLen ents;
-  "/  ({n} paths)"
-    :: brPad (brRows (brWindow ents (brStart c)) (brStart c) c) 10
-    |> brAppend "{c + 1}/{n}".
-brBody self vfs mode ents c p =
-  txt = AK.vfsRead self vfs p;
-  ls = brLines txt;
-  _ = drop txt;
-  p :: brPad ls 10 |> brAppend "RESOLVED".
-
 brAppend x l = brCat l (x :: Nil).
 brCat Nil b = b.
 brCat (a :: r) b = a :: brCat r b.
+
+# This actor owns the child model. Transport and effects exchange data only.
+run me = case AS.start me of
+    Err why -> Unit
+  | Ok ctx ->
+      (model, commands) = init;
+      _ = AS.issue me ctx commands;
+      _ = Sys.loop (ctx, model) (step me); Unit.
+step me state =
+  (ctx, model) = state;
+  case AS.next me ctx of
+    AS.Idle -> _ = Sys.sleepUs 1000; (True, state)
+  | AS.Gone -> _ = AS.abandon me ctx; (False, state)
+  | AS.JobResult token result ->
+      (fresh, commands) = update (AW.Arrived token result) model;
+      _ = AS.issue me ctx commands;
+      (True, (AS.advance ctx ctx.sequence, fresh))
+  | AS.Message ret request -> case request of
+      AW.Close session -> (AS.close me ctx ret session, state)
+    | AW.Event session sequence event -> case AS.valid ctx session sequence of
+        False -> _ = AC.reply ret (AW.Refused "stale session or sequence"); (True, state)
+      | True ->
+          next = AS.advance (AS.resized ctx event) sequence;
+          (fresh, commands) = update event model;
+          _ = AS.issue me next commands;
+          (tree, vals) = view (next.w, next.h) fresh;
+          _ = AC.reply ret (AW.Frame next.session next.revision tree vals (AW.status fresh.phase));
+          (True, (next, fresh)).

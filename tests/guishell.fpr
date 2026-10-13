@@ -22,7 +22,7 @@ main =
   q = QS.Qsys 0 0 0 0 Nil;
   ts = S.cat S.shortcuts [S.Tile "bad" "bad" "refused" (0 - 100),
        S.Tile "x" "x" "refused" (0 - 100), S.Tile "last" "last" "refused" (0 - 100)];
-  env = (q, ts, 0, 0);
+  env = (q, ts, 0, 0, 0);
   m = S.init env;
   p = S.page env m 100;
   _ = check (p.page == 1 and p.selected == 6);

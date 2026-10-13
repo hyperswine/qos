@@ -238,6 +238,10 @@ def check(out):
         f'QA_OUT={out / "scrolltext.qa"}', f'BUILD={out / "scrolltext-build"}')
     run('make', '-s', 'qos-app', 'PROG=tests/panemvu.fpr',
         f'QA_OUT={out / "panemvu.qa"}', f'BUILD={out / "panemvu-build"}')
+    run('make', '-s', 'qos-app', 'PROG=tests/appsession.fpr',
+        f'QA_OUT={out / "appsession.qa"}', f'BUILD={out / "appsession-build"}')
+    run('make', '-s', 'qos-app', 'PROG=tests/appjobs.fpr',
+        f'QA_OUT={out / "appjobs.qa"}', f'BUILD={out / "appjobs-build"}')
     run('make', '-s', '-C', 'qos', 'portable-gl')
     unit = subprocess.run([str(ROOT / 'qos/qosp-gl'), '--yes', str(out / 'unit.qa')],
                           cwd=out, env=env, capture_output=True, text=True, timeout=30)
@@ -252,6 +256,14 @@ def check(out):
                           cwd=out, env=env, capture_output=True, text=True, timeout=30)
     (out / 'panemvu.log').write_text(pane.stdout + pane.stderr)
     assert pane.returncode == 0 and 'panemvu: HOLDS' in pane.stdout, pane.stdout + pane.stderr
+    for contract in ['appsession', 'appjobs']:
+        for harts in ['1', '4']:
+            checked = subprocess.run([str(ROOT / 'qos/qosp-gl'), '--yes', str(out / (contract + '.qa'))],
+                                     cwd=out, env=dict(env, FPR_HARTS=harts, FPR_PORT='0'),
+                                     capture_output=True, text=True, timeout=30)
+            (out / (contract + '-' + harts + '.log')).write_text(checked.stdout + checked.stderr)
+            assert checked.returncode == 0 and contract + ': HOLDS' in checked.stdout, checked.stdout + checked.stderr
+
     env['FPR_DISK'] = str(disk)
     command = [str(ROOT / 'qos/qosp-gl'), '--yes', str(out / 'check.qa')]
 
@@ -336,17 +348,19 @@ def check(out):
             shutil.move(f'/tmp/{tag}-5.ppm', out / f'boot{boot}-5.ppm')
             key(106); key(106); key(28); wait_for('shell: open plugmini')
             refusal = shot(6)
+            key(1); wait_for('shell: home'); await_capture(Path(f'/tmp/{tag}-7.ppm'))
+            shutil.move(f'/tmp/{tag}-7.ppm', out / f'boot{boot}-7.ppm')
             key(106); key(28); wait_for('shell: open broken')
-            broken = shot(7)
+            broken = shot(8)
             assert refusal != broken, 'distinct launch refusals were not displayed'
             key(104); wait_for('shell: page 1')
             key(108); key(106); key(28); wait_for('shell: open clock')
-            clock = shot(8)
+            clock = shot(9)
             assert clock != first, 'loaded clock did not draw'
-            key(1); wait_for('shell: home'); await_capture(Path(f'/tmp/{tag}-9.ppm'))
-            shutil.move(f'/tmp/{tag}-9.ppm', out / f'boot{boot}-9.ppm')
+            key(1); wait_for('shell: home'); await_capture(Path(f'/tmp/{tag}-10.ppm'))
+            shutil.move(f'/tmp/{tag}-10.ppm', out / f'boot{boot}-10.ppm')
             key(105); key(105); key(105); key(28); wait_for('shell: open files'); wait_for('shell: pane 1 R Refresh')
-            files = shot(10)
+            files = shot(11)
             # Each namespace entry occupies its own row in the fixed viewport.
             # Count bright text in separate row bands, excluding the scrollbar.
             def row_ink(rgb, y):
@@ -354,19 +368,34 @@ def check(out):
                            for yy in range(y, y + 24) for x in range(65, 870))
             assert sum(row_ink(files, 236 + row * 26) > 20 for row in range(9)) >= 6, 'Files is not a vertical list'
             key(109)
-            files_bottom = shot(11)
+            files_bottom = shot(12)
             assert files_bottom != files, 'Files page-down did not scroll'
             key(102)
-            assert shot(12) == files, 'Files Home did not return to the first row'
-            key(1); wait_for('shell: home'); await_capture(Path(f'/tmp/{tag}-13.ppm'))
-            shutil.move(f'/tmp/{tag}-13.ppm', out / f'boot{boot}-13.ppm')
+            assert shot(13) == files, 'Files Home did not return to the first row'
+            key(1); wait_for('shell: home'); await_capture(Path(f'/tmp/{tag}-14.ppm'))
+            shutil.move(f'/tmp/{tag}-14.ppm', out / f'boot{boot}-14.ppm')
             key(106); key(28); wait_for('shell: open logs'); wait_for('shell: pane 2 R Refresh')
-            logs = shot(14)
+            logs = shot(15)
             assert sum(row_ink(logs, 236 + row * 26) > 20 for row in range(9)) >= 6, 'Logs is not a vertical list'
             key(107)
-            assert shot(15) != logs, 'Logs End did not scroll'
-            key(1); wait_for('shell: home'); await_capture(Path(f'/tmp/{tag}-16.ppm'))
-            shutil.move(f'/tmp/{tag}-16.ppm', out / f'boot{boot}-16.ppm')
+            assert shot(16) != logs, 'Logs End did not scroll'
+            key(1); wait_for('shell: home'); await_capture(Path(f'/tmp/{tag}-17.ppm'))
+            shutil.move(f'/tmp/{tag}-17.ppm', out / f'boot{boot}-17.ppm')
+            key(109); key(106); key(28); wait_for('shell: open disk')
+            disk_stats = shot(18)
+            assert disk_stats != logs, 'loaded Disk did not draw its cached statistics'
+            key(1); wait_for('shell: home'); await_capture(Path(f'/tmp/{tag}-19.ppm'))
+            shutil.move(f'/tmp/{tag}-19.ppm', out / f'boot{boot}-19.ppm')
+            key(104); key(108); key(106); key(106); key(28); wait_for('shell: open logs')
+            app_logs = shot(20)
+            key(18)
+            assert shot(21) != app_logs, 'loaded Logs did not update severity'
+            key(1); wait_for('shell: home'); await_capture(Path(f'/tmp/{tag}-22.ppm'))
+            shutil.move(f'/tmp/{tag}-22.ppm', out / f'boot{boot}-22.ppm')
+            key(105); key(28); wait_for('shell: open clock')
+            assert shot(23) != first, 'Clock did not reopen a fresh session'
+            key(1); wait_for('shell: home'); await_capture(Path(f'/tmp/{tag}-24.ppm'))
+            shutil.move(f'/tmp/{tag}-24.ppm', out / f'boot{boot}-24.ppm')
             if boot == 1:
                 key(16)
             else:
@@ -398,7 +427,7 @@ def check(out):
             os.close(fd)
             fifo.unlink(missing_ok=True)
             (out / f'boot{boot}.log').write_text(''.join(log))
-            for n in range(1, 17):
+            for n in range(1, 25):
                 p = Path(f'/tmp/{tag}-{n}.ppm')
                 if p.exists():
                     shutil.move(p, out / f'boot{boot}-{n}.ppm')
@@ -411,7 +440,7 @@ def check(out):
         'GX = use "' + str(ROOT/'programs/mods/graphics') + '".\n' +
         'MV = use "std/mvu".\n' +
         'fault me env event model = case event of\n' +
-        '    MV.ETick -> (q, tiles, mt, jobs) = env; QS.Qsys ns st vfs log apps = q;\n' +
+        '    MV.ETick -> (q, tiles, mt, jobs, sessions) = env; QS.Qsys ns st vfs log apps = q;\n' +
         '      ep = case GX.attach me ns "failure" of Ok value -> value | Err why -> error why;\n' +
         '      (graphics, handle) = ep; _ = kill graphics; (model, Nil)\n' +
         '  | other -> S.update me env event model.\n' +
@@ -433,7 +462,7 @@ def check(out):
     print('guishell: graphics death drains storage before failed exit HOLDS')
     check_live_deadline(out, env, profile)
     check_pane_recovery(out, env, profile)
-    print('guishell: real GL, Files/Logs vertical scrolling, two pages, onboard clock/browser, refusals, pointer protocol and two boots HOLDS')
+    print('guishell: real GL, Files/Logs vertical scrolling, two pages, all four onboard sessions, reopen/close, refusals, pointer protocol and two boots HOLDS')
 
 
 if __name__ == '__main__':
