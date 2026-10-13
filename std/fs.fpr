@@ -21,10 +21,10 @@
 # payloads are first-class -- records are length-carried end to end.
 # ============================================================================
 
-QL = use "../programs/mods/qlog#3c2ad30ff14444d6".
+QL = use "../programs/mods/qlog#564887d89849d201".
 SVC = use "../programs/mods/svc#0c925c3cb42f0f77".
 AC = use "std/actor#06e72a5feec8a6d4".
-B = use "std/blockio#1326ddf2a0e4841e".
+B = use "std/blockio#2dcfa109efe528e5".
 EP = use "../programs/mods/ep#f5a7c81840106100".
 
 # spawn the service on a device the caller opened; the returned actor

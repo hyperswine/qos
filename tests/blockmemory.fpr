@@ -1,0 +1,28 @@
+# Successful I/O must not allocate an immortal worker/relay identity per page.
+unsafe program.
+B = use "../std/blockio".
+freeKiB u = case Sys.memInfo 0 of _ :: f :: _ -> f | _ -> 0.
+check yes why = if yes then Unit else error "blockmemory: {why}".
+readPage me svc = case B.call me svc (B.Read 3) of
+    Ok (B.Page bytes) -> check (substr bytes 0 6 == "stable") "read contents"
+  | other -> error "blockmemory: read failed".
+rounds : unsafe Int -> Int -> Int -> Unit .
+rounds me svc n = if n == 0 then Unit else
+  _ = Sys.arena (fn u -> readPage me svc);
+  rounds me svc (n - 1).
+main =
+  me = myself 0;
+  svc = B.serve me (device "blk");
+  _ = case B.call me svc (B.Write 3 "stable") of Ok (B.Written 6) -> Unit | other -> error "blockmemory: write failed";
+  _ = rounds me svc 256;
+  _ = Sys.sleepUs 20000;
+  before = freeKiB Unit;
+  _ = rounds me svc 4096;
+  middle = freeKiB Unit;
+  _ = rounds me svc 4096;
+  _ = Sys.sleepUs 20000;
+  after = freeKiB Unit;
+  _ = check (before - after < 2048) "8192 reads retained {before - after} KiB";
+  _ = check (middle - after < 1024) "second read batch retained {middle - after} KiB";
+  _ = check (case B.call me svc B.Drain of Ok B.Drained -> True | other -> False) "drain";
+  print "blockmemory: 8192 reads retain under 2 MiB; second batch under 1 MiB; drain HOLDS".

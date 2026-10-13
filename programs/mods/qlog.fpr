@@ -83,7 +83,7 @@ Rpc = SVC.Rpc.
 
 # Page-source choice is explicit. Raw access is for standalone tools/tests;
 # all storage actors and native bootstrap use a routed block service.
-B = use "std/blockio#1326ddf2a0e4841e".
+B = use "std/blockio#2dcfa109efe528e5".
 AC = use "std/actor#06e72a5feec8a6d4".
 PageSource = Type (Direct Device | Routed Int).
 direct dev = Direct dev.

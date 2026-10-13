@@ -3,7 +3,7 @@
 # Lifecycle administration stays with the direct protocol's creator.
 EP = use "ep#f5a7c81840106100".
 AC = use "std/actor#06e72a5feec8a6d4".
-B = use "std/blockio#1326ddf2a0e4841e".
+B = use "std/blockio#2dcfa109efe528e5".
 serve : unsafe Int -> Int -> a .
 Handle = Type (Handle Int String Int String).
 serve block me = loop block Nil me.

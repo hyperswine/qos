@@ -1,7 +1,7 @@
 # Fresh-process probe for tools/portable-durable-check.py. The script substitutes
 # action, leaving all page operations on the routed block-service path.
 QL = use "../programs/mods/qlog".
-B = use "std/blockio#1326ddf2a0e4841e".
+B = use "std/blockio#2dcfa109efe528e5".
 SVC = use "svc#0c925c3cb42f0f77".
 action = 0.
 outcome r = case r of Ok s -> "Ok {s}" | Err why -> "Err {why}".

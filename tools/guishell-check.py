@@ -243,6 +243,35 @@ def check(out):
                 p = Path(f'/tmp/{tag}-{n}.ppm')
                 if p.exists():
                     shutil.move(p, out / f'boot{boot}-{n}.ppm')
+    # A dependency death must reach Main's lifecycle barrier before the
+    # primary failure is reported. Use only this test's graphics owner/disk.
+    failure = out / 'failure.fpr'
+    failure.write_text('unsafe program.\n' +
+        'S = use "' + str(ROOT/'programs/mods/guishell') + '".\n' +
+        'QS = use "' + str(ROOT/'programs/mods/qsys') + '".\n' +
+        'GX = use "' + str(ROOT/'programs/mods/graphics') + '".\n' +
+        'MV = use "std/mvu".\n' +
+        'fault me env event model = case event of\n' +
+        '    MV.ETick -> (q, tiles, mt) = env; QS.Qsys ns st vfs log apps = q;\n' +
+        '      ep = case GX.attach me ns "failure" of Ok value -> value | Err why -> error why;\n' +
+        '      (graphics, handle) = ep; _ = kill graphics; (model, Nil)\n' +
+        '  | other -> S.update me env event model.\n' +
+        'main = S.runWith "qos-shell-failure" fault.\n')
+    run('make', '-s', 'qos-app', f'PROG={failure}',
+        f'QA_OUT={out/"failure.qa"}', f'BUILD={out/"failure-build"}')
+    shutil.copyfile(profile/'Main.disk', out/'failure.disk')
+    fault_env = dict(env, FPR_DISK=str(out/'failure.disk'), FPR_EVDEV='/dev/null',
+                     QOSP_READY_FILE=str(out/'failure.ready'))
+    failed = subprocess.run([str(ROOT/'qos/qosp-gl'), '--yes', str(out/'failure.qa')],
+                            cwd=out, env=fault_env, capture_output=True, text=True, timeout=20)
+    text = failed.stdout + failed.stderr
+    (out/'failure.log').write_text(text)
+    assert failed.returncode == 1 and 'shell stopped: mvu:' in text, text
+    assert 'storage drained and flushed' in text and 'qosp: shutdown failed' in text, text
+    assert text.index('storage drained and flushed') < text.index('shell stopped: mvu:'), text
+    assert 'deadlock --' not in text and 'SIGSEGV' not in text, text
+    assert not (out/'failure.ready').exists(), text
+    print('guishell: graphics death drains storage before failed exit HOLDS')
     print('guishell: real GL, Files/Logs vertical scrolling, two pages, onboard clock/browser, refusals, pointer protocol and two boots HOLDS')
 
 

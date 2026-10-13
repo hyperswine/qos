@@ -48,6 +48,8 @@ def main():
     ap.add_argument('--output', type=Path, default=ROOT / '.qos/qlog-memory')
     ap.add_argument('--archive', type=Path)
     ap.add_argument('--host')
+    ap.add_argument('--host-bin', default='/usr/bin/qosp', help='existing remote host executable for an isolated candidate')
+    ap.add_argument('--host-key-alias')
     ap.add_argument('--identity')
     ap.add_argument('--known-hosts')
     ap.add_argument('--runner', type=Path)
@@ -79,6 +81,8 @@ def main():
         opts = ['-F', '/dev/null', '-i', a.identity, '-o', 'IdentitiesOnly=yes',
                 '-o', 'BatchMode=yes', '-o', f'UserKnownHostsFile={a.known_hosts}',
                 '-o', 'ConnectTimeout=5']
+        if a.host_key_alias:
+            opts += ['-o', f'HostKeyAlias={a.host_key_alias}']
         target = f'root@{a.host}'
         ssh = ['ssh', *opts, target]
         tag = str(time.time_ns())
@@ -101,7 +105,7 @@ def main():
                 log = f'{remote}/{name}.log'
                 command = [f'{remote}/runner', '580', '0', log, 'env',
                            f'FPR_HARTS={harts}', 'FPR_HEAP_MB=64', 'FPR_PORT=0',
-                           f'FPR_DISK={persistent}/h{harts}.disk', '/usr/bin/qosp', '--yes', f'{remote}/app.qa']
+                           'QOSP_ARENA_MB=64', f'FPR_DISK={persistent}/h{harts}.disk', a.host_bin, '--yes', f'{remote}/app.qa']
                 raw = run([*ssh, shlex.join(command)])
                 (out / f'{name}.json').write_text(raw)
                 stats = json.loads(raw)
@@ -110,7 +114,7 @@ def main():
             else:
                 text = run([host, '--yes', archive], cwd=out,
                     env={**os.environ, 'FPR_HARTS': str(harts), 'FPR_HEAP_MB': '64',
-                         'FPR_PORT': '0', 'FPR_DISK': str(disk)})
+                         'FPR_PORT': '0', 'QOSP_ARENA_MB': '64', 'FPR_DISK': str(disk)})
             (out / f'{name}.log').write_text(text)
             assert 'qlogmemory: HOLDS' in text, text
             results.append(name)
@@ -121,7 +125,10 @@ def main():
         'seed_sha256': hashlib.sha256(image.read_bytes()).hexdigest(),
         'qlog_sampled_pool_limit_bytes': 4194304,
         'global_heap_limit_mib': 64,
-        'global_growth_is_bounded': False,
+        'application_arena_limit_mib': 64,
+        'remote_host_binary': a.host_bin if a.host else None,
+        'sampled_global_growth_limit_kib': 4096,
+        'indefinite_global_growth_proven': False,
     }, indent=2) + '\n')
     if a.host:
         # Keep logs/archives, remove only this test's SD-backed disk copies.

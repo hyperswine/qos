@@ -240,10 +240,10 @@ view self env vp m =
 input graphics w h me = inputLoop graphics w h me (width / 2) (height / 2) 0.
 inputLoop graphics w h me x y buttons =
   (from, MV.Poll _) = receive me;
-  ev = MV.svcCall me graphics (MV.Poll 0);
-  (kind, a, b) = ev;
-  _ = drop ev;
-  inputEvent graphics w h me from x y buttons kind a b.
+  case MV.svcCallRes me graphics (MV.Poll 0) of
+      Err why -> Unit
+    | Ok ev -> (kind, a, b) = ev;
+               inputEvent graphics w h me from x y buttons kind a b.
 inputEvent graphics w h me from x y buttons 2 dx dy =
   xx = clamp 0 (width - 1) (x + dx * width / w);
   yy = clamp 0 (height - 1) (y - dy * height / h);
@@ -278,17 +278,44 @@ runWith tag upd =
   QS.Qsys ns st vfs log apps = q;
   tiles = cat shortcuts (installed me st apps);
   mt = reg32 (device "clint") 49144;
-  ep = case GX.attach me ns tag of Ok v -> v | Err e -> error "shell graphics: {e}";
+  attached = GX.attach me ns tag;
+  case attached of
+      Err why -> finishUnattached me lifecycle (Err "shell graphics: {why}")
+    | Ok ep -> runAttached me upd q lifecycle tiles mt ep.
+runAttached me upd q lifecycle tiles mt ep =
   (graphics, h) = ep;
-  (w, hh) = MV.svcCall me graphics (MV.Dims 0);
+  case MV.svcCallRes me graphics (MV.Dims 0) of
+      Err why -> finishSession me lifecycle ep (Err "shell dimensions: {why}")
+    | Ok dims -> runSized me upd q lifecycle tiles mt ep dims.
+runSized me upd q lifecycle tiles mt ep dims =
+  (graphics, h) = ep;
+  (w, hh) = dims;
   inp = spawn (input graphics w hh);
   _ = print "shell: Main Profile ready ({count tiles} shortcuts, {pages tiles} pages)";
   port = spawn MV.port;
   cfg = {env = (q, tiles, mt), mt = mt, tick = 333330, input = inp, render = graphics};
   app = MV.MApp init upd staticKey staticView view done (subscriptions port);
   _ = QS.ready lifecycle;
-  result = MV.runScoped me cfg app;
+  result = MV.runResult me cfg app;
+  _ = kill inp;
+  _ = kill port;
+  finishSession me lifecycle ep result.
+finishSession me lifecycle ep result =
   _ = Sys.shutdownBegin Unit;
-  _ = EP.close me ep;
-  _ = case QS.stop me lifecycle of Ok value -> print "shell: {value}" | Err why -> error "shell shutdown: {why}";
-  result.
+  closed = EP.close me ep;
+  finishUnattached me lifecycle (withCleanup result "graphics close" closed).
+finishUnattached me lifecycle result =
+  _ = Sys.shutdownBegin Unit;
+  stopped = QS.stop me lifecycle;
+  _ = case stopped of Ok value -> print "shell: {value}" | Err why -> Unit;
+  case withCleanup result "shell shutdown" stopped of
+      Ok value -> value
+    | Err why ->
+        _ = Sys.logAt 2 "shell stopped: {why}";
+        _ = Sys.shutdownComplete 1;
+        error "shell stopped: {why}".
+withCleanup result label cleanup = case cleanup of
+    Ok value -> result
+  | Err why -> case result of
+        Ok value -> Err "{label}: {why}"
+      | Err primary -> Err "{primary}; {label}: {why}".

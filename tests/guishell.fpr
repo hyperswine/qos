@@ -4,6 +4,7 @@ unsafe program.
 S = use "../programs/mods/guishell".
 QS = use "../programs/mods/qsys".
 MV = use "std/mvu".
+AC = use "std/actor".
 check True = Unit.
 check False = error "guishell: invariant failed".
 logRows i | i >= 30 = Unit.
@@ -71,4 +72,9 @@ main =
   (k7, absolutePress, v7) = poll me inp;
   _ = check (absolutePress == press);
   _ = check (S.pages S.shortcuts == 1);
+  gone = spawn (fn self -> Unit);
+  _ = Sys.sleepUs 20000;
+  failedInput = spawn (S.input gone 960 600);
+  failed = AC.sendAwait me failedInput (me, MV.Poll 0);
+  _ = check (case failed of Err why -> why == "dead actor" | Ok ev -> False);
   "guishell: HOLDS".

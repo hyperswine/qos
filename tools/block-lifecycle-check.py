@@ -32,7 +32,7 @@ with tempfile.TemporaryDirectory(prefix='qos-block-lifecycle-') as d:
     temp = Path(d)
     host = temp / 'host'
     run(['make', '-s', 'portable', f'QOSP_OUT={host}', 'FPRBUILD_EXTRA=--cflag -DQOS_BLK_TEST'], cwd=ROOT / 'qos')
-    for name in ('blocknamespace', 'blocklifecyclep'):
+    for name in ('blocknamespace', 'blocklifecyclep', 'blockmemory'):
         archive = temp / f'{name}.qa'
         run(['make', '-s', 'qos-app', f'PROG=tests/{name}.fpr', f'BUILD={temp}/{name}', f'QA_OUT={archive}'])
         for harts in (1, 2):
@@ -45,6 +45,8 @@ with tempfile.TemporaryDirectory(prefix='qos-block-lifecycle-') as d:
     for harts in (1, 2):
         lifecycle = temp / f'lifecycle-{harts}.elf'
         build(ROOT / 'tests/blocklifecycle.fpr', lifecycle, temp / f'lifecycle-{harts}', harts, '-DQOS_BLK_TEST')
+        memory = temp / f'memory-{harts}.elf'
+        build(ROOT / 'tests/blockmemory.fpr', memory, temp / f'memory-{harts}', harts)
         endpoint = temp / f'namespace-{harts}.elf'
         # Exercise native budgets through the same namespace adapter. Keep
         # the source in tests/ so all importer-relative module paths remain valid.
@@ -55,7 +57,7 @@ with tempfile.TemporaryDirectory(prefix='qos-block-lifecycle-') as d:
             fixture.write(src); fixture.flush()
             build(fixture.name, endpoint, temp / f'namespace-{harts}', harts)
         for modern in (False, True):
-            for name, kernel in (('blocklifecycle', lifecycle), ('blocknamespace', endpoint)):
+            for name, kernel in (('blocklifecycle', lifecycle), ('blocknamespace', endpoint), ('blockmemory', memory)):
                 disk = temp / f'{name}-{harts}-{modern}.disk'
                 run(['python3', ROOT / 'tools/mkdisk.py', disk, '8'])
                 out = boot(kernel, disk, harts, modern)

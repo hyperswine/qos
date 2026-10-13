@@ -50,3 +50,6 @@
 ../.fpr/store/10db41d6e4d0d077.fpr
 # Exact Files interface from the first memory-reclamation implementation.
 ../.fpr/store/56b7962bf2098855.fpr
+
+# Exact prior Files interface checked while updating the reusable block owner.
+../.fpr/store/aeb97cb13f0aff84.fpr

@@ -5,7 +5,7 @@
 unsafe module.
 Endpoint = use "epservice".
 EP = use "ep".
-FS = use "std/fs#aeb97cb13f0aff84".
+FS = use "std/fs#cc97de9b0dbf26f7".
 AC = use "std/actor".
 
 serve fs me = Endpoint.simple (readRecord fs) (writeRecord fs) me.

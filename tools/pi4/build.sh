@@ -16,7 +16,7 @@ make -s -C "$qos/qos" portable-es QOSP_ES_OUT="$out/qosp-es" \
   SND_FLAGS=-DQOSP_SND_ALSA SND_LIBS=-lasound
 echo 'built diagnostic EGL host'
 cd "$fprisc"
-for name in strprims bitrange longpanic killblocked deadmail autodrop2 fixedheap sleepwake sleepwait taskstress mvuscoped arenamigrate vecwide veccaps typedvector vecsimd_int bigheap overflow files; do
+for name in strprims bitrange longpanic killblocked deadmail autodrop2 fixedheap sleepwake sleepwait taskstress mvufailure mvuscoped arenamigrate vecwide veccaps typedvector vecsimd_int bigheap overflow files; do
   ./fpr build "tests/base/$name.fpr" -o "$out/$name" --harts 4 --cc "$cc"
   echo "built base/$name"
 done
@@ -31,7 +31,7 @@ for name in fib sha pingpong xpingpong nbody vecread; do
 done
 cp tests/base/strprims.expected "$out/strprims.expected"
 cd "$qos"
-for name in blockportable blocknamespace blocklifecyclep filessvc filesshutdown qlogmemory gfxshare gfxmemory gfxsmoke gfxheadless guishell portableshutdown qsys netactor netactorstart nettransport; do
+for name in blockportable blocknamespace blocklifecyclep blockmemory filessvc filesshutdown qlogmemory gfxshare gfxmemory gfxsmoke gfxheadless guishell portableshutdown qsys netactor netactorstart nettransport; do
   make -s qos-app-a64 PROG="tests/$name.fpr" QA_OUT="$out/$name.qa" BUILD="$out/build-$name"
   echo "built qos/$name"
 done

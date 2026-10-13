@@ -5,8 +5,8 @@
 # explicitly reports unsupported durability; an absent disk is drained only.
 AC = use "std/actor#06e72a5feec8a6d4".
 Net = use "std/net#e014c97bab46e124".
-FS = use "std/fs#aeb97cb13f0aff84".
-IO = use "std/blockio#1326ddf2a0e4841e".
+FS = use "std/fs#cc97de9b0dbf26f7".
+IO = use "std/blockio#2dcfa109efe528e5".
 Context = Type (Context Int Int Int Int).
 Request = Type (Stop).
 owner (Context admin net block files) = admin.

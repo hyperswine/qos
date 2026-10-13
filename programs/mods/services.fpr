@@ -5,8 +5,8 @@ unsafe module.
 Endpoint = use "epservice".
 EP = use "ep".
 AC = use "std/actor".
-Lifecycle = use "std/lifecycle#f95ec7dce656d2bb".
-BlockEP = use "blockep#d44cf337abf58619".
+Lifecycle = use "std/lifecycle#58d436d59e44b03f".
+BlockEP = use "blockep#79e7fec72bb2452e".
 Files = use "files".
 GX = use "graphics".
 GL = use "glsvc".

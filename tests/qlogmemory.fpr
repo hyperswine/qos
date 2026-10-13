@@ -79,6 +79,7 @@ main =
   _ = reads me fs 4;
   finalPool = poolBytes me fs;
   retained = before - freeKiB Unit;
+  _ = check (retained < 4096) "storage workload retains over 4 MiB globally: {retained}";
   _ = check (must (FS.replay me fs "persist/value") == "beforeafter") "persistent replay";
   _ = must (FS.shutdown me fs block);
   print "qlogmemory: HOLDS bootKiB={bootCost} globalGrowthKiB={retained} poolBytes={bootPool}/{readsPool}/{writesPool}/{compactPool}/{finalPool} reads=48 mutations=24 compactions=4".

@@ -16,6 +16,7 @@ echo "== baseline compile gates: graphics-independent, explicit LiveView safety 
 echo "== disk suspension: one-hart progress, abandoned requests and copied buffers ==" && (python3 tools/disk-suspend-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
 echo "== virtio raw policy: register programming and full-word deadlines against C ==" && (python3 tools/virtio-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
 echo "== native block service: configurable budgets and failure isolation ==" && (python3 tools/block-service-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
+echo "== block lifecycle: cancellation, drain and bounded reusable helpers ==" && (python3 tools/block-lifecycle-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
 echo "== Qlog and bootstrap block routing ==" && (python3 tools/qlog-routing-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
 echo "== Qlog scratch reclamation, binary reads and two-boot persistence ==" && (python3 tools/qlog-memory-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
 echo "== Portable durable storage: barriers, dual metadata and staged recovery ==" && (python3 tools/portable-durable-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }

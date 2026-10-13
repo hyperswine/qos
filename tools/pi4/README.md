@@ -91,9 +91,10 @@ python3 tools/qlog-memory-check.py \
 This uses the installed `/usr/bin/qosp` and separate SD-backed disks. It checks
 large binary reads, replay, tombstones, compaction, persistence and a 4 MiB
 bound on Qlog's sampled logical pool allocation, on one/four workers with a
-64 MiB global heap cap. It reports global allocation separately: the current
-block adapter retains actor identities per I/O, so the check does not establish
-bounded memory for indefinite storage workloads. The driver removes only its
+64 MiB application arena (`QOSP_ARENA_MB`) and a separate hosted heap cap.
+It checks under 4 MiB global growth across the finite workload: successful
+block I/O reuses its worker and relay. Cancellation/failure can still replace
+workers, and growing live indexes remain separate admission work. The driver removes only its
 own two disk copies after success and retains logs. Without `--host`, it builds
 and tests the local Portable host.
 
@@ -131,3 +132,12 @@ they do not measure reachable objects. The bump gauge is not live bytes.
 The driver also saves this process's DRM fdinfo when the kernel supplies it,
 separately from global V3D BO totals. Missing DRM counters remain empty.
 Use a fresh disk with matching onboard plugins after changing shared modules.
+
+The bundle now includes `mvufailure` and `blockmemory.qa`. The first checks
+service admission/death, worker death, port failure and Result cleanup; the
+second checks 8,192 repeated reads after warm-up under a real 64 MiB arena.
+The standard Pi driver runs both with one/four workers. For an isolated Qlog
+candidate, `qlog-memory-check.py --host-bin /tmp/candidate/qosp-es` selects an
+already uploaded matching host, and `--host-key-alias` uses the enrolled key
+when the Pi is reached through another interface. Defaults retain the
+installed host path. Neither option installs an executable.
