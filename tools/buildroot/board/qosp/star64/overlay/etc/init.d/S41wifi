@@ -1,0 +1,26 @@
+#!/bin/sh
+# Optional: configure /etc/wpa_supplicant.conf through the serial console.
+# The vendor driver contains its firmware; no Broadcom Pi settings apply.
+set -eu
+case "${1:-}" in
+start)
+    modprobe 8852bu || { echo "Wi-Fi: cannot load 8852bu" >&2; exit 1; }
+    [ -s /etc/wpa_supplicant.conf ] || exit 0
+    iface=wlan0
+    n=0
+    while [ ! -d "/sys/class/net/$iface" ] && [ "$n" -lt 50 ]; do
+        sleep 0.1
+        n=$((n + 1))
+    done
+    [ -d "/sys/class/net/$iface" ] || { echo "Wi-Fi: wlan0 absent" >&2; exit 1; }
+    wpa_supplicant -B -P /run/star64-wpa.pid -i "$iface" -D nl80211 -c /etc/wpa_supplicant.conf
+    udhcpc -b -t 3 -T 3 -A 10 -i "$iface" -p /run/star64-wifi-dhcp.pid
+    ;;
+stop)
+    for file in /run/star64-wifi-dhcp.pid /run/star64-wpa.pid; do
+        start-stop-daemon --stop --quiet --pidfile "$file" || true
+        rm -f "$file"
+    done
+    ;;
+*) echo "Usage: $0 {start|stop}" >&2; exit 2 ;;
+esac

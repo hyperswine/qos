@@ -1,0 +1,17 @@
+STAR64: include the SD controller in automatic distro boot
+
+The board selects devnum=1 for SD boot, but the vendor distro environment
+only defines bootcmd_mmc0. distro_bootcmd resets devnum to zero and never
+scans the SD card's extlinux configuration. Scan MMC 1 before MMC 0.
+
+--- a/include/configs/pine64-star64.h
++++ b/include/configs/pine64-star64.h
+@@ -87,7 +87,7 @@
+ #endif
+ 
+ /* HACK these should have '#if defined (stuff) around them like zynqp*/
+-#define BOOT_TARGET_DEVICES(func) func(MMC, mmc, 0) func(DHCP, dhcp, na)
++#define BOOT_TARGET_DEVICES(func) func(MMC, mmc, 1) func(MMC, mmc, 0) func(DHCP, dhcp, na)
+ 
+ #include <config_distro_bootcmd.h>
+ 

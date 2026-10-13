@@ -1,0 +1,4 @@
+config BR2_PACKAGE_QOSP_STAR64_TOOLS
+	bool "STAR64 EGL diagnostic"
+	depends on BR2_PACKAGE_HAS_LIBEGL
+	depends on BR2_PACKAGE_HAS_LIBGLES

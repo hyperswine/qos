@@ -1,0 +1,21 @@
+STAR64: continue boot when firmware display initialization fails
+
+The Linux framebuffer provides the local console. A missing monitor or
+firmware video failure must not make board_late_init fail and stop boot
+before Ethernet and SSH can start.
+
+--- a/board/pine64/star64/starfive_visionfive2.c
++++ b/board/pine64/star64/starfive_visionfive2.c
+@@ -452,8 +452,10 @@
+ 	env_set_hex("memory_size", gd->ram_size);
+ 
+ 	ret = uclass_get_device(UCLASS_VIDEO, 0, &dev);
+-	if (ret)
+-		return ret;
++	if (ret) {
++		printf("Firmware display unavailable (%d); continuing boot\n", ret);
++		return 0;
++	}
+ 
+ 	ret = video_bmp_display(dev, (ulong)&bmp_logo_bitmap[0], BMP_ALIGN_CENTER, BMP_ALIGN_CENTER, true);
+ 	if (ret)

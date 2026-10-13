@@ -1,0 +1,54 @@
+drivers: explicitly convert integer MMIO addresses for GCC 14
+
+These vendor-era drivers store register bases as unsigned long. Keep the
+existing byte-offset arithmetic and convert its result to an MMIO pointer
+when calling the RISC-V I/O helpers. GCC 14 rejects the implicit conversion.
+
+--- a/drivers/net/rtl8169.c
++++ b/drivers/net/rtl8169.c
+@@ -99,12 +99,12 @@
+ #define TX_TIMEOUT  (6*HZ)
+ 
+ /* write/read MMIO register. Notice: {read,write}[wl] do the necessary swapping */
+-#define RTL_W8(reg, val8)	writeb((val8), ioaddr + (reg))
+-#define RTL_W16(reg, val16)	writew((val16), ioaddr + (reg))
+-#define RTL_W32(reg, val32)	writel((val32), ioaddr + (reg))
+-#define RTL_R8(reg)		readb(ioaddr + (reg))
+-#define RTL_R16(reg)		readw(ioaddr + (reg))
+-#define RTL_R32(reg)		readl(ioaddr + (reg))
++#define RTL_W8(reg, val8)	writeb((val8), (void __iomem *)(ioaddr + (reg)))
++#define RTL_W16(reg, val16)	writew((val16), (void __iomem *)(ioaddr + (reg)))
++#define RTL_W32(reg, val32)	writel((val32), (void __iomem *)(ioaddr + (reg)))
++#define RTL_R8(reg)		readb((void __iomem *)(ioaddr + (reg)))
++#define RTL_R16(reg)		readw((void __iomem *)(ioaddr + (reg)))
++#define RTL_R32(reg)		readl((void __iomem *)(ioaddr + (reg)))
+ 
+ #define bus_to_phys(a)	pci_mem_to_phys((pci_dev_t)(unsigned long)dev->priv, \
+ 	(pci_addr_t)(unsigned long)a)
+--- a/drivers/video/dw_hdmi.c
++++ b/drivers/video/dw_hdmi.c
+@@ -78,10 +78,10 @@
+ {
+ 	switch (hdmi->reg_io_width) {
+ 	case 1:
+-		writeb(val, hdmi->ioaddr + offset);
++		writeb(val, (void __iomem *)(hdmi->ioaddr + offset));
+ 		break;
+ 	case 4:
+-		writel(val, hdmi->ioaddr + (offset << 2));
++		writel(val, (void __iomem *)(hdmi->ioaddr + (offset << 2)));
+ 		break;
+ 	default:
+ 		debug("reg_io_width has unsupported width!\n");
+@@ -93,9 +93,9 @@
+ {
+ 	switch (hdmi->reg_io_width) {
+ 	case 1:
+-		return readb(hdmi->ioaddr + offset);
++		return readb((void __iomem *)(hdmi->ioaddr + offset));
+ 	case 4:
+-		return readl(hdmi->ioaddr + (offset << 2));
++		return readl((void __iomem *)(hdmi->ioaddr + (offset << 2)));
+ 	default:
+ 		debug("reg_io_width has unsupported width!\n");
+ 		break;

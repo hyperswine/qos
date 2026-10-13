@@ -1,0 +1,24 @@
+/dts-v1/;
+/ {
+    description = "U-Boot SPL FIT image for JH7110 STAR64";
+    #address-cells = <2>;
+    images {
+        firmware {
+            description = "OpenSBI and U-Boot";
+            data = /incbin/("fw_payload.bin");
+            type = "firmware";
+            arch = "riscv";
+            os = "u-boot";
+            load = <0x0 0x40000000>;
+            entry = <0x0 0x40000000>;
+            compression = "none";
+        };
+    };
+    configurations {
+        default = "config-1";
+        config-1 {
+            description = "STAR64 firmware";
+            firmware = "firmware";
+        };
+    };
+};

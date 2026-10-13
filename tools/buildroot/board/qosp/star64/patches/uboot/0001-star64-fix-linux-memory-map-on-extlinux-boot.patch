@@ -1,0 +1,29 @@
+STAR64: fix the Linux memory map when booting through extlinux
+
+The vendor boot scripts run "fdt memory" but distro/extlinux boot bypasses
+those scripts. The kernel DTB otherwise retains its fixed 4 GiB memory node.
+Use the standard board setup hook for the DDR range detected by U-Boot.
+
+--- a/board/pine64/star64/starfive_visionfive2.c
++++ b/board/pine64/star64/starfive_visionfive2.c
+@@ -20,6 +20,7 @@
+ #include <bmp_logo.h>
+ #include <video.h>
+ #include <splash.h>
++#include <fdt_support.h>
+ 
+ #define SYS_CLOCK_ENABLE(clk) \
+ 	setbits_le32(SYS_CRG_BASE + clk, CLK_ENABLE_MASK)
+@@ -498,3 +499,12 @@
+ 	return 0;
+ }
+ #endif
++
++#ifdef CONFIG_OF_BOARD_SETUP
++int ft_board_setup(void *blob, struct bd_info *bd)
++{
++	/* Apply the EEPROM-detected DDR range on every Linux boot path. */
++	(void)bd;
++	return fdt_fixup_memory(blob, gd->ram_base, gd->ram_size);
++}
++#endif

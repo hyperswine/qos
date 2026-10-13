@@ -1,1 +1,3 @@
 source "$BR2_EXTERNAL_QOSP_PATH/package/qosp/Config.in"
+source "$BR2_EXTERNAL_QOSP_PATH/package/qosp-star64-spltool/Config.in.host"
+source "$BR2_EXTERNAL_QOSP_PATH/package/qosp-star64-tools/Config.in"

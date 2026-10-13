@@ -1,0 +1,3 @@
+config BR2_PACKAGE_HOST_QOSP_STAR64_SPLTOOL
+	bool "host STAR64 vendor SPL header tool"
+	depends on BR2_riscv

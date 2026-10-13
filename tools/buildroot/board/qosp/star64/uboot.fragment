@@ -1,0 +1,8 @@
+# extlinux must pass the detected DDR size to Linux, like the vendor scripts.
+CONFIG_OF_BOARD_SETUP=y
+# Boot this card's extlinux configuration, without vendor FAT/uEnv assumptions.
+CONFIG_USE_BOOTCOMMAND=y
+CONFIG_BOOTCOMMAND="run distro_bootcmd"
+# A saved environment from an earlier SPI installation must not override this image.
+CONFIG_ENV_IS_NOWHERE=y
+# CONFIG_ENV_IS_IN_SPI_FLASH is not set

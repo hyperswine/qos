@@ -1,0 +1,9 @@
+# STAR64 bring-up: remote root login requires a provisioned public SSH key.
+PermitRootLogin prohibit-password
+PubkeyAuthentication yes
+AuthenticationMethods publickey
+AuthorizedKeysFile .ssh/authorized_keys
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitEmptyPasswords no
+Subsystem sftp /usr/libexec/sftp-server

@@ -8,11 +8,17 @@ with no desktop, no compositor and no window system anywhere in the picture.
     qos/tools/buildroot/
       configs/qosp_qemu_aarch64_defconfig   the test loop: QEMU virt
       configs/qosp_rpi4_defconfig           the target: a Pi 4 SD card
+      configs/qosp_star64_defconfig         STAR64 Linux bring-up (no qosp yet)
       package/qosp/                         the package that builds qosp
       board/qosp/                           kernel fragment, Pi config.txt
       br.sh                                 build
       boot.sh                               boot the QEMU image
       qosp-check.py                         boot it and assert what came up
+
+The separate [STAR64 bring-up target](board/qosp/star64/README.md) builds
+RISC-V Linux with SSH, Ethernet/Wi-Fi support, vendor HDMI drivers and
+software EGL diagnostics. It does not yet run QOS or accelerate rendering
+on the PowerVR GPU. It uses Buildroot 2026.08 in a separate source/output tree.
 
 ## Why this is small
 
