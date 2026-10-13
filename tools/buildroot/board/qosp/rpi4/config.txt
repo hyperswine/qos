@@ -22,6 +22,11 @@ max_framebuffers=2
 # full resolution; comment out if the picture runs off the edge
 disable_overscan=1
 
+# QOS draws its own boot wordmark after Linux initializes the display.
+disable_splash=1
+# Linux chooses the attached display's native mode; avoid firmware's fallback.
+disable_fw_kms_setup=1
+
 # a serial console on ttyAMA0, so there is a shell even when the
 # application owns the screen (miniuart-bt moves Bluetooth off it)
 enable_uart=1

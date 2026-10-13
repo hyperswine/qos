@@ -4,11 +4,11 @@
 #include "fpr.h"
 extern V fpr_g_myself_call1(V);
 static uw qos_net_owner;
-#if defined(__riscv)
+#if defined(__riscv) && !defined(FPR_POSIX)
 extern V qos_process_net_owner(void) __attribute__((weak));
 #endif
 V qos_net_owner_value(void) {
-#if defined(__riscv)
+#if defined(__riscv) && !defined(FPR_POSIX)
   if (fpr_plane_actors && qos_process_net_owner) return qos_process_net_owner();
 #endif
   uw owner=__atomic_load_n(&qos_net_owner,__ATOMIC_ACQUIRE);
@@ -31,7 +31,8 @@ static V h_netBindOwner(V actor) {
 }
 FPR_FN(fpr_g_netOwner,h_netOwner,1);
 FPR_FN(fpr_g_netBindOwner,h_netBindOwner,1);
-#if __riscv_xlen == 64
+/* Linux RV64 uses the Portable socket transport, like Linux ARM/x64. */
+#if defined(__riscv) && __riscv_xlen == 64 && !defined(FPR_POSIX)
 #include "virt/netpolicy.h"
 static qos_net_conn qos_net_arena[QOS_NET_CONNECTIONS];
 static void *net_arena(V handle) {

@@ -1,8 +1,11 @@
 # STAR64 Linux bring-up
 
 This target builds a RISC-V Linux SD-card image alongside the Pi 4 target.
-It does not enable `BR2_PACKAGE_QOSP`: FP-RISC's Unix hosted build still
-needs a RISC-V context switch and explicit cross-architecture selection.
+The baseline defconfig keeps `BR2_PACKAGE_QOSP` optional. FP-RISC now supports
+Linux RV64GC/LP64D, and QOS Portable Main runs on the physical STAR64 with
+software EGL, HDMI scanout and USB keyboard input. See the
+[October 14 build and hardware record](../../../../../docs/2026-10-14-STAR64-PORTABLE.md)
+for cross-build commands, installation and remaining limits.
 
 ## Build
 
@@ -92,7 +95,9 @@ the first physical trial; see the [boot diagnosis](../../../../../docs/2026-10-1
 Select SD boot on the STAR64 and connect an HDMI display and USB keyboard.
 The image starts a text login on `tty1`; use `root` with an empty password.
 The serial login remains available at 115200 baud for recovery. This is a text
-console, not a graphical desktop, and physical HDMI support needs board testing.
+console, not a graphical desktop. HDMI text login worked in the
+[physical board trial](../../../../../docs/2026-10-13-STAR64-HARDWARE-BOOT.md)
+using a microSD Express card flashed through a UGREEN reader.
 
 Both `eth0` and `eth1` attempt DHCP with bounded initial attempts and background
 retries. OpenSSH starts automatically and permits public-key authentication only.
@@ -130,8 +135,15 @@ Use `modetest` separately to inspect display connectors and modes.
 
 Accelerated PowerVR EGL/GLES requires matching vendor userspace libraries,
 GPU firmware, and the kernel driver. Those are not supplied by this target.
-Hardware boot, Ethernet, Wi-Fi, HDMI and input each need physical validation;
-an image build or QEMU userspace check cannot establish them.
+The optional `tools/buildroot/star64-powervr.py` bundle has now passed physical
+EGL/GLES and QOS Main checks with this kernel's DDK 1.17.6210866. See the
+[hardware rendering record](../../../../../docs/2026-10-14-STAR64-POWERVR.md)
+for matching versions, installation and recovery. The baseline SD image still
+uses software Mesa.
+Physical boot, HDMI text login, one gigabit Ethernet port, authenticated SSH
+and software EGL passed the October 13 board trial. Wi-Fi, the second Ethernet
+port and other peripherals still need physical validation.
+An image build or QEMU userspace check cannot establish those hardware results.
 
 ## References
 

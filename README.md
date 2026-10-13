@@ -24,6 +24,10 @@ returns home, Page Up/Down changes pages, and Q exits from home. See the
 [Main Profile guide](docs/2026-10-03-GUI-SHELL.md) for boot-image wiring and
 the current prototype's application contract.
 
+QOS Portable also runs on Linux riscv64. The [STAR64 implementation and
+hardware record](docs/2026-10-14-STAR64-PORTABLE.md) covers RV64 cross-builds,
+Main's HDMI/keyboard setup and the faster LLVMpipe software renderer.
+
 One path names the fprisc checkout, found in this order: `--fprisc DIR` on an
 invocation, `$FPRISC_ROOT` in the shell, `fprisc.path` in this tree (what
 `./qos.py fprisc DIR` writes; it is ignored by git), then a sibling `../fprisc`.

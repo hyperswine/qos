@@ -1,4 +1,4 @@
-# Linux bring-up only. QOSP's hosted runtime does not yet support RV64 Linux.
+# Linux bring-up baseline; optionally enable QOSP with an RV64 Main profile.
 # Buildroot 2026.08; board kernel/bootloader from its 2025.02 STAR64 target.
 BR2_riscv=y
 BR2_RISCV_ISA_RVC=y

@@ -1,0 +1,253 @@
+{
+  "format": 1,
+  "architecture": "riscv64",
+  "source": "https://deb.debian.org/debian/",
+  "packages": [
+    {
+      "Package": "libelf1t64",
+      "Version": "0.192-4",
+      "Filename": "pool/main/e/elfutils/libelf1t64_0.192-4_riscv64.deb",
+      "SHA256": "d2ce018898814c005a363792c236fa0b33291bf3d775f9173ef97d7c9416dc03"
+    },
+    {
+      "Package": "libsensors5",
+      "Version": "1:3.6.2-2",
+      "Filename": "pool/main/l/lm-sensors/libsensors5_3.6.2-2_riscv64.deb",
+      "SHA256": "fa6be0c1b787431295abbdb33e1ebb9fe29b640643b83ac46ce3cec33ed03247"
+    },
+    {
+      "Package": "libxcb-shm0",
+      "Version": "1.17.0-2+b1",
+      "Filename": "pool/main/libx/libxcb/libxcb-shm0_1.17.0-2+b1_riscv64.deb",
+      "SHA256": "bab82cce26b4955381475a5461f7f241f7157e5210faa15489491c1353abd52f"
+    },
+    {
+      "Package": "libvulkan1",
+      "Version": "1.4.309.0-1",
+      "Filename": "pool/main/v/vulkan-loader/libvulkan1_1.4.309.0-1_riscv64.deb",
+      "SHA256": "9f1816ef20ce5e085f73d1d852822ae82b75a00e6406ea47977c6bc89b3524b6"
+    },
+    {
+      "Package": "libegl1",
+      "Version": "1.7.0-1+b2",
+      "Filename": "pool/main/libg/libglvnd/libegl1_1.7.0-1+b2_riscv64.deb",
+      "SHA256": "b2a9449b79a8903eecd627d02002dad95c7890dab52738f04f6523cd84e70d3b"
+    },
+    {
+      "Package": "libgles2",
+      "Version": "1.7.0-1+b2",
+      "Filename": "pool/main/libg/libglvnd/libgles2_1.7.0-1+b2_riscv64.deb",
+      "SHA256": "f8f978b5721579af8aff5825fbe73ec8d84e082f82080f32fc6c0589cbe6cc6e"
+    },
+    {
+      "Package": "libglvnd0",
+      "Version": "1.7.0-1+b2",
+      "Filename": "pool/main/libg/libglvnd/libglvnd0_1.7.0-1+b2_riscv64.deb",
+      "SHA256": "d06536f410212775e4f3ba863fbec3ca6dbc3037056bcedb6f7abd0fd180cb3d"
+    },
+    {
+      "Package": "libegl-mesa0",
+      "Version": "25.0.7-2+deb13u1",
+      "Filename": "pool/main/m/mesa/libegl-mesa0_25.0.7-2+deb13u1_riscv64.deb",
+      "SHA256": "17de2e6b513ce72b797b91986c61850e837ab760eeca68d6a7e586731fb18e6b"
+    },
+    {
+      "Package": "libgbm1",
+      "Version": "25.0.7-2+deb13u1",
+      "Filename": "pool/main/m/mesa/libgbm1_25.0.7-2+deb13u1_riscv64.deb",
+      "SHA256": "7709166722b87bac4bd9889f37bd365d680596e88cd8aa145f5573bd9ef75762"
+    },
+    {
+      "Package": "libgl1-mesa-dri",
+      "Version": "25.0.7-2+deb13u1",
+      "Filename": "pool/main/m/mesa/libgl1-mesa-dri_25.0.7-2+deb13u1_riscv64.deb",
+      "SHA256": "444fcd8957f4bc60258410d3599d6925ee00c5de7a02fb83dd891af70879ce7b"
+    },
+    {
+      "Package": "mesa-libgallium",
+      "Version": "25.0.7-2+deb13u1",
+      "Filename": "pool/main/m/mesa/mesa-libgallium_25.0.7-2+deb13u1_riscv64.deb",
+      "SHA256": "667778e099021bce8003dc9105739b9608f13eff061930d1adf5a39669afb0c1"
+    },
+    {
+      "Package": "libllvm19",
+      "Version": "1:19.1.7-3+b1",
+      "Filename": "pool/main/l/llvm-toolchain-19/libllvm19_19.1.7-3+b1_riscv64.deb",
+      "SHA256": "14ac302f9c0111f0ee5559aec7cf2afb028f878e731bcf46722d54a7d0282757"
+    },
+    {
+      "Package": "libedit2",
+      "Version": "3.1-20250104-1",
+      "Filename": "pool/main/libe/libedit/libedit2_3.1-20250104-1_riscv64.deb",
+      "SHA256": "7a770e1c14a7b587e46423fd29f531f4af0e7beca543a241ce9628dd50256d5e"
+    },
+    {
+      "Package": "libffi8",
+      "Version": "3.4.8-2",
+      "Filename": "pool/main/libf/libffi/libffi8_3.4.8-2_riscv64.deb",
+      "SHA256": "f2dc7319a32fb0af68723f781667aa876efb402301e9cb170d2979d394c11bfb"
+    },
+    {
+      "Package": "libxml2",
+      "Version": "2.12.7+dfsg+really2.9.14-2.1+deb13u3",
+      "Filename": "pool/main/libx/libxml2/libxml2_2.12.7+dfsg+really2.9.14-2.1+deb13u3_riscv64.deb",
+      "SHA256": "77004ef1c170a52c598b66e305542b33b128e24289aee1a447203b3b625dc932"
+    },
+    {
+      "Package": "libz3-4",
+      "Version": "4.13.3-1",
+      "Filename": "pool/main/z/z3/libz3-4_4.13.3-1_riscv64.deb",
+      "SHA256": "d88894828afe069beb9a5a22750d02061156ff3fafa0cede8f7adef7fe18e3fa"
+    },
+    {
+      "Package": "libzstd1",
+      "Version": "1.5.7+dfsg-1",
+      "Filename": "pool/main/libz/libzstd/libzstd1_1.5.7+dfsg-1_riscv64.deb",
+      "SHA256": "5967f5f97bfb6e7a8036d4e615c0ecd6861a9bb686bd60ee0c81422581faf0ad"
+    },
+    {
+      "Package": "liblzma5",
+      "Version": "5.8.1-1+deb13u1",
+      "Filename": "pool/main/x/xz-utils/liblzma5_5.8.1-1+deb13u1_riscv64.deb",
+      "SHA256": "d6b628145f0e58ff4e406cc1f6b656830a95b6ba98da538dbfac26fab672475c"
+    },
+    {
+      "Package": "libicu76",
+      "Version": "76.1-4",
+      "Filename": "pool/main/i/icu/libicu76_76.1-4_riscv64.deb",
+      "SHA256": "66f0a22cd0b6bd1c72089596b78865778dc6e9d871a92365fb9f697377043045"
+    },
+    {
+      "Package": "libtinfo6",
+      "Version": "6.5+20250216-2",
+      "Filename": "pool/main/n/ncurses/libtinfo6_6.5+20250216-2_riscv64.deb",
+      "SHA256": "9b902c0d5a1561c2e721fb90128281c9957ae6e37817acba2547aba91ff104ea"
+    },
+    {
+      "Package": "libbsd0",
+      "Version": "0.12.2-2",
+      "Filename": "pool/main/libb/libbsd/libbsd0_0.12.2-2_riscv64.deb",
+      "SHA256": "1ba7054b1de3931ebe3a7be38a1ba3cd5dbfe4eb647fc259425af8db76f89660"
+    },
+    {
+      "Package": "libmd0",
+      "Version": "1.1.0-2+b1",
+      "Filename": "pool/main/libm/libmd/libmd0_1.1.0-2+b1_riscv64.deb",
+      "SHA256": "b9d39f5d9bae99bdad80528fe6ffab501d0b0add8e2e388850b359a69094e64a"
+    },
+    {
+      "Package": "libdrm2",
+      "Version": "2.4.124-2",
+      "Filename": "pool/main/libd/libdrm/libdrm2_2.4.124-2_riscv64.deb",
+      "SHA256": "b6a8070c377bc5f5d58de1848b1c3f7df6e22d5a505bcf10f3f3e4d5f318b26c"
+    },
+    {
+      "Package": "libdrm-amdgpu1",
+      "Version": "2.4.124-2",
+      "Filename": "pool/main/libd/libdrm/libdrm-amdgpu1_2.4.124-2_riscv64.deb",
+      "SHA256": "ecff7a7405bb60f186dbd1211c5e59072ff72e68eb56285c7aeea6d986211f11"
+    },
+    {
+      "Package": "libdrm-radeon1",
+      "Version": "2.4.124-2",
+      "Filename": "pool/main/libd/libdrm/libdrm-radeon1_2.4.124-2_riscv64.deb",
+      "SHA256": "a008deda921ce0eb858f7f3cafbd26e8eba6a7e9ddc4e034fc411d77248c199b"
+    },
+    {
+      "Package": "libx11-6",
+      "Version": "2:1.8.12-1",
+      "Filename": "pool/main/libx/libx11/libx11-6_1.8.12-1_riscv64.deb",
+      "SHA256": "7323fa274165abb319f40eb62c380ed863353723e2d7931bb0622b94b521675d"
+    },
+    {
+      "Package": "libx11-xcb1",
+      "Version": "2:1.8.12-1",
+      "Filename": "pool/main/libx/libx11/libx11-xcb1_1.8.12-1_riscv64.deb",
+      "SHA256": "fd0d3d4840ca51a9c34cd515381ed75219c7f168e6803b27c90dc8cdeb834fdc"
+    },
+    {
+      "Package": "libxcb1",
+      "Version": "1.17.0-2+b1",
+      "Filename": "pool/main/libx/libxcb/libxcb1_1.17.0-2+b1_riscv64.deb",
+      "SHA256": "7453519720eb1791f08ba28748ab8654e0ccbdf2d0380fc7f617e74ffae99d74"
+    },
+    {
+      "Package": "libxcb-dri3-0",
+      "Version": "1.17.0-2+b1",
+      "Filename": "pool/main/libx/libxcb/libxcb-dri3-0_1.17.0-2+b1_riscv64.deb",
+      "SHA256": "ba8e67cb700584ce3b4b81227a80b4914bb3e3a8fe63a72a4b9962201bee52dd"
+    },
+    {
+      "Package": "libxcb-dri2-0",
+      "Version": "1.17.0-2+b1",
+      "Filename": "pool/main/libx/libxcb/libxcb-dri2-0_1.17.0-2+b1_riscv64.deb",
+      "SHA256": "6fbd7c62bdcdab2563617d4e11cb48cd73e27b25cf9c6741f566a94c479135c0"
+    },
+    {
+      "Package": "libxcb-present0",
+      "Version": "1.17.0-2+b1",
+      "Filename": "pool/main/libx/libxcb/libxcb-present0_1.17.0-2+b1_riscv64.deb",
+      "SHA256": "23f834c41fb177674534fe39e8570f8128986b66ad76e8c5302433d293733295"
+    },
+    {
+      "Package": "libxcb-sync1",
+      "Version": "1.17.0-2+b1",
+      "Filename": "pool/main/libx/libxcb/libxcb-sync1_1.17.0-2+b1_riscv64.deb",
+      "SHA256": "596a6f84e9e3349f09248293042c2ba688fc74441990e61c53640887b3364c24"
+    },
+    {
+      "Package": "libxcb-xfixes0",
+      "Version": "1.17.0-2+b1",
+      "Filename": "pool/main/libx/libxcb/libxcb-xfixes0_1.17.0-2+b1_riscv64.deb",
+      "SHA256": "2333a8f8a63bf51435b63bacec07354fd534381218fc26429020e2c9b39daa84"
+    },
+    {
+      "Package": "libxcb-randr0",
+      "Version": "1.17.0-2+b1",
+      "Filename": "pool/main/libx/libxcb/libxcb-randr0_1.17.0-2+b1_riscv64.deb",
+      "SHA256": "eeba8761b8f03c8d9f3ea016bebaf02b933df18630fea21043c1401ecbc05e9a"
+    },
+    {
+      "Package": "libxshmfence1",
+      "Version": "1.3.3-1",
+      "Filename": "pool/main/libx/libxshmfence/libxshmfence1_1.3.3-1_riscv64.deb",
+      "SHA256": "99b70742d5d3cd58cc68060396d64997fbe0a496029dc2efa5e04c037ad8b8a4"
+    },
+    {
+      "Package": "libwayland-client0",
+      "Version": "1.23.1-3",
+      "Filename": "pool/main/w/wayland/libwayland-client0_1.23.1-3_riscv64.deb",
+      "SHA256": "458d41a63291508ca330aa9afccdef11c4b97924f2b2d89ff812d23bd0fa3f7b"
+    },
+    {
+      "Package": "libwayland-server0",
+      "Version": "1.23.1-3",
+      "Filename": "pool/main/w/wayland/libwayland-server0_1.23.1-3_riscv64.deb",
+      "SHA256": "5427c2b850679d1a03c54173d85a09f9e50fa305e8295c05f0dfe615a62d8e4a"
+    },
+    {
+      "Package": "libxau6",
+      "Version": "1:1.0.11-1",
+      "Filename": "pool/main/libx/libxau/libxau6_1.0.11-1_riscv64.deb",
+      "SHA256": "231e70010c1d91eb8890db365e4baface65c8727652d78651b9afe53e2bf2d57"
+    },
+    {
+      "Package": "libxdmcp6",
+      "Version": "1:1.1.5-1",
+      "Filename": "pool/main/libx/libxdmcp/libxdmcp6_1.1.5-1_riscv64.deb",
+      "SHA256": "ff8bdae603dc08d1181ad48a3113e28a560d9f79be891ee759e0e485699bac66"
+    },
+    {
+      "Package": "libexpat1",
+      "Version": "2.8.3-1~deb13u1",
+      "Filename": "pool/main/e/expat/libexpat1_2.8.3-1~deb13u1_riscv64.deb",
+      "SHA256": "114156a4bccea157194bc6dc9ac4e2b44f7e8416245a34b168e40a3baaa68fa3"
+    },
+    {
+      "Package": "libdecor-0-0",
+      "Version": "0.2.2-2",
+      "Filename": "pool/main/libd/libdecor-0/libdecor-0-0_0.2.2-2_riscv64.deb",
+      "SHA256": "12fc9085ce58c0ae69ece11a760834d80d44a26c74fb5cfe463b180a2a9c19e9"
+    }
+  ]
+}

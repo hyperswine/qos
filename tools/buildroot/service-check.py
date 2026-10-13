@@ -48,6 +48,7 @@ def check(out):
 import os,signal,time
 from pathlib import Path
 base=Path(os.environ['CASE_DIR'])
+(base/'config-probe').write_text(os.environ.get('CONFIG_PROBE',''))
 count=base/'launches'
 attempt=int(count.read_text())+1 if count.exists() else 1
 count.write_text(str(attempt))
@@ -72,6 +73,7 @@ while True: time.sleep(.1)
             self.path.mkdir()
             self.run = self.path / 'run'
             self.env = dict(os.environ, CASE_DIR=str(self.path), MODE=mode,
+                            QOSP_CONFIG=str(self.path / 'config'),
                             QOSP_RUN_DIR=str(self.run), QOSP_LOG=str(self.path / 'service.log'),
                             QOSP_TTY='/dev/null', QOSP_SERVICE_LIB=str(PACKAGE / 'qosp-service.sh'),
                             QOSP_SERVICE_GUARD=str(guard), QOSP_SUPERVISOR=str(PACKAGE / 'qosp-supervise'),
@@ -99,6 +101,14 @@ while True: time.sleep(.1)
         def assert_quiet(self):
             assert not (self.run / 'owner').exists(), self.run
             assert not (self.run / 'ready').exists(), self.run
+
+    configured = Case('configured', mode='no-ready')
+    (configured.path / 'config').write_text('export MODE=ready\nexport CONFIG_PROBE=from-board-config\n')
+    configured.command('start')
+    assert (configured.path / 'config-probe').read_text() == 'from-board-config'
+    configured.command('stop')
+    configured.assert_quiet()
+    print('Service: board configuration reaches the supervised application HOLDS', flush=True)
 
     normal = Case('normal')
     with ThreadPoolExecutor(max_workers=4) as pool:

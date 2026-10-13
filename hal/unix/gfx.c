@@ -52,6 +52,8 @@
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #include <GLES3/gl31.h>
+#include <GLES2/gl2ext.h>
+#include <drm/drm_fourcc.h>
 #endif
 #include <errno.h>
 #include <fcntl.h>
@@ -61,6 +63,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <time.h>
 #ifndef FPR_DESKTOP_GL
 #include "drm_scanout.h"
 #endif
@@ -277,7 +280,7 @@ static struct {
 #else
   EGLDisplay dpy; EGLContext ctx;
 #endif
-  GLuint prog; GLint uProj, uView, uLightPos, uLightColor, uAmbient, uFog, uFogRange;
+  GLuint prog; GLint uProj, uView, uLightPos, uLightColor, uAmbient, uFog, uFogRange, uUnlit;
   GLuint fbo, fboColor, fboDepth;
   /* the text pass: one SDF atlas, one streaming quad buffer */
   GLuint tprog, tvao, tvbo, ttex; GLint tuView, tuProj, tuFog, tuFogRange, tuTex;
@@ -294,8 +297,13 @@ static struct {
   pthread_t boundTid; int haveTid; /* thread the context is current on */
 #ifndef FPR_DESKTOP_GL
   drm_out_t drm; /* the monitor link (drm_scanout.h); .on = 0 offscreen */
+  EGLImageKHR scanoutImage;
+  GLuint scanoutFbo, scanoutColor;
+  int scanoutTried;
 #endif
 } G;
+static uint64_t mesh_generation;
+static int retained_ui_valid, retained_ui_reported;
 
 #ifdef FPR_DESKTOP_GL
 #define GFX_EVENT_CAP 64
@@ -466,8 +474,10 @@ static const char *kFS =
     "in vec3 vN; in vec3 vW; in vec3 vC; in float vZ; in float vA; in vec4 vClip;\n"
     "uniform vec3 uLightPos; uniform vec3 uLightColor;\n"
     "uniform vec3 uAmbient; uniform vec3 uFog; uniform vec2 uFogRange;\n"
+    "uniform bool uUnlit;\n"
     "out vec4 fragColor;\n"
     "void main(){ if (vW.x < vClip.x || vW.x > vClip.z || vW.y < vClip.y || vW.y > vClip.w) discard;\n"
+    "  if (uUnlit) { fragColor = vec4(vC, vA); return; }\n"
     "  vec3 n = normalize(vN);\n"
     "  vec3 l = normalize(uLightPos - vW);\n"
     "  float d = max(dot(n,l), 0.0);\n"
@@ -647,9 +657,8 @@ int fpr_gpu_vec_fold_pair_sum(void *col0v, void *col1v, uw len, sw seed, sw *out
 }
 #endif
 
-/* egl_headless.cpp, C'd: surfaceless via the platform-display
- * extension, falling back to the default display.  PREFER_GBM and the
- * render-node path are the Pi-hardware upgrade, not ported yet. */
+/* Surfaceless EGL supports software Mesa and STAR64's vendor PowerVR Mesa.
+ * Optional dma-buf blits present through the GPU; CPU readback is the fallback. */
 #ifndef FPR_DESKTOP_GL
 static EGLDisplay egl_display(const char **how) {
   PFNEGLGETPLATFORMDISPLAYEXTPROC getPlat =
@@ -702,6 +711,12 @@ void gfx_init(int w, int h) { /* raw export: gfx_raw.h */
    * screen, no scaling).  An explicit size is kept and blitted centred.
    * With no display (or FPR_DRM=0) the classic 640x480 stands, so
    * headless runs and replay checks are unchanged. */
+  /* A CPU renderer can trade raster resolution for response time while
+   * keeping the application's scene coordinates and the monitor mode. */
+  const char *size = getenv("FPR_GFX_SIZE");
+  int sw, sh;
+  if (size && sscanf(size, "%dx%d", &sw, &sh) == 2 &&
+      sw >= 64 && sh >= 64 && sw <= 8192 && sh <= 8192) { w = sw; h = sh; }
   int autoSize = (w <= 0 || h <= 0);
   drm_scanout_init(&G.drm, autoSize ? 0 : w, autoSize ? 0 : h);
   if (G.drm.on && autoSize) {
@@ -757,6 +772,7 @@ void gfx_init(int w, int h) { /* raw export: gfx_raw.h */
   G.uAmbient = glGetUniformLocation(G.prog, "uAmbient");
   G.uFog = glGetUniformLocation(G.prog, "uFog");
   G.uFogRange = glGetUniformLocation(G.prog, "uFogRange");
+  G.uUnlit = glGetUniformLocation(G.prog, "uUnlit");
   {
     GLuint tvs = gfx_shader(GL_VERTEX_SHADER, kTVS), tfs = gfx_shader(GL_FRAGMENT_SHADER, kTFS);
     G.tprog = glCreateProgram();
@@ -822,6 +838,7 @@ void gfx_dims(int *w, int *h) { /* raw export: gfx_raw.h */
 /* content-addressed upload: a MeshId is uploaded once, ever */
 /* upload interleaved [px py pz nx ny nz] + indices as the mesh's buffers */
 static void mesh_upload(mesh_t *m, const float *v, int nv, const uint32_t *ix, int ni) {
+  mesh_generation++;
   glGenVertexArrays(1, &m->vao);
   glBindVertexArray(m->vao);
   glGenBuffers(1, &m->vbo);
@@ -1388,6 +1405,7 @@ static int gfx_render_pass(uint64_t scenev, int64_t *draws_out, int64_t *dyn_byt
   glClearColor(sky.x, sky.y, sky.z, 1.0f);
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
   glUseProgram(G.prog);
+  glUniform1i(G.uUnlit, 0);
   glUniformMatrix4fv(G.uView, 1, GL_FALSE, view.m);
   glUniformMatrix4fv(G.uProj, 1, GL_FALSE, proj.m);
   glUniform3f(G.uLightPos, lp.x, lp.y, lp.z);
@@ -1413,6 +1431,80 @@ static int gfx_render_pass(uint64_t scenev, int64_t *draws_out, int64_t *dyn_byt
   return 0;
 }
 
+#ifndef FPR_DESKTOP_GL
+/* Import the display controller's linear XRGB buffer into the GPU. This
+ * keeps the existing KMS ownership and CPU fallback, but avoids readback
+ * and CPU scaling on drivers supporting cross-device dma-buf rendering. */
+static int gfx_gpu_scanout_init(void) {
+  if (G.scanoutTried) return G.scanoutFbo != 0;
+  G.scanoutTried = 1;
+  const char *enabled = getenv("FPR_DRM_GPU_BLIT");
+  if (!enabled || strcmp(enabled, "1")) return 0;
+  const char *exts = eglQueryString(G.dpy, EGL_EXTENSIONS);
+  PFNEGLCREATEIMAGEKHRPROC create = (PFNEGLCREATEIMAGEKHRPROC)eglGetProcAddress("eglCreateImageKHR");
+  PFNEGLDESTROYIMAGEKHRPROC destroy = (PFNEGLDESTROYIMAGEKHRPROC)eglGetProcAddress("eglDestroyImageKHR");
+  PFNGLEGLIMAGETARGETRENDERBUFFERSTORAGEOESPROC storage =
+      (PFNGLEGLIMAGETARGETRENDERBUFFERSTORAGEOESPROC)eglGetProcAddress("glEGLImageTargetRenderbufferStorageOES");
+  int fd = -1;
+  if (!exts || !strstr(exts, "EGL_EXT_image_dma_buf_import") ||
+      !create || !destroy || !storage || (fd = drm_scanout_export_fd(&G.drm)) < 0)
+    goto fail;
+  EGLint attrs[] = {EGL_WIDTH, (EGLint)G.drm.mw, EGL_HEIGHT, (EGLint)G.drm.mh,
+      EGL_LINUX_DRM_FOURCC_EXT, DRM_FORMAT_XRGB8888,
+      EGL_DMA_BUF_PLANE0_FD_EXT, fd, EGL_DMA_BUF_PLANE0_OFFSET_EXT, 0,
+      EGL_DMA_BUF_PLANE0_PITCH_EXT, (EGLint)G.drm.pitch, EGL_NONE};
+  G.scanoutImage = create(G.dpy, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, 0, attrs);
+  close(fd); fd = -1;
+  if (G.scanoutImage == EGL_NO_IMAGE_KHR) goto fail;
+  glGenRenderbuffers(1, &G.scanoutColor);
+  glBindRenderbuffer(GL_RENDERBUFFER, G.scanoutColor);
+  storage(GL_RENDERBUFFER, (GLeglImageOES)G.scanoutImage);
+  glGenFramebuffers(1, &G.scanoutFbo);
+  glBindFramebuffer(GL_FRAMEBUFFER, G.scanoutFbo);
+  glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, G.scanoutColor);
+  if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE ||
+      glGetError() != GL_NO_ERROR) goto fail;
+  glBindFramebuffer(GL_FRAMEBUFFER, G.fbo);
+  qos_hostlog("[gfx] GPU scanout blit: dma-buf XRGB %ux%u, no CPU readback", G.drm.mw, G.drm.mh);
+  return 1;
+fail:
+  if (fd >= 0) close(fd);
+  qos_hostlog("[gfx] GPU scanout import unavailable (EGL 0x%x GL 0x%x); using CPU presentation",
+              eglGetError(), glGetError());
+  glBindFramebuffer(GL_FRAMEBUFFER, G.fbo);
+  if (G.scanoutFbo) glDeleteFramebuffers(1, &G.scanoutFbo);
+  if (G.scanoutColor) glDeleteRenderbuffers(1, &G.scanoutColor);
+  if (G.scanoutImage != EGL_NO_IMAGE_KHR && destroy) destroy(G.dpy, G.scanoutImage);
+  G.scanoutFbo = G.scanoutColor = 0; G.scanoutImage = EGL_NO_IMAGE_KHR;
+  return 0;
+}
+
+static int gfx_gpu_scanout_present(void) {
+  if (!gfx_gpu_scanout_init()) return 0;
+  int x, y, w, h;
+  drm_scanout_rect(&G.drm, &x, &y, &w, &h);
+  int sw = G.drm.scale ? G.w : w, sh = G.drm.scale ? G.h : h;
+  glBindFramebuffer(GL_READ_FRAMEBUFFER, G.fbo);
+  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, G.scanoutFbo);
+  const GLfloat black[] = {0, 0, 0, 1};
+  glClearBufferfv(GL_COLOR, 0, black);
+  /* GL's bottom row becomes the monitor's top row in the shared buffer. */
+  glBlitFramebuffer(0, G.h, sw, G.h - sh, x, y, x + w, y + h,
+                    GL_COLOR_BUFFER_BIT, GL_NEAREST);
+  glFinish(); /* GPU writes must complete before the existing live scanout. */
+  GLenum error = glGetError();
+  glBindFramebuffer(GL_FRAMEBUFFER, G.fbo);
+  if (error != GL_NO_ERROR) {
+    qos_hostlog("[gfx] GPU scanout blit failed (GL 0x%x); using CPU presentation", error);
+    /* Keep imported objects alive until process exit, but never retry this path. */
+    G.scanoutFbo = 0;
+    return 0;
+  }
+  drm_scanout_damage(&G.drm, 0, 0, (int)G.drm.mw, (int)G.drm.mh);
+  return 1;
+}
+#endif
+
 static void gfx_present(void) {
 #ifdef FPR_DESKTOP_GL
   {
@@ -1427,6 +1519,7 @@ static void gfx_present(void) {
 #else
   /* scanout present: FBO -> dumb buffer, every rendered frame */
   if (G.drm.on) {
+    if (gfx_gpu_scanout_present()) return;
     glReadPixels(0, 0, G.w, G.h, GL_RGBA, GL_UNSIGNED_BYTE, G.drm.rd);
     drm_scanout_present(&G.drm);
   } else {
@@ -1440,9 +1533,66 @@ static void gfx_present(void) {
 }
 
 int gfx_render_scene(uint64_t scenev, int64_t *draws_out, int64_t *dyn_bytes_out) {
+  retained_ui_valid = 0;
   int r = gfx_render_pass(scenev, draws_out, dyn_bytes_out);
   gfx_present();
   return r;
+}
+
+/* Compare exact staged pixels' inputs, not object addresses or a hash.
+ * Only a UI over an empty 3D scene with the default clear colour qualifies.
+ * This lets a CPU renderer leave its previous frame visible while input is
+ * polled at the normal MVU rate. Animated text/geometry still redraws. */
+static int nil_list(V v) { return !ISINT(v) && TID(v) == T_LIST && ((hdr_t *)v)->var == 0; }
+static int retain_ui(V scene, V ui, int64_t dist) {
+  static unsigned char *previous, *current;
+  static size_t previous_size, previous_cap, current_cap;
+  V *s = nfields(scene, "gfx: expected scene");
+  V lights = s[2];
+  int default_clear = nil_list(lights) ||
+    (!ISINT(lights) && TID(lights) == T_LIST && ((hdr_t *)lights)->var == 1 &&
+     nil_list(((V *)((char *)lights + 8))[1]));
+  if (!getenv("FPR_GFX_RETAIN_UI") || !nil_list(s[0]) || !nil_list(s[1]) || !default_clear || !ISINT(s[3])) {
+    retained_ui_valid = 0;
+    return 0;
+  }
+  if (!nil_list(lights)) {
+    V *pair = fields(((V *)((char *)lights + 8))[0], 4, "gfx: light must be (pos, color)");
+    (void)walk_v3(pair[0]); (void)walk_v3(pair[1]);
+  }
+  gfx_bind_thread();
+  stage_clear(); clip_reset(); walk_list(ui, walk_entity);
+  size_t text_bytes = (size_t)G.ntext * 6 * TVF * sizeof(float);
+  uint64_t meta[] = {(uint64_t)G.w, (uint64_t)G.h, (uint64_t)dist,
+    mesh_generation, (uint64_t)G.nmeshes, (uint64_t)G.ntext,
+    getenv("FPR_GFX_UNLIT_UI") != NULL};
+  size_t size = sizeof meta + text_bytes;
+  for (int i=0; i<G.nmeshes; i++) size += sizeof(uint64_t) + (size_t)G.meshes[i].nstage * sizeof(inst_t);
+  if (size > current_cap) {
+    unsigned char *p = realloc(current, size);
+    if (!p) fpr_cpanic("gfx: retained UI allocation failed");
+    current = p; current_cap = size;
+  }
+  size_t at = 0;
+  memcpy(current, meta, sizeof meta); at += sizeof meta;
+  memcpy(current + at, G.tstage, text_bytes); at += text_bytes;
+  for (int i=0; i<G.nmeshes; i++) {
+    uint64_t count = (uint64_t)G.meshes[i].nstage;
+    size_t bytes = (size_t)count * sizeof(inst_t);
+    memcpy(current + at, &count, sizeof count); at += sizeof count;
+    if (bytes) memcpy(current + at, G.meshes[i].stage, bytes);
+    at += bytes;
+  }
+  if (retained_ui_valid && size == previous_size && !memcmp(previous, current, size)) {
+    if (!retained_ui_reported && getenv("FPR_GFX_TRACE")) qos_hostlog("[gfx] unchanged UI retained; input polling continues");
+    retained_ui_reported = 1;
+    return 1;
+  }
+  unsigned char *old = previous; size_t old_cap = previous_cap;
+  previous = current; previous_cap = current_cap; previous_size = size;
+  current = old; current_cap = old_cap;
+  retained_ui_valid = 1; retained_ui_reported = 0;
+  return 0;
 }
 
 /* the 2D layer: a second pass over the same frame -- the depth buffer
@@ -1452,6 +1602,14 @@ int gfx_render_scene(uint64_t scenev, int64_t *draws_out, int64_t *dyn_bytes_out
  * the light behind the camera so faces carry their instance colour.  The
  * list is walked as dynamics; then the frame is presented. */
 int gfx_render_overlay(uint64_t scenev, uint64_t uiv, int64_t dist, int64_t *draws_out, int64_t *dyn_bytes_out) {
+  if (!G.inited) fpr_cpanic("glRender: glInit first");
+  if (retain_ui((V)scenev, (V)uiv, dist)) {
+    *draws_out = 0; *dyn_bytes_out = 0;
+    return 0;
+  }
+  int trace = getenv("FPR_GFX_TRACE") != NULL;
+  struct timespec started, drawn, presented;
+  if (trace) { clock_gettime(CLOCK_MONOTONIC, &started); qos_hostlog("[gfx] frame begin"); }
   int64_t d2 = 0, b2 = 0;
   int r = gfx_render_pass(scenev, draws_out, dyn_bytes_out);
   stage_clear();
@@ -1464,6 +1622,7 @@ int gfx_render_overlay(uint64_t scenev, uint64_t uiv, int64_t dist, int64_t *dra
   glViewport(0, 0, G.w, G.h);
   glClear(GL_DEPTH_BUFFER_BIT);
   glUseProgram(G.prog);
+  glUniform1i(G.uUnlit, getenv("FPR_GFX_UNLIT_UI") != NULL);
   glUniformMatrix4fv(G.uView, 1, GL_FALSE, view.m);
   glUniformMatrix4fv(G.uProj, 1, GL_FALSE, proj.m);
   glUniform3f(G.uLightPos, 0.0f, 0.0f, z * 40.0f);
@@ -1475,7 +1634,14 @@ int gfx_render_overlay(uint64_t scenev, uint64_t uiv, int64_t dist, int64_t *dra
   d2 += draw_translucent(&view, &proj, (v3){0, 0, 0}, 1000.0f, 2000.0f, &b2);
   *draws_out += d2;
   *dyn_bytes_out += b2;
+  if (trace) { clock_gettime(CLOCK_MONOTONIC, &drawn); qos_hostlog("[gfx] frame drawn"); }
   gfx_present();
+  if (trace) {
+    clock_gettime(CLOCK_MONOTONIC, &presented);
+    double draw_ms = (drawn.tv_sec - started.tv_sec) * 1000.0 + (drawn.tv_nsec - started.tv_nsec) / 1000000.0;
+    double present_ms = (presented.tv_sec - drawn.tv_sec) * 1000.0 + (presented.tv_nsec - drawn.tv_nsec) / 1000000.0;
+    qos_hostlog("[gfx] frame: draw %.1f ms, present %.1f ms", draw_ms, present_ms);
+  }
   return r;
 }
 

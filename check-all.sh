@@ -12,6 +12,9 @@ export FPR_HOME="$ROOT"
 export FPR_PATH="$FPRISC_ROOT"
 export FPR_FOREIGN="$ROOT/core/foreign.fpr"
 echo "== fprc =="                && (make -s fpr) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
+echo "== Linux RV64 lowering, cache isolation and QOS TLS ==" && (python3 "$FPRISC_ROOT/tests/check_rv64_linux.py") || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
+echo "== DRM scanout: RGB, orientation, pitch and full-screen scaling ==" && (sh qos/tests-host/drm-scanout-check.sh) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
+echo "== STAR64 console ownership with optional QOS autostart ==" && (python3 tools/buildroot/star64-console-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
 echo "== baseline compile gates: graphics-independent, explicit LiveView safety and dynamic-slot refusal ==" && (python3 tools/baseline-compile-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
 echo "== disk suspension: one-hart progress, abandoned requests and copied buffers ==" && (python3 tools/disk-suspend-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
 echo "== virtio raw policy: register programming and full-word deadlines against C ==" && (python3 tools/virtio-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
@@ -28,6 +31,7 @@ echo "== Files quiesce, block drain and final flush ==" && (python3 tools/files-
 echo "== Portable bounded graceful shutdown ==" && (python3 tools/portable-shutdown-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
 echo "== Buildroot service supervision and finite restart ==" && (python3 tools/buildroot/service-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
 echo "== Buildroot persistent state directory installation ==" && (python3 tools/buildroot/package-install-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
+echo "== Pi quiet boot splash and vector rendering ==" && (python3 tools/buildroot/splash-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
 echo "== disk hardening: deadlines, stalled devices, reset, offline refusal, overload refusal (native + Portable) ==" && (python3 tools/disk-harden-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
 echo "== native image integrity: corrupt sections and missing digests refuse before allocation ==" && (python3 tools/native-integrity-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }
 echo "== opt-in inbox admission: native process-plane ownership and reclamation ==" && (python3 tools/native-inbox-check.py) || { echo "** LEG FAILED"; touch /tmp/ck-fail.flag; }

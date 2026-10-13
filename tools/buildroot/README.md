@@ -17,8 +17,11 @@ with no desktop, no compositor and no window system anywhere in the picture.
 
 The separate [STAR64 bring-up target](board/qosp/star64/README.md) builds
 RISC-V Linux with SSH, Ethernet/Wi-Fi support, vendor HDMI drivers and
-software EGL diagnostics. It does not yet run QOS or accelerate rendering
-on the PowerVR GPU. It uses Buildroot 2026.08 in a separate source/output tree.
+software EGL diagnostics. Its baseline image does not include QOS or the
+PowerVR runtime. QOS Main and hardware EGL/GPU presentation have passed on
+the installed board with the optional
+[PowerVR bundle](../../docs/2026-10-14-STAR64-POWERVR.md).
+The target uses Buildroot 2026.08 in a separate source/output tree.
 
 ## Why this is small
 
@@ -71,7 +74,7 @@ hooks added for this:
 
 | hook | what it does |
 | --- | --- |
-| `FPRBUILD_EXTRA=--cc <gcc>` | compile and link with Buildroot's cross compiler |
+| `FPRBUILD_EXTRA=--target=linux-<arch> --cc <gcc>` | select the target ISA and link with Buildroot's cross compiler |
 | `QOSP_ARCH=<arch>` | decide `-ffixed-x28` by the TARGET, not the build machine |
 | `QOSP_ES_OUT=<path>` | write the binary into Buildroot's build dir |
 
@@ -80,12 +83,11 @@ build machine, and it only ever emits assembly for the target. Point
 `BR2_PACKAGE_QOSP_FPRISC_DIR` at a checkout where `fpr` is already built
 (empty means the sibling `../fprisc`, the rule the rest of the build follows).
 
-**The build machine must have the target's architecture.** `fpr build --cc`
-crosses to another *libc*, not to another *arch*: `Build.hs` still picks the
-context switch, `-ffixed-x28` and `-no-pie` from the machine it runs on. An
-aarch64 Linux box building an aarch64 image — which is what `tools/arm64-vm`
-gives you — is sound; an x86_64 box would build the wrong thing, quietly.
-This is written down in `fprisc/docs/2026-09-19-BOUNDS.md`.
+The build machine may have a different architecture. The package passes
+`--target=linux-<arch>` explicitly, selecting generated code, context switch
+and ABI flags for aarch64, x86_64 or riscv64. `--cc` alone still changes only
+the C compiler. Linux riscv64 uses RV64GC/LP64D; see the
+[STAR64 Portable validation](../../docs/2026-10-14-STAR64-PORTABLE.md).
 
 ## Booting the QEMU image
 
@@ -264,6 +266,12 @@ write also reports an unconfirmed shutdown.
 
 The settings are environment variables, in decimal integer seconds/counts:
 
+The service also sources optional `/etc/default/qosp` settings (override the
+file with `QOSP_CONFIG`). Use `export` for values the application needs.
+STAR64's overlay selects the optional PowerVR or LLVMpipe runtime, with
+system Mesa as recovery, and supplies full-display defaults there; see the
+[STAR64 hardware rendering record](../../docs/2026-10-14-STAR64-POWERVR.md).
+
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `QOSP_READY_TIMEOUT_SEC` | 20 | Application readiness deadline per launch |
@@ -288,6 +296,18 @@ For the complete host composition, first build `qosp` and an archive from
 This passes the actual host and application through `qosp-session` and the
 supervisor with one and two harts, then checks a clean durable stop and replay
 after a fresh process starts against the same disk.
+
+### Quiet Pi boot splash
+
+The Pi 4 defconfig enables `BR2_PACKAGE_QOSP_BOOT_SPLASH`: a small early fbdev
+helper displays the [QOS vector wordmark](../../assets/qos-boot-logo.svg), then
+QOS carries it into its initial KMS buffer until the GUI draws. HDMI console
+text, the cursor, kernel logos and firmware rainbow are suppressed. UART and
+SSH remain available; Ctrl+Alt+F2 offers a recovery login. Other boards keep
+their existing boot behavior. Connect and power the display before booting.
+See the [implementation and validation record](../../docs/2026-10-14-PI-BOOT-SPLASH.md)
+for build refresh requirements, logs, recovery and hardware test boundaries.
+Run `python3 tools/buildroot/splash-check.py` to validate the logo and boot policy.
 
 ### Filling the screen
 

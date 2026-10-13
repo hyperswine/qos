@@ -1,0 +1,268 @@
+{
+  "format": 1,
+  "gpu": "36.50.54.182",
+  "ddk": "1.17.6210866",
+  "mesa": {
+    "url": "https://archive.mesa3d.org/older-versions/22.x/mesa-22.1.3.tar.xz",
+    "sha256": "b98f32ba7aa2a1ff5725fb36eb999c693079f0ca16f70aa2f103e2b6c3f093e3"
+  },
+  "vendor": {
+    "url": "https://media.githubusercontent.com/media/starfive-tech/soft_3rdpart/b60da16be1b36453aa46599889c28310fd148fb8/IMG_GPU/out/img-gpu-powervr-bin-1.17.6210866.tar.gz",
+    "sha256": "bb94718c965a1c6d6ee68529e4b85989b08f347ccc8b64d12d8872dd668070d1"
+  },
+  "patch_base": "https://raw.githubusercontent.com/starfive-tech/buildroot/70e7c10de57195237ee4ae95f3c87637a39429b0/package/mesa3d/",
+  "patches": [
+    {
+      "name": "0001-Add-PVR-Gallium-driver.patch",
+      "sha256": "362dc1d322306ba108484978f0592290fae6b58929123d32baff2de956d05363"
+    },
+    {
+      "name": "0002-Force-Mesa-to-use-the-PVR-driver-for-platform-device.patch",
+      "sha256": "ec7da0a534588c09a53be9cfde8c16961ecb2f04b9575cd336ec53a18c643615"
+    },
+    {
+      "name": "0002-dri-Add-some-new-DRI-formats-and-fourccs.patch",
+      "sha256": "9b89627a4f601492528eccc7e8835dd202cb283612ccaf12cd59191996134826"
+    },
+    {
+      "name": "0003-GL_EXT_sparse_texture-entry-points.patch",
+      "sha256": "a2fe6e84ee77c762214f6a7a5175756305f35b7382b51df70353a4374ebe4bb4"
+    },
+    {
+      "name": "0004-Add-support-for-various-GLES-extensions.patch",
+      "sha256": "7acfb87bcb533c7d6197e6eea0d4720dd0121a0a4a1bfb617761a350c2931a4d"
+    },
+    {
+      "name": "0005-Add-EGL_IMG_cl_image-extension.patch",
+      "sha256": "fede3a5a3c98f26bab3845c1485974cde06f54fe9c6f9c0d0115f64e223a18b4"
+    },
+    {
+      "name": "0006-egl-optimise-eglMakeCurrent-for-the-case-where-nothi.patch",
+      "sha256": "5a1ad2e08a4ddeb650933c871838b3bcb5c5a70f2e6cdca9499708c3e224e2a8"
+    },
+    {
+      "name": "0007-GL_EXT_shader_pixel_local_storage2-entry-points.patch",
+      "sha256": "8e46c57bd07caf3fe59a08da736af2f417ff6f4e78f00c88f71e5fac0373ab73"
+    },
+    {
+      "name": "0008-GL_IMG_framebuffer_downsample-entry-points.patch",
+      "sha256": "c38ab2957cc47f6c134698580239404b3a1389c0d7307dca9ea05de47979820c"
+    },
+    {
+      "name": "0009-GL_OVR_multiview-entry-points.patch",
+      "sha256": "f8660e59050ca20bb12829371a96d14edb484a67d63d27435a5e83e6da24300d"
+    },
+    {
+      "name": "0010-Add-OVR_multiview_multisampled_render_to_texture.patch",
+      "sha256": "4cb457eb875e03bfdf11ee00abe0741da802ae1874aac79317f2b2b043c85b6f"
+    },
+    {
+      "name": "0011-wayland-drm-install-wayland-drm.xml-to-the-configure.patch",
+      "sha256": "268483c14fee70593e6c5525660cdeafac04ec52e8f58206aec894d6bba680fa"
+    },
+    {
+      "name": "0012-Enable-buffer-sharing-in-the-kms_swrast-driver.patch",
+      "sha256": "10f3bc2229fd466c4da4cfce7a5e4c0ddc5f4d9cb7fa4216e332efd48e9dc813"
+    },
+    {
+      "name": "0013-egl-wayland-add-support-for-RGB565-back-buffers.patch",
+      "sha256": "ae4449ca50341446c07402c27cd2f7f97b6f92b167701083378cce9d64f3be43"
+    },
+    {
+      "name": "0014-egl-automatically-call-eglReleaseThread-on-thread-te.patch",
+      "sha256": "369bc037881122d6fd127e64883fa6aac8f352bdd666d3d4a0466339ce0b4471"
+    },
+    {
+      "name": "0015-egl-wayland-post-maximum-damage-when-blitting.patch",
+      "sha256": "a73768c8f948f5c25937f95649d7e0a0d3cf0ef228bdaaced2bd8005d37cac42"
+    },
+    {
+      "name": "0016-egl-wayland-flush-the-drawable-before-blitting.patch",
+      "sha256": "a9f56e3cf21c2c61ef4763add50e6ed31aa7d87e4da2d8bf3a99a60d36bf86a3"
+    },
+    {
+      "name": "0017-dri-use-a-supported-API-in-driCreateNewContext.patch",
+      "sha256": "b9d13cabf71dd918990dc22e851dee8f42bf98b89f8499e7ab1af0c91608baf6"
+    },
+    {
+      "name": "0018-gbm-add-gbm_bo_blit.patch",
+      "sha256": "40b489266ce786e3a73ef582bcd08b6543beaa8eb960a895136ee372a82cb7e9"
+    },
+    {
+      "name": "0019-gbm-don-t-assert-if-DRI-context-creation-fails.patch",
+      "sha256": "0254731ff7a03b474a1925fa90b85b0891ca8499829270cc42a6d26694a02338"
+    },
+    {
+      "name": "0020-egl-wayland-add-pbuffer-support.patch",
+      "sha256": "c49a87ce55214479806fdb6599ec7a8e462034f859d6c45b9182b043358ece6d"
+    },
+    {
+      "name": "0021-egl-eglBindAPI-workaround-for-dEQP-bug.patch",
+      "sha256": "c55aaf13b90752d8531af533300a3f1d9b981b74333e0287596c2bf9f000c993"
+    },
+    {
+      "name": "0022-GL_EXT_multi_draw_indirect-entry-points.patch",
+      "sha256": "6e9d87e632968a28d84aafc8880cd41a137cd1f52c5c2e289080e3eb908ee253"
+    },
+    {
+      "name": "0023-dri-add-support-for-YUV-DRI-config.patch",
+      "sha256": "c9c6015ac7ae273597ab1f4cfc03d7a03270df23eb05546931bab7b57733dce5"
+    },
+    {
+      "name": "0024-egl-add-support-for-EXT_yuv_surface.patch",
+      "sha256": "004f6b49c5a8284a68ed223833bc31fe372ac51c5d2c8e6ef84b9a8b9d7355eb"
+    },
+    {
+      "name": "0025-dri-add-missing-__DRI_IMAGE_COMPONENTS-define-for-EG.patch",
+      "sha256": "7e4ca25f4b6810524b495655828a11f385c9f05e660b633ea22a9c90d4ce8cc7"
+    },
+    {
+      "name": "0026-egl-wayland-expose-EXT_yuv_surface-support.patch",
+      "sha256": "ba6a40be795855f7bbdb171ea4da4538ba31b408e64c30ffb85ef30ccede1e9b"
+    },
+    {
+      "name": "0027-gbm-add-some-new-GBM-formats.patch",
+      "sha256": "db8594576adc9fecca89fc8db2c688ebcf492158bd75b4af2ee21069fdc0aee8"
+    },
+    {
+      "name": "0028-egl-add-null-platform.patch",
+      "sha256": "7d14cfd0e3c510fc7e4c9b7907df3027cf16d8f2260cb575820997d88f66c00d"
+    },
+    {
+      "name": "0029-egl-add-support-for-EXT_image_gl_colorspace.patch",
+      "sha256": "7aec72b91b7eeedf7d865431f2ab57bd2ef31cb284019ac5a1895ded6776967e"
+    },
+    {
+      "name": "0030-meson-force-C-2011-for-thread_local.patch",
+      "sha256": "6382b6bf6c3856f55ef5a1997776a3411a9878e1d9b042cd02faa8fab95ebdbb"
+    },
+    {
+      "name": "0031-dri2-add-support-for-swap-intervals-other-than-1.patch",
+      "sha256": "73a23787e2e06c37a3652ef11ec1902d617ee61e3f5f320ddbe490b37a283b5c"
+    },
+    {
+      "name": "0032-null_platform-add-support-for-explicit-synchronisati.patch",
+      "sha256": "37391d5e3a9d996eebf461f85433e98cfd16f5881d7afab6f161b0b1e97db0e5"
+    },
+    {
+      "name": "0033-egl-null-add-support-for-DRM-image-format-modifiers.patch",
+      "sha256": "53ec21669c669b71334783cae72d8cf481464e0a325784f89ff1b4224b525d97"
+    },
+    {
+      "name": "0034-egl-query-the-supported-ES2-context-version.patch",
+      "sha256": "4dfbdce3d7f8febf2c95dbb2e063e581018c495958478197bfe3b98e03221e0c"
+    },
+    {
+      "name": "0035-meson-allow-libGL-to-be-built-without-GLX.patch",
+      "sha256": "a04d15f00517d2fd36046d8bb4428fe0ae4308e29065afae68be82f65ef98df7"
+    },
+    {
+      "name": "0036-egl-wayland-process-non-resized-window-movement.patch",
+      "sha256": "920339cdce1200e2a97cf8ef5c622cb629b73842a12f06e4f5126ebd0f223335"
+    },
+    {
+      "name": "0037-Separate-EXT_framebuffer_object-from-ARB-version.patch",
+      "sha256": "bb00c277ee87ab1b73db52ee467f03b1b68fc610af5e94054a5027635f690c2b"
+    },
+    {
+      "name": "0038-egl-null-add-support-for-async-flip-with-front-buffe.patch",
+      "sha256": "b230f618dba6d15e48a03652a3bbca6e89f4481266cdd94a3636c4dd7a4d63c3"
+    },
+    {
+      "name": "0039-gbm-add-pbuffer-support.patch",
+      "sha256": "b807db9107f7356bc5a9142d9a1d6c11971b4e8ac175e4a30a58e0c2cd3c3997"
+    },
+    {
+      "name": "0040-egl-null-expose-EXT_yuv_surface-support.patch",
+      "sha256": "a7854a66181ee83563b80214d23ea8858015aa5fb8229ecfe5b21e859a30a874"
+    },
+    {
+      "name": "0041-dri-preserve-the-original-FD-for-driver-use.patch",
+      "sha256": "ddc1db472aed58b5ce77499d52662ac637f1a9357741544444d89b4b726f9236"
+    },
+    {
+      "name": "0042-egl-wayland-a-linear-buffer-is-not-needed-with-DRM-f.patch",
+      "sha256": "06cb30f487c3f6e8e963d79b50956b375be83d40fc5ef54c9759623bcedd7d6f"
+    },
+    {
+      "name": "0043-dri3-a-linear-buffer-is-not-needed-with-DRM-format-m.patch",
+      "sha256": "fe602762bdbe6094a5c18e840d24c7738860fa12d1b4f5b46ca3d5731365448e"
+    },
+    {
+      "name": "0044-egl-drm-add-support-for-DRI_PRIME-GPU-selection.patch",
+      "sha256": "237e728e8fc33cf8bca2346e26a1225fcf2adac59a57de27c4437204ff1da354"
+    },
+    {
+      "name": "0045-egl-null-add-support-for-DRI_PRIME-GPU-selection.patch",
+      "sha256": "646663797456bfaef848745ca948352215a97849785765b037407f98aba28d7d"
+    },
+    {
+      "name": "0046-egl-null-introduce-NULL_DRM_DISPLAY.patch",
+      "sha256": "dc9473dd35e2b23cd82b6bb0c02f87c9c46f659113e306085f65fa8091bb6749"
+    },
+    {
+      "name": "0047-vulkan-wsi-check-the-DRI3-and-Present-XCB-reply-poin.patch",
+      "sha256": "260a945825456f08cf5ed097bfbd354feb11f17184ad2a37f792b9c46a8cc407"
+    },
+    {
+      "name": "0048-vulkan-wsi-make-the-display-FD-available.patch",
+      "sha256": "e00b800de5ec93f057000421567c9a23ed5d70b1361a797417c80dc6dfeb8cfa"
+    },
+    {
+      "name": "0049-pvr-wsi-add-PowerVR-Vulkan-WSI-library.patch",
+      "sha256": "2237141bbb7fc5dbc795735694ef469ffbc74cfd20280cf33e1f1d2c14e86d76"
+    },
+    {
+      "name": "0050-vulkan-wsi-Disable-use-of-VK_EXT_pci_bus_info.patch",
+      "sha256": "7e42abd52e425860fa87836cf00e101d1491601ce8eaa07f0ed4e9ad710e8d3a"
+    },
+    {
+      "name": "0051-vulkan-wsi-default-to-force_bgra8_unorm_first-true.patch",
+      "sha256": "2ecd6c74b671b1d0c3ac2ce5ad33962523cf79803776152ceb39dcd8dc02ffdf"
+    },
+    {
+      "name": "0052-vulkan-wsi-enable-additional-formats-for-Display.patch",
+      "sha256": "3553d017229b1753e3b9b5d206ba188232516d3a7590ded556180d32771481fd"
+    },
+    {
+      "name": "0053-mesa-partially-revert-pbuffer-attribute-removal.patch",
+      "sha256": "b6c4cab2d308f5cd1e6b14110dac694f85226cdef1df22990bdf8840078a1bd9"
+    },
+    {
+      "name": "0054-egl_dri2-set-pbuffer-config-attribs-to-0-for-non-pbu.patch",
+      "sha256": "817b4dfde32279a1ace2c826958237ad79eecf30dd2f8071fa26ca230303d497"
+    },
+    {
+      "name": "0055-GL_ARB_geometry_shader4-entry-points.patch",
+      "sha256": "38e84b79f4fa3915a1c858ce04e0161b089c8246e02f6fda580edc315613236b"
+    },
+    {
+      "name": "0056-egl-wayland-add-EGL_BUFFER_PRESERVED-support.patch",
+      "sha256": "fc06ea479543876d442e092c98d303e709fe0ef0b3e161a8a50a40e076ea2101"
+    },
+    {
+      "name": "0057-glapi-restore-exec-dynamic.patch",
+      "sha256": "4802d6d6b82cffa7f7b4eb65788b0161142266609167425c8d1dd279d0b5dcca"
+    },
+    {
+      "name": "0058-Revert-meson-check-mtls-if-has_exe_wrapper.patch",
+      "sha256": "70dcd0fa00dc430fbfc497cc079e383b048bfb8a3c5cb967632169ffeb5bf134"
+    },
+    {
+      "name": "0059-gbm-add-GBM_FORMAT_AXBXGXRX106106106106.patch",
+      "sha256": "1bc796aaab0ed273f2906e492f1d01dc6285b8bc14431df7edcd30f1824cea4b"
+    },
+    {
+      "name": "0060-gallium-pvr-Add-DRM_FORMAT_AXBXGXRX106106106106.patch",
+      "sha256": "55d3cb064ece6fd3661191c83d38f7999eda4b778c0aa49fd6b51d68acd7b45c"
+    },
+    {
+      "name": "0061-gallium-pvr-add-the-DRIconfigOptions-extension.patch",
+      "sha256": "05b27c754f4472fc874a2918e2f6e9a3381b95856e8e8a88c0e631889572592e"
+    },
+    {
+      "name": "0062-gallium-pvr-support-DRI-Image-extension-v21.patch",
+      "sha256": "32f8e5219681ddf635ea1b854f94c45374d63d0c6409f8c0c08fa707fa5c83c5"
+    }
+  ]
+}

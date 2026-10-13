@@ -460,7 +460,7 @@ int64_t qos_app_entry(const qos_boot_t *boot, char *result_out,
   h->idle = 0;
   h->fuel_preempts = 0;
   h->rpos = 0;
-  fpr_set_tp(h); /* FPR_POSIX form: assigns the plain global */
+  fpr_set_tp(h); /* per-thread hart register or host-borrowed TLS slot */
 
   /* ---- the unified log plane (ABI v4) --------------------
    * Hand the host our ring writer: every qos_hostlog line from here

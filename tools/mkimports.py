@@ -1,6 +1,6 @@
 """mkimports.py -- a Portable plugin's IMPORTS (docs/2026-10-01-IMPORT-TABLE.md).
 
-    tools/mkimports.py --arch a64|x64 <first-link.elf> -o imports.s
+    tools/mkimports.py --arch a64|x64|rv64 <first-link.elf> -o imports.s
 
 A plugin is linked at 0 and placed wherever the running app's buddy puts
 it, so it cannot reach the app's symbols by address.  This reads the
@@ -45,11 +45,14 @@ STUB = {
             "    ldr x16, [x16, :lo12:__qosimp_c_{n}]",
             "    br x16"],
     "x64": ["    jmp *__qosimp_c_{n}(%rip)"],
+    "rv64": ["    lla t0, __qosimp_c_{n}",
+             "    ld t0, 0(t0)",
+             "    jr t0"],
 }
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--arch", choices=("a64", "x64"), required=True)
+    ap.add_argument("--arch", choices=("a64", "x64", "rv64"), required=True)
     ap.add_argument("elf")
     ap.add_argument("-o", "--out", required=True)
     a = ap.parse_args()

@@ -1,0 +1,42 @@
+# STAR64 Main profile. Optional private renderers keep system Mesa available.
+# QOSP_RENDERER=llvmpipe or softpipe selects a recovery renderer explicitly.
+export FPR_HARTS=4
+export QOSP_ARENA_MB=512
+export FPR_GFX_SIZE=480x300
+export FPR_DRM_SCALE=fill
+export FPR_GFX_UNLIT_UI=1
+export FPR_GFX_RETAIN_UI=1
+
+# PowerVR requires the matching vendor kernel, firmware and private Mesa.
+# Build with tools/buildroot/star64-powervr.py. A missing GPU falls back to CPU.
+if [ "${QOSP_RENDERER:-auto}" != llvmpipe ] &&
+   [ "${QOSP_RENDERER:-auto}" != softpipe ] &&
+   [ -c /dev/dri/renderD128 ] &&
+   [ -f /opt/qosp-powervr/mesa/usr/lib/dri/pvr_dri.so ]; then
+    export LD_LIBRARY_PATH=/opt/qosp-powervr/mesa/usr/lib:/opt/qosp-powervr/vendor/usr/lib
+    export LIBGL_DRIVERS_PATH=/opt/qosp-powervr/mesa/usr/lib/dri
+    unset __EGL_VENDOR_LIBRARY_FILENAMES GALLIUM_DRIVER LP_NUM_THREADS LIBGL_ALWAYS_SOFTWARE
+    # Main uses a 960x600 logical canvas. A larger GPU raster is scaled to
+    # fill HDMI; leaving the size unset would center the default canvas.
+    export FPR_GFX_SIZE=1280x800
+    export FPR_DRM_SCALE=fill
+    export FPR_DRM_GPU_BLIT=1
+    unset FPR_GFX_UNLIT_UI
+elif [ "${QOSP_RENDERER:-auto}" != softpipe ] &&
+     [ -d /opt/qosp-llvmpipe/usr/lib/riscv64-linux-gnu ]; then
+    # Build with tools/buildroot/star64-llvmpipe.py.
+    unset FPR_DRM_GPU_BLIT
+    export LIBGL_ALWAYS_SOFTWARE=1
+    export LD_LIBRARY_PATH=/opt/qosp-llvmpipe/usr/lib/riscv64-linux-gnu
+    export __EGL_VENDOR_LIBRARY_FILENAMES=/opt/qosp-llvmpipe/usr/share/glvnd/egl_vendor.d/50_mesa.json
+    export LIBGL_DRIVERS_PATH=/opt/qosp-llvmpipe/usr/lib/riscv64-linux-gnu/dri
+    export GALLIUM_DRIVER=llvmpipe
+    export LP_NUM_THREADS=4
+    export FPR_GFX_SIZE=960x600
+    unset FPR_GFX_UNLIT_UI
+else
+    unset FPR_DRM_GPU_BLIT
+    unset LD_LIBRARY_PATH LIBGL_DRIVERS_PATH __EGL_VENDOR_LIBRARY_FILENAMES
+    unset GALLIUM_DRIVER LP_NUM_THREADS
+    export LIBGL_ALWAYS_SOFTWARE=1
+fi

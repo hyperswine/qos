@@ -1,0 +1,16 @@
+#!/bin/sh
+# Draw after S10mdev/udev coldplugs the display driver, before networking.
+# The framebuffer keeps the picture after this helper exits.
+case "${1:-}" in
+start)
+    n=50
+    while [ ! -c /dev/fb0 ] && [ "$n" -gt 0 ]; do n=$((n - 1)); sleep 0.1; done
+    mkdir -p /var/log
+    { read -r uptime rest < /proc/uptime; printf 'qosp-splash: start uptime=%ss\n' "$uptime";
+      /usr/bin/qosp-splash; } > /var/log/qosp-splash.log 2>&1 ||
+        echo "QOS splash unavailable; continuing boot (see /var/log/qosp-splash.log)" >&2
+    ;;
+stop) : ;;
+*) echo "usage: $0 {start|stop}" >&2; exit 2 ;;
+esac
+exit 0

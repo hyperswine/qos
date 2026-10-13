@@ -64,6 +64,15 @@ config BR2_PACKAGE_QOSP_MAIN_PROFILE
 	  Build the artifacts with tools/main-profile.py on the target architecture
 	  first, then set the directory below. Existing persistent disks are kept.
 
+config BR2_PACKAGE_QOSP_BOOT_SPLASH
+	bool "show the QOS vector boot splash"
+	depends on BR2_PACKAGE_QOSP_AUTOSTART
+	default n
+	help
+	  Draw the QOS wordmark through fbdev early in boot, before networking
+	  and the GUI shell. No compositor, image library or background daemon.
+	  The Pi post-build hook quiets HDMI and enables the matching KMS handoff.
+
 config BR2_PACKAGE_QOSP_MAIN_DIR
 	string "Main Profile artifact directory"
 	depends on BR2_PACKAGE_QOSP_MAIN_PROFILE

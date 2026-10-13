@@ -4,6 +4,10 @@
 set -f
 
 qosp_config() {
+	# Optional board/site settings apply to both control and supervisor paths.
+	if [ -r "${QOSP_CONFIG:-/etc/default/qosp}" ]; then
+		. "${QOSP_CONFIG:-/etc/default/qosp}" || return 1
+	fi
 	RUN_DIR=${QOSP_RUN_DIR:-/var/run/qosp}
 	LOCK=$RUN_DIR/owner
 	STATE_FILE=$RUN_DIR/state

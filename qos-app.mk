@@ -173,10 +173,67 @@ qos-app-mac-object: fprc $(SOURCE) $(FPRISC_ROOT)/core/prelude.fpr
 # `make qos-app` built an x86-64 image.  Only the arena BASE is macOS's own
 # (QOS_SLOT_BASE, above).
 ifneq ($(filter arm64 aarch64,$(shell uname -m)),)
-APP_HOST = a64
+APP_HOST ?= a64
+else ifneq ($(filter riscv64,$(shell uname -m)),)
+APP_HOST ?= rv64
 else
-APP_HOST = x64
+APP_HOST ?= x64
 endif
 qos-app: qos-app-$(APP_HOST)
 plugin-qa: plugin-qa-$(APP_HOST)
-.PHONY: qos-app plugin-qa qos-app-x64 plugin-qa-x64 qos-app-a64 plugin-qa-a64
+.PHONY: qos-app plugin-qa qos-app-x64 plugin-qa-x64 qos-app-a64 plugin-qa-a64 qos-app-rv64 plugin-qa-rv64
+
+# Linux RV64 images borrow the host's libc TLS slot. Every address in the
+# freestanding image must remain valid when the whole image moves.
+ifeq ($(shell uname -m),riscv64)
+QOS_RV64_CC ?= gcc
+else
+QOS_RV64_CC ?= riscv64-linux-gnu-gcc
+endif
+RV64_IMAGE_FLAGS = -O2 -Wall -Wextra -march=rv64gc -mabi=lp64d -mcmodel=medany \
+  -mno-relax -msmall-data-limit=0 -ffreestanding -nostdlib -nostartfiles \
+  -static -no-pie -fno-pic -fno-pie -fno-builtin -fno-stack-protector \
+  -fno-asynchronous-unwind-tables -Wl,--no-relax -Wl,--emit-relocs \
+  -Wl,--build-id=none -Wl,-z,noexecstack
+
+$(BUILD)/qosapp-rv64.s: fprc $(SOURCE) $(FPRISC_ROOT)/core/prelude.fpr FORCE
+	@mkdir -p $(BUILD)
+	LC_ALL=C.UTF-8 "$(FPRC)" --system=qos-portable --target=qrv64 --prelude=$(FPRISC_ROOT)/core/prelude.fpr $(SOURCE) $@
+
+QOSAPP_RV64_LINK = $(QOS_RV64_CC) $(RV64_IMAGE_FLAGS) \
+  -DFPR_POSIX -DFPR_QOSAPP -DFPR_NHARTS=$(QOSHARTS) -DFPR_SLAB_SZ=$(QOSSLAB) \
+  -DFPR_STACK_SZ=$(QOSSTACK) $(QOSCFLAGS_EXTRA) -I$(FRUNTIME) -I$(QOS)/appside \
+  -T $(QOS)/appside/link-qosapp-rv64.ld \
+  -Wl,--defsym=_heap_start=_proc_image_end -Wl,--defsym=_heap_end=_proc_image_end \
+  $(BUILD)/qosapp-rv64.s $$(cat $(BUILD)/qosapp-rv64.s.units) \
+  $(QOSAPP_RT_COMMON) $(FMACHINE)/unix/ctx_rv64.S
+
+$(BUILD)/qosapp-rv64.elf: $(BUILD)/qosapp-rv64.s $(QOSAPP_RT_COMMON) $(FMACHINE)/unix/ctx_rv64.S $(QOS)/appside/link-qosapp-rv64.ld tools/mkexports.py FORCE
+	$(QOSAPP_RV64_LINK) -Wl,--defsym=QOS_SLOT_BASE=0 -Wl,--unresolved-symbols=ignore-all -o $(BUILD)/qosapp-rv64.pre.elf
+	python3 tools/mkexports.py $(BUILD)/qosapp-rv64.pre.elf -o $(BUILD)/qosapp-rv64-exports.s
+	$(QOSAPP_RV64_LINK) -Wl,--defsym=QOS_SLOT_BASE=0 $(BUILD)/qosapp-rv64-exports.s -o $@
+	$(QOSAPP_RV64_LINK) -Wl,--defsym=QOS_SLOT_BASE=0x10000000 $(BUILD)/qosapp-rv64-exports.s -o $(BUILD)/qosapp-rv64.moved.elf
+
+qos-app-rv64: $(BUILD)/qosapp-rv64.elf tools/mkqa.py
+	@MF=$(BUILD)/qosapp-rv64-gen.toml; ID=$$(basename $(SOURCE) .fpr); \
+	ABIV=$$(grep -m1 'define QOS_ABI_VERSION' $(QOS)/appside/qos_abi.h | grep -o '[0-9]\+' | head -1); \
+	REV=$$(cat $(BUILD)/qosapp-rv64.s.abirev); \
+	printf 'name = "%s"\nid = "%s"\nentry = "n/a"\nversion = "1"\nloadMode = "process"\nabi = "%s.%s"\n' $$ID $$ID $$ABIV $$REV > $$MF; \
+	python3 tools/mkqa.py $$MF $(BUILD)/qosapp-rv64.elf -o $(QA_OUT) \
+	  --relocatable --check-moved $(BUILD)/qosapp-rv64.moved.elf --delta 0x10000000
+	@echo "$(QA_OUT) built for Linux RV64 (relocatable)"
+
+PLUG_RV64_LINK = $(QOS_RV64_CC) $(RV64_IMAGE_FLAGS) -T $(QOS)/appside/link-qosplug-rv64.ld
+plugin-qa-rv64: fprc $(FPRISC_ROOT)/core/prelude.fpr tools/mkimports.py tools/mkqa.py
+	@mkdir -p $(BUILD)
+	LC_ALL=C.UTF-8 "$(FPRC)" --target=qrv64 --plugin --prelude=$(FPRISC_ROOT)/core/prelude.fpr $(SOURCE) $(BUILD)/plug-$(PLUGID)-rv64.s
+	$(PLUG_RV64_LINK) -Wl,--defsym=PLUG_BASE=0 -Wl,--unresolved-symbols=ignore-all \
+	  $(BUILD)/plug-$(PLUGID)-rv64.s $$(cat $(BUILD)/plug-$(PLUGID)-rv64.s.units) -o $(BUILD)/plug-$(PLUGID)-rv64.u.elf
+	python3 tools/mkimports.py --arch rv64 $(BUILD)/plug-$(PLUGID)-rv64.u.elf -o $(BUILD)/plug-$(PLUGID)-rv64.imp.s
+	$(PLUG_RV64_LINK) -Wl,--defsym=PLUG_BASE=0 \
+	  $(BUILD)/plug-$(PLUGID)-rv64.s $$(cat $(BUILD)/plug-$(PLUGID)-rv64.s.units) $(BUILD)/plug-$(PLUGID)-rv64.imp.s -o $(BUILD)/plug-$(PLUGID)-rv64.elf
+	$(PLUG_RV64_LINK) -Wl,--defsym=PLUG_BASE=0x10000000 \
+	  $(BUILD)/plug-$(PLUGID)-rv64.s $$(cat $(BUILD)/plug-$(PLUGID)-rv64.s.units) $(BUILD)/plug-$(PLUGID)-rv64.imp.s -o $(BUILD)/plug-$(PLUGID)-rv64.moved.elf
+	@$(call PLUG_MF,$(BUILD)/plug-$(PLUGID)-rv64.s) > $(BUILD)/plug-$(PLUGID)-rv64-gen.toml
+	python3 tools/mkqa.py $(BUILD)/plug-$(PLUGID)-rv64-gen.toml $(BUILD)/plug-$(PLUGID)-rv64.elf -o $(PLUG_OUT) \
+	  --relocatable --imports --check-moved $(BUILD)/plug-$(PLUGID)-rv64.moved.elf --delta 0x10000000

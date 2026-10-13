@@ -4,6 +4,11 @@ Kind: investigation, implementation and validation record. Date: 2026-10-12.
 Applicable source: QOS `a617193` plus the uncommitted STAR64 Buildroot changes.
 This follows [first-boot access](2026-10-12-STAR64-FIRST-BOOT.md).
 
+Follow-up: [physical boot succeeded on 2026-10-13](2026-10-13-STAR64-HARDWARE-BOOT.md)
+after flashing a new microSD Express card through a UGREEN reader. The prior
+SanDisk 400 GB card/reader failure remains unresolved; the record below
+preserves the investigation as it stood on October 12.
+
 ## Physical report
 
 The personalized image produced no HDMI output and no visible router DHCP

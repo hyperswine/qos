@@ -6,7 +6,8 @@
  * pick the first /dev/dri/card* with a connected connector, take its
  * preferred mode, create one dumb XRGB framebuffer, SetCrtc once, and
  * per frame glReadPixels the FBO and blit it centered (vertically
- * flipped -- GL rows run bottom-up) into the mapping.
+ * flipped -- GL rows run bottom-up) into the mapping. gfx.c can instead
+ * import its exported dma-buf and perform that transfer on the GPU.
  *
  * Wholly optional and self-disabling: no /dev/dri, no connected
  * display, no DRM master (a compositor holds it), or FPR_DRM=0 all
@@ -31,6 +32,8 @@
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#include <linux/kd.h>
+#include "boot_logo.h"
 
 typedef struct {
   int fd;
@@ -40,9 +43,37 @@ typedef struct {
   unsigned char *rd;  /* RGBA readback scratch, gw*gh*4 */
   int gw, gh;         /* the GL FBO size */
   uint32_t fb_id;     /* the framebuffer, for DIRTYFB */
+  uint32_t gem_handle; /* exportable backing storage for optional GPU blits */
   int dirty;          /* this driver wants to be told what changed */
   int on;
+  int scale; /* 0 native pixels, 1 aspect fit, 2 fill the monitor */
 } drm_out_t;
+
+/* A fbcon VT left in KD_TEXT can restore its own CRTC on keyboard activity.
+ * Hold this appliance's VT in graphics mode while KMS owns the picture. */
+static int drm_console_fd = -1, drm_console_mode;
+static void drm_console_restore(void) {
+  if (drm_console_fd >= 0) {
+    ioctl(drm_console_fd, KDSETMODE, drm_console_mode);
+    close(drm_console_fd);
+    drm_console_fd = -1;
+  }
+}
+static void drm_console_acquire(void) {
+  const char *tty = getenv("FPR_DRM_TTY");
+  if (!tty || !*tty) tty = "/dev/tty1";
+  int fd = open(tty, O_RDWR | O_CLOEXEC);
+  int mode;
+  if (fd < 0 || ioctl(fd, KDGETMODE, &mode) < 0 ||
+      ioctl(fd, KDSETMODE, KD_GRAPHICS) < 0) {
+    qos_hostlog("[gfx] %s: graphics console mode unavailable (%s)", tty, strerror(errno));
+    if (fd >= 0) close(fd);
+    return;
+  }
+  drm_console_fd = fd; drm_console_mode = mode;
+  atexit(drm_console_restore);
+  qos_hostlog("[gfx] %s: graphics console mode", tty);
+}
 
 static int drm_try_card(drm_out_t *o, const char *path, int gw, int gh) {
   int fd = open(path, O_RDWR | O_CLOEXEC);
@@ -161,6 +192,9 @@ static int drm_try_card(drm_out_t *o, const char *path, int gw, int gh) {
     return 0;
   }
   memset(map, 0, cd.size);
+  const char *splash = getenv("FPR_BOOT_SPLASH");
+  if (splash && !strcmp(splash, "1"))
+    qos_boot_logo_xrgb((uint32_t *)map, cd.pitch, (int)cd.width, (int)cd.height);
 
   struct drm_mode_crtc crtc;
   memset(&crtc, 0, sizeof crtc);
@@ -182,6 +216,7 @@ static int drm_try_card(drm_out_t *o, const char *path, int gw, int gh) {
   o->fd = fd;
   o->map = (uint32_t *)map;
   o->fb_id = fb.fb_id;
+  o->gem_handle = cd.handle;
   o->dirty = 1; /* until a driver says it does not want to be told */
   o->pitch = cd.pitch;
   o->mw = mode.hdisplay;
@@ -192,8 +227,10 @@ static int drm_try_card(drm_out_t *o, const char *path, int gw, int gh) {
    * allocates rd itself once it knows */
   o->rd = gw ? (unsigned char *)malloc((size_t)gw * gh * 4) : 0;
   o->on = gw ? (o->rd != 0) : 1;
+  const char *scale = getenv("FPR_DRM_SCALE");
+  o->scale = scale && !strcmp(scale, "fill") ? 2 : scale && !strcmp(scale, "fit") ? 1 : 0;
   qos_hostlog("[gfx] scanout: %s %ux%u (frame %s)", path, o->mw, o->mh,
-              gw ? "centered" : "fullscreen");
+              o->scale == 2 ? "fill" : o->scale == 1 ? "fit" : gw ? "centered" : "fullscreen");
   return o->on;
 }
 
@@ -203,38 +240,43 @@ static void drm_scanout_init(drm_out_t *o, int gw, int gh) {
   if (e && e[0] == '0') return; /* explicitly off */
   const char *cards[] = {"/dev/dri/card0", "/dev/dri/card1", "/dev/dri/card2"};
   for (int i = 0; i < 3; i++)
-    if (drm_try_card(o, cards[i], gw, gh)) return;
+    if (drm_try_card(o, cards[i], gw, gh)) { drm_console_acquire(); return; }
 }
 
-/* readback + centered, v-flipped RGBA -> XRGB blit.  rd was filled by
- * glReadPixels(0,0,gw,gh) -- row 0 is the BOTTOM of the image. */
-static void drm_scanout_present(drm_out_t *o) {
-  if (!o->on) return;
-  uint32_t x0 = (o->mw > (uint32_t)o->gw) ? (o->mw - (uint32_t)o->gw) / 2 : 0;
-  uint32_t y0 = (o->mh > (uint32_t)o->gh) ? (o->mh - (uint32_t)o->gh) / 2 : 0;
+static int drm_scanout_export_fd(const drm_out_t *o) {
+  struct drm_prime_handle prime;
+  memset(&prime, 0, sizeof prime);
+  prime.handle = o->gem_handle;
+  prime.flags = DRM_CLOEXEC | DRM_RDWR;
+  if (ioctl(o->fd, DRM_IOCTL_PRIME_HANDLE_TO_FD, &prime) < 0) return -1;
+  return prime.fd;
+}
+
+/* Shared placement policy for CPU copies and GPU framebuffer blits. */
+static void drm_scanout_rect(const drm_out_t *o, int *x, int *y, int *outw, int *outh) {
   int w = ((uint32_t)o->gw < o->mw) ? o->gw : (int)o->mw;
   int h = ((uint32_t)o->gh < o->mh) ? o->gh : (int)o->mh;
-  for (int y = 0; y < h; y++) {
-    const unsigned char *src = o->rd + (size_t)(o->gh - 1 - y) * o->gw * 4;
-    uint32_t *dst = o->map + (size_t)(y0 + y) * (o->pitch / 4) + x0;
-    for (int x = 0; x < w; x++) {
-      dst[x] = ((uint32_t)src[x * 4 + 0] << 16) |
-               ((uint32_t)src[x * 4 + 1] << 8) | src[x * 4 + 2];
+  if (o->scale) {
+    w = (int)o->mw; h = (int)o->mh;
+    if (o->scale == 1) {
+      if ((uint64_t)w * o->gh > (uint64_t)h * o->gw) w = (int)((uint64_t)h * o->gw / o->gh);
+      else h = (int)((uint64_t)w * o->gh / o->gw);
     }
   }
+  uint32_t x0 = (o->mw - (uint32_t)w) / 2;
+  uint32_t y0 = (o->mh - (uint32_t)h) / 2;
+  *x = (int)x0; *y = (int)y0; *outw = w; *outh = h;
+}
 
-  /* A PARAVIRTUAL display does not scan out of this mapping.  virtio-gpu
-   * keeps the real pixels on the host and only copies what it is told has
-   * changed, so without this the buffer fills up perfectly and the screen
-   * stays black -- which is exactly what it did.  Scanout hardware (vc4 on
-   * a Pi) reads the memory directly and has no dirty ioctl at all, so the
-   * first call there fails harmlessly and we stop asking. */
+static void drm_scanout_damage(drm_out_t *o, int x0, int y0, int w, int h) {
+  /* Paravirtual displays copy only the region they are told changed.
+   * Physical scanout hardware usually does not implement this ioctl. */
   if (o->dirty) {
     struct drm_clip_rect clip;
     clip.x1 = (unsigned short)x0;
     clip.y1 = (unsigned short)y0;
-    clip.x2 = (unsigned short)(x0 + (uint32_t)w);
-    clip.y2 = (unsigned short)(y0 + (uint32_t)h);
+    clip.x2 = (unsigned short)(x0 + w);
+    clip.y2 = (unsigned short)(y0 + h);
     struct drm_mode_fb_dirty_cmd d;
     memset(&d, 0, sizeof d);
     d.fb_id = o->fb_id;
@@ -242,6 +284,26 @@ static void drm_scanout_present(drm_out_t *o) {
     d.clips_ptr = (uintptr_t)&clip;
     if (ioctl(o->fd, DRM_IOCTL_MODE_DIRTYFB, &d) < 0) o->dirty = 0;
   }
+}
+
+/* readback + centered, v-flipped RGBA -> XRGB blit.  rd was filled by
+ * glReadPixels(0,0,gw,gh) -- row 0 is the BOTTOM of the image. */
+static void drm_scanout_present(drm_out_t *o) {
+  if (!o->on) return;
+  int x0, y0, w, h;
+  drm_scanout_rect(o, &x0, &y0, &w, &h);
+  for (int y = 0; y < h; y++) {
+    int sy = o->scale ? (int)((uint64_t)y * o->gh / h) : y;
+    const unsigned char *src = o->rd + (size_t)(o->gh - 1 - sy) * o->gw * 4;
+    uint32_t *dst = o->map + (size_t)(y0 + y) * (o->pitch / 4) + x0;
+    for (int x = 0; x < w; x++) {
+      int sx = o->scale ? (int)((uint64_t)x * o->gw / w) : x;
+      dst[x] = ((uint32_t)src[sx * 4 + 0] << 16) |
+               ((uint32_t)src[sx * 4 + 1] << 8) | src[sx * 4 + 2];
+    }
+  }
+
+  drm_scanout_damage(o, x0, y0, w, h);
 }
 
 #endif /* DRM_SCANOUT_H */

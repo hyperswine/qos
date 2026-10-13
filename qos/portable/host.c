@@ -392,6 +392,8 @@ static void bus_handler(int sig, siginfo_t *info, void *vctx) {
   uintptr_t pc = uc ? uc->uc_mcontext->__ss.__pc : 0;
 #elif defined(__linux__) && defined(__aarch64__)
   uintptr_t pc = uc ? uc->uc_mcontext.pc : 0;
+#elif defined(__linux__) && defined(__riscv)
+  uintptr_t pc = uc ? uc->uc_mcontext.__gregs[REG_PC] : 0;
 #else
   uintptr_t pc = 0; (void)uc;
 #endif
