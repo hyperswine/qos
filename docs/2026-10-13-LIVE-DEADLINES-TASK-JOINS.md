@@ -1,6 +1,6 @@
 # Live-service deadlines and task joins
 
-Date: 2026-10-13. QOS pins FP-RISC `6ad33f0` for this change. This follows the block-worker reuse and service-failure work.
+Date: 2026-10-13. QOS pins FP-RISC `74c015b`, which includes the deadline implementation `6ad33f0` and the subsequent upstream integration. This follows the block-worker reuse and service-failure work.
 
 FP-RISC adds selective nonblocking receives, absolute-budget correlated calls,
 a reusable legacy session that retires after failure, default/configurable MVU
