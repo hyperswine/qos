@@ -141,3 +141,38 @@ candidate, `qlog-memory-check.py --host-bin /tmp/candidate/qosp-es` selects an
 already uploaded matching host, and `--host-key-alias` uses the enrolled key
 when the Pi is reached through another interface. Defaults retain the
 installed host path. Neither option installs an executable.
+
+## Updating an installed Main disk
+
+Rebuild `programs/main.fpr`, all four `apps/{clock,logs,browser,disk}.fpr`
+archives and the Portable ES host from matching QOS/FP-RISC revisions. Use
+the normal entry and omit diagnostic `QOS_BLK_TEST`/`QOS_STORE_TEST` flags.
+Changing a shared wire type requires replacing the shell and every onboard
+archive together. Replacing `/usr/share/qosp/Main.disk` alone does not update
+the existing writable `/var/lib/qosp/Main.disk`.
+
+First exercise the candidate on an isolated copy of the writable disk. Then
+stop `/etc/init.d/S99qosp` cleanly and take a fresh disk snapshot. On the build
+machine, prepare a separate replacement:
+
+```sh
+python3 tools/pi4/update-main-disk-check.py
+python3 tools/pi4/update-main-disk.py stopped.disk updated.disk production/
+```
+
+`production/` contains the matching four `.qa` files. The tool requires two
+valid stable v3 superblocks, verifies the complete committed record stream,
+and appends four new archive records. It preserves the original committed
+record bytes, app index and user history; both fallback superblocks publish
+the matching bundle. It refuses legacy/pending/corrupt disks, insufficient
+space, generation exhaustion and a custom index. Recover or compact through
+QOS first; rebuild additional indexed apps before adapting an upgrade for a
+custom profile. The source and any pre-existing output are never overwritten.
+
+Keep rollback copies of `/usr/bin/qosp`, `/usr/share/qosp/app.qa`, the seed
+disk, and the stopped writable disk. Install the new host, shell, seed and
+updated writable disk while stopped, flush them, and start the supervisor.
+Verify installed hashes, ready PID, restart count, real KMS/EGL ownership and
+logs, then exercise a clean supervised restart. Keep the stopped original
+disk for rollback; restoring it later would discard writes made since the
+upgrade. Never install a diagnostic Main bundle as the production session.
