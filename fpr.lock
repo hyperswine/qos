@@ -111,6 +111,8 @@ std/fs v5.0 84826bc9e8ddb4b5 tests/admissionnative.fpr
 std/actor v3.0 201a0e9bf98a5154 tests/appjobs.fpr
 std/fs v5.0 84826bc9e8ddb4b5 tests/apps.fpr
 std/actor v3.0 201a0e9bf98a5154 tests/appsession.fpr
+../programs/mods/ep v3.0 c66ad65e68dd97f5 tests/appsessionmemory.fpr
+std/actor v3.0 201a0e9bf98a5154 tests/appsessionmemory.fpr
 ../std/blockio v6.0 8b4ffa1467ca03a5 tests/blocklifecycle.fpr
 ../std/block v6.0 615ea5947fe13b00 tests/blocklifecycle.fpr
 ../std/blockio v6.0 8b4ffa1467ca03a5 tests/blocklifecyclep.fpr
@@ -160,6 +162,7 @@ std/fs v5.0 84826bc9e8ddb4b5 tests/loaderfail.fpr
 std/actor v3.0 201a0e9bf98a5154 tests/logcapmemory.fpr
 std/fs v5.0 84826bc9e8ddb4b5 tests/mailboxnative.fpr
 std/actor v3.0 201a0e9bf98a5154 tests/mailboxproc.fpr
+std/actor v3.0 201a0e9bf98a5154 tests/mainprofile.fpr
 std/fs v5.0 84826bc9e8ddb4b5 tests/mainreliability.fpr
 std/actor v3.0 201a0e9bf98a5154 tests/mainreliability.fpr
 std/actor v3.0 201a0e9bf98a5154 tests/memoryproc.fpr

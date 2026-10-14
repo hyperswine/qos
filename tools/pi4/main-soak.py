@@ -18,6 +18,22 @@ import time
 from soak import mappings
 
 
+def memory_summary(samples, warmup=3):
+    """Bound retained logical state after warmup, independently of RSS."""
+    steady = samples[warmup:]
+    if len(steady) < 2:
+        return {'verified': False, 'reason': 'fewer than two post-warmup samples'}
+    roots = [s['allocator']['arc_roots'] for s in steady]
+    reserved = [s['allocator']['reserved_kib'] for s in steady]
+    if max(roots) - roots[0] > 8:
+        raise RuntimeError(f'Post-warmup root growth exceeded 8: {roots[0]} -> {max(roots)}')
+    if max(reserved) - reserved[0] > 4096:
+        raise RuntimeError(f'Post-warmup reserved growth exceeded 4 MiB: {reserved[0]} -> {max(reserved)} KiB')
+    return {'verified': True, 'warmup_samples': warmup, 'steady_samples': len(steady),
+            'roots_min': min(roots), 'roots_max': max(roots),
+            'reserved_min_kib': min(reserved), 'reserved_max_kib': max(reserved)}
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--host', required=True)
@@ -88,7 +104,9 @@ def main():
     def key(boot, code):
         data = b''.join(struct.pack('<qqHHi', 0, 0, 1, code, value) for value in (1, 0))
         encoded = base64.b64encode(data).decode()
-        ssh('printf %s '+quote(encoded)+' | base64 -d > '+quote(work+f'/keys{boot}'))
+        # Opening a FIFO read/write avoids hanging SSH if the candidate died.
+        # The next log/status check reports that failure with its own evidence.
+        ssh('printf %s '+quote(encoded)+' | base64 -d 1<> '+quote(work+f'/keys{boot}'))
         time.sleep(.2)
 
     def start(boot, seconds, stop):
@@ -199,6 +217,8 @@ def main():
                 samples.append(sample)
                 output.write(json.dumps(sample)+'\n'); output.flush()
                 print(f'{elapsed:.1f}s cycles={cycles} RSS={sample["rss_kib"]} KiB PSS={sample["pss_kib"]} KiB', flush=True)
+                if a.memory_probe:
+                    memory_summary(samples)
                 if elapsed >= a.seconds: break
                 time.sleep(min(a.interval, a.seconds-elapsed))
         key(1, 16)
@@ -212,6 +232,7 @@ def main():
         if a.memory_probe:
             result['boots'][-1]['allocator_first'] = samples[0]['allocator']
             result['boots'][-1]['allocator_last'] = samples[-1]['allocator']
+            result['boots'][-1]['memory_summary'] = memory_summary(samples)
         if max(rss)-rss[0] > a.max_growth_mib*1024:
             raise RuntimeError(f'RSS growth exceeded {a.max_growth_mib} MiB: {rss[0]} -> {max(rss)} KiB')
         pid = start(2, 45, 30)
@@ -231,9 +252,20 @@ def main():
         result['passed'] = False
         result['error'] = str(error)
         (a.output/'failed.json').write_text(json.dumps(result, indent=2)+'\n')
+        for boot in (1, 2):
+            for suffix in ('log', 'json', 'err'):
+                path = work+f'/boot{boot}.{suffix}'
+                try:
+                    raw = ssh('if [ -f '+quote(path)+' ]; then cat '+quote(path)+'; fi')
+                    if raw:
+                        (a.output/f'boot{boot}.{suffix}').write_text(raw)
+                except Exception:
+                    pass
         if pid is not None:
             # Kill only our isolated runner's child, never a production PID.
-            ssh(f'kill -TERM {pid} 2>/dev/null || true')
+            ssh('if [ "$(cat '+quote(work+'/ready1')+' 2>/dev/null)" = '+quote(str(pid))+' ] || '
+                '[ "$(cat '+quote(work+'/ready2')+' 2>/dev/null)" = '+quote(str(pid))+' ]; then '
+                f'kill -TERM {pid} 2>/dev/null || true; fi')
         raise
 
 

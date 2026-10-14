@@ -311,6 +311,8 @@ def check(out):
         f'QA_OUT={out / "appsession.qa"}', f'BUILD={out / "appsession-build"}')
     run('make', '-s', 'qos-app', 'PROG=tests/appjobs.fpr',
         f'QA_OUT={out / "appjobs.qa"}', f'BUILD={out / "appjobs-build"}')
+    run('make', '-s', 'qos-app', 'PROG=tests/appsessionmemory.fpr',
+        f'QA_OUT={out / "appsessionmemory.qa"}', f'BUILD={out / "appsessionmemory-build"}')
     run('make', '-s', 'qos-app', 'PROG=tests/shelllayout.fpr',
         f'QA_OUT={out / "shelllayout.qa"}', f'BUILD={out / "shelllayout-build"}')
     run('make', '-s', '-C', 'qos', 'portable-gl')
@@ -329,7 +331,7 @@ def check(out):
                           cwd=out, env=env, capture_output=True, text=True, timeout=30)
     (out / 'panemvu.log').write_text(pane.stdout + pane.stderr)
     assert pane.returncode == 0 and 'panemvu: HOLDS' in pane.stdout, pane.stdout + pane.stderr
-    for contract in ['appsession', 'appjobs', 'shelllayout']:
+    for contract in ['appsession', 'appjobs', 'appsessionmemory', 'shelllayout']:
         for harts in ['1', '4']:
             checked = subprocess.run([str(ROOT / 'qos/qosp-gl'), '--yes', str(out / (contract + '.qa'))],
                                      cwd=out, env=dict(env, FPR_HARTS=harts, FPR_PORT='0'),

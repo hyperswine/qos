@@ -176,3 +176,6 @@ Verify installed hashes, ready PID, restart count, real KMS/EGL ownership and
 logs, then exercise a clean supervised restart. Keep the stopped original
 disk for rollback; restoring it later would discard writes made since the
 upgrade. Never install a diagnostic Main bundle as the production session.
+
+For correlated Main input/frame timing, temporary CPU policy and the app-session
+receive-root regression, see [GUI performance](../../docs/2026-10-14-GUI-PERFORMANCE.md).

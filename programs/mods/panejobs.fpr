@@ -37,7 +37,10 @@ readWorker ns owner budget me =
   Unit.
 readStep ns owner budget me state = case receiveFromRes me owner of
     Err why -> (False, state)
-  | Ok request -> readRequest ns owner budget me state request.
+  | Ok borrowed ->
+      request = keep borrowed;
+      _ = drop borrowed;
+      readRequest ns owner budget me state request.
 readRequest ns owner budget me state request =
   (gen, source) = request;
   result = case source == 1 of

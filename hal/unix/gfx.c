@@ -69,6 +69,25 @@
 #endif
 #include "font_sdf.h" /* the text face: an SDF atlas baked by tools/mkfont.py */
 
+/* Opt-in mechanism timestamps. Application input-to-frame correlation lives
+ * in the FP-RISC diagnostic model and the external report tool. No frame
+ * budget, input policy or GPU synchronization changes in the normal path. */
+static int gfx_profile_enabled(void) { return getenv("FPR_GFX_PROFILE") != NULL; }
+static int64_t gfx_profile_us(void) {
+  struct timespec t;
+  clock_gettime(CLOCK_MONOTONIC, &t);
+  return (int64_t)t.tv_sec * 1000000 + t.tv_nsec / 1000;
+}
+static void gfx_profile_frame(int64_t start, int64_t drawn, int retained) {
+  if (!start) return;
+  int64_t submitted = gfx_profile_us();
+  int finish = getenv("FPR_GFX_PROFILE_FINISH") != NULL;
+  if (finish) glFinish();
+  int64_t end = gfx_profile_us();
+  qos_hostlog("[gfx-profile] frame start_us=%lld drawn_us=%lld submitted_us=%lld end_us=%lld retained=%d finish=%d",
+    (long long)start, (long long)drawn, (long long)submitted, (long long)end, retained, finish);
+}
+
 /* ==== small math (vecmath.hpp, column-major, ported verbatim) ======== */
 typedef struct { float x, y, z; } v3;
 static v3 v3sub(v3 a, v3 b) { return (v3){a.x - b.x, a.y - b.y, a.z - b.z}; }
@@ -1648,8 +1667,10 @@ static int retain_ui(V scene, V ui, int64_t dist) {
  * list is walked as dynamics; then the frame is presented. */
 int gfx_render_overlay(uint64_t scenev, uint64_t uiv, int64_t dist, int64_t *draws_out, int64_t *dyn_bytes_out) {
   if (!G.inited) fpr_cpanic("glRender: glInit first");
+  int64_t profile_start = gfx_profile_enabled() ? gfx_profile_us() : 0;
   if (retain_ui((V)scenev, (V)uiv, dist)) {
     *draws_out = 0; *dyn_bytes_out = 0;
+    gfx_profile_frame(profile_start, profile_start ? gfx_profile_us() : 0, 1);
     return 0;
   }
   int trace = getenv("FPR_GFX_TRACE") != NULL;
@@ -1680,7 +1701,9 @@ int gfx_render_overlay(uint64_t scenev, uint64_t uiv, int64_t dist, int64_t *dra
   *draws_out += d2;
   *dyn_bytes_out += b2;
   if (trace) { clock_gettime(CLOCK_MONOTONIC, &drawn); qos_hostlog("[gfx] frame drawn"); }
+  int64_t profile_drawn = profile_start ? gfx_profile_us() : 0;
   gfx_present();
+  gfx_profile_frame(profile_start, profile_drawn, 0);
   if (trace) {
     clock_gettime(CLOCK_MONOTONIC, &presented);
     double draw_ms = (drawn.tv_sec - started.tv_sec) * 1000.0 + (drawn.tv_nsec - started.tv_nsec) / 1000000.0;
@@ -1725,7 +1748,7 @@ static void gfx_resize_target(int w, int h) {
     fpr_cpanic("gfx: resized framebuffer incomplete");
   G.w = w; G.h = h; retained_ui_valid = 0;
 }
-int gfx_input_poll(int64_t *kind_out, int64_t *a_out, int64_t *c_out) {
+static int gfx_input_poll_raw(int64_t *kind_out, int64_t *a_out, int64_t *c_out) {
   gfx_bind_thread();
   glfwPollEvents(); /* fires the callbacks: keys inject into evdev_raw */
   /* keys come back through the ONE decoder (modifier biasing, replay
@@ -1754,7 +1777,7 @@ static int gfx_tty_restore_armed;
 static void gfx_tty_restore(void) {
   if (gfx_tty_restore_armed) tcsetattr(0, TCSANOW, &gfx_tty_orig);
 }
-int gfx_input_poll(int64_t *kind_out, int64_t *a_out, int64_t *c_out) {
+static int gfx_input_poll_raw(int64_t *kind_out, int64_t *a_out, int64_t *c_out) {
   /* evdev keyboard first (FPR_EVDEV -- a real event node, a simulated
    * device FIFO, or a pre-baked event file; evdev_raw.h): press AND
    * release arrive as distinct (4, keycode, value) events, which is
@@ -1798,3 +1821,11 @@ int gfx_input_poll(int64_t *kind_out, int64_t *a_out, int64_t *c_out) {
   return kind != 0;
 }
 #endif
+
+int gfx_input_poll(int64_t *kind_out, int64_t *a_out, int64_t *c_out) {
+  int result = gfx_input_poll_raw(kind_out, a_out, c_out);
+  if (result && *kind_out && gfx_profile_enabled())
+    qos_hostlog("[gfx-profile] input us=%lld kind=%lld a=%lld b=%lld",
+      (long long)gfx_profile_us(), (long long)*kind_out, (long long)*a_out, (long long)*c_out);
+  return result;
+}

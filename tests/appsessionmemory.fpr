@@ -1,0 +1,61 @@
+#: expect appsessionmemory: HOLDS; 3000 events/owner calls/jobs/pane reads retain under 8 roots and 2 MiB
+unsafe program.
+C = use "../programs/mods/clockapp".
+AW = use "../programs/mods/appwire".
+AP = use "../programs/mods/appclient".
+AJ = use "../programs/mods/appjobs".
+PJ = use "../programs/mods/panejobs".
+EP = use "../programs/mods/ep#c66ad65e68dd97f5".
+AS = use "../programs/mods/appsession".
+AC = use "std/actor#201a0e9bf98a5154".
+check True = Unit.
+check False = error "appsessionmemory: invariant failed".
+used u = case Sys.memInfo 0 of arena :: free :: rest -> arena - free | other -> error "missing memory ledger".
+namespace me = _ = Sys.loop 0 (nsStep me); Unit.
+nsStep me state =
+  borrowed = receive me;
+  owned = keep borrowed;
+  _ = drop borrowed;
+  (from, id, EP.NsList path) = owned;
+  _ = AC.reply (from, id) (Ok "/one\n/two\n");
+  (True, state).
+paneRead me pane sequence =
+  _ = send pane (sequence, 1);
+  case receiveFromRes me pane of
+    Err why -> error why
+  | Ok borrowed ->
+      owned = keep borrowed;
+      _ = drop borrowed;
+      check (case owned of (from, id, PJ.Completed gen source (Ok text)) -> gen == sequence and source == 1 and text == "/one\n/two\n" | other -> False).
+turn me app owner worker pane sequence =
+  _ = check (case AC.callWithin 1000 me app (AW.Event 1 sequence (AW.Key 30)) of Ok (AW.Frame sid rev tree vals status) -> sid == 1 | other -> False);
+  _ = check (case AP.call me owner AP.Inspect of Ok (AW.Refused text) -> strlen text > 0 | other -> False);
+  _ = check (case AC.callWithin 1000 me worker (AW.Read sequence AW.Clock) of Ok (AW.Completed tag (Ok (AW.Time seconds))) -> tag == sequence | other -> False);
+  _ = paneRead me pane sequence;
+  _ = send me (sequence, AW.Completed sequence (Ok (AW.Text "still-owned")));
+  _ = check (case AS.selfResult me of AS.JobResult tag (Ok (AW.Text text)) -> tag == sequence and text == "still-owned" | other -> False);
+  (True, sequence + 1).
+batch me app owner worker pane start limit =
+  Sys.loop start (batchStep me app owner worker pane limit).
+batchStep me app owner worker pane limit sequence = if sequence >= limit then (False, sequence) else turn me app owner worker pane sequence.
+main =
+  me = myself 0;
+  app = spawn C.run;
+  owner = spawn (AP.run me 0 0 800 480);
+  worker = spawn (AJ.run me 0 0);
+  _ = check (case AC.callWithin 1000 me app (AW.magic, AW, (1, (800, 480), (0, 0))) of Ok (magic, schema, sid) -> sid == 1 | other -> False);
+  ns = spawn namespace;
+  pane = spawn (PJ.readWorker ns me 1000);
+  _ = batch me app owner worker pane 1 101;
+  _ = Sys.sleepUs 10000;
+  roots = arcLive 0;
+  memory = used Unit;
+  _ = batch me app owner worker pane 101 3101;
+  _ = Sys.sleepUs 10000;
+  _ = check (arcLive 0 <= roots + 8);
+  _ = check (used Unit < memory + 2048);
+  _ = check (case AC.callWithin 1500 me app (AW.Close 1) of Ok (AW.Closed 1 (Ok u)) -> True | other -> False);
+  _ = check (case AP.stop me owner of Ok u -> True | other -> False);
+  _ = check (case AC.callWithin 1500 me worker AW.Stop of Ok (AW.Stopped (Ok u)) -> True | other -> False);
+  _ = kill pane; _ = kill ns;
+  "appsessionmemory: HOLDS; 3000 events/owner calls/jobs/pane reads retain under 8 roots and 2 MiB".

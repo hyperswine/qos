@@ -11,7 +11,9 @@ run owner ns storage me =
   _ = Sys.loop {held = (0, 0), uncertain = ""} (step owner ns storage me); Unit.
 step owner ns storage me state = case receiveFromRes me owner of
     Err why -> _ = cleanup me state; (False, state)
-  | Ok request ->
+  | Ok borrowed ->
+      request = keep borrowed;
+      _ = drop borrowed;
       (from, token, command) = request;
       case command of
         AW.Inspect -> _ = AC.reply (from, token) state; (True, state)

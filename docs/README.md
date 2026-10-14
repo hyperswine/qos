@@ -120,3 +120,4 @@ Source-adjacent READMEs under `tools/` stay beside the tools they explain.
 | 2026-10-14 | [PI-BOOT-SPLASH.md](2026-10-14-PI-BOOT-SPLASH.md) | Pi-only vector splash, quiet HDMI boot, KMS handoff, recovery console and validation boundaries |
 | 2026-10-14 | [RECURSIVE-MVU-SHELL.md](2026-10-14-RECURSIVE-MVU-SHELL.md) | Recursive MVU and explicit message/effect contracts; first Files/Logs pane migration, visible retry, persistent reader ownership, host GL and isolated Pi validation |
 | 2026-10-14 | [RESPONSIVE-MVU-INPUT.md](2026-10-14-RESPONSIVE-MVU-INPUT.md) | Viewport-derived shell/app geometry, explicit focus/capture, keyboard, wheel and primary touch input; host GL and isolated Pi acceptance |
+| 2026-10-14 | [GUI-PERFORMANCE.md](2026-10-14-GUI-PERFORMANCE.md) | Correlated MVU input/frame timing, temporary CPU policy, receive-root leak regression and physical Pi memory profiling |

@@ -1,0 +1,28 @@
+# Diagnostic entry: the normal shell is a child MVU model. Only this entry
+# records timestamps. No production key bindings or view behavior change.
+unsafe program.
+Shell = use "../programs/mods/guishell".
+MV = use "std/mvu".
+AC = use "std/actor#201a0e9bf98a5154".
+init env = (Shell.init env, (0, 0, 0)).
+update me env ev (model, (serial, key, received)) =
+  begin = AC.nowUs Unit;
+  (next, commands) = Shell.update me env ev model;
+  measured = case ev of MV.EKey code -> code > 0 and code < 2000 | other -> False;
+  stamp = if measured then (serial + 1, keyCode ev, begin) else (serial, key, received);
+  _ = if measured then
+    print "gui-profile: update seq={serial + 1} key={keyCode ev} begin_us={begin} end_us={AC.nowUs Unit}"
+    else Unit;
+  ((next, stamp), commands).
+keyCode (MV.EKey code) = code.
+keyCode other = 0.
+view self env vp (model, (serial, key, received)) =
+  begin = AC.nowUs Unit;
+  values = Shell.view self env vp model;
+  _ = print "gui-profile: view seq={serial} key={key} input_us={received} begin_us={begin} end_us={AC.nowUs Unit}";
+  values.
+staticKey (model, stamp) = Shell.staticKey model.
+staticView vp (model, stamp) = Shell.staticView vp model.
+done (model, stamp) = Shell.done model.
+subs (model, stamp) = Shell.subs model.
+main = Shell.runProgram "qos-shell-profile" (MV.MApp init update staticKey staticView view done subs) 0 0.

@@ -340,6 +340,10 @@ run tag =
 # Validation entries can wrap updates while sharing the real boot/lifecycle.
 runWith tag upd = runWindow tag upd 0 0.
 runWindow tag upd requestedW requestedH =
+  runProgram tag (MV.MApp init upd staticKey staticView view done subs) requestedW requestedH.
+# A diagnostic entry is an ordinary MVU program over its own model. The
+# shell still owns the same boot, ports, deadlines and shutdown sequence.
+runProgram tag app requestedW requestedH =
   me = myself 0;
   (q, lifecycle) = QS.bootManagedSized me requestedW requestedH;
   QS.Qsys ns st vfs log apps = q;
@@ -348,8 +352,8 @@ runWindow tag upd requestedW requestedH =
   attached = GX.attach me ns tag;
   case attached of
       Err why -> finishUnattached me lifecycle (Err "shell graphics: {why}")
-    | Ok ep -> runAttached me upd q lifecycle tiles mt ep.
-runAttached me upd q lifecycle tiles mt ep =
+    | Ok ep -> runAttached me app q lifecycle tiles mt ep.
+runAttached me app q lifecycle tiles mt ep =
   (graphics, h) = ep;
   calls = spawn (AC.session me);
   dimsResult = case AC.deadlineAfter serviceBudgetMs of
@@ -358,8 +362,8 @@ runAttached me upd q lifecycle tiles mt ep =
   _ = kill calls;
   case dimsResult of
       Err why -> finishSession me lifecycle ep (Err "shell dimensions: {why}")
-    | Ok dims -> runSized me upd q lifecycle tiles mt ep dims.
-runSized me upd q lifecycle tiles mt ep dims =
+    | Ok dims -> runSized me app q lifecycle tiles mt ep dims.
+runSized me program q lifecycle tiles mt ep dims =
   QS.Qsys ns st vfs log apps = q;
   (graphics, h) = ep;
   (w, hh) = dims;
@@ -370,7 +374,7 @@ runSized me upd q lifecycle tiles mt ep dims =
   jobs = spawn (PJ.owner ns port serviceBudgetMs);
   sessions = spawn (AP.run me ns st w layout.footer);
   cfg = {env = (q, tiles, mt, jobs, sessions), mt = mt, tick = 333330, input = inp, render = graphics};
-  app = MV.MApp init upd staticKey staticView view done (subscriptions port);
+  app = withPort port program;
   _ = QS.ready lifecycle;
   result = MV.runResultWithin serviceBudgetMs me cfg app;
   appsStopped = AP.stop me sessions;
@@ -380,6 +384,8 @@ runSized me upd q lifecycle tiles mt ep dims =
   _ = kill inp;
   _ = kill port;
   finishSession me lifecycle ep (withCleanup (withCleanup result "app sessions close" appsStopped) "pane worker close" stopped).
+withPort port (MV.MApp ini upd sk vw vl dn sbs) = MV.MApp ini upd sk vw vl dn (portSubs port sbs).
+portSubs port sbs model = MV.SPort port :: sbs model.
 finishSession me lifecycle ep result =
   _ = Sys.shutdownBegin Unit;
   (graphics, h) = ep;

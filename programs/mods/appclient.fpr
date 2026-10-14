@@ -11,7 +11,10 @@ step owner ns storage w h me state = if not (Sys.alive owner) then
   (idle, result) = leave me state; (False, idle)
   else case receiveNow me of
     Err why -> _ = Sys.sleepUs 1000; (True, state)
-  | Ok received -> dispatch ns storage w h me state received.
+  | Ok borrowed ->
+      received = keep borrowed;
+      _ = drop borrowed;
+      dispatch ns storage w h me state received.
 dispatch ns storage w h me state received =
   case received of
     (from, id, command) ->

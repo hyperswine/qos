@@ -20,10 +20,16 @@ begin me request =
         Err why -> _ = finish me ctx; Err "startup refused"
       | Ok u -> Ok ctx.
 next me ctx = if not (Sys.alive ctx.parent) then Gone else case receiveFromNow me ctx.parent of
-    Ok (from, id, request) -> Message (from, id) request
+    Ok borrowed ->
+      owned = keep borrowed;
+      _ = drop borrowed;
+      (from, id, request) = owned;
+      Message (from, id) request
   | Err why -> case receiveFromNow me ctx.worker of
-      Ok (id, AW.Completed token result) -> JobResult token result
-    | Ok other -> Idle
+      Ok borrowed ->
+        owned = keep borrowed;
+        _ = drop borrowed;
+        (case owned of (id, AW.Completed token result) -> JobResult token result | other -> Idle)
     | Err why -> if Sys.alive ctx.parent then
         if Sys.alive ctx.worker then selfResult me else Gone
         else Gone.
@@ -53,12 +59,15 @@ close me ctx ret session = case session == ctx.session of
       False.
 
 selfResult me = case receiveFromNow me me of
-    Ok (id, AW.Completed token result) -> JobResult token result
+    Ok borrowed ->
+      owned = keep borrowed;
+      _ = drop borrowed;
+      (case owned of (id, AW.Completed token result) -> JobResult token result | other -> Idle)
   | other -> Idle.
 
 bootstrap deadline me = if AC.nowUs Unit >= deadline then Err "startup deadline exceeded" else
   case receiveNow me of
-    Ok request -> Ok request
+    Ok borrowed -> owned = keep borrowed; _ = drop borrowed; Ok owned
   | Err why -> _ = AC.napUntil deadline; bootstrap deadline me.
 
 abandon me ctx = case finish me ctx of
