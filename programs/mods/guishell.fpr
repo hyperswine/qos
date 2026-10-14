@@ -11,6 +11,8 @@ PN = use "panemvu".
 PJ = use "panejobs".
 AP = use "appclient".
 AW = use "appwire".
+L = use "shelllayout".
+SI = use "shellinput".
 FS = use "std/fs#84826bc9e8ddb4b5".
 AC = use "std/actor#201a0e9bf98a5154".
 MV = use "std/mvu".
@@ -20,7 +22,7 @@ Row = S2.Row. Col = S2.Col. Pad = S2.Pad. Gap = S2.Gap.
 W = S2.W. H = S2.H. Grow = S2.Grow. Fs = S2.Fs.
 Bg = S2.Bg. Fg = S2.Fg. Round = S2.Round. Center = S2.Center. Mid = S2.Mid.
 Tile = Type (Tile id title hint table).
-width = 960. height = 600. pageSize = 6.
+width = 960. height = 600.
 serviceBudgetMs = 5000.
 ink = (940, 950, 990). dim = (530, 610, 750).
 accent = (380, 800, 980).
@@ -35,7 +37,8 @@ at Nil n = Tile "" "" "" (0 - 1).
 clamp lo hi n | n < lo = lo.
 clamp lo hi n | n > hi = hi.
 clamp lo hi n = n.
-pages ts = (count ts + pageSize - 1) / pageSize.
+pages ts = L.pages (L.layout width height) (count ts).
+pagesAt m ts = L.pages m.layout (count ts).
 
 shortcuts = [Tile "clock" "Clock" "A moment of calm" (0 - 1),
              Tile "files" "Files" "Explore your onboard URLs" (0 - 2),
@@ -54,17 +57,17 @@ diskTile id (QS.App aid name ti :: rest) = case id == aid of
   | False -> diskTile id rest.
 
 
-init env = {page = 0, selected = 0, active = 0, inner = AW.Frame 0 0 (Box Nil Nil) Nil "", appFailed = False, appCommands = Nil, status = "Ready when you are", snap = 0, pane = PN.init, commands = Nil}.
+init env = {page = 0, selected = 0, active = 0, inner = AW.Frame 0 0 (Box Nil Nil) Nil "", appFailed = False, appCommands = Nil, status = "Ready when you are", snap = 0, pane = PN.init, commands = Nil, layout = L.layout width height, focus = L.Tile 0, hover = L.None, inputActive = True, pointerX = 0, pointerY = 0, down = False, capture = L.None, wheel = 0, dragY = 0, dragScroll = 0, clock = "00:00"}.
 staticKey m = 0.
 staticView vp m = 0.
 done m = "shell ended".
 subscriptions port m = MV.SPort port :: subs m.
 subs m = [MV.STick 100, MV.SKeys].
-update me env (MV.EKey 16) m | m.active == 0 = (m, [MV.MQuit]).
+update me env (MV.EKey 16) m | m.active == 0 and m.inputActive = (m, [MV.MQuit]).
 update me env (MV.EKey k) m = effects me env (key env k m).
-update me env (MV.EWheel dy dx) m | scrollable m.active =
-  effects me env (scrollBy env m (0 - dy * 3 / 10)).
-update me env MV.ETick m = effects me env (if m.active > 0 and not m.appFailed then
+update me env (MV.EResize w h) m = effects me env (resize env w h m).
+update me env (MV.EWheel dy dx) m = effects me env (wheel env dy dx m).
+update me env MV.ETick m = effects me env (if m.active > 0 and not m.appFailed and m.inputActive then
   {m | appCommands = [AP.Deliver AW.Tick]} else paneUpdate PN.Tick m).
 update me env (MV.EMsg "quit" _) m = (m, [MV.MQuit]).
 update me env (MV.EMsg tag body) m = case PJ.decode tag body of
@@ -83,63 +86,112 @@ paneUpdate msg m =
 effects me env m =
   (q, tiles, mt, jobs, sessions) = env;
   applied = appEffects me sessions m m.appCommands;
-  cleared = {applied | commands = Nil, appCommands = Nil};
+  seconds = if m.active == 0 - 1 then Sys.mtime Unit / 10000000 else 0;
+  clock = if m.active == 0 - 1 then "{AK.pad2 (seconds / 60 % 60)}:{AK.pad2 (seconds % 60)}" else applied.clock;
+  cleared = {applied | commands = Nil, appCommands = Nil, clock = clock};
   case PJ.run me jobs applied.commands of
       Ok u -> (cleared, Nil)
     | Err why -> (paneUpdate (PN.Complete m.pane.generation m.pane.source (Err why)) cleared, Nil).
-key env 1 m =
+# Pure recursive input policy. A click commits on release over its captured
+# target; resize, focus loss and keyboard navigation revoke that capture.
+resize env w h m = if not (L.valid w h) then m else
+  l = L.layout w h;
+  r = L.pane l;
+  next = paneUpdate (PN.Resize r.w r.h (L.px l 16) (L.px l 26)) m;
+  {next | layout = l, page = m.selected / l.capacity, down = False, capture = L.None, hover = L.None, wheel = 0,
+    appCommands = [AP.Resize w l.footer]}.
+key env k m = routeInput env (SI.decode k) m.
+routeInput env (SI.Focus active) m =
+  {m | inputActive = active, down = False, capture = L.None, hover = L.None, wheel = 0,
+    appCommands = (if m.active > 0 and not m.appFailed then [AP.Deliver (AW.Focus active)] else Nil)}.
+routeInput env SI.Cancel m = {m | down = False, capture = L.None, hover = L.None,
+  appCommands = (if m.active > 0 and not m.appFailed then [AP.Deliver AW.Cancel] else Nil)}.
+routeInput env ev m | not m.inputActive = m.
+routeInput env (SI.Move x y) m = pointerEvent env 0 x y m.
+routeInput env (SI.Down x y) m = pointerEvent env 1 x y m.
+routeInput env (SI.Up x y) m = pointerEvent env 2 x y m.
+routeInput env (SI.Key k) m =
+  next = keyCode env k {m | down = False, capture = L.None};
+  if m.active > 0 and m.down and not m.appFailed and next.active > 0 then
+    {next | appCommands = AP.Deliver AW.Cancel :: next.appCommands} else next.
+keyCode env 1 m =
   _ = print "shell: home";
-  paneUpdate PN.Leave {m | active = 0, appCommands = [AP.Home], status = "Welcome home", snap = m.snap + 1}.
-key env 25 m =
-  _ = print "shell: snapshot {m.snap + 1}";
-  {m | snap = m.snap + 1}.
-key env k m | k >= 1000000 = pointer env k m.
-key env 19 m | scrollable m.active = paneUpdate PN.Refresh m.
-key env k m | m.active != 0 = appKey env k m.
-key env 106 m = select env m (m.selected + 1).
-key env 105 m = select env m (m.selected - 1).
-key env 108 m = select env m (m.selected + 3).
-key env 103 m = select env m (m.selected - 3).
-key env 109 m = page env m 1.
-key env 104 m = page env m (0 - 1).
-key env 28 m = openTile env m.
-key env 57 m = openTile env m.
-key env k m = m.
+  paneUpdate PN.Leave {m | active = 0, appCommands = [AP.Home], status = "Welcome home",
+    inner = AW.Frame 0 0 (Box Nil Nil) Nil "", focus = L.Tile m.selected, hover = L.None, down = False, capture = L.None, wheel = 0}.
+keyCode env 25 m = _ = print "shell: snapshot {m.snap + 1}"; {m | snap = m.snap + 1}.
+keyCode env 15 m = tab False m.
+keyCode env 1015 m = tab True m.
+keyCode env k m | k == 28 or k == 57 = activate env m.focus {m | down = False, capture = L.None}.
+keyCode env 19 m | scrollable m.active = paneUpdate PN.Refresh m.
+keyCode env 19 m | m.active > 0 = appKey env 19 m.
+keyCode env k m | m.active != 0 = if m.focus == L.Content or m.focus == L.Scrollbar then appKey env k m else m.
+keyCode env 106 m = select env m (m.selected + 1).
+keyCode env 105 m = select env m (m.selected - 1).
+keyCode env 108 m = select env m (m.selected + m.layout.cols).
+keyCode env 103 m = select env m (m.selected - m.layout.cols).
+keyCode env 109 m = page env m 1.
+keyCode env 104 m = page env m (0 - 1).
+keyCode env 102 m = select env m 0.
+keyCode env 107 m = (q, tiles, mt, jobs, sessions) = env; select env m (count tiles - 1).
+keyCode env k m = m.
+tab reverse m =
+  target = if m.active == 0 then (case m.focus of
+      L.Previous -> if reverse then L.Tile m.selected else L.Next
+    | L.Next -> if reverse then L.Previous else L.Tile m.selected
+    | other -> if reverse then L.Next else L.Previous)
+    else (case m.focus of
+      L.Refresh -> if reverse then L.Content else L.Home
+    | L.Home -> if reverse then L.Refresh else L.Content
+    | other -> if reverse then L.Home else L.Refresh);
+  {m | focus = target, capture = L.None, down = False, hover = L.None}.
+activate env (L.Tile index) m = openTile env (select env m index).
+activate env L.Previous m = next = page env m (0 - 1); {next | focus = L.Previous}.
+activate env L.Next m = next = page env m 1; {next | focus = L.Next}.
+activate env L.Home m = keyCode env 1 m.
+activate env L.Refresh m = if scrollable m.active then paneUpdate PN.Refresh m else appKey env 19 m.
+activate env L.Content m = if m.active > 0 then appKey env 28 m else m.
+activate env target m = m.
 select env m n =
   (q, tiles, mt, jobs, sessions) = env;
-  s = clamp 0 (count tiles - 1) n;
-  {m | selected = s, page = s / pageSize}.
+  selected = clamp 0 (L.max 0 (count tiles - 1)) n;
+  {m | selected = selected, page = selected / m.layout.capacity, focus = L.Tile selected, capture = L.None, down = False, hover = L.None}.
 page env m delta =
   (q, tiles, mt, jobs, sessions) = env;
-  p = clamp 0 (pages tiles - 1) (m.page + delta);
+  p = clamp 0 (pagesAt m tiles - 1) (m.page + delta);
   _ = print "shell: page {p + 1}";
-  {m | page = p, selected = p * pageSize}.
-
-# Pointer adapter emits bounded virtual coordinates. A press launches, a move
-# selects. The service only delivers input while this shell has graphics focus.
-pointer env k m =
-  press = k >= 2000000;
-  pos = k - (case press of True -> 2000000 | False -> 1000000);
-  x = pos % width; y = pos / width;
-  case m.active != 0 of
-    True -> (case press and y >= 530 of True -> key env (case scrollable m.active and x < width / 2 of True -> 19 | False -> 1) m | False ->
-      case press and scrollable m.active and x >= 886 and x < 898 and y >= 236 and y < 470 of
-        True -> scrollClick env m (y - 236)
-      | False -> m)
-  | False -> pointerHome env m press x y.
-pointerHome env m press x y | y >= 530 =
-  case press of True -> page env m (case x < width / 2 of True -> 0 - 1 | False -> 1) | False -> m.
-pointerHome env m press x y | x < 42 or x >= 918 or y < 140 or y >= 476 = m.
-pointerHome env m press x y =
-  col = (x - 42) / 296; row = (y - 140) / 178;
-  case (x - 42) % 296 >= 284 or (y - 140) % 178 >= 158 of
-    True -> m
-  | False ->
-      (q, ts, mt, jobs, sessions) = env;
-      n = m.page * pageSize + row * 3 + col;
-      case n >= count ts of True -> m | False ->
-        m2 = {m | selected = n};
-        case press of True -> openTile env m2 | False -> m2.
+  select env m (p * m.layout.capacity).
+# The compatibility entry decodes the adapter's fixed-stride virtual key.
+pointer env k m = routeInput env (SI.decode k) m.
+hit env m x y =
+  (q, tiles, mt, jobs, sessions) = env;
+  if m.active == 0 then L.hitHome m.layout m.page (count tiles) x y else
+    if scrollable m.active then L.hitPane m.layout x y else L.hitApp m.layout x y.
+pointerEvent env kind x y m =
+  target = hit env m x y;
+  moved = {m | pointerX = x, pointerY = y, hover = target};
+  if kind == 1 then if m.down then moved else
+    chosen = case target of L.Tile index -> select env moved index | other -> moved;
+    pressed = {chosen | down = True, capture = target, dragY = y, dragScroll = m.pane.scroll, focus = (if target == L.None then m.focus else target)};
+    pointerContent env x y 1 pressed
+  else if kind == 2 then
+    released = pointerContent env x y 0 {moved | down = False};
+    fresh = {released | capture = L.None};
+    if m.down and m.capture == target and target != L.Content and target != L.Scrollbar then activate env target fresh else fresh
+  else pointerContent env x y (if m.down then 1 else 0) moved.
+pointerContent env x y buttons m =
+  if m.capture == L.Scrollbar and buttons == 1 then
+    r = L.pane m.layout; paneUpdate (PN.Click (y - r.y)) m
+  else if scrollable m.active and m.capture == L.Content and buttons == 1 then
+    paneUpdate (PN.Seek (m.dragScroll + (m.dragY - y) / m.pane.metrics.pitch)) m
+  else if m.active > 0 and not m.appFailed and (m.capture == L.Content or m.hover == L.Content) then
+    {m | appCommands = [AP.Deliver (AW.Pointer x y buttons)]}
+  else m.
+wheel env dy dx m = if not m.inputActive or (m.focus != L.Content and m.focus != L.Scrollbar) then m else
+  if scrollable m.active then
+    amount = m.wheel - dy * 3;
+    scrollBy env {m | wheel = amount % 10, down = False, capture = L.None} (amount / 10)
+  else if m.active > 0 and not m.appFailed then {m | down = False, capture = L.None, appCommands =
+    (if m.down then [AP.Deliver AW.Cancel, AP.Deliver (AW.Wheel dy dx)] else [AP.Deliver (AW.Wheel dy dx)])} else m.
 
 openTile env m =
   (q, tiles, mt, jobs, sessions) = env;
@@ -149,12 +201,12 @@ openTile env m =
     True -> {m | status = "Cannot open {id}: archive load was refused"}
   | False -> case ti < 0 of
       True ->
-        next = {m | active = ti, status = title};
+        next = {m | active = ti, status = title, focus = L.Content, down = False, capture = L.None, wheel = 0};
         (case scrollable ti of
           True -> paneUpdate (PN.Open (case ti == 0 - 2 of True -> 1 | False -> 2)) next
         | False -> paneUpdate PN.Leave next)
     | False -> {m | active = ti + 1, appFailed = False, appCommands = [AP.Open ti],
-        inner = AW.Frame 0 0 (Box Nil Nil) Nil "Loading", status = title}.
+        inner = AW.Frame 0 0 (Box Nil Nil) Nil "Loading", status = title, focus = L.Content, down = False, capture = L.None, wheel = 0}.
 
 scrollable a = a == 0 - 2 or a == 0 - 3.
 scrollBy env m delta = paneUpdate (PN.Scroll delta) m.
@@ -162,8 +214,8 @@ scrollTo env m requested = paneUpdate (PN.Seek requested) m.
 scrollClick env m y = paneUpdate (PN.Click y) m.
 appKey env 103 m | scrollable m.active = scrollBy env m (0 - 1).
 appKey env 108 m | scrollable m.active = scrollBy env m 1.
-appKey env 104 m | scrollable m.active = scrollBy env m (0 - ST.visible).
-appKey env 109 m | scrollable m.active = scrollBy env m ST.visible.
+appKey env 104 m | scrollable m.active = scrollBy env m (0 - m.pane.metrics.visible).
+appKey env 109 m | scrollable m.active = scrollBy env m m.pane.metrics.visible.
 appKey env 102 m | scrollable m.active = scrollTo env m 0.
 appKey env 107 m | scrollable m.active = scrollTo env m 1000000.
 appKey env k m | m.active < 0 = m.
@@ -182,119 +234,114 @@ appEffects me sessions m (command :: rest) =
 
 text s c size = Lbl [Fs size, Fg c] s.
 spacer = Box [Grow] Nil.
-header = Box [Row, H 82, Mid, Gap 20]
-  [Box [Col, Gap 7] [text "QOS" ink 34, text "MAIN PROFILE" dim 12], spacer,
-   text "Your space, ready." accent 16].
-color n = case n % 4 of
-    0 -> (230, 580, 900)
-  | 1 -> (290, 750, 590)
-  | 2 -> (690, 470, 900)
-  | _ -> (920, 570, 350).
-tile ts m n | n >= count ts = Box [W 284, H 158] Nil.
+label l s c size width = Lbl [Fs (L.px l size), Fg c, S2.Ellip width] s.
+header l = Box [Row, W l.content, H l.header, Mid, Gap (L.px l 20)]
+  [Box [Col, Gap (L.px l 7)] [text "QOS" ink (L.px l 34), text "MAIN PROFILE" dim (L.px l 12)], spacer,
+   label l (if l.w < 800 then "" else "Your space, ready.") accent 16 (l.content / 2)].
+color n = case n % 4 of 0 -> (230, 580, 900) | 1 -> (290, 750, 590) | 2 -> (690, 470, 900) | other -> (920, 570, 350).
+tile ts m n | n >= count ts = Box [W m.layout.tileW, H m.layout.tileH] Nil.
 tile ts m n =
+  l = m.layout;
   Tile id title hint ti = at ts n;
-  Box [Col, W 284, H 158, Pad 15, Gap 8, Round 20,
-       Bg (case n == m.selected of True -> (130, 210, 320) | False -> (65, 98, 155))]
-    [Box [Row, Gap 13, Mid]
-      [Box [W 56, H 56, Round 16, Bg (color n), Center, Mid]
-        [text (substr title 0 1) ink 28], text title ink 21],
-     text hint dim 13,
-     text (case ti == 0 - 100 of True -> ".QA REFUSED" | False ->
-       case ti < 0 of True -> "SHORTCUT" | False -> ".QA APP") accent 11].
+  focused = m.inputActive and m.focus == L.Tile n;
+  Box [Col, W l.tileW, H l.tileH, Pad (L.px l 15), Gap (L.px l 8), Round (L.px l 20), S2.Clip,
+       S2.Bord (if focused then accent else (65, 98, 155)),
+       Bg (if focused or m.hover == L.Tile n then (130, 210, 320) else (65, 98, 155))]
+    [Box [Row, Gap (L.px l 13), Mid]
+      [Box [W (L.px l 56), H (L.px l 56), Round (L.px l 16), Bg (color n), Center, Mid]
+        [text (substr title 0 1) ink (L.px l 28)], label l title ink 21 (L.max 1 (l.tileW - L.px l 100))],
+     label l hint dim 13 (l.tileW - L.px l 30),
+     text (if ti == 0 - 100 then ".QA REFUSED" else if ti < 0 then "SHORTCUT" else ".QA APP") accent (L.px l 11)].
 grid ts m =
-  base = m.page * pageSize;
-  Box [Col, Gap 20]
-    [Box [Row, Gap 12] [tile ts m base, tile ts m (base + 1), tile ts m (base + 2)],
-     Box [Row, Gap 12] [tile ts m (base + 3), tile ts m (base + 4), tile ts m (base + 5)]].
-home ts m = Box [Col, W width, H height, Pad 42, Gap 16, Bg (18, 30, 60)]
-  [header, grid ts m, spacer,
-   Box [Row, Mid] [text "< PREVIOUS" dim 13, spacer,
-     text "PAGE {m.page + 1} / {pages ts}" ink 14, spacer, text "NEXT >" dim 13],
-   text m.status accent 13].
-sheet title body = Box [Col, W width, H height, Pad 42, Gap 24, Bg (18, 30, 60)]
-  [header, Box [Col, Grow, Pad 26, Gap 20, Round 24, Bg (65, 98, 155)]
-    (text title ink 30 :: body), text "ESC OR CLICK HERE TO GO HOME     P SNAPSHOT" dim 14].
+  l = m.layout;
+  Box [Col, W l.content, H (l.rows * l.tileH + (l.rows - 1) * l.rowGap), Gap l.rowGap]
+    (gridRows ts m 0).
+gridRows ts m row = if row >= m.layout.rows then Nil else
+  Box [Row, Gap m.layout.gap] (gridCols ts m row 0) :: gridRows ts m (row + 1).
+gridCols ts m row col = if col >= m.layout.cols then Nil else
+  tile ts m (m.page * m.layout.capacity + row * m.layout.cols + col) :: gridCols ts m row (col + 1).
+button m target title width =
+  l = m.layout;
+  Box [Col, W width, H (L.px l 44), Pad (L.px l 10), Round (L.px l 8),
+    S2.Bord (if m.inputActive and m.focus == target then accent else (18, 30, 60)),
+    Bg (if m.hover == target then (65, 98, 155) else (18, 30, 60))]
+    [label l title (if m.inputActive and m.focus == target then ink else dim) 14 (width - L.px l 20)].
+footer m leftTarget leftTitle rightTarget rightTitle =
+  l = m.layout;
+  Box [Row, W l.content, H (L.px l 44)]
+    [button m leftTarget leftTitle (l.content / 2), button m rightTarget rightTitle (l.content - l.content / 2)].
+surface m body leftTarget leftTitle rightTarget rightTitle status =
+  l = m.layout;
+  Box [Col, W l.w, H l.h, Bg (18, 30, 60), S2.Clip]
+    [Box [H l.margin] Nil,
+     Box [Row, W l.w, H (l.h - l.margin)] [Box [W l.margin] Nil,
+       Box [Col, W l.content, H (l.h - l.margin)]
+        [header l, Box [H (L.px l 16)] Nil, body, spacer,
+         footer m leftTarget leftTitle rightTarget rightTitle,
+         Box [H (L.px l 16)] [label l status accent 12 l.content], Box [H (L.px l 10)] Nil]]].
+home ts m = surface m (grid ts m) L.Previous "< PREVIOUS PAGE" L.Next "NEXT PAGE >"
+  "PAGE {m.page + 1} / {pagesAt m ts}   {m.status}".
+sheet m title body =
+  l = m.layout; p = L.panel l;
+  surface m (Box [Col, W p.w, H p.h, Pad (L.px l 20), Gap (L.px l 12), Round (L.px l 24), Bg (65, 98, 155), S2.Clip]
+    (label l title ink 30 (p.w - L.px l 40) :: body)) L.Refresh "R REFRESH / RETRY" L.Home "ESC HOME" "TAB FOCUS   ENTER ACTIVATE   P SNAPSHOT".
 builtin self env m =
   (q, tiles, mt, jobs, sessions) = env;
   QS.Qsys ns st vfs log apps = q;
-  case scrollable m.active of
-    True -> scrollSheet (case m.active == 0 - 2 of True -> "Files & services" | False -> "System log")
-      (PN.status m.pane) m.pane.rows m.pane.scroll
-  | False -> builtinTree self ns mt m.active.
-scrollSheet title subtitle rows off =
-  Box [Col, W width, H height, Pad 42, Gap 16, Bg (18, 30, 60)]
-    [header,
-     Box [Col, W 876, H 378, Pad 20, Gap 12, Round 24, Bg (65, 98, 155)]
-       [text title ink 30, text subtitle accent 14, ST.pane rows off,
-        Box [Row, W 836, Mid]
-          [text (ST.range rows off) accent 12, spacer,
-           text "UP / DOWN   PGUP / PGDN   HOME / END" dim 12]],
-     text "R REFRESH / RETRY (CLICK LEFT)   ESC HOME (CLICK RIGHT)" dim 14].
-builtinTree self ns mt a | a == 0 - 1 = sheet "Take your time" [text (AK.clockStr mt) ink 70, text "QOS runtime clock" dim 17].
-builtinTree self ns mt a = sheet "Welcome to QOS" [text "An actor system, written in FP-RISC." ink 20,
-       text "Apps come from the onboard disk. Shortcuts live here." dim 16,
-       text "ARROWS select   ENTER open   PGUP / PGDN pages" accent 16,
-       text "Mouse: move to select, click to open." accent 16].
+  if scrollable m.active then scrollSheet m (if m.active == 0 - 2 then "Files & services" else "System log")
+    else builtinTree self ns mt m.
+scrollSheet m title =
+  l = m.layout; p = L.panel l; metrics = m.pane.metrics;
+  surface m (Box [Col, W p.w, H p.h, Pad (L.px l 20), Round (L.px l 24), Bg (65, 98, 155),
+    S2.Bord (if m.inputActive and (m.focus == L.Content or m.focus == L.Scrollbar) then accent else (65, 98, 155))]
+    [Box [H (L.px l 36)] [label l title ink 30 metrics.w], Box [H (L.px l 8)] Nil,
+     Box [H (L.px l 20)] [label l (PN.status m.pane) accent 14 metrics.w], Box [H (L.px l 12)] Nil,
+     ST.paneWith metrics m.pane.rows m.pane.scroll, Box [H (L.px l 12)] Nil,
+     Box [H (L.px l 16)] [label l (ST.rangeWith metrics m.pane.rows m.pane.scroll) accent 12 metrics.w]])
+    L.Refresh "R REFRESH / RETRY" L.Home "ESC HOME" "UP/DOWN   PGUP/PGDN   HOME/END   TAB FOCUS".
+builtinTree self ns mt m | m.active == 0 - 1 = sheet m "Take your time"
+  [text m.clock ink (L.px m.layout 70), text "QOS runtime clock" dim (L.px m.layout 17)].
+builtinTree self ns mt m = sheet m "Welcome to QOS"
+  [label m.layout "An actor system, written in FP-RISC." ink 20 (m.layout.content - 40),
+   label m.layout "ARROWS select   ENTER open   TAB focus" accent 16 (m.layout.content - 40),
+   label m.layout "Mouse or touch: press and release to open." accent 16 (m.layout.content - 40)].
 view self env vp m =
   (q, tiles, mt, jobs, sessions) = env;
-  tree = case m.active == 0 of
-      True -> home tiles m
-    | False -> case m.active < 0 of
-        True -> builtin self env m
-      | False -> appTree m;
-  (es, slots) = S2.buildW (width, height) tree;
-  vals = case m.active > 0 of
-      True -> (case m.inner of AW.Frame sid revision tree vals status -> vals | other -> Nil)
-    | False -> Nil;
-  # The overlay walks text as well as geometry every frame. The 3D static
-  # mesh cache does not retain proportional glyphs, so UI belongs here.
-  (S2.sceneAt height Nil Nil, (cat es (S2.dyns slots vals), S2.camAt height), m.snap).
-
+  l = m.layout;
+  tree = if m.active == 0 then home tiles m else if m.active < 0 then builtin self env m else appTree m;
+  (es, slots) = S2.buildW (l.w, l.h) tree;
+  vals = if m.active > 0 then (case m.inner of AW.Frame sid revision tree vals status -> vals | other -> Nil) else Nil;
+  (S2.sceneAt l.h Nil Nil, (cat es (S2.dyns slots vals), S2.camAt l.h), m.snap).
 appTree m = case m.inner of
     AW.Frame sid revision tree vals status -> if m.appFailed and sid == 0 then
-      sheet "Application unavailable" [text (substr m.status 0 110) accent 14, text "R RETRY     ESC HOME" ink 16]
-      else Box [Col, W width, H height, Bg (62, 70, 88)]
-      [tree, text (substr (if m.appFailed then m.status else "{status}    ESC HOME") 0 110) accent 12]
-  | other -> sheet "Application unavailable" [text m.status accent 14].
+      sheet m "Application unavailable" [label m.layout m.status accent 14 (m.layout.content - 40)]
+      else l = m.layout;
+        Box [Col, W l.w, H l.h, Bg (18, 30, 60), S2.Clip]
+          [Box [W l.w, H l.footer, S2.Clip] [tree],
+           Box [Row] [Box [W l.margin] Nil, footer m L.Refresh "R REFRESH / RETRY" L.Home "ESC HOME"],
+           Box [Row, H (L.px l 16)] [Box [W l.margin] Nil, label l (if m.appFailed then m.status else status) accent 12 l.content]]
+  | other -> sheet m "Application unavailable" [text m.status accent 14].
 
-input graphics w h me = inputLoop graphics w h me (width / 2) (height / 2) 0.
-inputLoop graphics w h me x y buttons =
+# The native service is only a source of facts. This persistent adapter owns
+# position/buttons and translates them into the existing driver's event wire.
+input graphics w h me = _ = Sys.loop (SI.init w h) (inputStep graphics me); Unit.
+inputStep graphics me state =
   (from, MV.Poll _) = receive me;
   case MV.svcCallRes me graphics (MV.Poll 0) of
-      Err why -> Unit
-    | Ok ev -> (kind, a, b) = ev;
-               inputEvent graphics w h me from x y buttons kind a b.
-inputEvent graphics w h me from x y buttons 2 dx dy =
-  xx = clamp 0 (width - 1) (x + dx * width / w);
-  yy = clamp 0 (height - 1) (y - dy * height / h);
-  _ = send from (4, 1000000 + yy * width + xx, 1);
-  _ = Sys.poolReset 0;
-  inputLoop graphics w h me xx yy buttons.
-inputEvent graphics w h me from x y buttons 7 px py =
-  xx = clamp 0 (width - 1) (px * width / w);
-  yy = clamp 0 (height - 1) (py * height / h);
-  _ = send from (4, 1000000 + yy * width + xx, 1);
-  _ = Sys.poolReset 0;
-  inputLoop graphics w h me xx yy buttons.
-inputEvent graphics w h me from x y buttons 3 next _ =
-  code = case band next 1 != 0 and band buttons 1 == 0 of
-      True -> (4, 2000000 + y * width + x, 1)
-    | False -> (4, 0, 0);
-  _ = send from code;
-  _ = Sys.poolReset 0;
-  inputLoop graphics w h me x y next.
-inputEvent graphics w h me from x y buttons kind a b =
-  _ = send from (kind, a, b);
-  _ = Sys.poolReset 0;
-  inputLoop graphics w h me x y buttons.
+    Err why -> (False, state)
+  | Ok (kind, a, b) ->
+      (event, next) = SI.adapt kind a b state;
+      _ = send from event;
+      (True, next).
 
 main = run "qos-shell".
 run tag =
   runWith tag update.
 # Validation entries can wrap updates while sharing the real boot/lifecycle.
-runWith tag upd =
+runWith tag upd = runWindow tag upd 0 0.
+runWindow tag upd requestedW requestedH =
   me = myself 0;
-  (q, lifecycle) = QS.bootManagedSized me width height;
+  (q, lifecycle) = QS.bootManagedSized me requestedW requestedH;
   QS.Qsys ns st vfs log apps = q;
   tiles = cat shortcuts (installed me st apps);
   mt = reg32 (device "clint") 49144;
@@ -316,11 +363,12 @@ runSized me upd q lifecycle tiles mt ep dims =
   QS.Qsys ns st vfs log apps = q;
   (graphics, h) = ep;
   (w, hh) = dims;
+  layout = L.layout w hh;
   inp = spawn (input graphics w hh);
-  _ = print "shell: Main Profile ready ({count tiles} shortcuts, {pages tiles} pages)";
+  _ = print "shell: Main Profile ready ({count tiles} shortcuts, {L.pages (L.layout w hh) (count tiles)} pages)";
   port = spawn MV.port;
   jobs = spawn (PJ.owner ns port serviceBudgetMs);
-  sessions = spawn (AP.run me ns st width (height - 32));
+  sessions = spawn (AP.run me ns st w layout.footer);
   cfg = {env = (q, tiles, mt, jobs, sessions), mt = mt, tick = 333330, input = inp, render = graphics};
   app = MV.MApp init upd staticKey staticView view done (subscriptions port);
   _ = QS.ready lifecycle;

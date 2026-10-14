@@ -1,20 +1,23 @@
-# Recursive MVU: cached model, pure update/view, explicit effect messages.
+# Recursive MVU: viewport, focus and pointer capture are model values.
 unsafe module.
 AW = use "appwire".
 AS = use "appsession".
-AC = use "std/actor#201a0e9bf98a5154".
-S2 = use "scene2d".
+AV = use "appview".
+L = use "shelllayout".
+ST = use "scrolltext".
 AK = use "appkit".
-Box = S2.Box. Lbl = S2.Lbl. Slot = S2.Slot.
-Row = S2.Row. Col = S2.Col. Pad = S2.Pad. Gap = S2.Gap.
-W = S2.W. H = S2.H. Grow = S2.Grow. Sc = S2.Sc.
-Bg = S2.Bg. Fg = S2.Fg. Bord = S2.Bord.
+AC = use "std/actor#201a0e9bf98a5154".
 
-
-init = ({keys = 0, time = 0, token = 1, busy = True, phase = AW.Loading}, [AW.Fetch 1 AW.Clock]).
+init = ({keys = 0, time = 0, token = 1, busy = True, phase = AW.Loading, w = 960, h = 530, focused = True, down = False, capture = 0 - 1, wheel = 0, scroll = 0, dragY = 0, dragScroll = 0, dragged = False}, [AW.Fetch 1 AW.Clock]).
 fetch m = if m.busy then (m, Nil) else
   ({m | token = m.token + 1, busy = True, phase = AW.Loading}, [AW.Fetch (m.token + 1) AW.Clock]).
+update (AW.Resize w h) m = (AV.resize w h m, Nil).
+update (AW.Focus active) m = (AV.focus active m, Nil).
+update AW.Cancel m = (AV.focus m.focused m, Nil).
+update AW.Tick m | not m.focused = (m, Nil).
+
 update AW.Tick m = fetch m.
+update (AW.Key 19) m = fetch m.
 update (AW.Key k) m = ({m | keys = m.keys + 1}, Nil).
 update (AW.Arrived token result) m = if token != m.token or not m.busy then (m, Nil) else
   case result of
@@ -22,30 +25,14 @@ update (AW.Arrived token result) m = if token != m.token or not m.busy then (m, 
   | Err why -> ({m | busy = False, phase = AW.Failed why}, Nil)
   | other -> ({m | busy = False, phase = AW.Failed "invalid clock result"}, Nil).
 update other m = (m, Nil).
-view vp m = (tree vp, ["{AK.pad2 (m.time / 60 % 60)}:{AK.pad2 (m.time % 60)}", "{m.keys} KEYS SEEN"]).
-
-tree vp =
-  (vw, vh) = vp;
-  Box [Col, Pad 8, Gap 8, W vw, H vh, Bg (62, 70, 88)]
-    [ Box [Row, Gap 6]
-        [ Lbl [Sc 2, Fg (420, 900, 560)] "CLOCK"
-        , Lbl [Fg (560, 590, 650)] "clock.qa" ]
-    , Box [Grow] Nil
-    , Box [Row]
-        [ Box [Grow] Nil
-        , Slot [Sc 4, Fg (930, 940, 960)] 0 5
-        , Box [Grow] Nil ]
-    , Box [Grow] Nil
-    , Box [Row, Gap 6]
-        [ Slot [Fg (560, 590, 650)] 1 20
-        , Box [Grow] Nil
-        , Lbl [Fg (560, 590, 650)] "ESC BACK" ] ].
+view vp m = (AV.clock vp "{AK.pad2 (m.time / 60 % 60)}:{AK.pad2 (m.time % 60)}" m.keys, Nil).
 
 # This actor owns the child model. Transport and effects exchange data only.
 run me = case AS.start me of
     Err why -> Unit
   | Ok ctx ->
-      (model, commands) = init;
+      (initial, commands) = init;
+      (model, ignored) = update (AW.Resize ctx.w ctx.h) initial;
       _ = AS.issue me ctx commands;
       _ = Sys.loop (ctx, model) (step me); Unit.
 step me state =

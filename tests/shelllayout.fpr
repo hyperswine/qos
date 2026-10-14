@@ -1,0 +1,99 @@
+#: expect shelllayout: HOLDS
+unsafe program.
+S = use "../programs/mods/guishell".
+L = use "../programs/mods/shelllayout".
+I = use "../programs/mods/shellinput".
+PN = use "../programs/mods/panemvu".
+ST = use "../programs/mods/scrolltext".
+QS = use "../programs/mods/qsys".
+B = use "../programs/mods/browserapp".
+AV = use "../programs/mods/appview".
+AW = use "../programs/mods/appwire".
+AP = use "../programs/mods/appclient".
+check tag True = Unit.
+check tag False = error "shelllayout: {tag}".
+env = (QS.Qsys 0 0 0 0 Nil, S.cat S.shortcuts [S.Tile "a" "A" "" (0 - 100), S.Tile "b" "B" "" (0 - 100), S.Tile "c" "C" "" (0 - 100), S.Tile "d" "D" "" (0 - 100)], 0, 0, 0).
+slots l page total n = if n >= l.capacity then Unit else
+  r = L.tile l n; index = page * l.capacity + n;
+  expected = if index < total then L.Tile index else L.None;
+  _ = check "tile center shares geometry" (L.hitHome l page total (r.x + r.w / 2) (r.y + r.h / 2) == expected);
+  _ = check "tile inside viewport and above controls" (r.x >= 0 and r.y >= 0 and r.x + r.w <= l.w and r.y + r.h <= l.footer);
+  _ = if n % l.cols == l.cols - 1 then Unit else check "gap not a tile" (L.hitHome l page total (r.x + r.w + 1) (r.y + 5) == L.None);
+  slots l page total (n + 1).
+viewport w h =
+  m = S.resize env w h (S.init env); l = m.layout;
+  _ = slots l 0 8 0;
+  _ = slots l (L.pages l 8 - 1) 8 0;
+  selected = S.select env m 7;
+  narrower = S.resize env 640 480 selected;
+  _ = check "resize preserves selected tile" (narrower.selected == 7 and narrower.page == 7 / narrower.layout.capacity);
+  home = S.key env 1 m;
+  _ = check "Home does not capture a frame" (home.snap == m.snap);
+  r = L.tile l 0;
+  down = S.pointerEvent env 1 (r.x + 10) (r.y + 10) m;
+  _ = check "press does not launch" (down.active == 0 and down.down);
+  held = S.pointerEvent env 1 (r.x + 10) (r.y + 10) down;
+  opened = S.pointerEvent env 2 (r.x + 10) (r.y + 10) held;
+  _ = check "release launches exactly once" (opened.active == 0 - 1 and not opened.down);
+  cancelled = S.routeInput env (I.Focus False) down;
+  up = S.pointerEvent env 2 (r.x + 10) (r.y + 10) {cancelled | inputActive = True};
+  _ = check "focus loss revokes capture" (up.active == 0 and not up.down);
+  afterResize = S.resize env w h down;
+  _ = check "resize revokes capture" (not afterResize.down and afterResize.capture == L.None);
+  moved = S.pointerEvent env 0 (r.x + 10) (r.y + 10) (S.select env m 1);
+  _ = check "hover does not steal keyboard selection" (moved.selected == 1 and moved.focus == L.Tile 1);
+  tabbed = S.key env 15 m;
+  _ = check "tab focus" (tabbed.focus == L.Previous);
+  pagedControl = S.key env 28 (S.key env 15 tabbed);
+  _ = check "pagination retains focus" (pagedControl.focus == L.Next);
+  reversed = S.key env 1015 tabbed;
+  _ = check "shift tab" (reversed.focus == L.Tile m.selected);
+  logs = S.openTile env {m | selected = 2};
+  rows = "first\nsecond\nthird\nfourth\nfifth\nsixth\nseventh\neighth\nninth\ntenth\neleventh\ntwelfth\n";
+  (ready, _) = PN.update (PN.Complete logs.pane.generation 2 (Ok rows)) logs.pane;
+  loaded = {logs | pane = ready, commands = Nil};
+  scrolled = S.wheel env (0 - 1) 0 (S.wheel env (0 - 1) 0 (S.wheel env (0 - 1) 0 (S.wheel env (0 - 1) 0 loaded)));
+  _ = check "fractional wheel retained" (scrolled.pane.scroll == ST.offsetWith ready.metrics (ST.count ready.rows) 1 and scrolled.wheel == 2);
+  pane = L.pane l; bar = L.bar l;
+  dragged = S.pointerEvent env 1 (bar.x + 1) (pane.y + pane.h - 1) loaded;
+  _ = check "scrollbar uses pane geometry" (dragged.pane.scroll == ST.limitWith ready.metrics (ST.count ready.rows));
+  startDrag = S.pointerEvent env 1 (pane.x + 6) (pane.y + pane.h - 10) loaded;
+  panned = S.pointerEvent env 0 (pane.x + 6) pane.y startDrag;
+  _ = check "content drag pans cached rows" (if ST.limitWith ready.metrics (ST.count ready.rows) > 0 then panned.pane.scroll > 0 else panned.pane.scroll == 0);
+  _ = S.view (myself 0) env (1, 1) loaded;
+  Unit.
+main =
+  _ = viewport 320 480; _ = viewport 640 480; _ = viewport 960 600;
+  _ = viewport 1024 600; _ = viewport 1280 720; _ = viewport 1920 1080;
+  initial = I.init 1920 1080;
+  (event, down) = I.adapt 7 1700 900 initial;
+  _ = check "fixed stride" (event == (4, I.pack I.moveBase 1700 900, 1));
+  _ = check "coordinate decoding" (I.decode (I.pack I.downBase 1700 900) == I.Down 1700 900);
+  (repeatNav, ignored) = I.adapt 4 108 2 initial;
+  (repeatOpen, ignored) = I.adapt 4 28 2 initial;
+  _ = check "navigation repeat only" (repeatNav == (4, 108, 1) and repeatOpen == (4, 28, 0));
+  (normalized, ignored) = I.adapt 9 65535 65535 initial;
+  _ = check "normalized touch" (normalized == (4, I.pack I.moveBase 1919 1079, 1));
+  (sized, adapter) = I.adapt 5 1024 600 initial;
+  _ = check "resize resets raw capture" (adapter.w == 1024 and adapter.h == 600 and adapter.buttons == 0);
+  appPressed = {S.init env | active = 1, focus = L.Content, down = True, capture = L.Content};
+  tabbedApp = S.key env 15 appPressed;
+  _ = check "Tab cancels child capture" (not tabbedApp.down and tabbedApp.appCommands == [AP.Deliver AW.Cancel]);
+  wheeledApp = S.wheel env 10 0 appPressed;
+  _ = check "wheel cancels child capture before scrolling" (not wheeledApp.down and wheeledApp.appCommands == [AP.Deliver AW.Cancel, AP.Deliver (AW.Wheel 10 0)]);
+  (b, _) = B.init;
+  (paths, _) = B.update (AW.Arrived 1 (Ok (AW.Lines ["/one", "/two"] ""))) b;
+  a = AV.layout paths.w paths.h;
+  (pressed, _) = B.update (AW.Pointer (a.margin + 4) (a.top + 4) 1) paths;
+  (reading, commands) = B.update (AW.Pointer (a.margin + 4) (a.top + 4) 0) pressed;
+  _ = check "child click resolves on release" (reading.mode == 1 and reading.busy and commands != Nil);
+  (dragging, _) = B.update (AW.Pointer (a.margin + 4) (a.top + 44) 1) pressed;
+  (dropped, commands) = B.update (AW.Pointer (a.margin + 4) (a.top + 44) 0) dragging;
+  _ = check "child drag never resolves a row" (dropped.mode == 0 and not dropped.busy and commands == Nil);
+  (cancelledChild, _) = B.update AW.Cancel pressed;
+  (afterCancel, commands) = B.update (AW.Pointer (a.margin + 4) (a.top + 4) 0) cancelledChild;
+  _ = check "cancel prevents child release activation" (afterCancel.mode == 0 and commands == Nil);
+  (resized, _) = B.update (AW.Resize 640 480) pressed;
+  (released, commands) = B.update (AW.Pointer (a.margin + 4) (a.top + 4) 0) resized;
+  _ = check "child resize cancels row activation" (released.mode == 0 and commands == Nil and not released.down);
+  "shelllayout: HOLDS".

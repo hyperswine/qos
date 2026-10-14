@@ -1,104 +1,75 @@
-# Recursive MVU: cached model, pure update/view, explicit effect messages.
+# Recursive MVU: viewport, focus and pointer capture are model values.
 unsafe module.
 AW = use "appwire".
 AS = use "appsession".
-AC = use "std/actor#201a0e9bf98a5154".
-S2 = use "scene2d".
+AV = use "appview".
+L = use "shelllayout".
+ST = use "scrolltext".
 AK = use "appkit".
-Box = S2.Box. Lbl = S2.Lbl. Slot = S2.Slot.
-Row = S2.Row. Col = S2.Col. Pad = S2.Pad. Gap = S2.Gap.
-W = S2.W. H = S2.H. Grow = S2.Grow. Sc = S2.Sc.
-Bg = S2.Bg. Fg = S2.Fg. Bord = S2.Bord.
+AC = use "std/actor#201a0e9bf98a5154".
 
-
-init = ({cursor = 0, mode = 0, paths = Nil, lines = Nil, path = "", token = 1, busy = True, stale = False, phase = AW.Loading}, [AW.Fetch 1 AW.ListRoot]).
+init = ({cursor = 0, mode = 0, paths = Nil, text = "", lines = Nil, path = "", token = 1, busy = True, stale = False, phase = AW.Loading, w = 960, h = 530, focused = True, down = False, capture = 0 - 1, wheel = 0, scroll = 0, dragY = 0, dragScroll = 0, dragged = False}, [AW.Fetch 1 AW.ListRoot]).
 fetch job m = if m.busy then (m, Nil) else
   ({m | token = m.token + 1, busy = True, stale = False, phase = AW.Loading}, [AW.Fetch (m.token + 1) job]).
-update (AW.Key 14) m = ({m | mode = 0, stale = m.busy, phase = AW.Ready}, Nil).
-update (AW.Key 103) m = if m.mode == 0 then ({m | cursor = brClamp (m.cursor - 1) (brLen m.paths)}, Nil) else (m, Nil).
-update (AW.Key 108) m = if m.mode == 0 then ({m | cursor = brClamp (m.cursor + 1) (brLen m.paths)}, Nil) else (m, Nil).
-update (AW.Key 28) m = if m.busy or m.paths == Nil then (m, Nil) else
-  (path, kind) = brNth m.paths m.cursor;
-  fetch (AW.ReadPath path) {m | mode = 1, path = path, lines = Nil}.
+update (AW.Resize w h) m = (move 0 (AV.resize w h m), Nil).
+update (AW.Focus active) m = (AV.focus active m, Nil).
+update AW.Cancel m = (AV.focus m.focused m, Nil).
+update AW.Tick m | not m.focused = (m, Nil).
+
+update (AW.Key 14) m = if m.mode == 0 then (m, Nil) else
+  ({m | mode = 0, scroll = 0, stale = m.busy, phase = AW.Ready, down = False, capture = 0 - 1}, Nil).
+update (AW.Key 103) m = (move (0 - 1) m, Nil).
+update (AW.Key 108) m = (move 1 m, Nil).
+update (AW.Key 104) m = spec = AV.metrics m; (move (0 - spec.visible) m, Nil).
+update (AW.Key 109) m = spec = AV.metrics m; (move spec.visible m, Nil).
+update (AW.Key 102) m = (move (0 - ST.count (rows m)) m, Nil).
+update (AW.Key 107) m = (move (ST.count (rows m)) m, Nil).
+update (AW.Key 28) m = open m.
 update (AW.Key 19) m = fetch (if m.mode == 0 then AW.ListRoot else AW.ReadPath m.path) m.
+update (AW.Wheel dy dx) m = amount = m.wheel - dy * 3; (move (amount / 10) {m | wheel = amount % 10}, Nil).
+update (AW.Pointer x y buttons) m =
+  if L.inside (AV.bar m) x y or m.capture == 0 - 2 or m.capture == 0 - 3 then (AV.pointer (rows m) x y buttons m, Nil) else
+  index = AV.rowAt m x y;
+  valid = m.mode == 0 and index >= 0 and index < ST.count m.paths;
+  if buttons == 1 then if m.down then
+    spec = AV.metrics m;
+    if y - m.dragY > spec.em / 2 or m.dragY - y > spec.em / 2 then
+      (AV.pointer (rows m) x y buttons {m | capture = 0 - 3}, Nil) else (m, Nil)
+    else
+    ({m | down = True, dragY = y, dragScroll = m.scroll, dragged = False, capture = (if valid then index else 0 - 1), cursor = (if valid then index else m.cursor)}, Nil)
+  else fresh = {m | down = False, capture = 0 - 1};
+    if m.down and valid and not m.dragged and m.capture == index then open fresh else (fresh, Nil).
 update (AW.Arrived token result) m = if token != m.token or not m.busy then (m, Nil) else
   if m.stale then ({m | busy = False, stale = False}, Nil) else case result of
-    Ok (AW.Lines rows total) -> paths = AK.withKind rows;
-      ({m | paths = paths, cursor = brClamp m.cursor (brLen paths), busy = False, phase = AW.Ready}, Nil)
-  | Ok (AW.Text text) -> ({m | lines = brLines text, busy = False, phase = AW.Ready}, Nil)
+    Ok (AW.Lines lines total) -> paths = AK.withKind lines;
+      ({m | paths = paths, cursor = clamp m.cursor (ST.count paths), busy = False, phase = AW.Ready}, Nil)
+  | Ok (AW.Text text) -> ({m | text = text, lines = ST.lines text, busy = False, phase = AW.Ready}, Nil)
   | Err why -> ({m | busy = False, phase = AW.Failed why}, Nil)
   | other -> ({m | busy = False, phase = AW.Failed "invalid browser result"}, Nil).
 update other m = (m, Nil).
-view vp m = (tree vp, if m.mode == 0 then
-  "/  ({brLen m.paths} paths)" :: brPad (brRows (brWindow m.paths (brStart m.cursor)) (brStart m.cursor) m.cursor) 10
-    |> brAppend "{if m.paths == Nil then 0 else m.cursor + 1}/{brLen m.paths}"
-  else m.path :: brPad m.lines 10 |> brAppend "RESOLVED").
-
-brRow i =
-  Box [Row, Pad 1] [ Slot [Fg (930, 940, 960)] i 46 ].
-
-tree vp =
-  (vw, vh) = vp;
-  Box [Col, Pad 8, Gap 4, W vw, H vh, Bg (62, 70, 88)]
-    [ Box [Row, Gap 6]
-        [ Lbl [Sc 2, Fg (420, 900, 560)] "FILES"
-        , Slot [Fg (999, 800, 300)] 0 26
-        , Box [Grow] Nil
-        , Slot [Fg (560, 590, 650)] 11 12 ]
-    , Box [Col, Gap 2, Grow, Bord (150, 165, 200), Pad 3]
-        [ brRow 1, brRow 2, brRow 3, brRow 4, brRow 5
-        , brRow 6, brRow 7, brRow 8, brRow 9, brRow 10 ]
-    , Lbl [Fg (560, 590, 650)] "UP/DOWN MOVE  ENTER RESOLVE  BKSP BACK  ESC HOME" ].
-
-# ---- helpers ---------------------------------------------------------------
-
-brLen Nil = 0.
-brLen (x :: r) = 1 + brLen r.
-brNth Nil i = ("", 0).
-brNth (x :: r) 0 = x.
-brNth (x :: r) i = brNth r (i - 1).
-brClamp c n | n == 0 or c < 0 = 0.
-brClamp c n | c > n - 1 = n - 1.
-brClamp c n = c.
-
-kindTag 0 = "VIRT".
-kindTag k = "DATA".
-
-# rows: a window of 10 around the cursor, marked
-brRows Nil i c = Nil.
-brRows ((p, k) :: r) i c | i == c = "> {kindTag k} {p}" :: brRows r (i + 1) c.
-brRows ((p, k) :: r) i c = "  {kindTag k} {p}" :: brRows r (i + 1) c.
-
-brWindow l start | start == 0 = l.
-brWindow Nil start = Nil.
-brWindow (x :: r) start = brWindow r (start - 1).
-brStart c | c > 9 = c - 9.
-brStart c = 0.
-
-# split served text into lines for the rows
-brLines s = brSplit s 0 0 Nil.
-brSplit s i st acc | i >= strlen s = brRev (brSeg s st i :: acc) Nil.
-brSplit s i st acc | charAt s i == 10 =
-  brSplit s (i + 1) (i + 1) (brSeg s st i :: acc).
-brSplit s i st acc = brSplit s (i + 1) st acc.
-brSeg s st i | i > st = substr s st (i - st).
-brSeg s st i = "".
-brRev Nil acc = acc.
-brRev (x :: r) acc = brRev r (x :: acc).
-
-brPad l n | n == 0 = Nil.
-brPad Nil n = "" :: brPad Nil (n - 1).
-brPad (x :: r) n = x :: brPad r (n - 1).
-
-brAppend x l = brCat l (x :: Nil).
-brCat Nil b = b.
-brCat (a :: r) b = a :: brCat r b.
+open m = if m.busy or m.paths == Nil or m.mode != 0 then (m, Nil) else
+  (path, kind) = nth m.paths m.cursor;
+  fetch (AW.ReadPath path) {m | mode = 1, path = path, text = "", lines = Nil, scroll = 0}.
+move delta m = if m.mode == 1 then AV.scroll (rows m) delta m else
+  c = clamp (m.cursor + delta) (ST.count m.paths); spec = AV.metrics m;
+  off = if c < m.scroll then c else if c >= m.scroll + spec.visible then c - spec.visible + 1 else m.scroll;
+  {m | cursor = c, scroll = ST.offsetWith spec (ST.count m.paths) off}.
+clamp c n = L.clamp 0 (L.max 0 (n - 1)) c.
+nth Nil n = ("", 0).
+nth (x :: rest) 0 = x.
+nth (x :: rest) n = nth rest (n - 1).
+pathRows Nil cursor index = Nil.
+pathRows ((path, kind) :: rest) cursor index =
+  "{if index == cursor then "> " else "  "}{path}" :: pathRows rest cursor (index + 1).
+rows m = if m.mode == 0 then pathRows m.paths m.cursor 0 else ST.wrapWith (AV.metrics m) m.text.
+view vp m = (AV.frame vp "Files" (if m.mode == 0 then "/   {ST.count m.paths} paths   ENTER RESOLVE" else "{m.path}   BKSP BACK") (rows m) m.scroll, Nil).
 
 # This actor owns the child model. Transport and effects exchange data only.
 run me = case AS.start me of
     Err why -> Unit
   | Ok ctx ->
-      (model, commands) = init;
+      (initial, commands) = init;
+      (model, ignored) = update (AW.Resize ctx.w ctx.h) initial;
       _ = AS.issue me ctx commands;
       _ = Sys.loop (ctx, model) (step me); Unit.
 step me state =

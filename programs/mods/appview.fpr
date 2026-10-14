@@ -1,0 +1,44 @@
+# Pure child layout shared by app view and app input handlers.
+S2 = use "scene2d".
+ST = use "scrolltext".
+L = use "shelllayout".
+layout w h =
+  l = L.layout w (h + 70);
+  margin = L.px l 20; top = margin + L.px l 60 + L.px l 12;
+  {w = w, h = h, margin = margin, top = top, scale = l.scale,
+   metrics = ST.spec (L.max 29 (w - 2 * margin)) (L.max 1 (h - top - margin)) (L.px l 16) (L.px l 26)}.
+metrics m = a = layout m.w m.h; a.metrics.
+resize w h m = if L.valid w h then {m | w = w, h = h, down = False, capture = 0 - 1, wheel = 0, dragged = False} else m.
+focus active m = {m | focused = active, down = False, capture = 0 - 1, wheel = 0, dragged = False}.
+scroll rows delta m = spec = metrics m; {m | scroll = ST.offsetWith spec (ST.count rows) (m.scroll + delta)}.
+seek rows target m = spec = metrics m; {m | scroll = ST.offsetWith spec (ST.count rows) target}.
+wheel rows dy m = amount = m.wheel - dy * 3; scroll rows (amount / 10) {m | wheel = amount % 10}.
+bar m = a = layout m.w m.h;
+  L.rect (a.margin + a.metrics.w + 16) a.top 12 a.metrics.h.
+rowAt m x y = a = layout m.w m.h;
+  if L.inside (L.rect a.margin a.top a.metrics.w a.metrics.h) x y then
+    m.scroll + (y - a.top) / a.metrics.pitch else 0 - 1.
+pointer rows x y buttons m =
+  r = bar m;
+  area = layout m.w m.h;
+  held = if buttons == 0 then {m | down = False, capture = 0 - 1, dragged = False}
+    else if not m.down then {m | down = True, dragY = y, dragScroll = m.scroll, dragged = False,
+      capture = (if L.inside r x y then 0 - 2 else if rowAt m x y >= 0 then 0 - 3 else 0 - 1)} else m;
+  if held.capture == 0 - 2 then
+    spec = metrics m; {held | scroll = ST.clickWith spec (ST.count rows) (y - r.y)}
+  else if held.capture == 0 - 3 then
+    seek rows (held.dragScroll + (held.dragY - y) / area.metrics.pitch) {held | dragged = True}
+  else held.
+
+label a text color size width = S2.Lbl [S2.Fs (size * a.scale / 1000), S2.Fg color, S2.Ellip width] text.
+header a title subtitle = S2.Box [S2.Col, S2.W (a.w - 2 * a.margin), S2.H (60 * a.scale / 1000), S2.Gap (6 * a.scale / 1000)]
+  [label a title (940, 950, 990) 28 (a.w - 2 * a.margin), label a subtitle (380, 800, 980) 14 (a.w - 2 * a.margin)].
+frame vp title subtitle rows off =
+  (w, h) = vp; a = layout w h;
+  S2.Box [S2.Col, S2.W w, S2.H h, S2.Pad a.margin, S2.Bg (18, 30, 60), S2.Clip]
+    [header a title subtitle, S2.Box [S2.H (12 * a.scale / 1000)] Nil, ST.paneWith a.metrics rows off].
+clock vp time keys = (w, h) = vp; a = layout w h;
+  S2.Box [S2.Col, S2.W w, S2.H h, S2.Pad a.margin, S2.Bg (18, 30, 60), S2.Clip]
+    [header a "Clock" "QOS runtime time", S2.Box [S2.Grow] Nil,
+     S2.Box [S2.Row, S2.Center] [label a time (940, 950, 990) 70 (w - 2 * a.margin)],
+     S2.Box [S2.Grow] Nil, label a "{keys} KEYS SEEN" (530, 610, 750) 16 (w - 2 * a.margin)].

@@ -7,6 +7,7 @@ D = use "../programs/mods/diskapp".
 AS = use "../programs/mods/appsession".
 AW = use "../programs/mods/appwire".
 AP = use "../programs/mods/appclient".
+S2 = use "../programs/mods/scene2d".
 AC = use "std/actor#201a0e9bf98a5154".
 check tag True = Unit.
 check tag False = error "appsession: {tag}".
@@ -51,7 +52,11 @@ main =
   _ = AC.callWithin 500 me managed (AW.magic, AW, (3, (800, 480), (0, 0)));
   (live, frame) = AP.exchange me AW.Tick {AP.empty | actor = managed, session = 3};
   _ = check "client frame" (case frame of Ok (AW.Frame sid rev tree vals status) -> sid == 3 and rev > 0 | other -> False);
-  (idle, left) = AP.leave me live;
+  (sized, resizedFrame) = AP.exchange me (AW.Resize 1280 640) live;
+  _ = check "session resize reaches child view" (case resizedFrame of
+    Ok (AW.Frame sid rev (S2.Box attrs kids) vals status) -> S2.wOf attrs == 1280 and S2.hOf attrs == 640
+    | other -> False);
+  (idle, left) = AP.leave me sized;
   _ = check "client close" (case left of Ok (AW.Closed sid (Ok u)) -> idle.actor == 0 | other -> False);
   _ = check "missing entry" (case AP.entry 99999 of Err why -> True | other -> False);
   client = spawn (AP.run me 0 0 800 480);

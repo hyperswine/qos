@@ -1,0 +1,36 @@
+# Pure adapter for the existing MVU input wire. Coordinate packing has a
+# fixed stride: queued positions never acquire a new meaning after resize.
+# These reserved virtual keys never overlap evdev's modifier-biased keys.
+L = use "shelllayout".
+Event = Type (Move Int Int | Down Int Int | Up Int Int | Focus Bool | Cancel | Key Int).
+stride = 8192. moveBase = 1000000. downBase = 100000000. upBase = 200000000.
+focusBase = 300000000.
+pack base x y = base + y * stride + x.
+decode k = if k == focusBase then Focus False else if k == focusBase + 1 then Focus True
+  else if k == focusBase + 2 then Cancel
+  else if k >= upBase and k < upBase + stride * stride then point Up (k - upBase)
+  else if k >= downBase and k < downBase + stride * stride then point Down (k - downBase)
+  else if k >= moveBase and k < moveBase + stride * stride then point Move (k - moveBase)
+  else Key k.
+point ctor n = ctor (n % stride) (n / stride).
+init w h = {w = w, h = h, x = w / 2, y = h / 2, buttons = 0, absolute = False, active = True}.
+# Returns native Poll reply plus the successor adapter state; no I/O.
+adapt kind a b st = case kind of
+    10 -> ((4, focusBase + 2, 1), {st | buttons = 0})
+  | 5 -> if L.valid a b then ((5, a, b), {init a b | active = st.active}) else ((0, 0, 0), st)
+  | 8 -> ((4, focusBase + (if a == 0 then 0 else 1), 1), {st | active = a != 0, buttons = 0, absolute = False})
+  | 2 -> if not st.active or st.absolute then ((4, 0, 0), st) else position False (st.x + a) (st.y - b) st
+  | 7 -> if not st.active then ((4, 0, 0), st) else position True a b st
+  | 9 -> if not st.active then ((4, 0, 0), st) else position True (a * (st.w - 1) / 65535) (b * (st.h - 1) / 65535) st
+  | 3 -> if not st.active then ((4, 0, 0), {st | buttons = 0}) else
+      was = st.buttons % 2; now = a % 2;
+      code = if was == now then (4, 0, 0) else (4, pack (if now == 1 then downBase else upBase) st.x st.y, 1);
+      (code, {st | buttons = a})
+  | 4 -> if not st.active then ((4, 0, 0), st) else
+      # Repeat navigation, never repeat launch/quit/close actions.
+      repeat = b == 2 and (a == 103 or a == 108 or a == 105 or a == 106 or a == 104 or a == 109);
+      ((4, a, if b == 1 or repeat then 1 else 0), st)
+  | other -> (if st.active then (kind, a, b) else (4, 0, 0), st).
+position absolute x y st =
+  xx = L.clamp 0 (st.w - 1) x; yy = L.clamp 0 (st.h - 1) y;
+  ((4, pack moveBase xx yy, 1), {st | x = xx, y = yy, absolute = absolute}).

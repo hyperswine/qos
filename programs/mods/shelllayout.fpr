@@ -1,0 +1,45 @@
+# Pure geometry shared by rendering, hit testing and keyboard navigation.
+# All rectangles use half-open edges in the surface's logical pixels.
+Target = Type (None | Tile Int | Previous | Next | Content | Refresh | Home | Scrollbar).
+clamp lo hi n = if n < lo then lo else if n > hi then hi else n.
+rect x y w h = {x = x, y = y, w = w, h = h}.
+inside r x y = x >= r.x and y >= r.y and x < r.x + r.w and y < r.y + r.h.
+valid w h = w > 0 and h > 0 and w <= 8192 and h <= 8192.
+layout w h =
+  scale = clamp 1000 1500 (min (w * 1000 / 960) (h * 1000 / 600));
+  margin = if w < 800 then 20 else 42 * scale / 1000;
+  gap = 12 * scale / 1000; rowGap = 20 * scale / 1000;
+  header = 82 * scale / 1000; top = margin + header + 16 * scale / 1000;
+  footer = max top (h - 44 * scale / 1000 - 16 * scale / 1000 - 10 * scale / 1000);
+  content = max 1 (w - 2 * margin);
+  cols = clamp 1 4 ((content + gap) / (240 * scale / 1000 + gap));
+  tileH = min (158 * scale / 1000) (max 1 (footer - top - rowGap));
+  rows = clamp 1 3 ((footer - top + rowGap) / (tileH + rowGap));
+  {w = w, h = h, scale = scale, margin = margin, content = content, gap = gap, rowGap = rowGap,
+   header = header, top = top, footer = footer, cols = cols, rows = rows, capacity = cols * rows,
+   tileW = max 1 ((content - (cols - 1) * gap) / cols), tileH = tileH}.
+min a b = if a < b then a else b.
+max a b = if a > b then a else b.
+px l n = max 1 (n * l.scale / 1000).
+pages l count = max 1 ((count + l.capacity - 1) / l.capacity).
+tile l slot = rect (l.margin + slot % l.cols * (l.tileW + l.gap))
+  (l.top + slot / l.cols * (l.tileH + l.rowGap)) l.tileW l.tileH.
+left l = rect l.margin l.footer (l.content / 2) (px l 44).
+right l = rect (l.margin + l.content / 2) l.footer (l.content - l.content / 2) (px l 44).
+content l = rect 0 0 l.w l.footer.
+panel l = rect l.margin l.top l.content (max 1 (l.footer - l.top - px l 12)).
+pane l =
+  p = panel l;
+  y = p.y + px l 20 + px l 36 + px l 8 + px l 20 + px l 12;
+  rect (p.x + px l 20) y (max 29 (p.w - px l 40)) (max 1 (p.y + p.h - y - px l 12 - px l 16 - px l 20)).
+bar l = r = pane l; rect (r.x + r.w - 12) r.y 12 r.h.
+hitHome l page count x y =
+  if inside (left l) x y then Previous else if inside (right l) x y then Next
+  else hitTiles l page count x y 0.
+hitTiles l page count x y slot = if slot >= l.capacity then None else
+  index = page * l.capacity + slot;
+  if index < count and inside (tile l slot) x y then Tile index else hitTiles l page count x y (slot + 1).
+hitPane l x y = if inside (left l) x y then Refresh else if inside (right l) x y then Home
+  else if inside (bar l) x y then Scrollbar else if inside (pane l) x y then Content else None.
+hitApp l x y = if inside (left l) x y then Refresh else if inside (right l) x y then Home
+  else if inside (content l) x y then Content else None.

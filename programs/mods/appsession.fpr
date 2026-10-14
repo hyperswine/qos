@@ -3,6 +3,7 @@
 unsafe module.
 AW = use "appwire".
 AJ = use "appjobs".
+L = use "shelllayout".
 AC = use "std/actor#201a0e9bf98a5154".
 Inbox = Type (Message (Int, Int) AW.Request | JobResult Int (Result AW.Snapshot String) | Idle | Gone).
 start me = case bootstrap (AC.nowUs Unit + 1000000) me of
@@ -10,7 +11,7 @@ start me = case bootstrap (AC.nowUs Unit + 1000000) me of
   | Ok request -> begin me request.
 begin me request =
   (parent, id, (magic, schema, (session, (w, h), (ns, storage)))) = request;
-  case magic == AW.magic and schema == AW and session > 0 and w > 0 and h > 0 of
+  case magic == AW.magic and schema == AW and session > 0 and L.valid w h of
     False -> _ = AC.reply (parent, id) ("refused", AW, 0); Err "startup refused"
   | True ->
       worker = spawn (AJ.run me ns storage);
@@ -28,7 +29,7 @@ next me ctx = if not (Sys.alive ctx.parent) then Gone else case receiveFromNow m
         else Gone.
 valid ctx session sequence = session == ctx.session and sequence > ctx.sequence.
 advance ctx sequence = {ctx | revision = ctx.revision + 1, sequence = sequence}.
-resized ctx (AW.Resize w h) = if w > 0 and h > 0 then {ctx | w = w, h = h} else ctx.
+resized ctx (AW.Resize w h) = if L.valid w h then {ctx | w = w, h = h} else ctx.
 resized ctx other = ctx.
 issue me ctx Nil = Unit.
 issue me ctx (AW.Fetch token job :: rest) =

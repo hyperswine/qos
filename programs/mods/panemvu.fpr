@@ -2,19 +2,23 @@
 ST = use "scrolltext".
 Phase = Type (Idle | Loading | Ready | Failed String).
 Msg = Type (Open Int | Refresh | Complete Int Int (Result String String)
-          | Scroll Int | Seek Int | Click Int | Tick | Leave).
+          | Scroll Int | Seek Int | Click Int | Resize Int Int Int Int | Tick | Leave).
 Cmd = Type (Fetch Int Int | Cancel).
-init = {source = 0, generation = 0, phase = Idle, rows = Nil, scroll = 0, ticks = 0}.
+init = {source = 0, generation = 0, phase = Idle, rows = Nil, raw = "", metrics = ST.default, scroll = 0, ticks = 0}.
 loading m = case m.phase of Loading -> True | other -> False.
 update msg m = case msg of
-    Open source -> begin source {m | rows = Nil, scroll = 0}
+    Open source -> begin source {m | raw = "", rows = Nil, scroll = 0}
   | Refresh -> (case m.source == 0 or loading m of True -> (m, Nil) | False -> begin m.source m)
   | Complete generation source result -> complete generation source result m
   | Tick -> tick m
-  | Scroll delta -> ({m | scroll = ST.offset (ST.count m.rows) (m.scroll + delta)}, Nil)
-  | Seek requested -> ({m | scroll = ST.offset (ST.count m.rows) requested}, Nil)
-  | Click y -> ({m | scroll = ST.click (ST.count m.rows) y}, Nil)
-  | Leave -> ({m | source = 0, generation = m.generation + 1, phase = Idle, rows = Nil, scroll = 0, ticks = 0}, [Cancel]).
+  | Scroll delta -> ({m | scroll = ST.offsetWith m.metrics (ST.count m.rows) (m.scroll + delta)}, Nil)
+  | Seek requested -> ({m | scroll = ST.offsetWith m.metrics (ST.count m.rows) requested}, Nil)
+  | Click y -> ({m | scroll = ST.clickWith m.metrics (ST.count m.rows) y}, Nil)
+  | Resize w h size pitch ->
+      metrics = ST.spec w h size pitch;
+      rows = ST.wrapWith metrics m.raw;
+      ({m | metrics = metrics, rows = rows, scroll = ST.offsetWith metrics (ST.count rows) m.scroll}, Nil)
+  | Leave -> ({m | source = 0, generation = m.generation + 1, phase = Idle, raw = "", rows = Nil, scroll = 0, ticks = 0}, [Cancel]).
 begin source m =
   gen = m.generation + 1;
   ({m | source = source, generation = gen, phase = Loading, ticks = 0}, [Fetch gen source]).
@@ -24,8 +28,8 @@ complete generation source result m =
   | True -> case result of
       Err why -> ({m | phase = Failed why}, Nil)
     | Ok text ->
-        rows = ST.wrap text;
-        ({m | phase = Ready, rows = rows, scroll = ST.offset (ST.count rows) m.scroll}, Nil).
+        rows = ST.wrapWith m.metrics text;
+        ({m | phase = Ready, raw = text, rows = rows, scroll = ST.offsetWith m.metrics (ST.count rows) m.scroll}, Nil).
 status m = case m.phase of
     Idle -> ""
   | Loading -> "Loading...   ESC Home"

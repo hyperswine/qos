@@ -80,3 +80,32 @@ pane rows requested =
 range rows requested =
   n = count rows; off = offset n requested;
   case n == 0 of True -> "NO ENTRIES" | False -> "{off + 1}-{clamp 0 n (off + visible)} / {n} LINES".
+
+# Dynamic panes use the same metrics for wrapping, drawing and hit testing.
+spec w h size line = {w = S2.imax 1 (w - 28), h = S2.imax 1 h,
+  em = S2.imax 1 size, pitch = S2.imax 1 line, visible = S2.imax 1 (h / S2.imax 1 line)}.
+default = spec 836 paneH em pitch.
+limitWith s n = S2.imax 0 (n - s.visible).
+offsetWith s n requested = clamp 0 (limitWith s n) requested.
+wrapWith s text = wrapParts s (lines text).
+wrapParts s Nil = Nil.
+wrapParts s (line :: rest) = append (wrapLine line (s.w - 6) s.em) (wrapParts s rest).
+wrapLinesWith s Nil = Nil.
+wrapLinesWith s (line :: rest) = append (wrapWith s line) (wrapLinesWith s rest).
+clickWith s n y = offsetWith s n (clamp 0 (s.h - 1) y * limitWith s n / S2.imax 1 (s.h - 1)).
+thumbWith s n = clamp (S2.imin 22 s.h) s.h (s.h * s.visible / S2.imax s.visible n).
+thumbTopWith s n off = (s.h - thumbWith s n) * offsetWith s n off / S2.imax 1 (limitWith s n).
+rowWith s text = S2.Box [S2.Col, S2.W s.w, S2.H s.pitch, S2.Pad 3]
+  [S2.Lbl [S2.Fs s.em, S2.Fg (940, 950, 990), S2.Ellip (s.w - 6)] text].
+rowTreesWith s Nil = Nil.
+rowTreesWith s (line :: rest) = rowWith s line :: rowTreesWith s rest.
+paneWith s rows requested =
+  n = count rows; off = offsetWith s n requested;
+  S2.Box [S2.Row, S2.W (s.w + 28), S2.H s.h, S2.Gap 16]
+    [S2.Box [S2.Col, S2.W s.w, S2.H s.h, S2.Clip]
+       (if n == 0 then [rowWith s "No entries yet."] else rowTreesWith s (take (skip rows off) s.visible)),
+     S2.Box [S2.Col, S2.W 12, S2.H s.h, S2.Round 6, S2.Bg (32, 49, 78)]
+       [S2.Box [S2.H (thumbTopWith s n off)] Nil,
+        S2.Box [S2.W 12, S2.H (thumbWith s n), S2.Round 6, S2.Bg (380, 800, 980)] Nil]].
+rangeWith s rows requested = n = count rows; off = offsetWith s n requested;
+  if n == 0 then "NO ENTRIES" else "{off + 1}-{clamp 0 n (off + s.visible)} / {n} LINES".

@@ -1,65 +1,56 @@
-# Recursive MVU: cached model, pure update/view, explicit effect messages.
+# Recursive MVU: viewport, focus and pointer capture are model values.
 unsafe module.
 AW = use "appwire".
 AS = use "appsession".
-AC = use "std/actor#201a0e9bf98a5154".
-S2 = use "scene2d".
+AV = use "appview".
+L = use "shelllayout".
+ST = use "scrolltext".
 AK = use "appkit".
-Box = S2.Box. Lbl = S2.Lbl. Slot = S2.Slot.
-Row = S2.Row. Col = S2.Col. Pad = S2.Pad. Gap = S2.Gap.
-W = S2.W. H = S2.H. Grow = S2.Grow. Sc = S2.Sc.
-Bg = S2.Bg. Fg = S2.Fg. Bord = S2.Bord.
+AC = use "std/actor#201a0e9bf98a5154".
 
-
-init = ({sev = 0, wanted = 0, rows = Nil, total = "", token = 1, busy = True, ticks = 0, phase = AW.Loading}, [AW.Fetch 1 (AW.Logs 0)]).
+init = ({sev = 0, wanted = 0, rows = Nil, total = "", token = 1, busy = True, ticks = 0, phase = AW.Loading, w = 960, h = 530, focused = True, down = False, capture = 0 - 1, wheel = 0, scroll = 0, dragY = 0, dragScroll = 0, dragged = False}, [AW.Fetch 1 (AW.Logs 0)]).
 fetch m = if m.busy then (m, Nil) else
-  ({m | rows = (if m.sev == m.wanted then m.rows else Nil), total = (if m.sev == m.wanted then m.total else ""), sev = m.wanted, token = m.token + 1, busy = True, ticks = 0, phase = AW.Loading}, [AW.Fetch (m.token + 1) (AW.Logs m.wanted)]).
+  ({m | rows = (if m.sev == m.wanted then m.rows else Nil), scroll = (if m.sev == m.wanted then m.scroll else 0), total = (if m.sev == m.wanted then m.total else ""), sev = m.wanted, token = m.token + 1, busy = True, ticks = 0, phase = AW.Loading}, [AW.Fetch (m.token + 1) (AW.Logs m.wanted)]).
+update (AW.Resize w h) m = fresh = AV.resize w h m; (AV.seek (rows fresh) fresh.scroll fresh, Nil).
+update (AW.Focus active) m = (AV.focus active m, Nil).
+update AW.Cancel m = (AV.focus m.focused m, Nil).
+update AW.Tick m | not m.focused = (m, Nil).
+
+update (AW.Wheel dy dx) m = (AV.wheel (rows m) dy m, Nil).
+update (AW.Pointer x y buttons) m = (AV.pointer (rows m) x y buttons m, Nil).
 update (AW.Key k) m = if k == 49 or k == 17 or k == 18 or k == 35 then
   fetch {m | wanted = (case k of 49 -> 0 | 17 -> 1 | 18 -> 2 | other -> 3)}
-  else if k == 19 then fetch m else (m, Nil).
+  else if k == 19 then fetch m else (navigate k m, Nil).
 update AW.Tick m = case m.phase of
     AW.Ready -> if m.ticks >= 9 then fetch m else ({m | ticks = m.ticks + 1}, Nil)
   | other -> (m, Nil).
 update (AW.Arrived token result) m = if token != m.token or not m.busy then (m, Nil) else
   if m.sev != m.wanted then fetch {m | busy = False} else case result of
-    Ok (AW.Lines rows total) -> ({m | rows = rows, total = total, busy = False, phase = AW.Ready}, Nil)
+    Ok (AW.Lines lines total) -> fresh = {m | rows = lines, total = total, busy = False, phase = AW.Ready};
+      (AV.seek (rows fresh) m.scroll fresh, Nil)
   | Err why -> ({m | busy = False, phase = AW.Failed why}, Nil)
   | other -> ({m | busy = False, phase = AW.Failed "invalid logs result"}, Nil).
 update other m = (m, Nil).
-view vp m = (tree vp, [sevPath m.sev, lgNth m.rows 0, lgNth m.rows 1, lgNth m.rows 2, lgNth m.rows 3,
-  lgNth m.rows 4, lgNth m.rows 5, lgNth m.rows 6, lgNth m.rows 7, m.total]).
-
-lgLine i =
-  Box [Row, Pad 1] [ Slot [Fg (930, 940, 960)] i 44 ].
-
-tree vp =
-  (vw, vh) = vp;
-  Box [Col, Pad 8, Gap 4, W vw, H vh, Bg (62, 70, 88)]
-    [ Box [Row, Gap 6]
-        [ Lbl [Sc 2, Fg (420, 900, 560)] "LOGS"
-        , Slot [Fg (999, 800, 300)] 0 14
-        , Box [Grow] Nil
-        , Slot [Fg (560, 590, 650)] 9 14 ]
-    , Box [Col, Gap 2, Grow, Bord (150, 165, 200), Pad 3]
-        [ lgLine 1, lgLine 2, lgLine 3, lgLine 4
-        , lgLine 5, lgLine 6, lgLine 7, lgLine 8 ]
-    , Lbl [Fg (560, 590, 650)] "N NORMAL  W WARNS  E ERRORS  H HOST  ESC BACK" ].
-
+rows m = ST.wrapLinesWith (AV.metrics m) m.rows.
+navigate 103 m = AV.scroll (rows m) (0 - 1) m.
+navigate 108 m = AV.scroll (rows m) 1 m.
+navigate 104 m = spec = AV.metrics m; AV.scroll (rows m) (0 - spec.visible) m.
+navigate 109 m = spec = AV.metrics m; AV.scroll (rows m) spec.visible m.
+navigate 102 m = AV.seek (rows m) 0 m.
+navigate 107 m = AV.seek (rows m) (ST.count (rows m)) m.
+navigate other m = m.
 sevPath 0 = "/logs/normal".
 sevPath 1 = "/logs/warns".
 sevPath 2 = "/logs/errors".
-sevPath 3 = "/logs/host".
-sevPath sev = error "logs: invalid severity {sev}".
-
-lgNth Nil i = "".
-lgNth (v :: r) 0 = v.
-lgNth (v :: r) i = lgNth r (i - 1).
+sevPath other = "/logs/host".
+view vp m = (AV.frame vp "Logs" "{sevPath m.sev}   {m.total}" (rows m) m.scroll, Nil).
 
 # This actor owns the child model. Transport and effects exchange data only.
 run me = case AS.start me of
     Err why -> Unit
   | Ok ctx ->
-      (model, commands) = init;
+      (initial, commands) = init;
+      (model, ignored) = update (AW.Resize ctx.w ctx.h) initial;
       _ = AS.issue me ctx commands;
       _ = Sys.loop (ctx, model) (step me); Unit.
 step me state =

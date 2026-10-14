@@ -313,6 +313,10 @@ static unsigned gfx_event_read, gfx_event_write;
 static double gfx_cursor_x, gfx_cursor_y;
 static int gfx_have_cursor;
 static int gfx_mouse_buttons;
+static int gfx_live_input(void) {
+  const char *source = getenv("FPR_EVDEV");
+  return !source || !*source || !strcmp(source, "auto");
+}
 
 static void gfx_event_push(int64_t kind, int64_t a, int64_t c) {
   unsigned next = (gfx_event_write + 1) % GFX_EVENT_CAP;
@@ -382,25 +386,32 @@ static unsigned short gfx_glfw_to_evdev(int key) {
 
 static void gfx_key_cb(GLFWwindow *window, int key, int scancode, int action, int mods) {
   (void)window; (void)scancode; (void)mods;
-  if (action == GLFW_REPEAT) return; /* press/release only, like evdev discovery */
+  if (!gfx_live_input()) return;
   unsigned short code = gfx_glfw_to_evdev(key);
-  if (code) qos_evdev_inject(code, action != GLFW_RELEASE);
+  if (code) {
+    /* Native modifier facts rehydrate the shared decoder after focus changes.
+     * The decoder still owns all keycode biasing and caps-lock semantics. */
+    gfx_event_push(4, 42, (mods & GLFW_MOD_SHIFT) != 0);
+    gfx_event_push(4, 29, (mods & GLFW_MOD_CONTROL) != 0);
+    gfx_event_push(4, 56, (mods & GLFW_MOD_ALT) != 0);
+    gfx_event_push(4, code, action == GLFW_REPEAT ? 2 : action != GLFW_RELEASE);
+  }
 }
 
 static void gfx_char_cb(GLFWwindow *window, unsigned int codepoint) {
   (void)window;
-  gfx_event_push(1, codepoint, 0);
+  /* ASCII control input is already represented by the evdev key above.
+   * Do not enqueue a second activation for the matching character event. */
+  if (gfx_live_input() && codepoint >= 128) gfx_event_push(1, codepoint, 0);
 }
 
 static void gfx_pointer_position(GLFWwindow *window, double x, double y) {
-  int w, h;
-  glfwGetWindowSize(window, &w, &h);
-  if (w > 0 && h > 0)
-    gfx_event_push(7, (int64_t)(x * G.w / w), (int64_t)(y * G.h / h));
+  (void)window;
+  if (gfx_live_input()) gfx_event_push(7, (int64_t)x, (int64_t)y);
 }
 
 static void gfx_cursor_cb(GLFWwindow *window, double x, double y) {
-  if (gfx_have_cursor) gfx_event_push(2, (int64_t)(x - gfx_cursor_x), (int64_t)(gfx_cursor_y - y));
+  if (gfx_live_input() && gfx_have_cursor) gfx_event_push(2, (int64_t)(x - gfx_cursor_x), (int64_t)(gfx_cursor_y - y));
   gfx_cursor_x = x; gfx_cursor_y = y; gfx_have_cursor = 1;
   gfx_pointer_position(window, x, y);
 }
@@ -409,12 +420,12 @@ static void gfx_cursor_cb(GLFWwindow *window, double x, double y) {
  * survive), c = horizontal */
 static void gfx_scroll_cb(GLFWwindow *window, double xoff, double yoff) {
   (void)window;
-  gfx_event_push(6, (int64_t)lround(yoff * 10.0), (int64_t)lround(xoff * 10.0));
+  if (gfx_live_input()) gfx_event_push(6, (int64_t)lround(yoff * 10.0), (int64_t)lround(xoff * 10.0));
 }
 
 static void gfx_mouse_cb(GLFWwindow *window, int button, int action, int mods) {
   (void)mods;
-  if (button >= 0 && button < 31) {
+  if (gfx_live_input() && button >= 0 && button < 31) {
     double x, y;
     glfwGetCursorPos(window, &x, &y);
     gfx_pointer_position(window, x, y);
@@ -423,6 +434,32 @@ static void gfx_mouse_cb(GLFWwindow *window, int button, int action, int mods) {
     gfx_event_push(3, gfx_mouse_buttons, 0);
   }
 }
+/* Report native facts only. Focus/navigation/click policy belongs to FP-RISC. */
+static void gfx_focus_cb(GLFWwindow *window, int focused) {
+  (void)window;
+  if (!gfx_live_input()) return;
+  if (!focused) {
+    /* Abandon clicks/keys, but keep the newest surface-size fact. Otherwise
+     * a resize immediately followed by focus loss would leave a stale FBO. */
+    gfx_event_t resize = {0, 0, 0};
+    while (gfx_event_read != gfx_event_write) {
+      gfx_event_t event = gfx_events[gfx_event_read];
+      gfx_event_read = (gfx_event_read + 1) % GFX_EVENT_CAP;
+      if (event.kind == 5) resize = event;
+    }
+    gfx_event_read = gfx_event_write = 0;
+    if (resize.kind) gfx_event_push(resize.kind, resize.a, resize.c);
+    gfx_mouse_buttons = 0; gfx_have_cursor = 0;
+    qos_evdev_reset_modifiers();
+  }
+  gfx_event_push(8, focused != 0, 0);
+}
+static void gfx_size_cb(GLFWwindow *window, int w, int h) {
+  (void)window;
+  if (w > 0 && h > 0 && w <= 8192 && h <= 8192 && (w != G.w || h != G.h))
+    gfx_event_push(5, w, h);
+}
+
 #endif
 
 /* EGL contexts are thread-bound.  The graphics service actor's mailbox
@@ -675,6 +712,12 @@ static EGLDisplay egl_display(const char **how) {
 
 void gfx_init(int w, int h) { /* raw export: gfx_raw.h */
   if (G.inited) return;
+  const char *requested_size = getenv("FPR_GFX_SIZE");
+  int requested_w, requested_h;
+  if (requested_size && sscanf(requested_size, "%dx%d", &requested_w, &requested_h) == 2 &&
+      requested_w >= 64 && requested_h >= 64 && requested_w <= 8192 && requested_h <= 8192) {
+    w = requested_w; h = requested_h;
+  }
 #ifdef FPR_DESKTOP_GL
   if (w <= 0) w = 1280;
   if (h <= 0) h = 720;
@@ -693,6 +736,8 @@ void gfx_init(int w, int h) { /* raw export: gfx_raw.h */
   glfwSetCursorPosCallback(G.window, gfx_cursor_cb);
   glfwSetMouseButtonCallback(G.window, gfx_mouse_cb);
   glfwSetScrollCallback(G.window, gfx_scroll_cb);
+  glfwSetWindowFocusCallback(G.window, gfx_focus_cb);
+  glfwSetWindowSizeCallback(G.window, gfx_size_cb);
   glfwSwapInterval(1);
   G.boundTid = pthread_self(); G.haveTid = 1;
   qos_hostlog("[desktopgl] GLFW  OpenGL %s  %s",
@@ -1669,20 +1714,38 @@ int gfx_save_ppm(const char *path) {
 
 /* ==== input ========================================================== */
 #ifdef FPR_DESKTOP_GL
+static void gfx_resize_target(int w, int h) {
+  if (w <= 0 || h <= 0 || w > 8192 || h > 8192) return;
+  glBindTexture(GL_TEXTURE_2D, G.fboColor);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, 0);
+  glBindRenderbuffer(GL_RENDERBUFFER, G.fboDepth);
+  glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, w, h);
+  glBindFramebuffer(GL_FRAMEBUFFER, G.fbo);
+  if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+    fpr_cpanic("gfx: resized framebuffer incomplete");
+  G.w = w; G.h = h; retained_ui_valid = 0;
+}
 int gfx_input_poll(int64_t *kind_out, int64_t *a_out, int64_t *c_out) {
   gfx_bind_thread();
   glfwPollEvents(); /* fires the callbacks: keys inject into evdev_raw */
   /* keys come back through the ONE decoder (modifier biasing, replay
    * precedence); the local queue keeps only mouse + char events */
-  if (qos_evdev_poll(kind_out, a_out, c_out)) return 1;
-  if (gfx_event_read == gfx_event_write) {
-    *kind_out = 0; *a_out = 0; *c_out = 0;
-    return 0;
+  if (!gfx_live_input() && qos_evdev_poll(kind_out, a_out, c_out)) return 1;
+  const char *pointer_replay = getenv("FPR_POINTER_EVDEV");
+  if (pointer_replay && *pointer_replay && qos_mice_poll(kind_out, a_out, c_out)) return 1;
+  while (gfx_event_read != gfx_event_write) {
+    gfx_event_t event = gfx_events[gfx_event_read];
+    gfx_event_read = (gfx_event_read + 1) % GFX_EVENT_CAP;
+    if (event.kind == 5) gfx_resize_target((int)event.a, (int)event.c);
+    if (event.kind == 4) {
+      if (qos_evdev_decode_key((unsigned short)event.a, (int)event.c, kind_out, a_out, c_out)) return 1;
+      continue;
+    }
+    *kind_out = event.kind; *a_out = event.a; *c_out = event.c;
+    return 1;
   }
-  gfx_event_t event = gfx_events[gfx_event_read];
-  gfx_event_read = (gfx_event_read + 1) % GFX_EVENT_CAP;
-  *kind_out = event.kind; *a_out = event.a; *c_out = event.c;
-  return 1;
+  *kind_out = 0; *a_out = 0; *c_out = 0;
+  return 0;
 }
 #else
 #include <termios.h>

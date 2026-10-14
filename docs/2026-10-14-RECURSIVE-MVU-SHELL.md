@@ -253,3 +253,9 @@ restaged and the successful hardware runs used one stable boot. No installed
 host, GUI archive, seed or writable disk was replaced. Local ignored evidence
 is in `.qos/validation/gui-app-session-20261014/`, including source/artifact
 hashes, contract results, GUI screenshots/logs and Pi workload results.
+
+## Responsive layout and input
+
+The next slice implements viewport-derived shell/child geometry, explicit focus
+and input state, and data-only input messages. Its contract, mechanisms and
+fresh validation are recorded in [RESPONSIVE-MVU-INPUT](2026-10-14-RESPONSIVE-MVU-INPUT.md).

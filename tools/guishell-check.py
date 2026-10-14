@@ -19,13 +19,13 @@ import zlib
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def png(path, rgb):
+def png(path, rgb, width=960, height=600):
     def chunk(kind, data):
         return (struct.pack('!I', len(data)) + kind + data +
                 struct.pack('!I', zlib.crc32(kind + data) & 0xffffffff))
-    raw = b''.join(b'\0' + rgb[i:i + 2880] for i in range(0, len(rgb), 2880))
+    raw = b''.join(b'\0' + rgb[i:i + width * 3] for i in range(0, len(rgb), width * 3))
     path.write_bytes(b'\x89PNG\r\n\x1a\n' +
-                     chunk(b'IHDR', struct.pack('!2I5B', 960, 600, 8, 2, 0, 0, 0)) +
+                     chunk(b'IHDR', struct.pack('!2I5B', width, height, 8, 2, 0, 0, 0)) +
                      chunk(b'IDAT', zlib.compress(raw)) + chunk(b'IEND', b''))
 
 
@@ -85,7 +85,7 @@ fixtureLoop me recovered =
     module.write_text(text)
     entry = out / 'pane-entry.fpr'
     entry.write_text('unsafe program.\nS = use "' + str(module.with_suffix('')) +
-                     '".\nmain = S.run "' + tag + '".\n')
+                     '".\nmain = S.runWindow "' + tag + '" S.update 960 600.\n')
     built = subprocess.run(['make', '-s', 'qos-app', f'PROG={entry}',
                             f'QA_OUT={out / "pane-recovery.qa"}', f'BUILD={out / "pane-recovery-build"}'],
                            cwd=ROOT, env=env, capture_output=True, text=True, timeout=240)
@@ -182,6 +182,75 @@ fixtureLoop me recovered =
                 shutil.move(path, out / f'pane-recovery-{n}.ppm')
 
 
+def viewport_checks(out, env, command, tag):
+    for width, height in [(1024, 600), (1280, 720), (1920, 1080)]:
+        name = f'viewport-{width}x{height}'
+        keyboard, pointer = out / (name + '.keys'), out / (name + '.pointer')
+        os.mkfifo(keyboard); os.mkfifo(pointer)
+        kfd = os.open(keyboard, os.O_RDWR | os.O_NONBLOCK)
+        pfd = os.open(pointer, os.O_RDWR | os.O_NONBLOCK)
+        local = dict(env, FPR_GFX_SIZE=f'{width}x{height}', FPR_EVDEV=str(keyboard), FPR_POINTER_EVDEV=str(pointer))
+        proc = subprocess.Popen(command, cwd=out, env=local, stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, text=True, bufsize=1)
+        log = []
+        thread = threading.Thread(target=lambda: log.extend(proc.stdout), daemon=True); thread.start()
+        def wait(text):
+            deadline = time.monotonic() + 20
+            while time.monotonic() < deadline:
+                body = ''.join(log)
+                assert 'PANIC' not in body and proc.poll() is None, body
+                if text in body: return
+                time.sleep(.025)
+            raise TimeoutError(text + '\n' + ''.join(log)[-2000:])
+        def key(code):
+            for value in (1, 0): os.write(kfd, struct.pack('llHHi', 0, 0, 1, code, value))
+            time.sleep(.15)
+        def point(value):
+            events = [(3, 0, 65535 // 8), (3, 1, 65535 // 3), (1, 0x14a, value), (0, 0, 0)]
+            os.write(pfd, b''.join(struct.pack('llHHi', 0, 0, *event) for event in events))
+            time.sleep(.2)
+        def capture(n, requested=True):
+            if requested: key(25); wait(f'shell: snapshot {n}')
+            path = Path(f'/tmp/{tag}-{n}.ppm'); deadline = time.monotonic() + 10
+            while time.monotonic() < deadline:
+                if path.exists() and path.stat().st_size >= width * height * 3: break
+                time.sleep(.025)
+            data = path.read_bytes(); assert data.startswith(f'P6\n{width} {height}\n255\n'.encode()), data[:60]
+            rgb = data.split(b'\n', 3)[3]; assert len(rgb) == width * height * 3
+            assert sum(r > 160 and g > 160 and b > 160 for r,g,b in zip(rgb[::3],rgb[1::3],rgb[2::3])) > 100
+            shutil.move(path, out / f'{name}-{n}.ppm'); png(out / f'{name}-{n}.png', rgb, width, height)
+            return rgb
+        try:
+            wait('Main Profile ready (10 shortcuts,')
+            home = capture(1)
+            point(1)
+            assert 'shell: open clock' not in ''.join(log), 'press launched before release'
+            os.write(pfd, struct.pack('llHHi', 0, 0, 0, 3, 0) + struct.pack('llHHi', 0, 0, 0, 0, 0))
+            point(0)
+            assert 'shell: open clock' not in ''.join(log), 'dropped input report retained click capture'
+            point(1); point(0); wait('shell: open clock')
+            assert capture(2) != home
+            key(1); wait('shell: home'); capture(3)
+            key(102); key(106); key(28); wait('shell: open files'); wait('shell: pane 1 R Refresh')
+            files = capture(4); assert files != home
+            key(1); capture(5)
+            key(102)
+            for _ in range(6): key(106)
+            key(28); wait('shell: open browser'); capture(6)
+            key(15); key(15); key(28); capture(7)  # focused Home, activated with Enter
+            key(16); proc.wait(timeout=10); thread.join(timeout=3)
+            assert proc.returncode == 0 and 'storage drained and flushed' in ''.join(log), ''.join(log)
+        finally:
+            if proc.poll() is None:
+                proc.terminate()
+                try: proc.wait(timeout=5)
+                except subprocess.TimeoutExpired: proc.kill(); proc.wait(timeout=5)
+            thread.join(timeout=3); proc.stdout.close()
+            os.close(kfd); os.close(pfd); keyboard.unlink(); pointer.unlink()
+            (out / (name + '.log')).write_text(''.join(log))
+    print('guishell: Pi panel, 720p, 1080p real GL; native touch replay, cancellation and keyboard focus HOLDS')
+
+
 def check(out):
     out.mkdir(parents=True, exist_ok=False)
     tag = f'qos-shell-check-{os.getpid()}'
@@ -203,7 +272,7 @@ def check(out):
     entry = out / 'shell-check.fpr'
     entry.write_text('unsafe program.\nS = use "' +
                      str(ROOT / 'programs/mods/guishell') +
-                     '".\nmain = S.run "' + tag + '".\n')
+                     '".\nmain = S.runWindow "' + tag + '" S.update 960 600.\n')
     run('make', '-s', 'qos-app', f'PROG={entry}',
         f'QA_OUT={out / "check.qa"}', f'BUILD={out / "check-build"}')
     # Exercise the actual appliance session script with a runner that records
@@ -242,7 +311,11 @@ def check(out):
         f'QA_OUT={out / "appsession.qa"}', f'BUILD={out / "appsession-build"}')
     run('make', '-s', 'qos-app', 'PROG=tests/appjobs.fpr',
         f'QA_OUT={out / "appjobs.qa"}', f'BUILD={out / "appjobs-build"}')
+    run('make', '-s', 'qos-app', 'PROG=tests/shelllayout.fpr',
+        f'QA_OUT={out / "shelllayout.qa"}', f'BUILD={out / "shelllayout-build"}')
     run('make', '-s', '-C', 'qos', 'portable-gl')
+    run('sh', 'qos/tests-host/pointer-check.sh')
+    run('sh', 'qos/tests-host/gfx-input-check.sh')
     unit = subprocess.run([str(ROOT / 'qos/qosp-gl'), '--yes', str(out / 'unit.qa')],
                           cwd=out, env=env, capture_output=True, text=True, timeout=30)
     (out / 'unit.log').write_text(unit.stdout + unit.stderr)
@@ -256,7 +329,7 @@ def check(out):
                           cwd=out, env=env, capture_output=True, text=True, timeout=30)
     (out / 'panemvu.log').write_text(pane.stdout + pane.stderr)
     assert pane.returncode == 0 and 'panemvu: HOLDS' in pane.stdout, pane.stdout + pane.stderr
-    for contract in ['appsession', 'appjobs']:
+    for contract in ['appsession', 'appjobs', 'shelllayout']:
         for harts in ['1', '4']:
             checked = subprocess.run([str(ROOT / 'qos/qosp-gl'), '--yes', str(out / (contract + '.qa'))],
                                      cwd=out, env=dict(env, FPR_HARTS=harts, FPR_PORT='0'),
@@ -344,12 +417,10 @@ def check(out):
             key(108); key(28)
             resolved = shot(4)
             assert browser != resolved, 'onboard browser update did not change its view'
-            key(1); wait_for('shell: home'); await_capture(Path(f'/tmp/{tag}-5.ppm'))
-            shutil.move(f'/tmp/{tag}-5.ppm', out / f'boot{boot}-5.ppm')
+            key(1); wait_for('shell: home'); shot(5)
             key(106); key(106); key(28); wait_for('shell: open plugmini')
             refusal = shot(6)
-            key(1); wait_for('shell: home'); await_capture(Path(f'/tmp/{tag}-7.ppm'))
-            shutil.move(f'/tmp/{tag}-7.ppm', out / f'boot{boot}-7.ppm')
+            key(1); wait_for('shell: home'); shot(7)
             key(106); key(28); wait_for('shell: open broken')
             broken = shot(8)
             assert refusal != broken, 'distinct launch refusals were not displayed'
@@ -357,8 +428,7 @@ def check(out):
             key(108); key(106); key(28); wait_for('shell: open clock')
             clock = shot(9)
             assert clock != first, 'loaded clock did not draw'
-            key(1); wait_for('shell: home'); await_capture(Path(f'/tmp/{tag}-10.ppm'))
-            shutil.move(f'/tmp/{tag}-10.ppm', out / f'boot{boot}-10.ppm')
+            key(1); wait_for('shell: home'); shot(10)
             key(105); key(105); key(105); key(28); wait_for('shell: open files'); wait_for('shell: pane 1 R Refresh')
             files = shot(11)
             # Each namespace entry occupies its own row in the fixed viewport.
@@ -372,30 +442,25 @@ def check(out):
             assert files_bottom != files, 'Files page-down did not scroll'
             key(102)
             assert shot(13) == files, 'Files Home did not return to the first row'
-            key(1); wait_for('shell: home'); await_capture(Path(f'/tmp/{tag}-14.ppm'))
-            shutil.move(f'/tmp/{tag}-14.ppm', out / f'boot{boot}-14.ppm')
+            key(1); wait_for('shell: home'); shot(14)
             key(106); key(28); wait_for('shell: open logs'); wait_for('shell: pane 2 R Refresh')
             logs = shot(15)
             assert sum(row_ink(logs, 236 + row * 26) > 20 for row in range(9)) >= 6, 'Logs is not a vertical list'
             key(107)
             assert shot(16) != logs, 'Logs End did not scroll'
-            key(1); wait_for('shell: home'); await_capture(Path(f'/tmp/{tag}-17.ppm'))
-            shutil.move(f'/tmp/{tag}-17.ppm', out / f'boot{boot}-17.ppm')
+            key(1); wait_for('shell: home'); shot(17)
             key(109); key(106); key(28); wait_for('shell: open disk')
             disk_stats = shot(18)
             assert disk_stats != logs, 'loaded Disk did not draw its cached statistics'
-            key(1); wait_for('shell: home'); await_capture(Path(f'/tmp/{tag}-19.ppm'))
-            shutil.move(f'/tmp/{tag}-19.ppm', out / f'boot{boot}-19.ppm')
+            key(1); wait_for('shell: home'); shot(19)
             key(104); key(108); key(106); key(106); key(28); wait_for('shell: open logs')
             app_logs = shot(20)
             key(18)
             assert shot(21) != app_logs, 'loaded Logs did not update severity'
-            key(1); wait_for('shell: home'); await_capture(Path(f'/tmp/{tag}-22.ppm'))
-            shutil.move(f'/tmp/{tag}-22.ppm', out / f'boot{boot}-22.ppm')
+            key(1); wait_for('shell: home'); shot(22)
             key(105); key(28); wait_for('shell: open clock')
             assert shot(23) != first, 'Clock did not reopen a fresh session'
-            key(1); wait_for('shell: home'); await_capture(Path(f'/tmp/{tag}-24.ppm'))
-            shutil.move(f'/tmp/{tag}-24.ppm', out / f'boot{boot}-24.ppm')
+            key(1); wait_for('shell: home'); shot(24)
             if boot == 1:
                 key(16)
             else:
@@ -431,6 +496,7 @@ def check(out):
                 p = Path(f'/tmp/{tag}-{n}.ppm')
                 if p.exists():
                     shutil.move(p, out / f'boot{boot}-{n}.ppm')
+    viewport_checks(out, env, command, tag)
     # A dependency death must reach Main's lifecycle barrier before the
     # primary failure is reported. Use only this test's graphics owner/disk.
     failure = out / 'failure.fpr'
@@ -444,7 +510,7 @@ def check(out):
         '      ep = case GX.attach me ns "failure" of Ok value -> value | Err why -> error why;\n' +
         '      (graphics, handle) = ep; _ = kill graphics; (model, Nil)\n' +
         '  | other -> S.update me env event model.\n' +
-        'main = S.runWith "qos-shell-failure" fault.\n')
+        'main = S.runWindow "qos-shell-failure" fault 960 600.\n')
     run('make', '-s', 'qos-app', f'PROG={failure}',
         f'QA_OUT={out/"failure.qa"}', f'BUILD={out/"failure-build"}')
     shutil.copyfile(profile/'Main.disk', out/'failure.disk')

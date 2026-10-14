@@ -36,6 +36,9 @@ int qos_evdev_inject(unsigned code, int value);
 /* how many sources are open (opens them on first use): 0 means there is no
  * keyboard to read and the caller should fall back to the terminal */
 int qos_evdev_sources(void);
+/* Same decoder for native window events, consumed in their arrival order. */
+int qos_evdev_decode_key(unsigned short code, int value, int64_t *kind, int64_t *a, int64_t *c);
+void qos_evdev_reset_modifiers(void);
 
 /* the mouse tier (mice_raw.c): 1 = event delivered -- (2, dx, dy) relative
  * motion with +y UP, or (3, buttons, 0) the mask after a change */

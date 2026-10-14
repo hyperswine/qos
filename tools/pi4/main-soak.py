@@ -25,6 +25,8 @@ def main():
     ap.add_argument('--known-hosts', required=True)
     ap.add_argument('--host-key-alias')
     ap.add_argument('--remote-dir', required=True)
+    ap.add_argument('--viewport', help='force an isolated logical surface, e.g. 1024x600')
+    ap.add_argument('--pointer-probe', action='store_true', help='test primary touch tap/cancel through FPR_POINTER_EVDEV')
     ap.add_argument('--harts', type=int, choices=(1, 4), default=4)
     ap.add_argument('--reliability-probe', action='store_true',
                     help='require tests/mainreliability.fpr; F11 checks real reload and a live hung storage peer')
@@ -39,6 +41,10 @@ def main():
     a = ap.parse_args()
     if a.seconds < 60 or a.interval <= 0 or a.max_growth_mib < 0 or a.arena_mib < 64:
         ap.error('seconds must be >=60, interval positive, growth nonnegative, arena >=64 MiB')
+    if a.viewport:
+        viewport = re.fullmatch(r'([0-9]+)x([0-9]+)', a.viewport)
+        if not viewport or any(not 64 <= int(n) <= 8192 for n in viewport.groups()):
+            ap.error('viewport must be WIDTHxHEIGHT, each 64..8192')
     a.output.mkdir(parents=True, exist_ok=True)
     ssh_args = ['ssh', '-F', '/dev/null', '-i', a.identity, '-o', 'IdentitiesOnly=yes',
                 '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes',
@@ -60,7 +66,7 @@ def main():
     ssh('set -e\nmkdir '+quote(work)+' '+quote(store)+'\ncp '+quote(base+'/Main.disk')+' '+quote(store+'/Main.disk'))
     result = {'remote_dir': base, 'work': work, 'store': store, 'bundle_hashes': hashes,
               'production_before': production, 'boots': [], 'memory_probe': a.memory_probe,
-              'arena_limit_mib': a.arena_mib, 'harts': a.harts,
+              'arena_limit_mib': a.arena_mib, 'harts': a.harts, 'viewport': a.viewport, 'pointer_probe': a.pointer_probe,
               'reliability_probe': a.reliability_probe, 'scope':
               'isolated Main UI workload and two graceful shutdown paths; residency and optional allocator reservations/root counts, not reachability proof'}
     (a.output/'started.json').write_text(json.dumps(result, indent=2)+'\n')
@@ -87,14 +93,17 @@ def main():
 
     def start(boot, seconds, stop):
         ready, keys = work+f'/ready{boot}', work+f'/keys{boot}'
+        pointer = work+f'/pointer{boot}'
+        extra = (' FPR_GFX_SIZE='+quote(a.viewport) if a.viewport else '') + (' FPR_POINTER_EVDEV='+quote(pointer) if a.pointer_probe else '')
         command = ('cd '+quote(work)+'\nmkfifo '+quote(keys)+'\n'
+                   + ('mkfifo '+quote(pointer)+'\n' if a.pointer_probe else '')
                    + f'FPR_HARTS={a.harts} FPR_HEAP_MB=256 QOSP_ARENA_MB={a.arena_mib} FPR_PORT=0 FPR_EVDEV='+quote(keys)
-                   + ' QOSP_READY_FILE='+quote(ready)+' FPR_DISK='+quote(store+'/Main.disk')
+                   + extra + ' QOSP_READY_FILE='+quote(ready)+' FPR_DISK='+quote(store+'/Main.disk')
                    + ' '+quote(base+'/runner')+f' {seconds+60} {stop} '+quote(work+f'/boot{boot}.log')
                    + ' '+quote(base+'/qosp-es')+' --yes '+quote(base+'/main.qa')
                    + ' > '+quote(work+f'/boot{boot}.json')+' 2> '+quote(work+f'/boot{boot}.err')+' < /dev/null &')
         ssh(command)
-        wait_log(boot, 'Main Profile ready (8 shortcuts, 2 pages)')
+        wait_log(boot, 'Main Profile ready (8 shortcuts,')
         return int(ssh('cat '+quote(ready)))
 
     def collect(boot):
@@ -117,6 +126,21 @@ def main():
     pid = None
     try:
         pid = start(1, a.seconds, 0)
+        if a.pointer_probe:
+            def pointer(events):
+                data = b''.join(struct.pack('<qqHHi', 0, 0, *event) for event in events)
+                encoded = base64.b64encode(data).decode()
+                ssh('printf %s '+quote(encoded)+' | base64 -d > '+quote(work+'/pointer1'))
+                time.sleep(.3)
+            def touch(value):
+                pointer([(3, 0, 65535//8), (3, 1, 65535//3), (1, 0x14a, value), (0, 0, 0)])
+            touch(1)
+            if 'shell: open clock' in logfile(1): raise RuntimeError('touch launched on press')
+            pointer([(0, 3, 0), (0, 0, 0)])
+            touch(0)
+            if 'shell: open clock' in logfile(1): raise RuntimeError('cancelled touch launched')
+            touch(1); touch(0); wait_log(1, 'shell: open clock')
+            key(1, 1)
         started = time.monotonic()
         samples = []
         cycles = 0
@@ -124,13 +148,13 @@ def main():
             while True:
                 # Reset the launcher selection each time; exercise both text
                 # viewports, their scroll keys, and the onboard Browser.
-                for code in (1, 104, 106, 28): key(1, code)
+                for code in (1, 102, 106, 28): key(1, code)
                 wait_log(1, 'shell: open files', cycles+1)
-                for code in (109, 102, 1, 104, 106, 106, 28): key(1, code)
+                for code in (109, 102, 1, 102, 106, 106, 28): key(1, code)
                 wait_log(1, 'shell: open logs', cycles+1)
-                for code in (107, 102, 1, 109, 28): key(1, code)
+                for code in (107, 102, 1, 102, 106, 106, 106, 106, 106, 106, 28): key(1, code)
                 wait_log(1, 'shell: open browser', cycles+1)
-                for code in (108, 28, 1, 104): key(1, code)
+                for code in (108, 28, 1, 102): key(1, code)
                 cycles += 1
                 if a.reliability_probe:
                     key(1, 87)

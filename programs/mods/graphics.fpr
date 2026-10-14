@@ -68,17 +68,17 @@ Ses = Type (Ses pid h tag snap owner).
 # the service: dims, the backend, sessions (newest first), the focused
 # handle (0 = none), the next handle, inited, control handles, meshes to
 # register once the context exists
-Gs = Type (Gs w h be ses focus next inited ctl meshes).
+Gs = Type (Gs w h be ses focus next inited ctl meshes notes).
 
 # ---- the service ----------------------------------------------------------
 # w h: the window (0 0 = the display's); meshes: (name, text) pairs
 # registered right after init -- the geometry a program carries (mkmesh)
 service : unsafe Int -> Int -> _ -> List (String, String) -> Int -> a .
-service w h be meshes me = loop me (Gs w h be Nil 0 1 0 Nil meshes).
+service w h be meshes me = loop me (Gs w h be Nil 0 1 0 Nil meshes Nil).
 # the same, with a tag waiting for the first program admitted on its frames
 # (mods/glsvc.fpr's `serve`: one program alone, its snapshots named)
 serviceAs : unsafe Int -> Int -> _ -> List (String, String) -> String -> Int -> a .
-serviceAs w h be meshes tag me = loop me (Gs w h be (Ses (0 - 1) 0 (strcat tag "") 0 0 :: Nil) 0 1 0 Nil meshes).
+serviceAs w h be meshes tag me = loop me (Gs w h be (Ses (0 - 1) 0 (strcat tag "") 0 0 :: Nil) 0 1 0 Nil meshes Nil).
 
 loop : unsafe Int -> Gs -> a .
 loop me st =
@@ -104,22 +104,22 @@ epMsg me st ret from q = case q of
 
 epOpen : unsafe Int -> Gs -> (Int, Int) -> Int -> String -> a .
 epOpen me st ret from tag =
-  Gs w h be ses focus next inited ctl meshes = st;
+  Gs w h be ses focus next inited ctl meshes notes = st;
   case EP.strEq tag "focus" of
-    True -> AC.reply ret (Opened next) >> loop me (Gs w h be ses focus (next + 1) inited (next :: ctl) meshes)
+    True -> AC.reply ret (Opened next) >> loop me (Gs w h be ses focus (next + 1) inited (next :: ctl) meshes notes)
   | False -> admit me st ret from tag.
 # a new session; the first one is focused
 admit : unsafe Int -> Gs -> (Int, Int) -> Int -> String -> a .
 admit me st ret from tag =
-  Gs w h be ses focus next inited ctl meshes = st;
+  Gs w h be ses focus next inited ctl meshes notes = st;
   t = case strlen tag == 0 of True -> "app{next}" | False -> strcat tag "";
   f2 = case focus == 0 of True -> next | False -> focus;
   _ = AC.reply ret (Opened next);
-  loop me (Gs w h be (Ses (Sys.pidOf from) next t 0 from :: ses) f2 (next + 1) inited ctl meshes).
+  loop me (Gs w h be (Ses (Sys.pidOf from) next t 0 from :: ses) f2 (next + 1) inited ctl meshes notes).
 
 epRead : unsafe Gs -> Int -> Result EP.IoV String .
 epRead st h =
-  Gs w hh be ses focus next inited ctl meshes = st;
+  Gs w hh be ses focus next inited ctl meshes notes = st;
   case isCtl ctl h of
     True -> Ok (IStr (listing ses focus ""))
   | False -> (case hasH ses h of
@@ -137,7 +137,7 @@ liStep r focus acc s = case s of Ses pd h t sn ow ->
 
 epWrite : unsafe Int -> Gs -> (Int, Int) -> Int -> EP.IoV -> a .
 epWrite me st ret h v =
-  Gs w hh be ses focus next inited ctl meshes = st;
+  Gs w hh be ses focus next inited ctl meshes notes = st;
   case isCtl ctl h of
     True -> ctlWrite me st ret v
   | False -> (case hasH ses h of
@@ -146,25 +146,25 @@ epWrite me st ret h v =
 # the control handle: focus by tag
 ctlWrite : unsafe Int -> Gs -> (Int, Int) -> EP.IoV -> a .
 ctlWrite me st ret v =
-  Gs w hh be ses focus next inited ctl meshes = st;
+  Gs w hh be ses focus next inited ctl meshes notes = st;
   case v of
     IStr tag -> (case hByTag ses tag of
         0 -> AC.reply ret (Err "no session tagged {tag}") >> loop me st
-      | h -> AC.reply ret (Ok IUnit) >> loop me (Gs w hh be ses h next inited ctl meshes))
+      | h -> AC.reply ret (Ok IUnit) >> loop me (Gs w hh be ses h next inited ctl meshes notes))
   | o -> AC.reply ret (Err "focus wants IStr <tag>") >> loop me st.
 # a program's mesh: "<name>\n<text>", registered now or once the context exists
 meshWrite : unsafe Int -> Gs -> (Int, Int) -> EP.IoV -> a .
 meshWrite me st ret v =
-  Gs w hh be ses focus next inited ctl meshes = st;
+  Gs w hh be ses focus next inited ctl meshes notes = st;
   case v of
     IStr s -> meshAdd me st ret (splitName s)
   | o -> AC.reply ret (Err "a session takes IStr \"<name>\\n<mesh text>\"") >> loop me st.
 meshAdd : unsafe Int -> Gs -> (Int, Int) -> (String, String) -> a .
 meshAdd me st ret nt =
-  Gs w hh be ses focus next inited ctl meshes = st;
+  Gs w hh be ses focus next inited ctl meshes notes = st;
   (name, text) = nt;
   case inited == 0 of
-    True -> AC.reply ret (Ok (IInt 0)) >> loop me (Gs w hh be ses focus next inited ctl ((strcat name "", strcat text "") :: meshes))
+    True -> AC.reply ret (Ok (IInt 0)) >> loop me (Gs w hh be ses focus next inited ctl ((strcat name "", strcat text "") :: meshes) notes)
   | False -> AC.reply ret (Ok (IInt (be.mesh name text))) >> loop me st.
 splitName : unsafe String -> (String, String) .
 splitName s = snGo s 0.
@@ -186,7 +186,7 @@ rvMsg me st rv =
   (replyTo, q) = rv;
   st2 = admitted st replyTo;
   st3 = aliveFocus st2 replyTo;
-  Gs w h be ses focus next inited ctl meshes = st3;
+  Gs w h be ses focus next inited ctl meshes notes = st3;
   case q of
     Dims u -> dims me st3 replyTo
   | Render s vs sc fr -> frame me st3 replyTo vs
@@ -195,12 +195,12 @@ rvMsg me st rv =
 # a program that speaks Rv without an open is a session of its own
 admitted : unsafe Gs -> Int -> Gs .
 admitted st c =
-  Gs w h be ses focus next inited ctl meshes = st;
+  Gs w h be ses focus next inited ctl meshes notes = st;
   case hByClient ses c == 0 of
     False -> st
   | True ->
       (t, ses2) = takeTag ses next;
-      Gs w h be (Ses (Sys.pidOf c) next t 0 c :: ses2) (case focus == 0 of True -> next | False -> focus) (next + 1) inited ctl meshes.
+      Gs w h be (Ses (Sys.pidOf c) next t 0 c :: ses2) (case focus == 0 of True -> next | False -> focus) (next + 1) inited ctl meshes notes.
 # a waiting tag (a placeholder session with client 0) names the admitted
 # program; otherwise it is "app<h>"
 takeTag : unsafe List Ses -> Int -> (String, List Ses) .
@@ -218,7 +218,7 @@ ttStep r h s = case s of Ses pd hh t sn ow ->
 # anyone moves the focus on
 aliveFocus : unsafe Gs -> Int -> Gs .
 aliveFocus st c =
-  Gs w h be ses focus next inited ctl meshes = st;
+  Gs w h be ses focus next inited ctl meshes notes = st;
   fc = ownerOf ses focus;
   case or2 (fc == 0) (Sys.alive fc) of
     True -> st
@@ -228,17 +228,17 @@ or2 a b = case a of True -> True | False -> b.
 dims : unsafe Int -> Gs -> Int -> a .
 dims me st replyTo =
   st2 = ensure st;
-  Gs w h be ses focus next inited ctl meshes = st2;
+  Gs w h be ses focus next inited ctl meshes notes = st2;
   answer me st2 replyTo (w, h).
 ensure : unsafe Gs -> Gs .
 ensure st =
-  Gs w h be ses focus next inited ctl meshes = st;
+  Gs w h be ses focus next inited ctl meshes notes = st;
   case inited == 1 of
     True -> st
   | False ->
       (w2, h2) = be.init w h;
       _ = regMeshes be meshes;
-      Gs w2 h2 be ses focus next 1 ctl Nil.
+      Gs w2 h2 be ses focus next 1 ctl Nil notes.
 regMeshes : unsafe _ -> List (String, String) -> Unit .
 regMeshes be ms = case ms of
     Nil -> Unit
@@ -252,13 +252,13 @@ rmStep be r nt =
 frame : unsafe Int -> Gs -> Int -> _ -> a .
 frame me st replyTo vs =
   st2 = ensure st;
-  Gs w h be ses focus next inited ctl meshes = st2;
+  Gs w h be ses focus next inited ctl meshes notes = st2;
   case hByClient ses replyTo == focus of
     False -> answer me st2 replyTo (0, 0)
   | True -> draw me st2 replyTo vs.
 draw : unsafe Int -> Gs -> Int -> _ -> a .
 draw me st replyTo vs =
-  Gs w h be ses focus next inited ctl meshes = st;
+  Gs w h be ses focus next inited ctl meshes notes = st;
   (scene, ui, snap) = vs;
   (ents, dist) = ui;
   r = be.render scene ents dist;
@@ -267,28 +267,44 @@ draw me st replyTo vs =
 # a changed snapshot counter: the frame just drawn goes to /tmp/<tag>-<snap>.ppm
 shot : unsafe Gs -> Int -> Int -> Gs .
 shot st h snap =
-  Gs w hh be ses focus next inited ctl meshes = st;
+  Gs w hh be ses focus next inited ctl meshes notes = st;
   case or2 (snap == 0) (snap == snapOf ses h) of
     True -> st
   | False ->
       tag = tagOf ses h;
       rc = be.snap "/tmp/{tag}-{snap}.ppm";
       _ = Sys.logAt 0 "[{tag}] snapshot {snap} -> /tmp/{tag}-{snap}.ppm rc={rc}";
-      Gs w hh be (setSnap ses h snap) focus next inited ctl meshes.
+      Gs w hh be (setSnap ses h snap) focus next inited ctl meshes notes.
 
 poll : unsafe Int -> Gs -> Int -> a .
 poll me st replyTo =
   st2 = ensure st;
-  Gs w h be ses focus next inited ctl meshes = st2;
-  case hByClient ses replyTo == focus of
-    False -> answer3 me st2 replyTo (0, 0, 0)
-  | True -> pollFocused me st2 replyTo (be.poll 0).
+  Gs w h be ses focus next inited ctl meshes notes = st2;
+  focused = hByClient ses replyTo == focus;
+  live = liveNotes notes;
+  previous = noteOf live replyTo;
+  current = if focused then 1 else 0;
+  fresh = Gs w h be ses focus next inited ctl meshes (setNote live replyTo current);
+  if previous != current then answer3 me fresh replyTo (8, current, 0) else
+    if focused then pollFocused me fresh replyTo (be.poll 0) else answer3 me fresh replyTo (0, 0, 0).
 pollFocused : unsafe Int -> Gs -> Int -> (Int, Int, Int) -> a .
 pollFocused me st replyTo ev =
   (kind, a, b) = ev;
   case and2 (kind == 4) (a == focusKey) of
-    True -> answer3 me (nextFocus st) replyTo (0, 0, 0)
-  | False -> answer3 me st replyTo ev.
+    True -> answer3 me (if b == 1 then nextFocus st else st) replyTo (0, 0, 0)
+  | False -> case kind == 5 and a > 0 and b > 0 and a <= 8192 and b <= 8192 of
+      True -> Gs w h be ses focus next inited ctl meshes notes = st;
+        answer3 me (Gs a b be ses focus next inited ctl meshes notes) replyTo ev
+    | False -> answer3 me st replyTo ev.
+# Each polling capability learns loss/gain once, even when it is unfocused.
+noteOf Nil caller = 0 - 1.
+noteOf ((owner, value) :: rest) caller = if owner == caller then value else noteOf rest caller.
+setNote Nil caller value = [(caller, value)].
+setNote ((owner, previous) :: rest) caller value =
+  if owner == caller then (caller, value) :: rest else (owner, previous) :: setNote rest caller value.
+liveNotes Nil = Nil.
+liveNotes ((owner, value) :: rest) = if Sys.alive owner then (owner, value) :: liveNotes rest else liveNotes rest.
+
 and2 a b = case a of True -> b | False -> False.
 
 # a reply to a program; one that has ended is dropped from the sessions
@@ -313,7 +329,7 @@ hByPid ses p = case ses of
 hcStep : unsafe List Ses -> Int -> Ses -> Int .
 hcStep r p s = case s of Ses pd h t sn ow -> case pd == p of True -> h | False -> hByPid r p.
 hByClientSt st c =
-  Gs w h be ses focus next inited ctl meshes = st;
+  Gs w h be ses focus next inited ctl meshes notes = st;
   hByClient ses c.
 hByTag : unsafe List Ses -> String -> Int .
 hByTag ses tag = case ses of
@@ -358,8 +374,8 @@ isCtl ctl h = case ctl of
 # remove a handle (a session or a control); the focus moves on if it was it
 dropH : unsafe Gs -> Int -> Gs .
 dropH st h =
-  Gs w hh be ses focus next inited ctl meshes = st;
-  st2 = Gs w hh be (without ses h) focus next inited (withoutI ctl h) meshes;
+  Gs w hh be ses focus next inited ctl meshes notes = st;
+  st2 = Gs w hh be (without ses h) focus next inited (withoutI ctl h) meshes notes;
   case h == focus of
     True -> nextFocus st2
   | False -> st2.
@@ -377,8 +393,8 @@ withoutI l h = case l of
 # first, so: the next older, wrapping to the newest); none -> 0
 nextFocus : unsafe Gs -> Gs .
 nextFocus st =
-  Gs w hh be ses focus next inited ctl meshes = st;
-  Gs w hh be ses (after ses focus) next inited ctl meshes.
+  Gs w hh be ses focus next inited ctl meshes notes = st;
+  Gs w hh be ses (after ses focus) next inited ctl meshes notes.
 after : unsafe List Ses -> Int -> Int .
 after ses focus = case ses of
     Nil -> 0

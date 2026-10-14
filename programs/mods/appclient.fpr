@@ -4,9 +4,9 @@ unsafe module.
 AW = use "appwire".
 AC = use "std/actor#201a0e9bf98a5154".
 S2 = use "scene2d".
-Cmd = Type (Open Int | Deliver AW.Event | Home | Stop | Inspect).
-empty = {actor = 0, session = 0, sequence = 0, revision = 0, cleanup = "", failures = 0}.
-run owner ns storage w h me = _ = Sys.loop empty (step owner ns storage w h me); Unit.
+Cmd = Type (Open Int | Deliver AW.Event | Resize Int Int | Home | Stop | Inspect).
+empty = {actor = 0, session = 0, sequence = 0, revision = 0, cleanup = "", failures = 0, w = 960, h = 530}.
+run owner ns storage w h me = _ = Sys.loop {empty | w = w, h = h} (step owner ns storage w h me); Unit.
 step owner ns storage w h me state = if not (Sys.alive owner) then
   (idle, result) = leave me state; (False, idle)
   else case receiveNow me of
@@ -16,8 +16,11 @@ dispatch ns storage w h me state received =
   case received of
     (from, id, command) ->
       (next, answer) = case command of
-          Open table -> launch ns storage w h me table state
+          Open table -> launch ns storage state.w state.h me table state
         | Deliver event -> exchange me event state
+        | Resize newW newH ->
+            sized = {state | w = newW, h = newH};
+            if state.actor == 0 then (sized, Ok (AW.Closed 0 (Ok Unit))) else exchange me (AW.Resize newW newH) sized
         | Home -> leave me state
         | Stop -> leave me state
         | Inspect -> (state, Ok (AW.Refused "actor={state.actor} session={state.session}"));
@@ -69,7 +72,7 @@ leave me state =
   _ = if state.actor == 0 then Unit else kill state.actor;
   cleanup = case result of Ok u -> state.cleanup | Err why -> retain state.cleanup why;
   failures = state.failures + (case result of Err why -> if state.actor == 0 then 0 else 1 | Ok u -> 0);
-  ({empty | cleanup = cleanup, failures = failures}, if cleanup != "" then Err cleanup
+  ({empty | cleanup = cleanup, failures = failures, w = state.w, h = state.h}, if cleanup != "" then Err cleanup
     else Ok (AW.Closed state.session (Ok Unit))).
 call me owner command = case AC.callWithin 2500 me owner command of
     Err why -> Err "session owner: {why}"
@@ -80,6 +83,6 @@ stop me owner = case call me owner Stop of Ok reply -> Ok Unit | Err why -> Err 
 abortStartup state why =
   _ = kill state.actor;
   cleanup = retain state.cleanup "startup forced stop; cleanup unconfirmed: {why}";
-  ({empty | cleanup = cleanup, failures = state.failures + 1}, Err cleanup).
+  ({empty | cleanup = cleanup, failures = state.failures + 1, w = state.w, h = state.h}, Err cleanup).
 
 retain previous why = if previous == "" or previous == why then why else "{previous}; {why}".

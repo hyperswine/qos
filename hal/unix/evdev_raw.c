@@ -165,7 +165,7 @@ int qos_evdev_sources(void) {
 /* the modifier machine: ONE decoder for device records and injected
  * synthetics alike.  Returns 1 with a (biased) keypress, 0 for events
  * that are state, not keys (modifiers, capslock). */
-static int decode_key(unsigned short code, int value,
+int qos_evdev_decode_key(unsigned short code, int value,
                       int64_t *kind, int64_t *a, int64_t *c) {
   if (code == KEY_LEFTSHIFT || code == KEY_RIGHTSHIFT) {
     if (value != 2) shift_held = value ? 1 : 0;
@@ -202,7 +202,7 @@ int qos_evdev_poll(int64_t *kind, int64_t *a, int64_t *c) {
     unsigned short code = inj_ring[inj_r].code;
     int value = inj_ring[inj_r].value;
     inj_r = (inj_r + 1) % INJ_CAP;
-    if (decode_key(code, value, kind, a, c)) return 1;
+    if (qos_evdev_decode_key(code, value, kind, a, c)) return 1;
   }
   ev_open();
   if (!ev_nfds) return 0;
@@ -232,10 +232,15 @@ int qos_evdev_poll(int64_t *kind, int64_t *a, int64_t *c) {
       /* MODIFIER STATE lives in decode_key, the one decoder every
        * source -- device records and injected synthetics alike --
        * passes through (biasing rationale documented there). */
-      if (decode_key(ev.code, (int)ev.value, kind, a, c)) return 1;
+      if (qos_evdev_decode_key(ev.code, (int)ev.value, kind, a, c)) return 1;
       continue;
     }
     /* EV_SYN / EV_MSC / EV_LED ...: framing + metadata, skipped here */
   }
   return 0;
+}
+
+void qos_evdev_reset_modifiers(void) {
+  shift_held = ctrl_held = alt_held = 0;
+  inj_r = inj_w;
 }
