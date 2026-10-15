@@ -118,6 +118,13 @@ Source-adjacent READMEs under `tools/` stay beside the tools they explain.
 | 2026-10-14 | [STAR64-POWERVR.md](2026-10-14-STAR64-POWERVR.md) | Matching GPU firmware and private vendor Mesa enable hardware EGL/GLES 3.2 on the installed STAR64; physical pixel, QOS shader and Main replay checks |
 | 2026-10-14 | [STAR64-WIFI.md](2026-10-14-STAR64-WIFI.md) | Private local Wi-Fi provisioning, router DHCP and SSH verified with Ethernet disabled; existing wireless startup service reconnects |
 | 2026-10-14 | [PI-BOOT-SPLASH.md](2026-10-14-PI-BOOT-SPLASH.md) | Pi-only vector splash, quiet HDMI boot, KMS handoff, recovery console and validation boundaries |
+| 2026-10-14 | [PI-BOOT-TIMING.md](2026-10-14-PI-BOOT-TIMING.md) | Nonblocking DHCP and SD-first EEPROM boot; physical QOS readiness improves from 20.0 to 8.2 seconds; optional driver and service audit |
 | 2026-10-14 | [RECURSIVE-MVU-SHELL.md](2026-10-14-RECURSIVE-MVU-SHELL.md) | Recursive MVU and explicit message/effect contracts; first Files/Logs pane migration, visible retry, persistent reader ownership, host GL and isolated Pi validation |
 | 2026-10-14 | [RESPONSIVE-MVU-INPUT.md](2026-10-14-RESPONSIVE-MVU-INPUT.md) | Viewport-derived shell/app geometry, explicit focus/capture, keyboard, wheel and primary touch input; host GL and isolated Pi acceptance |
 | 2026-10-14 | [GUI-PERFORMANCE.md](2026-10-14-GUI-PERFORMANCE.md) | Correlated MVU input/frame timing, temporary CPU policy, receive-root leak regression and physical Pi memory profiling |
+
+| 2026-10-14 | [PI-MAIN-DEPLOYMENT.md](2026-10-14-PI-MAIN-DEPLOYMENT.md) | Matching production Main/app deployment, preserved disk history, KMS captures, remote interaction acceptance and rollback |
+| 2026-10-15 | [GUI-IDLE-CPU.md](2026-10-15-GUI-IDLE-CPU.md) | Retained MVU frames, real worker wakeups and physical Pi idle CPU validation |
+| 2026-10-15 | [STAR64-BOOT-TIMING.md](2026-10-15-STAR64-BOOT-TIMING.md) | Nonblocking networking, physical boot times and RISC-V module loader delay |
+| 2026-10-15 | [STAR64-LOADER-FIX.md](2026-10-15-STAR64-LOADER-FIX.md) | Vendor-kernel RISC-V loader backports, sanitizer/QEMU checks and physical Wi-Fi boot improvement |
+| 2026-10-16 | [STAR64-FPRISC-UPGRADE.md](2026-10-16-STAR64-FPRISC-UPGRADE.md) | Current FP-RISC with retained rendering, matching Portable v20 bundle, physical RV64 tests, preserved disk and reboot acceptance |

@@ -12,6 +12,7 @@
  * co-compiled HAL's fpr_cpanic behavior: the app named a capability
  * this table does not carry, and continuing would lie about it. */
 #include "qos_abi.h"
+#include "park.h"
 #include "hostlog.h"
 #include "net_raw.h"
 #include "blk_raw.h"
@@ -101,6 +102,11 @@ void qosp_shutdown_begin(void);
 
 static qos_hal_t the_table = {
     .version = QOS_ABI_VERSION,
+    .hart_wait = qosp_hart_wait,
+    .hart_ring = qosp_hart_ring,
+    .hart_clear = qosp_hart_clear,
+    .hart_timer_arm = qosp_hart_timer_arm,
+    .hart_timer_park = qosp_hart_timer_park,
     .nharts = 1, /* main.c raises this (and installs start_hart) at boot */
     .putc = t_putc,
     .poweroff = t_poweroff,

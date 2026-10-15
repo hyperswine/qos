@@ -1,0 +1,11 @@
+# The GUI may start while these DHCP clients are still acquiring leases.
+auto lo
+iface lo inet loopback
+
+auto eth0
+iface eth0 inet manual
+    pre-up /etc/network/nfs_check
+    up ip link set eth0 up
+    up /usr/libexec/qosp-dhcp start eth0
+    down /usr/libexec/qosp-dhcp stop eth0
+    post-down ip link set eth0 down

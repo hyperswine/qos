@@ -7,6 +7,9 @@ QS = use "../programs/mods/qsys".
 MV = use "std/mvu".
 PN = use "../programs/mods/panemvu".
 ST = use "../programs/mods/scrolltext".
+L = use "../programs/mods/shelllayout".
+AW = use "../programs/mods/appwire".
+S2 = use "../programs/mods/scene2d".
 AC = use "std/actor#201a0e9bf98a5154".
 check True = Unit.
 check False = error "guishell: invariant failed".
@@ -18,6 +21,32 @@ source events me =
     Nil -> _ = send from (0, 0, 0); source Nil me
   | e :: r -> _ = send from e; source r me.
 poll me a = MV.svcCall me a (MV.Poll 0).
+# Idle ticks/motion keep the frame key; visible child changes invalidate it.
+idleTurns me env n m = if n == 0 then m else
+  (next, _) = S.update me env MV.ETick m;
+  idleTurns me env (n - 1) next.
+changed before after = S.staticKey (S.reviseView before after) > S.staticKey before.
+retention me env initial =
+  idle = idleTurns me env 1000 initial;
+  _ = check (S.staticKey idle == S.staticKey initial);
+  r = L.tile idle.layout 0;
+  hovered = S.reviseView idle (S.pointerEvent env 0 (r.x + 10) (r.y + 10) idle);
+  moved = S.reviseView hovered (S.pointerEvent env 0 (r.x + 11) (r.y + 11) hovered);
+  _ = check (S.staticKey hovered > S.staticKey idle and S.staticKey moved == S.staticKey hovered);
+  _ = check (changed moved (S.key env 15 moved));
+  _ = check (changed moved (S.resize env 1024 600 moved));
+  (shot, _) = S.update me env (MV.EKey 25) moved;
+  _ = check (S.staticKey shot > S.staticKey moved and shot.snap == moved.snap + 1);
+  _ = check (changed moved {moved | status = "unavailable - retry"});
+  _ = check (changed moved {moved | inputActive = False});
+  _ = check (changed moved {moved | active = 0 - 1, clock = "42:13"});
+  _ = check (changed moved {moved | pane = {moved.pane | phase = PN.Failed "offline"}});
+  app = {moved | active = 1};
+  frame = {app | inner = AW.Frame 7 1 (S2.Box Nil Nil) ["same"] "Ready"};
+  ack = {frame | inner = AW.Frame 7 2 (S2.Box Nil Nil) ["same"] "Ready"};
+  _ = check (S.staticKey (S.reviseView frame ack) == S.staticKey frame);
+  _ = check (changed frame {frame | inner = AW.Frame 7 2 (S2.Box Nil Nil) ["changed"] "Ready"});
+  Unit.
 main =
   me = myself 0;
   q = QS.Qsys 0 0 0 0 Nil;
@@ -25,6 +54,7 @@ main =
        S.Tile "x" "x" "refused" (0 - 100), S.Tile "last" "last" "refused" (0 - 100)];
   env = (q, ts, 0, 0, 0);
   m = S.init env;
+  _ = retention me env m;
   p = S.page env m 100;
   _ = check (p.page == 1 and p.selected == 6);
   first = S.page env m (0 - 10);

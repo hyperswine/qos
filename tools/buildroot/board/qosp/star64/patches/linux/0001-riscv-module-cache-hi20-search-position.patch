@@ -1,0 +1,68 @@
+STAR64 Linux 5.15: avoid restarting each HI20 relocation search
+
+Backport of upstream 080c4324fa5e81ff3780206a138223abfb57a68e by
+Amma Lee and Maxim Kochetkov, including the bounds correction from
+0b4cce68efb9 (riscv: module: Fix out-of-bounds relocation access).
+Start at the previous match and wrap safely. Keep the vendor relocation
+handlers and supported relocation types unchanged.
+
+Upstream: https://github.com/torvalds/linux/commit/080c4324fa5e81ff3780206a138223abfb57a68e
+Upstream: https://git.kernel.org/riscv/c/0b4cce68efb9
+
+--- a/arch/riscv/kernel/module.c
++++ b/arch/riscv/kernel/module.c
+@@ -329,13 +329,15 @@
+ 	Elf_Sym *sym;
+ 	u32 *location;
+ 	unsigned int i, type;
++	unsigned int j_idx = 0;
++	unsigned int num_relocations = sechdrs[relsec].sh_size / sizeof(*rel);
+ 	Elf_Addr v;
+ 	int res;
+ 
+ 	pr_debug("Applying relocate section %u to %u\n", relsec,
+ 	       sechdrs[relsec].sh_info);
+ 
+-	for (i = 0; i < sechdrs[relsec].sh_size / sizeof(*rel); i++) {
++	for (i = 0; i < num_relocations; i++) {
+ 		/* This is where to make the change */
+ 		location = (void *)sechdrs[sechdrs[relsec].sh_info].sh_addr
+ 			+ rel[i].r_offset;
+@@ -367,9 +369,10 @@
+ 		v = sym->st_value + rel[i].r_addend;
+ 
+ 		if (type == R_RISCV_PCREL_LO12_I || type == R_RISCV_PCREL_LO12_S) {
+-			unsigned int j;
+-
+-			for (j = 0; j < sechdrs[relsec].sh_size / sizeof(*rel); j++) {
++			unsigned int j = j_idx;
++			bool found = false;
++
++			do {
+ 				unsigned long hi20_loc =
+ 					sechdrs[sechdrs[relsec].sh_info].sh_addr
+ 					+ rel[j].r_offset;
+@@ -398,16 +401,21 @@
+ 					hi20 = (offset + 0x800) & 0xfffff000;
+ 					lo12 = offset - hi20;
+ 					v = lo12;
++					found = true;
+ 
+ 					break;
+ 				}
+-			}
+-			if (j == sechdrs[relsec].sh_size / sizeof(*rel)) {
++				/* Wrap before dereferencing the next entry. */
++				if (++j == num_relocations)
++					j = 0;
++			} while (j != j_idx);
++			if (!found) {
+ 				pr_err(
+ 				  "%s: Can not find HI20 relocation information\n",
+ 				  me->name);
+ 				return -EINVAL;
+ 			}
++			j_idx = j;
+ 		}
+ 
+ 		res = handler(me, location, v);

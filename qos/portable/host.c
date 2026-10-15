@@ -29,6 +29,7 @@
  *     Memory.qa analogue, the syscall trampoline the System.qa one.
  */
 #include "qos_abi.h"
+#include "park.h"
 #include "snd_raw.h"
 
 /* ---- the ABI stamp (kills the apps-qa desync class) -----------------
@@ -325,7 +326,6 @@ static uint64_t qosp_tls_off(void) {
  * app's hart entry; the thread returns when the app world ends
  * (fpr_process_done fails every hart loop), and main joins them all
  * after the entry returns. */
-#define QOSP_MAXHARTS 64
 static pthread_t hart_threads[QOSP_MAXHARTS];
 static unsigned hart_nthreads;
 struct hart_arg { uint64_t idx; void (*fn)(uint64_t); };

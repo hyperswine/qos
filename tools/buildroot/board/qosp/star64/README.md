@@ -38,6 +38,9 @@ the output tree, so unpersonalized rebuilds do not retain earlier access.
 parent. The default image is `~/.cache/qosp-br/star64/images/sdcard.img`.
 `br.sh` preserves an existing output `.config`; explicitly reapply
 `qosp_star64_defconfig` when changing the tracked defaults.
+The Linux patches include two RISC-V module loader optimizations; an existing
+cached kernel needs `linux-dirclean` before the regular build to apply new
+patches. See [the loader backport and board measurements](../../../../../docs/2026-10-15-STAR64-LOADER-FIX.md).
 
 Before flashing, check the assembled image and boot its Linux userspace
 under QEMU (install `qemu-system-riscv64` on the machine running the check):
@@ -99,8 +102,10 @@ console, not a graphical desktop. HDMI text login worked in the
 [physical board trial](../../../../../docs/2026-10-13-STAR64-HARDWARE-BOOT.md)
 using a microSD Express card flashed through a UGREEN reader.
 
-Both `eth0` and `eth1` attempt DHCP with bounded initial attempts and background
-retries. OpenSSH starts automatically and permits public-key authentication only.
+Both `eth0` and `eth1` start persistent DHCP clients immediately in the
+background through `/usr/libexec/qosp-dhcp`. A missing cable or lease does not
+hold up SSH or QOS startup. OpenSSH starts automatically and permits public-key
+authentication only.
 For an image personalized as above, find the board's address in your router's
 DHCP leases (hostname `qos-star64`) or with `ip -br addr` on its local console,
 then connect from the Mac with `ssh root@<board-ip>`. A public key must be
@@ -110,7 +115,12 @@ in the tracked image configuration.
 Onboard Wi-Fi uses the vendor `8852bu` module, whose firmware is embedded
 in the driver. Configure `/etc/wpa_supplicant.conf` locally, then start
 `/etc/init.d/S41wifi start`. Check the interface name with `iw dev` if
-`wlan0` does not appear. Pi Broadcom module settings are not copied here.
+`wlan0` does not appear. Association and DHCP retry in the background;
+`S41wifi restart` waits for the previous supplicant to exit before starting its
+replacement. Driver loading and bringing up the interface remain synchronous.
+Pi Broadcom module settings are not copied here.
+See [boot timings and the module-loader investigation](../../../../../docs/2026-10-15-STAR64-BOOT-TIMING.md)
+for physical validation and the remaining delay before Wi-Fi probe.
 
 ## Validation on the board
 

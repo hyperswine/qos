@@ -31,14 +31,14 @@ void fpr_park(void) {
 }
 
 void hal_wfi_enable(void) {}
-void hal_wfi(void) { qos_hal->wfi(); } /* poll pace; rings re-checked after */
+void hal_wfi(void) { qos_hal->hart_wait(fpr_hart()->id); }
 /* the CLINT model's mtime (10 MHz ticks, net_raw.c's CLINT_MTIME): the
  * clock the parked sleep (actors.c) and the timer service read */
 uint64_t hal_mtime(void) { return qos_hal->mmio_read(0x2000u + 49144u, 8); }
-void hal_ipi_send(uw hart) { (void)hart; } /* single-hart image */
-void hal_ipi_clear(uw hart) { (void)hart; }
-void hal_timer_park(uw hart) { (void)hart; }
-void hal_timer_arm(uw hart, uw ticks) { (void)hart; (void)ticks; }
+void hal_ipi_send(uw hart) { qos_hal->hart_ring(hart); }
+void hal_ipi_clear(uw hart) { qos_hal->hart_clear(hart); }
+void hal_timer_park(uw hart) { qos_hal->hart_timer_park(hart); }
+void hal_timer_arm(uw hart, uw ticks) { qos_hal->hart_timer_arm(hart, ticks); }
 
 /* ---- first-activation contexts for ctx_*.S ------------------------
  * Same rule as posix/hal.c: on x86-64 the fabricated entry state must

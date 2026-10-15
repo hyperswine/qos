@@ -1,0 +1,64 @@
+#!/bin/sh
+# Optional onboard Wi-Fi. No credentials in the source overlay.
+# Association and DHCP keep retrying in the background; boot stays bounded.
+set -u
+IFACE=wlan0
+WPA_PID=/run/wpa_supplicant-wlan0.pid
+CONFIG=/etc/wpa_supplicant.conf
+
+alive() {
+    [ -s "$1" ] && kill -0 "$(cat "$1")" 2>/dev/null
+}
+
+start() {
+    [ -s "$CONFIG" ] || return 0
+    mkdir -p /run /var/log
+    # Firmware is on the mounted rootfs now, even when mdev missed an alias.
+    modprobe brcmfmac 2>/dev/null || true
+    n=0
+    while [ ! -d "/sys/class/net/$IFACE" ] && [ "$n" -lt 50 ]; do
+        sleep 0.1
+        n=$((n + 1))
+    done
+    if [ ! -d "/sys/class/net/$IFACE" ]; then
+        echo "Wi-Fi: $IFACE absent (check brcmfmac and firmware)" >&2
+        return 1
+    fi
+    ip link set "$IFACE" up || return 1
+    iw dev "$IFACE" set power_save off 2>/dev/null || true
+    if ! alive "$WPA_PID"; then
+        wpa_supplicant -B -P "$WPA_PID" -i "$IFACE" -D nl80211 \
+            -c "$CONFIG" >> /var/log/wifi.log 2>&1 || return 1
+    fi
+    /usr/libexec/qosp-dhcp start "$IFACE" || return 1
+    echo "Wi-Fi: association and DHCP started on $IFACE"
+}
+
+stop() {
+    /usr/libexec/qosp-dhcp stop "$IFACE" || return 1
+    for pidfile in "$WPA_PID"; do
+        pid=
+        [ ! -s "$pidfile" ] || pid=$(cat "$pidfile")
+        start-stop-daemon --stop --quiet --pidfile "$pidfile" 2>/dev/null || true
+        # Wait for the old supplicant's interface cleanup before a new one
+        # starts. Otherwise it can bring wlan0 down underneath its successor.
+        n=50
+        while [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && [ "$n" -gt 0 ]; do
+            sleep 0.1
+            n=$((n - 1))
+        done
+        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+            echo "Wi-Fi: daemon did not stop ($pidfile)" >&2
+            return 1
+        fi
+        rm -f "$pidfile"
+    done
+    ip link set "$IFACE" down 2>/dev/null || true
+}
+
+case "${1:-}" in
+    start) start ;;
+    stop) stop ;;
+    restart|reload) stop && start ;;
+    *) echo "Usage: $0 {start|stop|restart}" >&2; exit 2 ;;
+esac

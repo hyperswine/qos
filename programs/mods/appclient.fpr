@@ -7,14 +7,17 @@ S2 = use "scene2d".
 Cmd = Type (Open Int | Deliver AW.Event | Resize Int Int | Home | Stop | Inspect).
 empty = {actor = 0, session = 0, sequence = 0, revision = 0, cleanup = "", failures = 0, w = 960, h = 530}.
 run owner ns storage w h me = _ = Sys.loop {empty | w = w, h = h} (step owner ns storage w h me); Unit.
-step owner ns storage w h me state = if not (Sys.alive owner) then
-  (idle, result) = leave me state; (False, idle)
-  else case receiveNow me of
-    Err why -> _ = Sys.sleepUs 1000; (True, state)
+# Drain queued stale replies before parking on the owning actor. A dead owner
+# wakes receiveFromRes, so lifecycle cleanup needs no 1 ms polling loop.
+step owner ns storage w h me state = case next owner me of
+    Err why -> (idle, result) = leave me state; (False, idle)
   | Ok borrowed ->
       received = keep borrowed;
       _ = drop borrowed;
       dispatch ns storage w h me state received.
+next owner me = if not (Sys.alive owner) then Err "dead actor" else case receiveNow me of
+    Ok message -> Ok message
+  | Err why -> receiveFromRes me owner.
 dispatch ns storage w h me state received =
   case received of
     (from, id, command) ->

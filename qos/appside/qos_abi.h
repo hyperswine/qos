@@ -19,7 +19,7 @@
 
 #include <stdint.h>
 
-#define QOS_ABI_VERSION 19u /* v19: shutdown begin/request/completion and explicit app readiness; v18: tag 4 checks RELOC and IMPORT against LOAD's relsha */
+#define QOS_ABI_VERSION 20u /* v20: app worker doorbells and timer parking; v19: explicit lifecycle; v18: tag 4 checks RELOC and IMPORT against LOAD's relsha */
 
 /* ---- the address plan (linux-x86-64) --------------------------------
  * The host is linked non-PIE (default 0x400000 text); the arena is a
@@ -246,6 +246,13 @@ typedef struct {
   /* Arms the same deadline for ordinary app-initiated graceful shutdown,
    * without inventing an OS signal or terminating the app's return path. */
   void (*shutdown_begin)(void);
+  /* v20: the loaded app owns its worker IDs. These doorbells are separate
+   * from the host Base runtime and its own scheduler/park state. */
+  void (*hart_wait)(uint64_t hart);
+  void (*hart_ring)(uint64_t hart);
+  void (*hart_clear)(uint64_t hart);
+  void (*hart_timer_arm)(uint64_t hart, uint64_t ticks);
+  void (*hart_timer_park)(uint64_t hart);
 } qos_hal_t;
 
 /* ---- the memory-growth grant (RETIRED in v12) ----------------------

@@ -1,3 +1,5 @@
+# This contract exercises raw block-device and service operations.
+unsafe program.
 B = use "../std/blockio#8b4ffa1467ca03a5".
 FS = use "../std/fs#84826bc9e8ddb4b5".
 text r = case r of Ok value -> value | Err why -> "error".

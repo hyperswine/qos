@@ -57,20 +57,35 @@ diskTile id (QS.App aid name ti :: rest) = case id == aid of
   | False -> diskTile id rest.
 
 
-init env = {page = 0, selected = 0, active = 0, inner = AW.Frame 0 0 (Box Nil Nil) Nil "", appFailed = False, appCommands = Nil, status = "Ready when you are", snap = 0, pane = PN.init, commands = Nil, layout = L.layout width height, focus = L.Tile 0, hover = L.None, inputActive = True, pointerX = 0, pointerY = 0, down = False, capture = L.None, wheel = 0, dragY = 0, dragScroll = 0, clock = "00:00"}.
-staticKey m = 0.
+init env = {page = 0, selected = 0, active = 0, inner = AW.Frame 0 0 (Box Nil Nil) Nil "", appFailed = False, appCommands = Nil, status = "Ready when you are", snap = 0, pane = PN.init, commands = Nil, layout = L.layout width height, focus = L.Tile 0, hover = L.None, inputActive = True, pointerX = 0, pointerY = 0, down = False, capture = L.None, wheel = 0, dragY = 0, dragScroll = 0, clock = "00:00", renderVersion = 0}.
+staticKey m = m.renderVersion + m.snap.
 staticView vp m = 0.
 done m = "shell ended".
 subscriptions port m = MV.SPort port :: subs m.
 subs m = [MV.STick 100, MV.SKeys].
-update me env (MV.EKey 16) m | m.active == 0 and m.inputActive = (m, [MV.MQuit]).
-update me env (MV.EKey k) m = effects me env (key env k m).
-update me env (MV.EResize w h) m = effects me env (resize env w h m).
-update me env (MV.EWheel dy dx) m = effects me env (wheel env dy dx m).
-update me env MV.ETick m = effects me env (if m.active > 0 and not m.appFailed and m.inputActive then
+# Visible child state determines a monotonic render revision. Idle ticks and
+# motion within one hover target keep it. Input still runs at the usual pace;
+# all visible facts arrive through ordinary recursive MVU updates.
+update me env event m =
+  (next, commands) = updateModel me env event m;
+  (reviseView m next, commands).
+visualKey m = (m.page, m.selected, m.active, (if m.active > 0 then frameKey m.inner else (0, Box Nil Nil, Nil, "")),
+  m.appFailed, m.status, m.pane.phase, m.pane.rows, m.pane.metrics, m.pane.scroll,
+  m.layout, m.focus, m.hover, m.inputActive, m.clock).
+# Transport revisions acknowledge messages, not pixels. Dynamic slot values
+# and child status remain part of the visible key even when the tree is shared.
+frameKey (AW.Frame sid revision tree vals status) = (sid, tree, vals, status).
+frameKey other = (0, Box Nil Nil, Nil, "").
+reviseView previous next = if visualKey previous == visualKey next then next else
+  {next | renderVersion = previous.renderVersion + 1}.
+updateModel me env (MV.EKey 16) m | m.active == 0 and m.inputActive = (m, [MV.MQuit]).
+updateModel me env (MV.EKey k) m = effects me env (key env k m).
+updateModel me env (MV.EResize w h) m = effects me env (resize env w h m).
+updateModel me env (MV.EWheel dy dx) m = effects me env (wheel env dy dx m).
+updateModel me env MV.ETick m = effects me env (if m.active > 0 and not m.appFailed and m.inputActive then
   {m | appCommands = [AP.Deliver AW.Tick]} else paneUpdate PN.Tick m).
-update me env (MV.EMsg "quit" _) m = (m, [MV.MQuit]).
-update me env (MV.EMsg tag body) m = case PJ.decode tag body of
+updateModel me env (MV.EMsg "quit" _) m = (m, [MV.MQuit]).
+updateModel me env (MV.EMsg tag body) m = case PJ.decode tag body of
     Err why -> (m, Nil)
   | Ok msg ->
       next = paneUpdate msg m;
@@ -78,7 +93,7 @@ update me env (MV.EMsg tag body) m = case PJ.decode tag body of
           True -> print "shell: pane {next.pane.source} {PN.status next.pane}"
         | False -> Unit;
       effects me env next.
-update me env ev m = (m, Nil).
+updateModel me env ev m = (m, Nil).
 # Child commands are values, interpreted outside the pure pane update/view.
 paneUpdate msg m =
   (pane, commands) = PN.update msg m.pane;
@@ -376,7 +391,7 @@ runSized me program q lifecycle tiles mt ep dims =
   cfg = {env = (q, tiles, mt, jobs, sessions), mt = mt, tick = 333330, input = inp, render = graphics};
   app = withPort port program;
   _ = QS.ready lifecycle;
-  result = MV.runResultWithin serviceBudgetMs me cfg app;
+  result = MV.runRetainedResultWithin serviceBudgetMs me cfg app;
   appsStopped = AP.stop me sessions;
   _ = kill sessions;
   stopped = PJ.stop me jobs;

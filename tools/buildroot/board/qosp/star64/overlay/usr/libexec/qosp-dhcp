@@ -1,0 +1,33 @@
+#!/bin/sh
+# A persistent DHCP client whose initial retries never hold up appliance boot.
+set -eu
+action=${1:-}
+iface=${2:-}
+case "$iface" in ''|*[!a-zA-Z0-9_.:-]*) echo 'qosp-dhcp: invalid interface' >&2; exit 2 ;; esac
+run_dir=${QOSP_DHCP_RUN_DIR:-/run}
+log_dir=${QOSP_DHCP_LOG_DIR:-/var/log}
+daemon=${QOSP_DHCP_DAEMON:-/sbin/udhcpc}
+ssd=${QOSP_DHCP_SSD:-start-stop-daemon}
+pidfile=$run_dir/udhcpc-$iface.pid
+matches() { "$ssd" -K -t -q -p "$pidfile" -x "$daemon"; }
+case "$action" in
+start)
+    mkdir -p "$run_dir" "$log_dir"
+    [ -x "$daemon" ] || exit 1
+    "$ssd" -S -o -q -b -m -p "$pidfile" -x "$daemon" -- \
+        -f -R -t 3 -T 3 -A 10 -O search -O staticroutes -i "$iface" -p "$pidfile" \
+        -x "hostname:$(hostname)" >> "$log_dir/dhcp-$iface.log" 2>&1
+    # Acknowledge process startup, not a network lease. Stop uses the same PID.
+    n=20
+    while ! matches && [ "$n" -gt 0 ]; do sleep 0.05; n=$((n - 1)); done
+    matches || { echo "qosp-dhcp: $iface client failed to start" >&2; exit 1; }
+    ;;
+stop)
+    "$ssd" -K -o -q -p "$pidfile" -x "$daemon"
+    n=50
+    while matches && [ "$n" -gt 0 ]; do sleep 0.1; n=$((n - 1)); done
+    ! matches || { echo "qosp-dhcp: $iface client failed to stop" >&2; exit 1; }
+    rm -f "$pidfile"
+    ;;
+*) echo 'usage: qosp-dhcp {start|stop} IFACE' >&2; exit 2 ;;
+esac

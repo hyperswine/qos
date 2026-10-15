@@ -179,3 +179,30 @@ upgrade. Never install a diagnostic Main bundle as the production session.
 
 For correlated Main input/frame timing, temporary CPU policy and the app-session
 receive-root regression, see [GUI performance](../../docs/2026-10-14-GUI-PERFORMANCE.md).
+
+## Reading the active HDMI framebuffer
+
+`kms-readback.c` captures the first active CRTC's XRGB8888 dumb framebuffer as
+RGB PPM, using GETRESOURCES/GETCRTC/GETFB/MAP_DUMB and a read-only mapping.
+It does not acquire DRM master, modeset, allocate a framebuffer or write pixels.
+It requires permission to retrieve the framebuffer handle (root on this Pi).
+Build with the matching Buildroot cross compiler, upload the executable and run:
+
+```sh
+"$TARGET_CC" -O2 -o kms-readback tools/pi4/kms-readback.c
+# On the Pi, while Main is running:
+/tmp/kms-readback /dev/dri/card1 /tmp/qosp-screen.ppm
+```
+
+Use the card reported by the running host's `scanout` log. Unsupported formats
+or unmappable framebuffers fail explicitly. A capture can race a display update;
+it proves selected scanout pixels, not physical panel/backlight operation.
+
+For a changed IP address of the same enrolled Pi, `soak.py` also accepts
+`--host-key-alias` without changing the known-hosts enrollment. The
+[2026-10-14 deployment record](../../docs/2026-10-14-PI-MAIN-DEPLOYMENT.md)
+contains installed hashes, actual HDMI acceptance, remaining Clock status
+polish and rollback instructions.
+
+For the opt-in retained MVU driver, Portable v20 worker parking and the matching
+Pi bundle, see [Main idle CPU](../../docs/2026-10-15-GUI-IDLE-CPU.md).

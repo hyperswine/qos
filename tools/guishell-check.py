@@ -316,6 +316,7 @@ def check(out):
     run('make', '-s', 'qos-app', 'PROG=tests/shelllayout.fpr',
         f'QA_OUT={out / "shelllayout.qa"}', f'BUILD={out / "shelllayout-build"}')
     run('make', '-s', '-C', 'qos', 'portable-gl')
+    run('sh', 'qos/tests-host/park-check.sh')
     run('sh', 'qos/tests-host/pointer-check.sh')
     run('sh', 'qos/tests-host/gfx-input-check.sh')
     unit = subprocess.run([str(ROOT / 'qos/qosp-gl'), '--yes', str(out / 'unit.qa')],

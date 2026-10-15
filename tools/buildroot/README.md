@@ -164,20 +164,30 @@ overlay and resulting image contain network access material; keep them local.
 
 `vm.sh sync` deliberately excludes `.env` and `.qos`. Copy only the generated
 overlay into `~/qos/.qos/pi4/overlay` in the Linux build VM, then set
-`BR2_ROOTFS_OVERLAY` in that target's `menuconfig` to both directories:
+`BR2_ROOTFS_OVERLAY` in that target's `menuconfig` to these directories:
 
-    $(BR2_EXTERNAL_QOSP_PATH)/board/qosp/overlay /home/dev/qos/.qos/pi4/overlay
+    $(BR2_EXTERNAL_QOSP_PATH)/board/qosp/overlay $(BR2_EXTERNAL_QOSP_PATH)/board/qosp/rpi4/overlay /home/dev/qos/.qos/pi4/overlay
 
-The first is the tracked startup script; the second is the private settings.
-The Pi defconfig already selects the first. Existing cached target configs
+The first is shared setup, the second is Pi-specific networking, and the last
+is private settings. The Pi defconfig already selects the tracked directories
+and leaves `BR2_SYSTEM_DHCP` empty: its overlay supplies Ethernet configuration.
+Existing cached target configs
 must be updated explicitly: `br.sh` preserves their `.config`.
 
 `S41wifi` loads `brcmfmac` after the firmware filesystem is available, waits
-up to five seconds for `wlan0`, then starts `wpa_supplicant` and DHCP. DHCP's
-initial attempt is bounded to three three-second tries, with continued
-background retries afterward. Stop waits up to five seconds per daemon before
+up to five seconds for `wlan0`, then starts `wpa_supplicant` and DHCP. In the Pi
+overlay, `/usr/libexec/qosp-dhcp` backgrounds the persistent client immediately,
+including its first lease attempt; Ethernet uses the same launcher through
+ifup/down hooks. QOS keeps its existing S99 startup and reverse shutdown order,
+so its clean shutdown still precedes network teardown. The shared overlay's
+older Wi-Fi fallback waits for its initial attempts before backgrounding;
+select the Pi overlay for nonblocking networking. Stop waits up to five seconds per daemon before
 allowing a replacement to start; the old supplicant can otherwise bring the
 new instance's interface down during its cleanup.
+
+On the tested Pi, QOS readiness moved from 19.976 seconds to 8.164 and 8.192
+seconds after Linux starts. SD-first EEPROM boot order is a separate one-time
+board setting; see the [boot timing and driver audit](../../docs/2026-10-14-PI-BOOT-TIMING.md).
 
 The overlay disables only Broadcom firmware supplicant offload
 (`feature_disable=0x2000`, `BRCMF_FEAT_FWSUP` in the pinned kernel). On the

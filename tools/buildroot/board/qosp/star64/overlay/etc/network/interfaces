@@ -1,10 +1,17 @@
 auto lo
 iface lo inet loopback
 
+# A cable or DHCP server may arrive after the QOS shell starts.
 auto eth0
-iface eth0 inet dhcp
-    udhcpc_opts -b -t 3 -T 3 -A 10
+iface eth0 inet manual
+    up ip link set eth0 up
+    up /usr/libexec/qosp-dhcp start eth0
+    down /usr/libexec/qosp-dhcp stop eth0
+    post-down ip link set eth0 down
 
 auto eth1
-iface eth1 inet dhcp
-    udhcpc_opts -b -t 3 -T 3 -A 10
+iface eth1 inet manual
+    up ip link set eth1 up
+    up /usr/libexec/qosp-dhcp start eth1
+    down /usr/libexec/qosp-dhcp stop eth1
+    post-down ip link set eth1 down

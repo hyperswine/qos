@@ -33,6 +33,7 @@ def main():
     ap.add_argument('--host', required=True)
     ap.add_argument('--identity', required=True)
     ap.add_argument('--known-hosts', required=True)
+    ap.add_argument('--host-key-alias')
     ap.add_argument('--seconds', type=int, default=1800)
     ap.add_argument('--interval', type=int, default=30)
     ap.add_argument('--output', type=Path, required=True)
@@ -44,7 +45,10 @@ def main():
     a.output.mkdir(parents=True, exist_ok=True)
     ssh = ['ssh', '-F', '/dev/null', '-i', a.identity, '-o', 'IdentitiesOnly=yes',
            '-o', 'BatchMode=yes', '-o', f'UserKnownHostsFile={a.known_hosts}',
-           '-o', 'ConnectTimeout=5', f'root@{a.host}']
+           '-o', 'ConnectTimeout=5']
+    if a.host_key_alias:
+        ssh += ['-o', 'HostKeyAlias='+a.host_key_alias]
+    ssh += [f'root@{a.host}']
     command = 'set -e\np=$(cat ' + shlex.quote(a.ready_file) + ')\n' + '''
 case "$p" in ''|*[!0-9]*) exit 2;; esac
 echo SECTION:pid; echo "$p"
