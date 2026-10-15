@@ -26,8 +26,13 @@ start : unsafe Int -> Result Int String .
 start me =
   prior = netOwner Unit;
   owner = if prior != 0 then prior else install me (AC.spawnWithOn (if Sys.harts Unit > 1 then 1 else 0) (AC.Static 64) (actor me));
-  if owner == 0 then Err "net: kernel network actor unavailable" else
-  case call me owner Status of Ok (Info mode True) -> Ok owner | Ok other -> Err "net: stopped" | Err why -> Err why.
+  if owner == 0 then
+    Err "net: kernel network actor unavailable"
+  else
+    case call me owner Status of
+      Ok (Info mode True) -> Ok owner
+    | Ok other -> Err "net: stopped"
+    | Err why -> Err why.
 
 install : Int -> Int -> Int .
 install me candidate = actual = netBindOwner candidate; _ = if actual != candidate then kill candidate else Unit; actual.

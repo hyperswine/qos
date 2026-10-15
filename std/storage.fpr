@@ -1,8 +1,11 @@
 # Storage wire v2: Svc.TimedRpc caller correlation deadline tag key bytes.
 # One budget covers admission, queued time, recovery and all page operations.
 # A timed-out mutation is never replayed: its commit outcome may be unknown.
+
 AC = use "std/actor#201a0e9bf98a5154".
+
 defaultMs = 10000.
+
 now u = AC.nowUs u.
 deadline ms = AC.deadlineAfter ms.
 expired until = now Unit >= until.

@@ -1,47 +1,67 @@
 # Shared block owner. Mailboxes have 64 slots per sender; admitted pending I/O
 # has a separate global bound of 64. Administrator identity is cooperative
 # inside a trusted image; process authorization belongs to the namespace.
+
 AC = use "std/actor#201a0e9bf98a5154".
 Wire = use "std/storage#a8f7ee14e1efae76".
+
 Sys.alive : Int -> Bool .
+
 Request = Type (Timed Int Request | Capacity | Read Int | Write Int String | GetBudget | Configure (Int, Int, Int, Int) | Status | Cancel Int | CancelFor Int Int | Drain | Completed (Result Reply String) | Flush).
 Reply = Type (Pages Int | Page String | Written Int | Budget (Int, Int, Int, Int) | State Int Int Bool | Cancelled Bool | Drained | Flushed Bool).
+
 # State = admission mode (0 open, 1 draining, 2 drained), queued I/O, active.
 Context = Type (Context Int Device (Unit -> Result Reply String) ((Int, Int, Int, Int) -> Result Reply String)).
 Pending = Type (Pending Int Int Int Request).
 Active = Type (Idle Int Int Int | Running Int Int Int Int Bool Int Int | Offline).
 Mode = Type (Open | Closing Int Int | Closed).
 Owner = Type (Owner Active (List Pending) Int Mode).
+
 unsupported q = Err "block: native budgets unsupported".
+
 serve : unsafe Int -> Device -> Int .
 serve admin dev = serveWith admin dev unsupported unsupported.
+
 serveWith : unsafe Int -> Device -> (Unit -> Result Reply String) -> ((Int, Int, Int, Int) -> Result Reply String) -> Int .
 serveWith admin dev query update = Wire.spawn 64 8388608 (actor (Context admin dev query update)).
+
 serveWithOn : unsafe Int -> Int -> Device -> (Unit -> Result Reply String) -> ((Int, Int, Int, Int) -> Result Reply String) -> Int .
 serveWithOn hart admin dev query update = Wire.spawnOn hart 64 8388608 (actor (Context admin dev query update)).
+
 submit : Int -> Int -> Request -> Result Int String .
 submit me service q = case AC.deadlineAfter 10000 of Err why -> Err why | Ok until -> submitUntil until me service q.
+
 submitUntil until me service q = if AC.nowUs Unit >= until then Err "block: deadline exceeded before admission" else
   id = Sys.nextId Unit; case send service (me, id, Timed until q) of Ok u -> Ok id | Err why -> Err "block service: {why}".
+
 await : Int -> Int -> Int -> Result Reply String .
 await me service id = case AC.deadlineAfter 10000 of Err why -> Err why | Ok until -> awaitUntil until me service id.
+
 awaitUntil until me service id = flatten (AC.awaitReplyUntil until me service id).
+
 call : Int -> Int -> Request -> Result Reply String .
 call me service q = callWithin 10000 me service q.
+
 callWithin ms me service q = case AC.deadlineAfter ms of
     Err why -> Err why
   | Ok until -> callUntil until me service q.
+
 callUntil until me service q = flatten (AC.callUntil until me service (Timed until q)).
+
 capacity me service = case call me service Capacity of
     Ok (Pages n) -> Ok n
   | Err why -> Err why
   | other -> Err "block: invalid capacity reply".
+
 flatten : Result (Result Reply String) String -> Result Reply String .
 flatten r = case r of Ok reply -> reply | Err why -> Err "block service: {why}".
+
 actor : unsafe Context -> Int -> Unit .
 actor ctx me = _ = Sys.loop (ctx, Owner (Idle 0 0 16) Nil 0 Open) (blockStep me); Unit.
+
 loop : unsafe Context -> Owner -> Int -> Unit .
 loop ctx state me = _ = Sys.loop (ctx, state) (blockStep me); Unit.
+
 blockStep : unsafe Int -> (Context, Owner) -> (Bool, (Context, Owner)) .
 blockStep me (ctx, state) =
   ready = advance ctx state me;
@@ -58,6 +78,7 @@ blockStep me (ctx, state) =
             Timed until command -> handleUntil until ctx ready me from id command
           | legacy -> handleUntil (AC.nowUs Unit + 10000000) ctx ready me from id legacy;
   (True, (ctx, next)).
+
 handleUntil : unsafe Int -> Context -> Owner -> Int -> Int -> Int -> Request -> Owner .
 handleUntil until ctx state me from id q =
   if AC.nowUs Unit >= until then respond state from id (Err "block: deadline exceeded before I/O") else
@@ -67,16 +88,20 @@ handleUntil until ctx state me from id q =
     | Flush -> flushRequestUntil until ctx state me from id
     | Timed inner command -> handleUntil (if inner < until then inner else until) ctx state me from id command
     | other -> handle ctx state me from id other.
+
 advance ctx (Owner Offline queue count mode) me =
   _ = failPending queue;
   _ = case mode of Closing from id -> AC.reply (from, id) (Err "block: helper restart budget exhausted") | other -> Ok Unit;
   Owner Offline Nil 0 (case mode of Closing from id -> Closed | other -> mode).
+
 failPending : unsafe List Pending -> Unit .
 failPending Nil = Unit.
 failPending (Pending from id until q :: rest) =
   _ = AC.reply (from, id) (Err "block: helper restart budget exhausted"); failPending rest.
+
 again : unsafe (Context, Owner) -> Int -> Unit .
 again pair me = (ctx, state) = pair; loop ctx state me.
+
 advance : unsafe Context -> Owner -> Int -> Owner .
 advance ctx (Owner (Idle worker relay remaining) queue count mode) me = case queue of
     Pending from id until q :: rest -> if AC.nowUs Unit >= until then
@@ -90,9 +115,11 @@ advance ctx (Owner (Running from id worker relay cancelled until remaining) queu
     _ = kill relay;
     _ = AC.reply (from, id) (Err "block: deadline exceeded (outcome unknown)");
     advance ctx (Owner (Idle 0 0 remaining) queue count mode) me.
+
 drained me worker relay remaining mode = case mode of
     Closing from id -> _ = AC.reply (from, id) (Ok Drained); Owner (Idle worker relay remaining) Nil 0 Closed
   | other -> Owner (Idle worker relay remaining) Nil 0 other.
+
 # Keep one worker and one relay across successful I/O. Actor identities are
 # immortal, so spawning these per request would grow the global ledger forever.
 # A cancelled/failed worker is replaced only after its relay reports completion.
@@ -105,6 +132,8 @@ start ctx oldWorker oldRelay remaining me from id until q =
     _ = AC.reply (from, id) (Err "block: helper restart budget exhausted");
     Offline
   else startAdmitted ctx oldWorker oldRelay (remaining - (if reuse then 0 else 1)) me from id until q.
+
+# This kind of nested style is a bit awkward and against style guides, should use monadic |>? instead
 startAdmitted : unsafe Context -> Int -> Int -> Int -> Int -> Int -> Int -> Int -> Request -> Active .
 startAdmitted (Context admin dev query update) oldWorker oldRelay remaining me from id until q =
   case helper oldWorker (io me dev) of
@@ -117,11 +146,13 @@ startAdmitted (Context admin dev query update) oldWorker oldRelay remaining me f
       | Ok u -> case send worker (relay, id, q) of
           Err why -> helperFailed worker relay from id why
         | Ok v -> Running from id worker relay False until remaining.
+
 helper prior entry = if prior != 0 and Sys.alive prior then Ok prior else
   Wire.spawnResult (hartId 0) 2 262144 entry.
 helperFailed worker relay from id why =
   _ = kill worker; _ = kill relay;
   _ = AC.reply (from, id) (Err "block: helper command refused: {why}"); Offline.
+
 # The owner is the only command sender. Each turn watches this request's
 # worker, so its death remains an explicit Result. The token rejects stale
 # completions after cancellation. Idle helpers end when their owner ends.
@@ -129,6 +160,7 @@ completion : unsafe Int -> Int -> Unit .
 completion owner me = case receiveFromRes me owner of
     Err why -> Unit
   | Ok message -> completionTurn owner me message.
+
 completionTurn : unsafe Int -> Int -> (Int, Int) -> Unit .
 completionTurn owner me message =
   (worker, token) = message;
@@ -137,8 +169,10 @@ completionTurn owner me message =
   case AC.sendSure me owner (me, token, Completed result) of
       False -> Unit
     | True -> fresh = AC.boundary me owner; completion fresh me.
+
 flattenIO : Result (Result Reply String) String -> Result Reply String .
 flattenIO r = case r of Ok reply -> reply | Err why -> Err "block device: {why}".
+
 handle : unsafe Context -> Owner -> Int -> Int -> Int -> Request -> Owner .
 handle ctx state me from id q = case q of
     Completed result -> finish state from id result
@@ -155,10 +189,12 @@ handle ctx state me from id q = case q of
   | Flush -> flushRequest ctx state me from id
   | Timed until command -> handleUntil until ctx state me from id command
   | other -> admit ctx state me from id other.
+
 # After Drain, only the administrator may submit a final barrier. No page
 # operation can be admitted behind it; Closed remains the admission mode.
 flushRequest : unsafe Context -> Owner -> Int -> Int -> Int -> Owner .
 flushRequest ctx state me from id = flushRequestUntil (AC.nowUs Unit + 10000000) ctx state me from id.
+
 flushRequestUntil : unsafe Int -> Context -> Owner -> Int -> Int -> Int -> Owner .
 flushRequestUntil until ctx state me from id = case state of Owner active queue count mode ->
   case mode of
@@ -166,31 +202,41 @@ flushRequestUntil until ctx state me from id = case state of Owner active queue 
               if from != admin then respond state from id (Err "block: closed flush requires administrator")
               else closedFlushUntil until ctx state me from id
   | other -> admitUntil until ctx state me from id Flush.
+
 closedFlush : unsafe Context -> Owner -> Int -> Int -> Int -> Owner .
 closedFlush ctx state me from id = closedFlushUntil (AC.nowUs Unit + 10000000) ctx state me from id.
+
 closedFlushUntil : unsafe Int -> Context -> Owner -> Int -> Int -> Int -> Owner .
 closedFlushUntil until ctx (Owner (Idle worker relay remaining) queue count Closed) me from id = Owner (start ctx worker relay remaining me from id until Flush) queue count Closed.
 closedFlushUntil until ctx state me from id = respond state from id (Err "block: flush already active").
+
 respond state from id result = _ = AC.reply (from, id) result; state.
 status (Owner active queue count mode) = Ok (State (modeId mode) count (case active of Running from id worker relay cancelled until remaining -> True | other -> False)).
+
 modeId Open = 0.
 modeId (Closing from id) = 1.
 modeId Closed = 2.
+
 admit : unsafe Context -> Owner -> Int -> Int -> Int -> Request -> Owner .
 admit ctx state me from id q = admitUntil (AC.nowUs Unit + 10000000) ctx state me from id q.
+
 admitUntil : unsafe Int -> Context -> Owner -> Int -> Int -> Int -> Request -> Owner .
 admitUntil until ctx state me from id q = case state of Owner active queue count mode ->
   case mode of
     Open -> if isOffline active then respond state from id (Err "block: helper restart budget exhausted") else if count >= 64 then respond state from id (Err "block: queue full") else enqueueUntil until ctx active queue count me from id q
   | other -> respond state from id (Err "block: draining").
+
 enqueueUntil : unsafe Int -> Context -> Active -> List Pending -> Int -> Int -> Int -> Int -> Request -> Owner .
 enqueueUntil until ctx (Idle worker relay remaining) queue count me from id q = Owner (start ctx worker relay remaining me from id until q) queue count Open.
 enqueueUntil until ctx active queue count me from id q = Owner active (push queue (Pending from id until q)) (count + 1) Open.
+
 isOffline Offline = True.
 isOffline _ = False.
+
 push : unsafe List Pending -> Pending -> List Pending .
 push Nil item = item :: Nil.
 push (head :: rest) item = head :: push rest item.
+
 finish : Owner -> Int -> Int -> Result Reply String -> Owner .
 finish state sender token result = case state of Owner active queue count mode ->
   case active of
@@ -200,7 +246,9 @@ finish state sender token result = case state of Owner active queue count mode -
       if sender == relay and token == id then
         _ = AC.reply (from, id) (if cancelled then Err "block: request cancelled (outcome unknown)" else result);
         Owner (Idle worker relay remaining) queue count mode
-      else state.
+      else
+        state.
+
 cancel : unsafe Owner -> Int -> Int -> Int -> Int -> Owner .
 cancel state from id caller target = case state of Owner active queue count mode ->
   case active of
@@ -208,28 +256,37 @@ cancel state from id caller target = case state of Owner active queue count mode
       if owner == caller and token == target then
         _ = kill worker;
         respond (Owner (Running owner token worker relay True until remaining) queue count mode) from id (Ok (Cancelled True))
-      else cancelQueued state from id caller target
+      else
+        cancelQueued state from id caller target
   | Idle worker relay remaining -> cancelQueued state from id caller target
   | Offline -> cancelQueued state from id caller target.
+
 cancelQueued : unsafe Owner -> Int -> Int -> Int -> Int -> Owner .
 cancelQueued state from id caller target = case state of Owner active queue count mode ->
   (found, rest) = remove queue caller target;
   respond (Owner active rest (if found then count - 1 else count) mode) from id (Ok (Cancelled found)).
+
 remove : unsafe List Pending -> Int -> Int -> (Bool, List Pending) .
 remove Nil caller target = (False, Nil).
 remove (Pending from id until q :: rest) caller target =
   if from == caller and id == target then
-    _ = AC.reply (from, id) (Err "block: request cancelled before I/O"); (True, rest)
-  else (found, tail) = remove rest caller target; (found, Pending from id until q :: tail).
+    _ = AC.reply (from, id) (Err "block: request cancelled before I/O");
+    (True, rest)
+  else
+    (found, tail) = remove rest caller target;
+    (found, Pending from id until q :: tail).
+
 drain state from id = case state of Owner active queue count mode ->
   case mode of
     Open -> Owner active queue count (Closing from id)
   | Closed -> respond state from id (Ok Drained)
   | other -> respond state from id (Err "block: already draining").
+
 io : unsafe Int -> Device -> Int -> Unit .
 io owner dev me = case receiveFromRes me owner of
     Err why -> Unit
   | Ok message -> ioTurn owner dev me message.
+
 ioTurn : unsafe Int -> Device -> Int -> (Int, Int, Request) -> Unit .
 ioTurn owner dev me message =
   (relay, rid, borrowed) = message;
@@ -239,6 +296,7 @@ ioTurn owner dev me message =
   case AC.sendSure me relay (rid, result) of
       False -> Unit
     | True -> fresh = AC.boundary me (owner, dev); ioAgain fresh me.
+
 ioAgain : unsafe (Int, Device) -> Int -> Unit .
 ioAgain pair me = (owner, dev) = pair; io owner dev me.
 
@@ -247,11 +305,16 @@ operate dev q = case q of
   | Write p bytes -> writeOne dev p bytes
   | Flush -> flushOne dev
   | other -> Err "block: invalid I/O request".
+
 flushOne dev = case blkFlush dev of
     0 -> Ok (Flushed True)
   | 1 -> Ok (Flushed False)
   | other -> Err "block: flush failed (outcome unknown)".
+
 readOne dev p = if validPage dev p then Ok (Page (blkRead dev p)) else Err "block: page out of range".
+
 writeOne dev p bytes = if not (validPage dev p) then Err "block: page out of range" else if strlen bytes > 4096 then Err "block: payload exceeds one page" else written dev p bytes.
+
 written dev p bytes = _ = blkWrite dev p bytes; Ok (Written (strlen bytes)).
+
 validPage dev p = p >= 0 and p < blkPages dev.
