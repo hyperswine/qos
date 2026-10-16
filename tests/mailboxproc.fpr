@@ -69,7 +69,7 @@ main =
   _ = check (receiveFromNow me idleActor == Err "empty") "selective plane poll";
   _ = check (AC.callWithin 10 me idleActor 0 == Err "deadline exceeded (outcome unknown)") "live deadline through plane";
   _ = kill idleActor;
-  _ = check (receiveFromNow me idleActor == Err "dead actor") "selective plane death";
+  _ = check (receiveFromNow me idleActor == Err "dead actor: killed") "selective plane death";
   _ = check (Task.map (fn x -> x + 1) (1 :: 2 :: Nil) == Ok (2 :: 3 :: Nil)) "task process join";
   _ = check (Task.map failJob (0 :: Nil) == Err "task: worker 0: dead actor") "task process failure";
   (a, ka, oa) = trial me (Static 8) 20;

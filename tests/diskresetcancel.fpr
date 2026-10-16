@@ -14,7 +14,7 @@ awaitReset n = case blkTestResetPending Unit > 0 of
   | False -> case n <= 0 of
       True -> False
     | False -> _ = Sys.sleepUs 1000; awaitReset (n - 1).
-dead r = case r of Err e -> e == "dead actor" | Ok v -> False.
+dead r = case r of Err e -> substr e 0 10 == "dead actor" | Ok v -> False.
 cancelReset phase =
   me = myself 0;
   configured = blkBudgetSet (0, 100000, 20, 1) == 1;

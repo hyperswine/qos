@@ -6,7 +6,7 @@ netTestNow : Unit -> Int .
 sender boss self = send boss (netTestSend Unit) >> Unit.
 beat boss self = _ = send boss 77; _ = Sys.sleepUs 10000; beat boss self.
 count me n = case receiveNow me of Ok 77 -> count me (n + 1) | _ -> n.
-dead r = case r of Err "dead actor" -> True | _ -> False.
+dead r = case r of Err why -> substr why 0 10 == "dead actor" | _ -> False.
 main =
   me = myself 0;
   _ = netTestSend Unit;

@@ -1,0 +1,122 @@
+# uiapp.fpr -- a std/ui app on std/view: the whole app is init/update/view,
+# and the view is COMPONENT composition, not markup.  Server state (count,
+# toast text, theme) rides Dyn slots and the model; client state (the active
+# tab, an open section) is a typed record the page holds, which never
+# round-trips.  (It was maapp.fpr, over std/ma; std/ma's look is std/ui's
+# `day` and `night`.)
+#
+# The main below is the MVU cycle run as a harness: it prints the full
+# first paint (HTML + generated CSS) between UIBEGIN/UIEND markers,
+# then drives update with messages and prints what the wire would
+# carry -- deltas for count/toast (same statics), a full re-render for
+# the theme flip (statics change: the reshape path, exercised on
+# purpose).
+G  = use "std/view".
+UI = use "std/ui".
+
+M = {count : Int, toastN : Int, night : Int}.
+
+init = {count = 0, toastN = 0, night = 0}.
+
+Msg = Type (Bump Int | Save | Theme).
+codec = @Msg.
+
+update m msg = case msg of
+    Bump n -> {m | count = m.count + n}
+  | Save -> {m | toastN = m.toastN + 1}
+  | Theme -> {m | night = 1 - m.night}.
+
+# what the page holds: the tab it shows, whether the section is open
+Tab = Type (Overview | Tokens | About).
+Client = {tab : Tab, open : Bool}.
+client = {tab = Overview, open = False}.
+
+view m =
+  UI.pageWith (if m.night == 1 then UI.night else UI.day) { UI.stack | gap = 6, pad = 5 } (G.locals @Client client)
+    [ header m
+    , UI.hstack { UI.stack | gap = 2 } [tab Overview "Overview", tab Tokens "Tokens", tab About "About"]
+    , overview m
+    , tokensTab
+    , aboutTab
+    , UI.toast UI.Success "toast {m.toastN} -- saved" ].
+
+header m =
+  UI.hstack { UI.stack | gap = 4, align = UI.Center }
+    [ UI.vstack { UI.stack | gap = 1, fill = UI.Grow } [UI.label hero "std/ui", UI.label caption "empty space as a first-class element"]
+    , UI.badge UI.Muted "std/view native"
+    , UI.button UI.btn [G.send codec Theme] (if m.night == 1 then "day mode" else "night mode") ].
+
+tab t label = UI.button { UI.btn | kind = UI.Pill, vary = [UI.onState @Client.tab t [UI.Inverted]] } [G.setTo @Client.tab t] label.
+
+overview m =
+  UI.vstackWith { UI.stack | gap = 5 } [G.showIf @Client.tab Overview]
+    [ UI.label caption "ui / demo / overview"
+    , UI.hstack { UI.stack | gap = 4, wrap = True }
+        [ counterCell m
+        , UI.card UI.panel [UI.label heading "Reserved roles", UI.label UI.txt "colors that keep their meaning", badges]
+        , UI.card UI.panel [UI.label heading "Toast", UI.label UI.txt "server text, client dismiss", UI.button primary [G.send codec Save] "save"] ]
+    , UI.card UI.panel
+        [ UI.button UI.btn [G.toggle @Client.open] "Why stacks only"
+        , UI.vstackWith UI.stack [G.showIf @Client.open True]
+            [ UI.label UI.txt "A card grid is a wrapping row of cards: there is no grid, only stacks."
+            , UI.label caption "a hard constraint, not a default" ] ] ].
+
+counterCell m =
+  UI.card UI.panel
+    [ UI.label heading "Counter"
+    , UI.text hero "{m.count}"
+    , UI.hstack { UI.stack | gap = 2 } [UI.button primary [G.send codec (Bump 1)] "+1", UI.button UI.btn [G.send codec (Bump 10)] "+10"] ].
+
+badges =
+  UI.hstack { UI.stack | gap = 2 }
+    [UI.badge UI.Success "saved", UI.badge UI.Warning "unsaved", UI.badge UI.Danger "delete", UI.badge UI.Accent "milestone"].
+
+tokensTab =
+  UI.vstackWith UI.stack [G.showIf @Client.tab Tokens]
+    [ UI.card UI.panel
+        [ UI.label heading "Type scale"
+        , UI.label hero "Hero", UI.label { UI.txt | size = UI.Title } "Title", UI.label heading "Heading"
+        , UI.label UI.txt "Body", UI.label caption "Caption", UI.rule Unit
+        , UI.label caption "the spacing scale 0..6, the roles and the tones are std/ui's" ] ].
+
+aboutTab =
+  UI.vstackWith UI.stack [G.showIf @Client.tab About]
+    [ UI.card UI.panel
+        [ UI.label heading "About"
+        , UI.label UI.txt "One tree. Statics fixed by shape, dynamics by the model, client state by the page."
+        , UI.label caption "theme flip = reshape (full re-render); count/toast = deltas" ] ].
+
+hero = { UI.txt | size = UI.Hero, tabular = True }.
+heading = { UI.txt | size = UI.Heading }.
+caption = { UI.txt | size = UI.Caption, tone = UI.Muted }.
+primary = { UI.btn | kind = UI.Primary }.
+
+# ---- harness: the MVU cycle, observable --------------------------------------
+main =
+  m0 = init;
+  (s0, d0) = G.render (view m0);
+  css = UI.css (view m0);
+  _ = print "UIBEGIN";
+  _ = print "<!doctype html><html><head><meta charset='utf-8'><style>";
+  _ = print css;
+  _ = print "</style></head><body>";
+  _ = print (pageOf s0 d0 0);
+  _ = print "</body></html>";
+  _ = print "UIEND";
+  _ = print "ui: statics={List.len s0} dynamics={List.len d0}";
+  m1 = update m0 (Bump 1);
+  (s1, d1) = G.render (view m1);
+  _ = print "ui: bump same-statics={G.sameStatics s0 s1} delta={G.deltaJson d0 d1}";
+  m2 = update m1 Save;
+  (s2, d2) = G.render (view m2);
+  _ = print "ui: save same-statics={G.sameStatics s1 s2} delta={G.deltaJson d1 d2}";
+  m3 = update m2 Theme;
+  (s3, d3) = G.render (view m3);
+  _ = print "ui: theme same-statics={G.sameStatics s2 s3} (reshape -> full re-render)";
+  0 .
+
+# interleave statics and dynamics: s0 d0 s1 d1 ... sn
+pageOf : unsafe List String -> List a85 -> Int -> String .
+pageOf [s] Nil i = s.
+pageOf (s :: sr) (d :: dr) i = strcat s (strcat "<span data-slot=\"{i}\">{d}</span>" (pageOf sr dr (i + 1))).
+pageOf ss ds i = "".

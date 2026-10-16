@@ -30,7 +30,8 @@ with tempfile.TemporaryDirectory(prefix='qos-disk-harden-') as d:
     p = run([host, '--yes', tmp / 'stall.qa'], cwd=tmp, timeout=60,
             env={'FPR_HARTS': '2', 'FPR_DISK': str(tmp / 'stall.disk'), 'QOS_BLK_TEST_DELAY_US': '800000',
                  'QOS_BLK_TEST_DELAY_READS': '2', 'QOS_BLK_DEADLINE_MS': '300'})
-    assert 'diskstallp: storage=Err storage service: dead actor alive=True timeout=Err dead actor refused=Err dead actor write=Ok 5 read=Ok fresh HOLDS' in p.stdout, p.stdout + p.stderr
+    assert ('diskstallp: storage=Err storage service: dead actor alive=True timeout=Err dead actor: blk: request timed out (the disk worker stalled) '
+            'refused=Err dead actor: blk: request refused' in p.stdout and 'write=Ok 5 read=Ok fresh HOLDS' in p.stdout), p.stdout + p.stderr
     print('Portable disk: a stalled disk fail-stops the storage actor (its client gets Err), a late caller, refuses while stalled, recovers: PASS')
 
     if shutil.which('qemu-system-riscv64') and shutil.which('riscv64-unknown-elf-gcc'):
@@ -51,7 +52,7 @@ with tempfile.TemporaryDirectory(prefix='qos-disk-harden-') as d:
                     args += ['-global', 'virtio-mmio.force-legacy=false']
                 p = run(args, timeout=60)
                 out = p.stdout
-                assert 'diskstall: stalled=Err dead actor after-reset=before rewrite=rewrit cancel=afterk' in out and out.rstrip().endswith('HOLDS'), out + p.stderr
+                assert 'diskstall: stalled=Err dead actor: blk: ' in out and 'after-reset=before rewrite=rewrit cancel=afterk' in out and out.rstrip().endswith('HOLDS'), out + p.stderr
                 assert 'fast=True' in out and 'disk offline' in out, out
                 print(f'Native disk: virtio v{2 if modern else 1}, {harts} hart(s), timeout/reset/cancellation/offline HOLDS', flush=True)
 

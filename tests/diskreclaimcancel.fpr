@@ -9,7 +9,7 @@ blkTestNow : Unit -> Int .
 blkBudgetSet : (Int, Int, Int, Int) -> Int .
 disk u = device "blk".
 reader boss self = send boss (blkRead (disk Unit) 3) >> Unit.
-dead r = case r of Err why -> why == "dead actor" | Ok v -> False.
+dead r = case r of Err why -> substr why 0 10 == "dead actor" | Ok v -> False.
 awaitReclaim : (n : Int | measure n) -> Bool .
 awaitReclaim n = if blkTestResetPending Unit == 3 then True else if n <= 0 then False else _ = Sys.sleepUs 1000; awaitReclaim (n - 1).
 main =

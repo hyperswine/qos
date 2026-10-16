@@ -28,7 +28,7 @@ main =
   (local, childPid) = receiveFrom me a;
   _ = receiveFromRes me a;
   b = require (A.spawnWithHeap 128 (overflow me));
-  overrun = case receiveFromRes me b of Err "dead actor" -> True | _ -> False;
+  overrun = case receiveFromRes me b of Err why -> substr why 0 10 == "dead actor" | _ -> False;
   c = require (A.spawnWithHeap 131072 (worker me));
   (next, _) = receiveFrom me c;
   _ = receiveFromRes me c;

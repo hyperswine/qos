@@ -10,7 +10,7 @@ sender boss self = send boss (netTestSend Unit) >> Unit.
 submitted n = case netTestPending Unit of
     1 -> Unit
   | _ -> case n <= 0 of True -> error "TX never submitted" | False -> Sys.sleepUs 1000 >> submitted (n - 1).
-dead r = case r of Err "dead actor" -> True | _ -> False.
+dead r = case r of Err why -> substr why 0 10 == "dead actor" | _ -> False.
 sent r = case r of Ok 1 -> True | _ -> False.
 main =
   me = myself 0;

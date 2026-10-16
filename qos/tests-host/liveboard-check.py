@@ -130,11 +130,13 @@ class Ws:
             self.buf += d
         head, self.buf = self.buf.split(b'\r\n\r\n', 1)
         assert b'101' in head.split(b'\r\n')[0], head
-    def send(self, name, *fields, arg=None, raw=None):
+    def send(self, name, *fields, arg=None, raw=None, values=None):
         """a TYPED message, as View.send / View.sendWith put it in the page:
-        "=" [name, field...] is complete; "+" takes `arg` as its final field"""
-        wire = raw if raw is not None else ('+' if arg is not None else '=') + json.dumps([name, *map(str, fields)])
-        p = json.dumps({'msg': wire, 'arg': arg or ''}).encode()
+        "=" [name, field...] is complete; "+" takes `arg` as its final field (an
+        upload); "*" takes `values`, the page's values, as its final fields"""
+        kind = '*' if values is not None else '+' if arg is not None else '='
+        wire = raw if raw is not None else kind + json.dumps([name, *map(str, fields)])
+        p = json.dumps({'msg': wire, 'arg': json.dumps(values) if values is not None else arg or ''}).encode()
         mask = os.urandom(4)
         hdr = (bytes([0x81, 0x80 | len(p)]) if len(p) < 126 else bytes([0x81, 0x80 | 126]) + struct.pack('>H', len(p)) if len(p) < 65536
                else bytes([0x81, 0x80 | 127]) + struct.pack('>Q', len(p)))
@@ -171,7 +173,7 @@ with tempfile.TemporaryDirectory() as t:
     srv = start(port, store)
     try:
         page = urllib.request.urlopen(f'http://127.0.0.1:{port}/', timeout=20).read().decode()
-        assert 'id="lv-root"' in page and 'window.__LV__' in page and '.col' in page and 'new WebSocket' in page
+        assert 'id="lv-root"' in page and '["__LV__"]' in page and '.fpr-u-' in page and 'WebSocket' in page
         print('page: generated CSS, the seed (statics + first dynamics), the client script: PASS')
         a, b = Ws(port), Ws(port)
         fa, fb = a.recv(), b.recv()
@@ -181,8 +183,8 @@ with tempfile.TemporaryDirectory() as t:
         da = a.until(lambda m: has(m, '"10"')); b.until(lambda m: has(m, '"10"'))
         assert set(da) == {'d'} and len(da['d']) <= 2, da
         print(f'two sessions, each its own view; one update reaches both as a DELTA ({len(json.dumps(da))} bytes of a {nstat}-static, {ndyn}-dynamic page): PASS')
-        a.send('Add', arg='first note'); b.until(lambda m: has(m, 'first note'))
-        a.send('Add', arg='<script>x</script>'); b.until(lambda m: has(m, 'script'))
+        a.send('Add', values=['first note']); b.until(lambda m: has(m, 'first note'))
+        a.send('Add', values=['<script>x</script>']); b.until(lambda m: has(m, 'script'))
         print('an event carrying CLIENT state (the draft) reaches the model; markup in it stays text: PASS')
         for forged in [dict(raw='=["Nope"]'), dict(raw='=["Bump","ten"]'), dict(raw='=["Bump"]'), dict(raw='bump'), dict(raw='=not json')]:
             a.send('', **forged)

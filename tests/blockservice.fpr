@@ -6,7 +6,9 @@ blkTestNow : Unit -> Int .
 blkTestResetDelay : Int -> Int .
 blkBudgetSet : (Int, Int, Int, Int) -> Int .
 blkTestBusy : Unit -> Int .
-errorIs why r = case r of Err text -> text == why | other -> False.
+# the error `why`, or `why` and the reason a death carries after it
+# ("block device: dead actor: blk: request timed out ...")
+errorIs why r = case r of Err text -> text == why or substr text 0 (strlen why + 2) == "{why}: " | other -> False.
 budget r = case r of Ok (B.Budget p) -> p | other -> (-1, -1, -1, -1).
 page r = case r of Ok (B.Page bytes) -> substr bytes 0 6 | other -> "error".
 written r = case r of Ok (B.Written n) -> n | other -> -1.

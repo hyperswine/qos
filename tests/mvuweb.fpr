@@ -69,7 +69,9 @@ titleCls n = case n == 1 of True -> "text-lg upper warm" | False -> "text-lg upp
 
 wView m =
   M c t n = m;
-  G.El "div" [G.Cls "col gap-2 p-4", G.Local "one" "1", G.Local "ten" "10"]
+  # the classes name the statics a reshape flips; the stylesheet is the
+  # tree's own typed utilities (std/view generates CSS for those, not names)
+  G.El "div" [G.Cls "col gap-2 p-4", G.utilities [G.BoxSizing G.BorderBox, G.Display G.Flex, G.Direction G.Column, G.Gap (G.Px 8), G.Padding (G.Px 16)], G.Local "one" "1", G.Local "ten" "10"]
     [ G.El "div" [G.Cls (titleCls n)] [G.Txt "MVUWEB"]
     , G.El "div" [G.Cls "big tabular"] [G.Dyn "{c}"]
     , G.El "div" [G.Cls "dim text-sm"] [G.Txt "ticks ", G.Dyn "{t}"]

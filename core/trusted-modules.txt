@@ -76,3 +76,7 @@
 ../.fpr/store/878fb2196060eb47.fpr
 # Current Svc snapshot, byte-identical to the trusted source above.
 ../.fpr/store/75479fb6d5f34670.fpr
+
+# Exact current actor library (v3.0, pinned throughout), byte-identical to
+# fprisc std/actor.fpr at dcf9fbc (2026-10-13), an allow-listed std module.
+../.fpr/store/201a0e9bf98a5154.fpr

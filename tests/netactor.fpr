@@ -15,7 +15,7 @@ main =
   (aOwner, aOk) = receiveFrom me a; (bOwner, bOk) = receiveFrom me b;
   same = owner == aOwner and owner == bOwner;
   outsider = spawn (intruder me);
-  guarded = case receiveFromRes me outsider of Err why -> why == "dead actor" | Ok v -> False;
+  guarded = case receiveFromRes me outsider of Err why -> substr why 0 10 == "dead actor" | Ok v -> False;
   noPeer = case N.call me owner N.Poll of Ok (N.Peer 0) -> True | other -> False;
   invalid = case N.call me owner N.Status of
       Ok (N.Info 1 True) -> (case N.call me owner (N.Write 99 "bad peer") of Err why -> why == "net: connection closed" | other -> False)
@@ -27,7 +27,7 @@ main =
   refused = case N.call me owner N.Poll of Err why -> why == "net: stopped" | other -> False;
   stoppedStart = case N.start me of Err why -> why == "net: stopped" | Ok other -> False;
   _ = kill owner;
-  dead = case N.call me owner N.Status of Err why -> why == "network service: dead actor" | Ok other -> False;
-  noRestart = case N.start me of Err why -> why == "network service: dead actor" | Ok other -> False;
+  dead = case N.call me owner N.Status of Err why -> substr why 0 27 == "network service: dead actor" | Ok other -> False;
+  noRestart = case N.start me of Err why -> substr why 0 27 == "network service: dead actor" | Ok other -> False;
   holds = same and aOk and bOk and guarded and noPeer and invalid and healthy and stopped and repeat and refused and stoppedStart and dead and noRestart;
   "netactor: same={same} clients={aOk and bOk} guarded={guarded} invalid={invalid} healthy={healthy} stopped={stopped} repeat={repeat} refused={refused} stoppedStart={stoppedStart} dead={dead} noRestart={noRestart} {if holds then "HOLDS" else "FAILED"}".

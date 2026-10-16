@@ -15,11 +15,11 @@ try:
     a = Ws(port); f = a.recv(); assert 'Live board' in ''.join(f['s'])
     a.send('Bump', 7); a.until(lambda m: has(m, '"7"'))
     # 1. a change that does NOT compile: the old program must keep serving
-    open(app, 'w').write(backup.replace('Ma.display "Live board"', 'Ma.display ("Live board"'))
+    open(app, 'w').write(backup.replace('UI.label title "Live board"', 'UI.label title ("Live board"'))
     time.sleep(4); a.send('Bump', 1); a.until(lambda m: has(m, '"8"'))
     print('a rebuild that FAILS is reported and the old program keeps serving: PASS')
     # 2. a real edit: new heading
-    open(app, 'w').write(backup.replace('Ma.display "Live board"', 'Ma.display "Live board, reloaded"'))
+    open(app, 'w').write(backup.replace('UI.label title "Live board"', 'UI.label title "Live board, reloaded"'))
     t0 = time.time()
     while True:
         try:

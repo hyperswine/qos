@@ -15,5 +15,5 @@ main =
   noPeer = case N.call me owner N.Poll of Ok (N.Peer 0) -> True | other -> False;
   denied = case N.call me owner N.Stop of Err why -> why == "net: stop requires administrator" | other -> False;
   child = spawn outsider;
-  guarded = case receiveFromRes me child of Err why -> why == "dead actor" | other -> False;
+  guarded = case receiveFromRes me child of Err why -> substr why 0 10 == "dead actor" | other -> False;
   "netactorprocess: kernel={kernel} actual={actual} same={same} status={status} noPeer={noPeer} denied={denied} guarded={guarded} {if kernel and actual and same and status and noPeer and denied and guarded then "HOLDS" else "FAILED"}".
