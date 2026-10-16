@@ -1,4 +1,5 @@
 # sysed2 -- compatible successor: capitalize the first letter.
+editLine : String -> String .
 editLine s = case strlen s == 0 of
     True -> s
   | False -> "{upA (charAt s 0)}{substr s 1 (strlen s - 1)}".

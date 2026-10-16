@@ -1,3 +1,6 @@
-# sysed1 -- the sysdisk demo's edit module, v1: verbatim.
+# sysed1 -- the sysdisk demo's edit module, v1: verbatim.  The signature is
+# the interface a successor must keep: inferred, `s = s` is `a -> a`, which
+# a String editor is not, and the loader compares checked types.
+editLine : String -> String .
 editLine s = s.
 editName u = "sys.v1".

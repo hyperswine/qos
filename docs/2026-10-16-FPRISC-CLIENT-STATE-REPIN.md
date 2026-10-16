@@ -1,7 +1,9 @@
 # FP-RISC repin: typed client state, the plane's reasons, std/ui apps
 
 Date: 2026-10-16. Kind: implementation record. FP-RISC `1d4309b` (fprisc
-`docs/2026-10-16-CLIENT-STATE-AND-GAPS.md`).
+`docs/2026-10-16-CLIENT-STATE-AND-GAPS.md`), then `9699dbd` the same day
+for the five red legs (below): the Sol profile's `Sys.loop` and the dedup
+ceiling's stated reason.
 
 ## Builds again
 
@@ -50,14 +52,20 @@ index past the end, `chr` of a non-byte) into such a failure.
   Portable), failure injections, admission, the mailbox and error process
   legs, both liveboard legs, first-class paths (the schema now also lists
   `ks`, a List leaf: `leaves=5`), the std/ui harness.
-- Red, and red at the previous pin (FP-RISC `573cfd3`) as well, so not from
-  this change; they could not be seen before because nothing built:
-  - dedup ratchet: fprisc `compiler/Sol/Infer.hs` is 131 lines, the
-    ceiling 127 (last changed 2026-10-13);
-  - sysdisk: the loader refuses `sysed2` as "checked type, contract or
-    ABI changed for an export";
-  - Timer.qa: the aux-hart CLINT bridge leg;
-  - Vec record folds: the compile-note half of the leg (the run prints
-    `recfold: OK`);
-  - the sketch tier's `sketch-mvutick.sol`: `Sys.loop` is unbound under
-    `fpr sol` (its paths and hello parts pass).
+- Five legs were red at the previous pin (FP-RISC `573cfd3`) as well, so
+  not from this change; nothing had built to show them. All five are green
+  the same day:
+  - dedup ratchet: fprisc `compiler/Sol/Infer.hs` had grown past its
+    ceiling by primitive declarations only; with `Sys.loop` it is 132 and
+    the ratchet says so with the reason (fprisc);
+  - the sketch tier: `sketch-mvutick.sol` needed `Sys.loop` under
+    `fpr sol`, which fprisc's Sol profile has now;
+  - Vec record folds: the leg expected x64 to report its specialization
+    tier off; it has been on since fprisc `28dcacc`, so the leg expects the
+    same dualized fold and named decline as on RISC-V;
+  - Timer.qa: `tests/timer.fpr` and `tests/timerroute.fpr` no longer kill
+    the timer service, which fprisc refuses since `285d35e` (the bound
+    timer actor is the machine's, SUPERVISION S7);
+  - sysdisk: `tests/sysed1.fpr` and `tests/sysed2.fpr` declare `editLine :
+    String -> String`; inferred, v1's `s = s` was `a -> a`, so the reload
+    gate refused v2 as a changed checked type. `sysbad` is still refused.

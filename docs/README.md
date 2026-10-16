@@ -128,4 +128,4 @@ Source-adjacent READMEs under `tools/` stay beside the tools they explain.
 | 2026-10-15 | [STAR64-BOOT-TIMING.md](2026-10-15-STAR64-BOOT-TIMING.md) | Nonblocking networking, physical boot times and RISC-V module loader delay |
 | 2026-10-15 | [STAR64-LOADER-FIX.md](2026-10-15-STAR64-LOADER-FIX.md) | Vendor-kernel RISC-V loader backports, sanitizer/QEMU checks and physical Wi-Fi boot improvement |
 | 2026-10-16 | [STAR64-FPRISC-UPGRADE.md](2026-10-16-STAR64-FPRISC-UPGRADE.md) | Current FP-RISC with retained rendering, matching Portable v20 bundle, physical RV64 tests, preserved disk and reboot acceptance |
-| 2026-10-16 | [FPRISC-CLIENT-STATE-REPIN.md](2026-10-16-FPRISC-CLIENT-STATE-REPIN.md) | FP-RISC 1d4309b: the frozen std/actor trusted (QOS builds again), deaths carry their reason, liveboard and uiapp on std/ui with typed client state |
+| 2026-10-16 | [FPRISC-CLIENT-STATE-REPIN.md](2026-10-16-FPRISC-CLIENT-STATE-REPIN.md) | FP-RISC 1d4309b: the frozen std/actor trusted (QOS builds again), deaths carry their reason, liveboard and uiapp on std/ui with typed client state; then 9699dbd: the five check-all legs red since 573cfd3 green |

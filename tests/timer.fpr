@@ -51,7 +51,9 @@ main =
       True -> (case t2 - t0 >= 900000 of True -> "ok" | False -> "EARLY")
     | False -> "WRONG";
 
-  _ = kill svc;
+  # no kill: on native the service is the machine's bound timer actor, which
+  # the runtime refuses to kill (fprisc 285d35e, SUPERVISION S7); the
+  # program ends here and the service with it
   "timer: mode={mode} sleep50={s50} after={aok} order={ook}".
 
 isFire f = case f of TFire -> True | o -> False.

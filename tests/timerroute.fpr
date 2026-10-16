@@ -46,5 +46,6 @@ main =
   fok = case f of
       TFire -> (case d >= 300000 of True -> "ok" | False -> "EARLY({d})")
     | o -> "WRONG";
-  _ = kill tsvc;
+  # no kill: the service bound itself as the machine's timer actor, which
+  # the runtime refuses to kill (fprisc 285d35e, SUPERVISION S7)
   "timerroute: write={wok} fire={fok}".
