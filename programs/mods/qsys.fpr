@@ -286,11 +286,24 @@ filesMsg st ns me act ret from q = case q of
 filesOpen : unsafe Int -> Int -> Int -> List (String, Int) -> (Int, Int) -> Int -> String -> String -> a .
 filesOpen st ns me act ret from url mode =
   a0 = EP.ownerOf act url;
-  case a0 == 0 of
-    False -> filesHand st ns me act ret from url mode a0
-  | True -> (case strEq mode "read" of
-      True -> AC.reply ret (Refused "no such file: {url}") >> filesServe st ns me act
-    | False -> filesMake st ns me act ret from url mode).
+  live = case a0 == 0 of True -> False | False -> Sys.alive a0;
+  act2 = case a0 != 0 and not live of True -> EP.without act url | False -> act;
+  case live of
+    True -> (case strEq mode "delete" of
+        True -> filesDelete st ns me act2 ret url a0
+      | False -> filesHand st ns me act2 ret from url mode a0)
+  | False -> (case strEq mode "read" or strEq mode "delete" of
+      True -> AC.reply ret (Refused "no such file: {url}") >> filesServe st ns me act2
+    | False -> filesMake st ns me act2 ret from url mode).
+# delete: the file's actor ends, its path leaves the namespace (the manager
+# registered it, so the manager may withdraw it), its records leave the log
+filesDelete : unsafe Int -> Int -> Int -> List (String, Int) -> (Int, Int) -> String -> Int -> a .
+filesDelete st ns me act ret url a =
+  _ = kill a;
+  _ = EP.unregister me ns url;
+  _ = (case rpc me st 4 url "" of Ok u -> Unit | Err why -> Sys.logAt 1 "system: delete {url}: {why}");
+  _ = Sys.logAt 0 "system: deleted {url}";
+  AC.reply ret (Opened 0) >> filesServe st ns me (EP.without act url).
 filesMake : unsafe Int -> Int -> Int -> List (String, Int) -> (Int, Int) -> Int -> String -> String -> a .
 filesMake st ns me act ret from url mode =
   if fileCount act >= 64 or strlen url > 1024 then
@@ -302,7 +315,9 @@ filesMakeAdmitted st ns me act ret from url mode =
   _ = Sys.logAt 0 "system: creating {url}";
   p2 = strcat url "";      # OWN COPY: curried into the actor + the set
   a = Wire.spawn 8 Wire.inboxBytes (fileActor st p2);
-  _ = EP.register me ns p2 a;
+  # the MANAGER owns the path in the namespace (an open comes here and is
+  # redirected to the file's actor), so that it can also withdraw it
+  _ = EP.register me ns p2 0;
   filesHand st ns me ((p2, a) :: act) ret from url mode a.
 # forward the client's own envelope to the file and point the client at it
 filesHand : unsafe Int -> Int -> Int -> List (String, Int) -> (Int, Int) -> Int -> String -> String -> Int -> a .

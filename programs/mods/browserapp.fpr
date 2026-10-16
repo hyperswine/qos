@@ -8,7 +8,10 @@ ST = use "scrolltext".
 AK = use "appkit".
 AC = use "std/actor#201a0e9bf98a5154".
 
-init = ({cursor = 0, mode = 0, paths = Nil, text = "", lines = Nil, path = "", token = 1, busy = True, stale = False, phase = AW.Loading, w = 960, h = 530, focused = True, down = False, capture = 0 - 1, wheel = 0, scroll = 0, dragY = 0, dragScroll = 0, dragged = False}, [AW.Fetch 1 AW.ListRoot]).
+# A directory is a prefix of the flat namespace: `dir` is the prefix being
+# shown ("" is the root), `all` every url, `paths` what is directly under
+# the prefix -- a deeper path shows as its next segment with a "/" (kind 1).
+init = ({cursor = 0, mode = 0, dir = "", all = Nil, paths = Nil, text = "", lines = Nil, path = "", token = 1, busy = True, stale = False, phase = AW.Loading, w = 960, h = 530, focused = True, down = False, capture = 0 - 1, wheel = 0, scroll = 0, dragY = 0, dragScroll = 0, dragged = False}, [AW.Fetch 1 AW.ListRoot]).
 fetch job m = if m.busy then (m, Nil) else
   ({m | token = m.token + 1, busy = True, stale = False, phase = AW.Loading}, [AW.Fetch (m.token + 1) job]).
 update (AW.Resize w h) m = (move 0 (AV.resize w h m), Nil).
@@ -16,7 +19,7 @@ update (AW.Focus active) m = (AV.focus active m, Nil).
 update AW.Cancel m = (AV.focus m.focused m, Nil).
 update AW.Tick m | not m.focused = (m, Nil).
 
-update (AW.Key 14) m = if m.mode == 0 then (m, Nil) else
+update (AW.Key 14) m = if m.mode == 0 then (up m, Nil) else
   ({m | mode = 0, scroll = 0, stale = m.busy, phase = AW.Ready, down = False, capture = 0 - 1}, Nil).
 update (AW.Key 103) m = (move (0 - 1) m, Nil).
 update (AW.Key 108) m = (move 1 m, Nil).
@@ -41,15 +44,63 @@ update (AW.Pointer x y buttons) m =
     if m.down and valid and not m.dragged and m.capture == index then open fresh else (fresh, Nil).
 update (AW.Arrived token result) m = if token != m.token or not m.busy then (m, Nil) else
   if m.stale then ({m | busy = False, stale = False}, Nil) else case result of
-    Ok (AW.Lines lines total) -> paths = AK.withKind lines;
-      ({m | paths = paths, cursor = clamp m.cursor (ST.count paths), busy = False, phase = AW.Ready}, Nil)
+    Ok (AW.Lines lines total) -> paths = children lines m.dir;
+      ({m | all = lines, paths = paths, cursor = clamp m.cursor (ST.count paths), busy = False, phase = AW.Ready}, Nil)
   | Ok (AW.Text text) -> ({m | text = text, lines = ST.lines text, busy = False, phase = AW.Ready}, Nil)
   | Err why -> ({m | busy = False, phase = AW.Failed why}, Nil)
   | other -> ({m | busy = False, phase = AW.Failed "invalid browser result"}, Nil).
 update other m = (m, Nil).
 open m = if m.busy or m.paths == Nil or m.mode != 0 then (m, Nil) else
-  (path, kind) = nth m.paths m.cursor;
-  fetch (AW.ReadPath path) {m | mode = 1, path = path, text = "", lines = Nil, scroll = 0}.
+  (name, kind) = nth m.paths m.cursor;
+  path = "{m.dir}/{name}";
+  if kind == 1 then ({m | dir = path, paths = children m.all path, cursor = 0, scroll = 0}, Nil)
+  else fetch (AW.ReadPath path) {m | mode = 1, path = path, text = "", lines = Nil, scroll = 0}.
+# Backspace in a directory: its parent, with the cursor on the directory left
+up m = if m.dir == "" then m else
+  parent = parentOf m.dir;
+  paths = children m.all parent;
+  {m | dir = parent, paths = paths, cursor = indexOf (strcat (segAfter m.dir parent) "/") paths 0, scroll = 0}.
+parentOf dir = case lastSlash dir (strlen dir - 1) of
+    0 -> ""
+  | i -> substr dir 0 i.
+lastSlash : String -> (i : Int | measure (i + 1)) -> Int .
+lastSlash s i = if i <= 0 then 0 else if charAt s i == 47 then i else lastSlash s (i - 1).
+segAfter path parent = substr path (strlen parent + 1) (strlen path - strlen parent - 1).
+indexOf name Nil i = 0.
+indexOf name ((n, k) :: rest) i = if n == name then i else indexOf name rest (i + 1).
+# what is directly under a prefix, folders first then files, each once; a
+# name that is both a registered url and a prefix (/home, the manager, and
+# /home/notes under it) shows as the folder
+children all dir =
+  pre = strcat dir "/";
+  entries = entriesUnder all pre Nil;
+  folderNames = uniqSorted (sortBy 1 entries);
+  append folderNames (notFolders (uniqSorted (sortBy 0 entries)) folderNames).
+notFolders Nil fs = Nil.
+notFolders ((n, k) :: rest) fs = if isFolder n fs then notFolders rest fs else (n, k) :: notFolders rest fs.
+isFolder n Nil = False.
+isFolder n ((f, k) :: rest) = if n == f then True else isFolder n rest.
+entriesUnder Nil pre acc = acc.
+entriesUnder (u :: rest) pre acc =
+  if strlen u > strlen pre and substr u 0 (strlen pre) == pre then
+    tail = substr u (strlen pre) (strlen u - strlen pre);
+    i = strIndexOf "/" tail;
+    entriesUnder rest pre ((if i < 0 then (tail, 0) else (substr tail 0 i, 1)) :: acc)
+  else entriesUnder rest pre acc.
+sortBy kind entries = sortNames (names kind entries).
+names kind Nil = Nil.
+names kind ((n, k) :: rest) = if k == kind then (n, k) :: names kind rest else names kind rest.
+sortNames Nil = Nil.
+sortNames (x :: rest) = insertName x (sortNames rest).
+insertName x Nil = x :: Nil.
+insertName x (y :: rest) = (n, k) = x; (n2, k2) = y; if strCmp n n2 <= 0 then x :: y :: rest else y :: insertName x rest.
+uniqSorted Nil = Nil.
+uniqSorted (x :: Nil) = x :: Nil.
+uniqSorted (x :: y :: rest) = (n, k) = x; (n2, k2) = y; if n == n2 then uniqSorted (y :: rest) else x :: uniqSorted (y :: rest).
+append Nil ys = ys.
+append (x :: r) ys = x :: append r ys.
+folders Nil = 0.
+folders ((n, k) :: rest) = k + folders rest.
 move delta m = if m.mode == 1 then AV.scroll (rows m) delta m else
   c = clamp (m.cursor + delta) (ST.count m.paths); spec = AV.metrics m;
   off = if c < m.scroll then c else if c >= m.scroll + spec.visible then c - spec.visible + 1 else m.scroll;
@@ -59,10 +110,12 @@ nth Nil n = ("", 0).
 nth (x :: rest) 0 = x.
 nth (x :: rest) n = nth rest (n - 1).
 pathRows Nil cursor index = Nil.
-pathRows ((path, kind) :: rest) cursor index =
-  "{if index == cursor then "> " else "  "}{path}" :: pathRows rest cursor (index + 1).
+pathRows ((name, kind) :: rest) cursor index =
+  "{if index == cursor then "> " else "  "}{name}{if kind == 1 then "/" else ""}" :: pathRows rest cursor (index + 1).
 rows m = if m.mode == 0 then pathRows m.paths m.cursor 0 else ST.wrapWith (AV.metrics m) m.text.
-view vp m = (AV.frame vp "Files" (if m.mode == 0 then "/   {ST.count m.paths} paths   ENTER RESOLVE" else "{m.path}   BKSP BACK") (rows m) m.scroll, Nil).
+view vp m = (AV.frame vp "Files" (if m.mode == 0 then
+    "{if m.dir == "" then "/" else m.dir}   {folders m.paths} folders, {ST.count m.paths - folders m.paths} files   ENTER OPEN   BKSP UP   R REFRESH"
+    else "{m.path}   {ST.count m.lines} lines, {strlen m.text} bytes   BKSP BACK") (rows m) m.scroll, Nil).
 
 # This actor owns the child model. Transport and effects exchange data only.
 run me = case AS.start me of

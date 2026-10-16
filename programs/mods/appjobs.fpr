@@ -31,12 +31,24 @@ execute me ns storage AW.ListRoot state =
 execute me ns storage AW.Disk state =
   result = FS.rpcWithin 500 me storage 5 "" "";
   (case result of Ok text -> Ok (AW.Lines (AK.lines text) "STORAGE STATS") | Err why -> Err why, state).
+# the file namespaces: a write is open/write/close, a delete an open in
+# the "delete" mode that the manager answers by removing the file; a
+# replacing write deletes first and reads "no such file" as nothing to do
+execute me ns storage (AW.AppendPath path text) state = writePath me ns path text state.
+execute me ns storage (AW.WritePath path text) state =
+  case deletePath me ns path state of
+    (Err why, next) -> if strIndexOf "no such file" why >= 0 then writePath me ns path text next else (Err why, next)
+  | (Ok u, next) -> writePath me ns path text next.
+execute me ns storage (AW.DeletePath path) state =
+  case deletePath me ns path state of
+    (Err why, next) -> (Err why, next)
+  | (Ok u, next) -> (Ok (AW.Done "deleted {path}"), next).
 execute me ns storage (AW.ReadPath path) state =
   case cleanup me state of
     Err why -> (Err why, state)
   | Ok u -> case AC.deadlineAfter 500 of
       Err why -> (Err why, state)
-    | Ok deadline -> case openTracked deadline me ns path of
+    | Ok deadline -> case openTracked deadline me ns path "read" of
         Err (why, unknown) ->
           # A queued Open has no cancellation/lease acknowledgement in v1.
           # Do not claim cleanup or admit more opens with an unknown handle.
@@ -55,6 +67,40 @@ execute me ns storage (AW.ReadPath path) state =
               | Ok other -> Err "endpoint did not return text", next).
 readError (Ok value) = "read completed".
 readError (Err why) = why.
+writePath me ns path text state =
+  case cleanup me state of
+    Err why -> (Err why, state)
+  | Ok u -> case AC.deadlineAfter 1000 of
+      Err why -> (Err why, state)
+    | Ok deadline -> case openTracked deadline me ns path "write" of
+        Err (why, unknown) ->
+          next = {state | held = (0, 0), uncertain = (if unknown then "open cleanup unconfirmed: {why}" else "")};
+          (Err (if unknown then next.uncertain else why), next)
+      | Ok ep ->
+          result = ED.writeUntil deadline me ep (EP.IStr text);
+          pending = {state | held = ep};
+          closed = cleanup me pending;
+          next = case closed of Ok u -> {state | held = (0, 0)} | Err why -> pending;
+          (case closed of
+              Err why -> Err "{readError result}; {why}"
+            | Ok u -> case result of
+                Err why -> Err why
+              | Ok (EP.IInt n) -> Ok (AW.Done "wrote {n} bytes to {path}")
+              | Ok other -> Ok (AW.Done "wrote to {path}"), next).
+deletePath me ns path state =
+  case cleanup me state of
+    Err why -> (Err why, state)
+  | Ok u -> case AC.deadlineAfter 1000 of
+      Err why -> (Err why, state)
+    | Ok deadline -> case openTracked deadline me ns path "delete" of
+        Err (why, unknown) ->
+          next = {state | held = (0, 0), uncertain = (if unknown then "open cleanup unconfirmed: {why}" else "")};
+          (Err (if unknown then next.uncertain else why), next)
+      | Ok ep ->
+          pending = {state | held = ep};
+          (case cleanup me pending of
+              Err why -> (Err why, pending)
+            | Ok u -> (Ok Unit, {state | held = (0, 0)})).
 cleanup me state = case state.uncertain != "" of
     True -> Err state.uncertain
   | False -> case state.held of
@@ -66,7 +112,7 @@ cleanup me state = case state.uncertain != "" of
         | Err why -> Err "endpoint close unconfirmed: {why}".
 
 # Explicit refusals prove no handle was granted. Transport timeouts cannot.
-openTracked deadline me ns path = case AC.callUntil deadline me ns (EP.NsOpen path "read") of
+openTracked deadline me ns path mode = case AC.callUntil deadline me ns (EP.NsOpen path mode) of
     Err why -> Err ("namespace: {why}", True)
   | Ok (Err why) -> Err (why, False)
   | Ok (Ok (owner, id)) -> awaitTracked deadline me owner id.

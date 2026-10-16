@@ -4,6 +4,7 @@ C = use "../programs/mods/clockapp".
 L = use "../programs/mods/logsapp".
 B = use "../programs/mods/browserapp".
 D = use "../programs/mods/diskapp".
+T = use "../programs/mods/termapp".
 AS = use "../programs/mods/appsession".
 AW = use "../programs/mods/appwire".
 AP = use "../programs/mods/appclient".
@@ -112,4 +113,30 @@ main =
   (failedDisk, _) = D.update (AW.Arrived 1 (Err "storage unavailable")) disk;
   (retryDisk, commands) = D.update (AW.Key 19) failedDisk;
   _ = check "disk retry" (retryDisk.busy and retryDisk.token == 2 and commands != Nil);
+  # the Terminal's language: pure pipelines answer at once; a stage that
+  # touches the namespace is one job and the pipeline resumes on its result
+  (t0, _) = T.init;
+  (counted, cmds1) = T.submit "echo one two three | nl | count" t0;
+  _ = check "term pure pipeline" (T.lastLine counted == "1" and cmds1 == Nil and not counted.running);
+  (kept, _) = T.submit "let n = echo a b | count ; echo there are $n lines" counted;
+  _ = check "term let and $var" (T.lastLine kept == "there are 1 lines");
+  (listing, cmds2) = T.submit "ls /home | grep t | count" kept;
+  _ = check "term ls is a job" (listing.running and (case cmds2 of AW.Fetch tok AW.ListRoot :: Nil -> True | other -> False));
+  (resumed, cmds3) = T.update (AW.Arrived listing.token (Ok (AW.Lines ["/home/t.txt", "/home/notes/a", "/tmp/x"] ""))) listing;
+  _ = check "term listing resumes the pipeline" (T.lastLine resumed == "2" and not resumed.running and cmds3 == Nil);
+  (writing, cmds4) = T.submit "echo hello | write notes/b.txt" resumed;
+  _ = check "term write is a replacing job under cwd" (case cmds4 of AW.Fetch tok (AW.WritePath p t) :: Nil -> p == "/home/notes/b.txt" and t == "hello\n" | other -> False);
+  (done, _) = T.update (AW.Arrived writing.token (Ok (AW.Done "wrote 6 bytes to /home/notes/b.txt"))) writing;
+  _ = check "term job result shown" (T.lastLine done == "wrote 6 bytes to /home/notes/b.txt");
+  (bad, cmds5) = T.submit "frobnicate" done;
+  _ = check "term unknown word" (T.lastLine bad == "error: frobnicate: no such word (help)" and cmds5 == Nil);
+  (moved, _) = T.submit "cd ../tmp ; pwd" bad;
+  _ = check "term cd normalizes" (T.lastLine moved == "/tmp");
+  (b2, _) = B.init;
+  (tree, _) = B.update (AW.Arrived 1 (Ok (AW.Lines ["/home", "/home/notes/a", "/home/t.txt", "/logs/normal", "/", "/readme"] ""))) b2;
+  _ = check "browser root folders win over same-named urls" (tree.paths == [("home", 1), ("logs", 1), ("readme", 0)]);
+  (inHome, _) = B.update (AW.Key 28) tree;
+  _ = check "browser descends a prefix" (inHome.dir == "/home" and inHome.paths == [("notes", 1), ("t.txt", 0)] and not inHome.busy);
+  (upAgain, _) = B.update (AW.Key 14) inHome;
+  _ = check "browser backspace goes up" (upAgain.dir == "" and upAgain.cursor == 0);
   "appsession: HOLDS".

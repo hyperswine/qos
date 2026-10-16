@@ -8,7 +8,7 @@ ST = use "scrolltext".
 AK = use "appkit".
 AC = use "std/actor#201a0e9bf98a5154".
 
-init = ({sev = 0, wanted = 0, rows = Nil, total = "", token = 1, busy = True, ticks = 0, phase = AW.Loading, w = 960, h = 530, focused = True, down = False, capture = 0 - 1, wheel = 0, scroll = 0, dragY = 0, dragScroll = 0, dragged = False}, [AW.Fetch 1 (AW.Logs 0)]).
+init = ({sev = 0, wanted = 0, rows = Nil, total = "", paused = False, token = 1, busy = True, ticks = 0, phase = AW.Loading, w = 960, h = 530, focused = True, down = False, capture = 0 - 1, wheel = 0, scroll = 0, dragY = 0, dragScroll = 0, dragged = False}, [AW.Fetch 1 (AW.Logs 0)]).
 fetch m = if m.busy then (m, Nil) else
   ({m | rows = (if m.sev == m.wanted then m.rows else Nil), scroll = (if m.sev == m.wanted then m.scroll else 0), total = (if m.sev == m.wanted then m.total else ""), sev = m.wanted, token = m.token + 1, busy = True, ticks = 0, phase = AW.Loading}, [AW.Fetch (m.token + 1) (AW.Logs m.wanted)]).
 update (AW.Resize w h) m = fresh = AV.resize w h m; (AV.seek (rows fresh) fresh.scroll fresh, Nil).
@@ -20,9 +20,9 @@ update (AW.Wheel dy dx) m = (AV.wheel (rows m) dy m, Nil).
 update (AW.Pointer x y buttons) m = (AV.pointer (rows m) x y buttons m, Nil).
 update (AW.Key k) m = if k == 49 or k == 17 or k == 18 or k == 35 then
   fetch {m | wanted = (case k of 49 -> 0 | 17 -> 1 | 18 -> 2 | other -> 3)}
-  else if k == 19 then fetch m else (navigate k m, Nil).
+  else if k == 19 then fetch m else if k == 25 then ({m | paused = not m.paused}, Nil) else (navigate k m, Nil).
 update AW.Tick m = case m.phase of
-    AW.Ready -> if m.ticks >= 9 then fetch m else ({m | ticks = m.ticks + 1}, Nil)
+    AW.Ready -> if m.paused then (m, Nil) else if m.ticks >= 9 then fetch m else ({m | ticks = m.ticks + 1}, Nil)
   | other -> (m, Nil).
 update (AW.Arrived token result) m = if token != m.token or not m.busy then (m, Nil) else
   if m.sev != m.wanted then fetch {m | busy = False} else case result of
@@ -43,7 +43,7 @@ sevPath 0 = "/logs/normal".
 sevPath 1 = "/logs/warns".
 sevPath 2 = "/logs/errors".
 sevPath other = "/logs/host".
-view vp m = (AV.frame vp "Logs" "{sevPath m.sev}   {m.total}" (rows m) m.scroll, Nil).
+view vp m = (AV.frame vp "Logs" "{sevPath m.sev}   {m.total}   {ST.count m.rows} lines, newest first   {if m.paused then "PAUSED (P resumes)" else "N W E H severity   P pause"}" (rows m) m.scroll, Nil).
 
 # This actor owns the child model. Transport and effects exchange data only.
 run me = case AS.start me of

@@ -133,10 +133,15 @@ keyCode env 1 m =
   _ = print "shell: home";
   paneUpdate PN.Leave {m | active = 0, appCommands = [AP.Home], status = "Welcome home",
     inner = AW.Frame 0 0 (Box Nil Nil) Nil "", focus = L.Tile m.selected, hover = L.None, down = False, capture = L.None, wheel = 0}.
-keyCode env 25 m = _ = print "shell: snapshot {m.snap + 1}"; {m | snap = m.snap + 1}.
+# P snapshots from the home grid and the shortcuts; while an app is open a
+# typed p is the app's, and ctrl-P (the input tier's +4000 bias) snapshots
+keyCode env 25 m | m.active <= 0 = _ = print "shell: snapshot {m.snap + 1}"; {m | snap = m.snap + 1}.
+keyCode env 4025 m = _ = print "shell: snapshot {m.snap + 1}"; {m | snap = m.snap + 1}.
 keyCode env 15 m = tab False m.
 keyCode env 1015 m = tab True m.
-keyCode env k m | k == 28 or k == 57 = activate env m.focus {m | down = False, capture = L.None}.
+# Enter activates the focused control; so does Space, except inside an
+# open app's content, where a space is a typed character
+keyCode env k m | k == 28 or (k == 57 and not (m.active > 0 and m.focus == L.Content)) = activate env m.focus {m | down = False, capture = L.None}.
 keyCode env 19 m | scrollable m.active = paneUpdate PN.Refresh m.
 keyCode env 19 m | m.active > 0 = appKey env 19 m.
 keyCode env k m | m.active != 0 = if m.focus == L.Content or m.focus == L.Scrollbar then appKey env k m else m.

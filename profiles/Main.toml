@@ -2,4 +2,4 @@
 name = "Main"
 entry = "programs/main.fpr"
 apps = ["apps/clock.fpr", "apps/logs.fpr", "apps/browser.fpr",
-        "apps/disk.fpr"]
+        "apps/disk.fpr", "apps/terminal.fpr"]

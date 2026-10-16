@@ -210,7 +210,7 @@ def viewport_checks(out, env, command, tag):
             os.write(pfd, b''.join(struct.pack('llHHi', 0, 0, *event) for event in events))
             time.sleep(.2)
         def capture(n, requested=True):
-            if requested: key(25); wait(f'shell: snapshot {n}')
+            if requested: key(4025); wait(f'shell: snapshot {n}')  # ctrl-P snapshots with an app open
             path = Path(f'/tmp/{tag}-{n}.ppm'); deadline = time.monotonic() + 10
             while time.monotonic() < deadline:
                 if path.exists() and path.stat().st_size >= width * height * 3: break
@@ -221,7 +221,7 @@ def viewport_checks(out, env, command, tag):
             shutil.move(path, out / f'{name}-{n}.ppm'); png(out / f'{name}-{n}.png', rgb, width, height)
             return rgb
         try:
-            wait('Main Profile ready (10 shortcuts,')
+            wait('Main Profile ready (11 shortcuts,')
             home = capture(1)
             point(1)
             assert 'shell: open clock' not in ''.join(log), 'press launched before release'
@@ -300,7 +300,7 @@ def check(out):
     (profile / 'broken.qa').write_bytes(b'not a QA archive')
     disk = out / 'check.disk'
     run('python3', 'tools/mkdisk.py', disk, 32,
-        *[profile / (name + '.qa') for name in ['clock', 'logs', 'browser', 'disk', 'plugmini', 'broken']])
+        *[profile / (name + '.qa') for name in ['clock', 'logs', 'browser', 'disk', 'terminal', 'plugmini', 'broken']])
     run('make', '-s', 'qos-app', 'PROG=tests/guishell.fpr',
         f'QA_OUT={out / "unit.qa"}', f'BUILD={out / "unit-build"}')
     run('make', '-s', 'qos-app', 'PROG=tests/scrolltext.fpr',
@@ -383,7 +383,7 @@ def check(out):
         def shot(n):
             path = Path(f'/tmp/{tag}-{n}.ppm')
             assert not path.exists(), f'old capture: {path}'
-            key(25)
+            key(4025)  # ctrl-P: a snapshot wherever we are (a plain p types into an open app)
             wait_for(f'shell: snapshot {n}')
             await_capture(path)
             data = path.read_bytes()
@@ -405,7 +405,7 @@ def check(out):
             raise TimeoutError(f'capture not written: {path}')
 
         try:
-            wait_for('Main Profile ready (10 shortcuts, 2 pages)')
+            wait_for('Main Profile ready (11 shortcuts, 2 pages)')
             deadline = time.monotonic() + 5
             while time.monotonic() < deadline and (not ready.exists() or ready.read_text().strip() != str(proc.pid)):
                 time.sleep(.01)
@@ -421,7 +421,7 @@ def check(out):
             resolved = shot(4)
             assert browser != resolved, 'onboard browser update did not change its view'
             key(1); wait_for('shell: home'); shot(5)
-            key(106); key(106); key(28); wait_for('shell: open plugmini')
+            key(106); key(106); key(106); key(28); wait_for('shell: open plugmini')
             refusal = shot(6)
             key(1); wait_for('shell: home'); shot(7)
             key(106); key(28); wait_for('shell: open broken')
@@ -464,6 +464,22 @@ def check(out):
             key(105); key(28); wait_for('shell: open clock')
             assert shot(23) != first, 'Clock did not reopen a fresh session'
             key(1); wait_for('shell: home'); shot(24)
+            # the Terminal: typed words reach it (a space included), `help`
+            # answers, and a file written under /home reads back
+            key(109); key(106); key(106); key(28); wait_for('shell: open terminal')
+            term = shot(25)
+            for code in (35, 18, 38, 25, 28):            # h e l p Enter
+                key(code)
+            helped = shot(26)
+            assert helped != term, 'Terminal did not answer help'
+            for code in (17, 19, 23, 20, 18, 57, 53, 35, 24, 50, 18, 53, 20, 52, 20, 45, 20, 57, 35, 23, 28):  # write /home/t.txt hi
+                key(code)
+            for code in (46, 30, 20, 57, 53, 35, 24, 50, 18, 53, 20, 52, 20, 45, 20, 28):  # cat /home/t.txt
+                key(code)
+            time.sleep(1.0)
+            written = shot(27)
+            assert written != helped, 'Terminal write/cat did not change the view'
+            key(1); wait_for('shell: home'); shot(28)
             if boot == 1:
                 key(16)
             else:
@@ -531,7 +547,7 @@ def check(out):
     print('guishell: graphics death drains storage before failed exit HOLDS')
     check_live_deadline(out, env, profile)
     check_pane_recovery(out, env, profile)
-    print('guishell: real GL, Files/Logs vertical scrolling, two pages, all four onboard sessions, reopen/close, refusals, pointer protocol and two boots HOLDS')
+    print('guishell: real GL, Files/Logs vertical scrolling, two pages, all five onboard sessions (the Terminal typed and written to), reopen/close, refusals, pointer protocol and two boots HOLDS')
 
 
 if __name__ == '__main__':

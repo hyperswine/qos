@@ -1,0 +1,301 @@
+# termapp.fpr -- Terminal.qa: a small terminal with a small language (qsh).
+#
+# The whole world is the URL namespace (docs/2026-10-16-MAIN-SHELL-APPS.md):
+# `ls` lists what is registered under a prefix, `cat` reads a url, `write`,
+# `append`, `touch`, `mkdir` and `rm` go to the file namespaces (/home, /tmp)
+# through the session's worker, `ps` lists the live actors of this process,
+# `logs` reads the log rings.  A line is commands separated by `;`, each a
+# PIPELINE of stages separated by `|`; a stage's output is a list of lines
+# and the next stage's input.  `let x = <pipeline>` keeps the lines in a
+# variable, `$x` puts them back as words.  Pure stages run at once; a stage
+# that reads or writes the namespace is one job, and the pipeline resumes
+# when its result arrives, so a slow owner never blocks the shell.
+#
+#   ls /home | grep notes | count
+#   echo hello world | write /home/hello.txt ; cat /home/hello.txt
+#   let n = ls / | count ; echo there are $n urls
+#
+# Recursive MVU: viewport, focus and pointer capture are model values.
+unsafe module.
+AW = use "appwire".
+AS = use "appsession".
+AV = use "appview".
+L = use "shelllayout".
+ST = use "scrolltext".
+AK = use "appkit".
+AC = use "std/actor#201a0e9bf98a5154".
+
+promptRows = 1.
+maxInput = 240.
+maxOut = 400.
+
+init = ({input = "", out = ["qsh -- a small shell over the namespace; `help` lists the words", ""], hist = Nil, histAt = 0 - 1, draft = "",
+         cwd = "/home", vars = Nil, queue = Nil, stages = Nil, acc = Nil, target = "", running = False,
+         token = 1, busy = False, phase = AW.Ready, w = 960, h = 530, full = 530, focused = True, down = False, capture = 0 - 1,
+         wheel = 0, scroll = 0, dragY = 0, dragScroll = 0, dragged = False, follow = True}, Nil).
+
+# ---- the session ------------------------------------------------------------------
+update (AW.Resize w h) m = (AV.resize w (h - promptHeight w h) {m | full = h}, Nil).
+update (AW.Focus active) m = (AV.focus active m, Nil).
+update AW.Cancel m = (AV.focus m.focused m, Nil).
+update AW.Tick m = (m, Nil).
+update (AW.Wheel dy dx) m = (unfollow (AV.wheel (rows m) dy m), Nil).
+update (AW.Pointer x y buttons) m = (unfollow (AV.pointer (rows m) x y buttons m), Nil).
+update (AW.Key 28) m = submit m.input {m | input = "", histAt = 0 - 1, draft = ""}.
+update (AW.Key 14) m = ({m | input = dropLast m.input}, Nil).
+update (AW.Key 103) m = (recall (m.histAt + 1) m, Nil).
+update (AW.Key 108) m = (recall (m.histAt - 1) m, Nil).
+update (AW.Key 104) m = spec = AV.metrics m; (unfollow (AV.scroll (rows m) (0 - spec.visible) m), Nil).
+update (AW.Key 109) m = spec = AV.metrics m; (unfollow (AV.scroll (rows m) spec.visible m), Nil).
+update (AW.Key 102) m = (unfollow (AV.seek (rows m) 0 m), Nil).
+update (AW.Key 107) m = (bottom {m | follow = True}, Nil).
+update (AW.Key 4038) m = ({m | out = Nil, scroll = 0}, Nil).          # ctrl-L
+update (AW.Key 4022) m = ({m | input = ""}, Nil).                      # ctrl-U
+update (AW.Key k) m = c = AK.keyChar k;
+  if strlen c == 0 or strlen m.input >= maxInput then (m, Nil) else ({m | input = strcat m.input c}, Nil).
+update (AW.Arrived token result) m = if token != m.token or not m.busy then (m, Nil) else
+  arrived result {m | busy = False}.
+update other m = (m, Nil).
+
+promptHeight w h = l = L.layout w (h + 70); 34 * l.scale / 1000.
+unfollow m = {m | follow = False}.
+bottom m = AV.seek (rows m) (ST.count (rows m)) m.
+rows m = ST.wrapLinesWith (AV.metrics m) m.out.
+recall at m =
+  n = count m.hist;
+  if at < 0 then {m | histAt = 0 - 1, input = m.draft}
+  else if at >= n then m
+  else {m | histAt = at, input = nth m.hist at "", draft = (if m.histAt < 0 then m.input else m.draft)}.
+dropLast s = if strlen s == 0 then "" else dropGo s (strlen s - 1).
+dropGo : String -> (i : Int | measure (i + 1)) -> String .
+dropGo s i = if i < 0 then "" else if charAt s i >= 128 and charAt s i < 192 then dropGo s (i - 1) else substr s 0 i.
+
+# ---- running a line --------------------------------------------------------------
+# a line is `;`-separated commands, queued; one runs at a time
+submit line m | strlen (trim line) == 0 = (m, Nil).
+submit line m | m.running = (say ["(busy: a command is still running)"] m, Nil).
+submit line m =
+  cmds = split ";" line;
+  next = say ["$ {line}"] {m | hist = take 50 (line :: m.hist), queue = cmds};
+  startNext next.
+startNext m = case m.queue of
+    Nil -> ({m | running = False}, Nil)
+  | cmd :: rest -> begin (trim cmd) {m | queue = rest, running = True}.
+begin cmd m | strlen cmd == 0 = startNext m.
+begin cmd m =
+  (target, body) = letForm cmd;
+  stages = parse body m.vars;
+  advance Nil {m | stages = stages, target = target, acc = Nil}.
+# `let name = pipeline`
+letForm cmd = ws = words cmd;
+  case ws of
+    "let" :: name :: "=" :: rest -> (name, unwords rest)
+  | other -> ("", cmd).
+parse body vars = filterEmpty (map (fn s -> expand (words (trim s)) vars) (split "|" body)).
+expand Nil vars = Nil.
+expand (w :: rest) vars = if strlen w > 1 and charAt w 0 == 36 then append (lookup (substr w 1 (strlen w - 1)) vars) (expand rest vars)
+  else w :: expand rest vars.
+filterEmpty Nil = Nil.
+filterEmpty (Nil :: rest) = filterEmpty rest.
+filterEmpty (s :: rest) = s :: filterEmpty rest.
+
+# work through the stages left; a stage that needs the namespace issues its
+# job and returns, `arrived` resumes with the rest
+advance : unsafe List String -> _ -> (_, List AW.Cmd) .
+advance input m = case m.stages of
+    Nil -> finish input m
+  | stage :: rest -> (case stage of
+      Nil -> advance input {m | stages = rest}
+    | word :: args -> (case job word args input m of
+        Ok (Some j) -> fetch j {m | stages = rest, acc = stage}
+      | Ok None -> (case pure word args input m of
+          Ok (lines, next) -> advance lines {next | stages = rest}
+        | Err why -> finish ["error: {why}"] {m | stages = Nil})
+      | Err why -> finish ["error: {why}"] {m | stages = Nil})).
+finish lines m =
+  shown = if strlen m.target == 0 then say lines m else {m | vars = (m.target, lines) :: without m.target m.vars};
+  startNext {shown | target = ""}.
+fetch j m = ({m | token = m.token + 1, busy = True}, [AW.Fetch (m.token + 1) j]).
+arrived result m = case result of
+    Ok (AW.Lines lines label) -> advance (fromListing lines m) m
+  | Ok (AW.Text text) -> advance (ST.lines text) m
+  | Ok (AW.Done note) -> advance [note] m
+  | Err why -> finish ["error: {why}"] {m | stages = Nil}
+  | other -> finish ["error: unexpected result"] {m | stages = Nil}.
+# the listing came back as every url: `ls` keeps what is under its prefix
+# (`acc` holds the words of the stage that asked)
+fromListing lines m = case m.acc of
+    "ls" :: p :: Nil -> children lines (resolve p m.cwd)
+  | other -> children lines m.cwd.
+
+Opt = Type (Some AW.Job | None).
+# the stages that are jobs: Ok (Some job) when the words make one, Ok None
+# when the word is a pure stage, Err when the words are wrong
+job word args input m = case word of
+    "ls" -> (case args of
+        Nil -> Ok (Some AW.ListRoot)
+      | p :: Nil -> Ok (Some AW.ListRoot)
+      | other -> Err "ls: one path at most")
+  | "cat" -> (case args of p :: Nil -> Ok (Some (AW.ReadPath (resolve p m.cwd))) | other -> Err "cat <path>")
+  | "write" -> (case args of
+        p :: text -> Ok (Some (AW.WritePath (resolve p m.cwd) (textOf text input)))
+      | Nil -> Err "write <path> [text] (or pipe text in)")
+  | "append" -> (case args of
+        p :: text -> Ok (Some (AW.AppendPath (resolve p m.cwd) (textOf text input)))
+      | Nil -> Err "append <path> [text] (or pipe text in)")
+  | "touch" -> (case args of p :: Nil -> Ok (Some (AW.AppendPath (resolve p m.cwd) "")) | other -> Err "touch <path>")
+  | "mkdir" -> (case args of p :: Nil -> Ok (Some (AW.AppendPath "{resolve p m.cwd}/.dir" "")) | other -> Err "mkdir <path>")
+  | "rm" -> (case args of p :: Nil -> Ok (Some (AW.DeletePath (resolve p m.cwd))) | other -> Err "rm <path>")
+  | other -> Ok None.
+# `ls` remembers its argument for the listing filter
+textOf Nil input = unlines input.
+textOf text input = strcat (unwords text) "\n".
+unlines Nil = "".
+unlines (l :: rest) = strcat (strcat l "\n") (unlines rest).
+
+# the pure stages
+pure word args input m = case word of
+    "help" -> Ok (helpText, m)
+  | "echo" -> Ok ([unwords args], m)
+  | "grep" -> (case args of p :: Nil -> Ok (filter (fn l -> strIndexOf p l >= 0) input, m) | other -> Err "grep <text>")
+  | "head" -> Ok (take (numOr 10 args) input, m)
+  | "tail" -> Ok (reverse (take (numOr 10 args) (reverse input)), m)
+  | "count" -> Ok (["{count input}"], m)
+  | "sort" -> Ok (sort input, m)
+  | "rev" -> Ok (reverse input, m)
+  | "nl" -> Ok (numbered input 1, m)
+  | "uniq" -> Ok (uniq input, m)
+  | "pwd" -> Ok ([m.cwd], m)
+  | "cd" -> (case args of Nil -> Ok (Nil, {m | cwd = "/home"}) | p :: Nil -> Ok (Nil, {m | cwd = resolve p m.cwd}) | other -> Err "cd <path>")
+  | "history" -> Ok (reverse m.hist, m)
+  | "vars" -> Ok (map (fn pair -> case pair of (k, v) -> "{k} = {count v} line(s)") m.vars, m)
+  | "ps" -> Ok (actors Unit, m)
+  | "logs" -> Ok (Sys.logSnap (sevOf args), m)
+  | "uptime" -> Ok ([uptime Unit], m)
+  | "clear" -> Ok (Nil, {m | out = Nil})
+  | other -> Err "{word}: no such word (help)".
+helpText = [
+  "words:  ls [path]   cat <path>   write <path> [text]   append <path> [text]",
+  "        touch <path>   mkdir <path>   rm <path>   cd [path]   pwd",
+  "        echo <text>   grep <text>   head [n]   tail [n]   count   sort   rev   nl   uniq",
+  "        ps   logs [n|w|e|h]   uptime   history   vars   clear   help",
+  "lines:  cmd ; cmd       stages: a | b | c       let x = pipeline   then $x",
+  "files live under /home and /tmp; a directory is a path prefix (mkdir makes one)",
+  "keys:   UP/DOWN history   PGUP/PGDN scroll   HOME/END   ctrl-L clear   ctrl-U erase line"].
+sevOf ("w" :: _) = 1.
+sevOf ("e" :: _) = 2.
+sevOf ("h" :: _) = 3.
+sevOf other = 0.
+uptime u = t = Sys.mtime Unit / 10000000; "up {t / 3600}h {AK.pad2 (t / 60 % 60)}m {AK.pad2 (t % 60)}s".
+actors u = n = Sys.actLive 0; "{n} actors live" :: actorRows 0 n.
+actorRows : (i : Int | measure (n - i)) -> (n : Int) -> List String .
+actorRows i n = if i >= n then Nil else actorRow (Sys.actInfo i) :: actorRows (i + 1) n.
+actorRow (id :: st :: pa :: rest) = "  #{id}  {(if st == 0 then "RUN" else "BLK")}  parent #{pa}".
+actorRow other = "  ?".
+
+# ---- paths ----------------------------------------------------------------------
+resolve p cwd = normalize (if strlen p > 0 and charAt p 0 == 47 then p else "{cwd}/{p}").
+normalize p = joinPath (normGo (split "/" p) Nil).
+normGo Nil acc = reverse acc.
+normGo ("" :: rest) acc = normGo rest acc.
+normGo ("." :: rest) acc = normGo rest acc.
+normGo (".." :: rest) acc = normGo rest (case acc of Nil -> Nil | _ :: up -> up).
+normGo (seg :: rest) acc = normGo rest (seg :: acc).
+joinPath Nil = "/".
+joinPath segs = strcat "/" (join "/" segs).
+# what is directly under a prefix: folders (deeper paths) end in "/"
+children all dir =
+  pre = if dir == "/" then "/" else strcat dir "/";
+  entries = map (fn u -> entryOf u pre) (filter (fn u -> startsWith pre u and strlen u > strlen pre) all);
+  sort (uniq (sort entries)).
+entryOf u pre = rest = substr u (strlen pre) (strlen u - strlen pre);
+  i = strIndexOf "/" rest;
+  if i < 0 then rest else strcat (substr rest 0 i) "/".
+startsWith p u = strlen p <= strlen u and substr u 0 (strlen p) == p.
+
+# ---- the model's output and the view --------------------------------------------
+say lines m = kept = append m.out lines; n = count kept;
+  trimmed = if n > maxOut then drop (n - maxOut) kept else kept;
+  m2 = {m | out = trimmed};
+  if m.follow then bottom m2 else m2.
+view vp m =
+  (w, h) = vp;
+  (AV.console (w, m.full) "Terminal" "{m.cwd}   {count m.out} lines   {(if m.running then "running" else "qsh")}   help lists the words" (rows m) m.scroll "$ {m.input}_", Nil).
+
+# the newest output line (the tests read it)
+lastLine m = case reverse m.out of Nil -> "" | l :: _ -> l.
+
+# ---- small list and string helpers ------------------------------------------------
+count Nil = 0.
+count (_ :: r) = 1 + count r.
+append Nil ys = ys.
+append (x :: r) ys = x :: append r ys.
+reverse xs = revGo xs Nil.
+revGo Nil acc = acc.
+revGo (x :: r) acc = revGo r (x :: acc).
+map f Nil = Nil.
+map f (x :: r) = f x :: map f r.
+filter f Nil = Nil.
+filter f (x :: r) = if f x then x :: filter f r else filter f r.
+take n xs = if n <= 0 then Nil else (case xs of Nil -> Nil | x :: r -> x :: take (n - 1) r).
+drop n xs = if n <= 0 then xs else (case xs of Nil -> Nil | x :: r -> drop (n - 1) r).
+nth Nil i d = d.
+nth (x :: r) i d = if i == 0 then x else nth r (i - 1) d.
+lookup k Nil = Nil.
+lookup k ((k2, v) :: r) = if k == k2 then v else lookup k r.
+without k Nil = Nil.
+without k ((k2, v) :: r) = if k == k2 then without k r else (k2, v) :: without k r.
+numOr d Nil = d.
+numOr d (s :: _) = n = parseInt s; if n <= 0 then d else n.
+numbered Nil i = Nil.
+numbered (l :: r) i = "{i}  {l}" :: numbered r (i + 1).
+uniq Nil = Nil.
+uniq (x :: Nil) = x :: Nil.
+uniq (x :: y :: r) = if x == y then uniq (y :: r) else x :: uniq (y :: r).
+sort Nil = Nil.
+sort (x :: r) = insert x (sort r).
+insert x Nil = x :: Nil.
+insert x (y :: r) = if strCmp x y <= 0 then x :: y :: r else y :: insert x r.
+join sep Nil = "".
+join sep (x :: Nil) = x.
+join sep (x :: r) = strcat (strcat x sep) (join sep r).
+unwords ws = join " " ws.
+words s = filter (fn w -> strlen w > 0) (split " " s).
+trim s = trimEnd (trimStart s).
+trimStart s = if strlen s > 0 and charAt s 0 == 32 then trimStart (substr s 1 (strlen s - 1)) else s.
+trimEnd s = if strlen s > 0 and charAt s (strlen s - 1) == 32 then trimEnd (substr s 0 (strlen s - 1)) else s.
+split sep s = splitGo sep s 0 0 (strlen s) Nil.
+splitGo : String -> String -> Int -> (i : Int | measure (n - i)) -> (n : Int) -> List String -> List String .
+splitGo sep s st i n acc =
+  if i >= n then reverse (substr s st (i - st) :: acc)
+  else if charAt s i == charAt sep 0 then splitGo sep s (i + 1) (i + 1) n (substr s st (i - st) :: acc)
+  else splitGo sep s st (i + 1) n acc.
+
+# This actor owns the child model. Transport and effects exchange data only.
+run me = case AS.start me of
+    Err why -> Unit
+  | Ok ctx ->
+      (initial, commands) = init;
+      (model, ignored) = update (AW.Resize ctx.w ctx.h) initial;
+      _ = AS.issue me ctx commands;
+      _ = Sys.loop (ctx, model) (step me); Unit.
+step me state =
+  (ctx, model) = state;
+  case AS.next me ctx of
+    AS.Idle -> _ = Sys.sleepUs 1000; (True, state)
+  | AS.Gone -> _ = AS.abandon me ctx; (False, state)
+  | AS.JobResult token result ->
+      (fresh, commands) = update (AW.Arrived token result) model;
+      _ = AS.issue me ctx commands;
+      (True, (AS.advance ctx ctx.sequence, fresh))
+  | AS.Message ret request -> case request of
+      AW.Close session -> (AS.close me ctx ret session, state)
+    | AW.Event session sequence event -> case AS.valid ctx session sequence of
+        False -> _ = AC.reply ret (AW.Refused "stale session or sequence"); (True, state)
+      | True ->
+          next = AS.advance (AS.resized ctx event) sequence;
+          (fresh, commands) = update event model;
+          _ = AS.issue me next commands;
+          (tree, vals) = view (next.w, next.h) fresh;
+          _ = AC.reply ret (AW.Frame next.session next.revision tree vals (AW.status fresh.phase));
+          (True, (next, fresh)).

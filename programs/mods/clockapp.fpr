@@ -8,7 +8,9 @@ ST = use "scrolltext".
 AK = use "appkit".
 AC = use "std/actor#201a0e9bf98a5154".
 
-init = ({keys = 0, time = 0, token = 1, busy = True, phase = AW.Loading, w = 960, h = 530, focused = True, down = False, capture = 0 - 1, wheel = 0, scroll = 0, dragY = 0, dragScroll = 0, dragged = False}, [AW.Fetch 1 AW.Clock]).
+# the stopwatch runs on the same runtime seconds: SPACE starts and stops,
+# L takes a lap, BACKSPACE resets
+init = ({keys = 0, time = 0, swOn = False, swStart = 0, swAcc = 0, laps = Nil, token = 1, busy = True, phase = AW.Loading, w = 960, h = 530, focused = True, down = False, capture = 0 - 1, wheel = 0, scroll = 0, dragY = 0, dragScroll = 0, dragged = False}, [AW.Fetch 1 AW.Clock]).
 fetch m = if m.busy then (m, Nil) else
   ({m | token = m.token + 1, busy = True, phase = AW.Loading}, [AW.Fetch (m.token + 1) AW.Clock]).
 update (AW.Resize w h) m = (AV.resize w h m, Nil).
@@ -18,14 +20,23 @@ update AW.Tick m | not m.focused = (m, Nil).
 
 update AW.Tick m = fetch m.
 update (AW.Key 19) m = fetch m.
+update (AW.Key 57) m = ({m | swOn = not m.swOn, swStart = m.time, swAcc = (if m.swOn then elapsed m else m.swAcc)}, Nil).
+update (AW.Key 14) m = ({m | swOn = False, swAcc = 0, laps = Nil}, Nil).
+update (AW.Key 38) m = if m.swOn or m.swAcc > 0 then ({m | laps = take 6 ("lap {1 + count m.laps}   {hms (elapsed m)}" :: m.laps)}, Nil) else (m, Nil).
 update (AW.Key k) m = ({m | keys = m.keys + 1}, Nil).
+elapsed m = if m.swOn then m.swAcc + m.time - m.swStart else m.swAcc.
+count Nil = 0.
+count (_ :: r) = 1 + count r.
+take n xs = if n <= 0 then Nil else (case xs of Nil -> Nil | x :: r -> x :: take (n - 1) r).
+hms t = "{t / 3600}:{AK.pad2 (t / 60 % 60)}:{AK.pad2 (t % 60)}".
 update (AW.Arrived token result) m = if token != m.token or not m.busy then (m, Nil) else
   case result of
     Ok (AW.Time seconds) -> ({m | time = seconds, busy = False, phase = AW.Ready}, Nil)
   | Err why -> ({m | busy = False, phase = AW.Failed why}, Nil)
   | other -> ({m | busy = False, phase = AW.Failed "invalid clock result"}, Nil).
 update other m = (m, Nil).
-view vp m = (AV.clock vp "{AK.pad2 (m.time / 60 % 60)}:{AK.pad2 (m.time % 60)}" m.keys, Nil).
+view vp m = (AV.clockWith vp (hms m.time) "{if m.swOn then "stopwatch " else "stopwatch paused "}{hms (elapsed m)}" m.laps
+  "SPACE START/STOP   L LAP   BKSP RESET   {m.keys} KEYS", Nil).
 
 # This actor owns the child model. Transport and effects exchange data only.
 run me = case AS.start me of

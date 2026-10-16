@@ -1,0 +1,6 @@
+unsafe program.
+# One startup entry; all subsequent communication is versioned data.
+A = use "../programs/mods/termapp".
+appMain : unsafe Int -> Unit .
+appMain me = A.run me.
+main = Unit.

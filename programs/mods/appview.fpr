@@ -37,6 +37,26 @@ frame vp title subtitle rows off =
   (w, h) = vp; a = layout w h;
   S2.Box [S2.Col, S2.W w, S2.H h, S2.Pad a.margin, S2.Bg (18, 30, 60), S2.Clip]
     [header a title subtitle, S2.Box [S2.H (12 * a.scale / 1000)] Nil, ST.paneWith a.metrics rows off].
+# a text pane over a one-line prompt (the Terminal): the pane gets h less
+# the prompt's row; the model's own h is that pane height
+console vp title subtitle rows off prompt =
+  (w, h) = vp; a0 = layout w h; ph = 34 * a0.scale / 1000; a = layout w (h - ph);
+  S2.Box [S2.Col, S2.W w, S2.H h, S2.Pad a.margin, S2.Bg (18, 30, 60), S2.Clip]
+    [header a title subtitle, S2.Box [S2.H (12 * a.scale / 1000)] Nil, ST.paneWith a.metrics rows off,
+     S2.Box [S2.H (8 * a.scale / 1000)] Nil,
+     S2.Box [S2.Row, S2.W (w - 2 * a.margin), S2.H (ph - 8 * a.scale / 1000), S2.Pad (6 * a.scale / 1000), S2.Round (6 * a.scale / 1000), S2.Bg (28, 44, 84), S2.Mid]
+       [label a prompt (940, 950, 990) 16 (w - 2 * a.margin - 12 * a.scale / 1000)]].
+# the clock, a line under it (the stopwatch) and a few rows (its laps)
+clockWith vp time under rows foot = (w, h) = vp; a = layout w h;
+  S2.Box [S2.Col, S2.W w, S2.H h, S2.Pad a.margin, S2.Bg (18, 30, 60), S2.Clip]
+    [header a "Clock" "QOS runtime time: hours, minutes and seconds since boot", S2.Box [S2.Grow] Nil,
+     S2.Box [S2.Row, S2.Center] [label a time (940, 950, 990) 70 (w - 2 * a.margin)],
+     S2.Box [S2.Row, S2.Center] [label a under (380, 800, 980) 22 (w - 2 * a.margin)],
+     S2.Box [S2.H (10 * a.scale / 1000)] Nil,
+     S2.Box [S2.Col, S2.Gap (4 * a.scale / 1000)] (lapRows a rows),
+     S2.Box [S2.Grow] Nil, label a foot (530, 610, 750) 16 (w - 2 * a.margin)].
+lapRows a Nil = Nil.
+lapRows a (r :: rest) = S2.Box [S2.Row, S2.Center] [label a r (530, 610, 750) 16 (a.w - 2 * a.margin)] :: lapRows a rest.
 clock vp time keys = (w, h) = vp; a = layout w h;
   S2.Box [S2.Col, S2.W w, S2.H h, S2.Pad a.margin, S2.Bg (18, 30, 60), S2.Clip]
     [header a "Clock" "QOS runtime time", S2.Box [S2.Grow] Nil,
