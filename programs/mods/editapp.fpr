@@ -14,8 +14,15 @@
 #   ^B build: the buffer through the host compiler (Sys.compile), the
 #   diagnostics in the output panel, the caret on the first error
 #   ^R run: built the same way, started as a process of its own, what it
-#   prints streamed into the output panel; ^R again stops it
+#   prints streamed into the output panel; ^R again stops it.  A program
+#   with an `app` (std/hosted: init, update, view, subs) runs in the
+#   panel: its view drawn there, the keys its own (^J hands them back to
+#   the text and to it again), its file commands asked of the Editor,
+#   which allows /home and nothing else
 #   ^J show or hide the output panel
+#   live checks: a moment after the typing stops, the compiler's front end
+#   (fprd's check op, a tenth of a second) marks the gutter, counts the
+#   problems in the header, and names the one on the caret's line
 #
 # Work is never lost to a closed app: shortly after the buffer changes, the
 # session record (/home/.editor/session) keeps the path and, while there
@@ -35,29 +42,33 @@ Fm = use "fontm".
 S2 = use "scene2d".
 AC = use "std/actor#201a0e9bf98a5154".
 RP = use "runprog".
+PG = use "std/hosted".
 
 sessionPath = "/home/.editor/session".
 undoDepth = 200.
 outKeep = 400.
 # the kinds of job in flight (a list: the worker serves them in order)
-kOpen = 1. kList = 2. kSave = 3. kSession = 4. kBuild = 5. kRun = 6. kRestore = 7.
+kOpen = 1. kList = 2. kSave = 3. kSession = 4. kBuild = 5. kRun = 6. kRestore = 7. kCheck = 8. kAsk = 10.
 
 init = ({buf = E.empty, path = "", version = 0, savedVersion = 0, nextStamp = 1, recorded = "", idle = 0,
          top = 0, left = 0, undo = Nil, redo = Nil, lastKind = 0, clip = "",
          mode = 0, query = "", files = Nil, listed = False, pick = 0, findText = "", msg = "", warn = False,
-         out = Nil, outOpen = False, confirm = 0, pending = [{token = 1, kind = kRestore, version = 0, path = sessionPath}],
-         outBack = 0, token = 1, building = False, running = False, runActor = 0, runPid = 0, partial = "", busy = False, phase = AW.Ready, w = 960, h = 530, focused = True,
+         out = Nil, outOpen = False, confirm = 0, pending = [{token = 1, kind = kRestore, version = 0, path = sessionPath, wrapped = False}],
+         diags = Nil, checking = False, checker = True, checkedVersion = 0 - 1,
+         outBack = 0, token = 1, building = False, running = False, proc = RP.idle Unit, partial = "", appRun = False, progView = Nil, progFocus = False, busy = False, phase = AW.Ready, w = 960, h = 530, focused = True,
          down = False, capture = 0 - 1, wheel = 0, scroll = 0, dragY = 0, dragScroll = 0, dragged = False},
         [AW.Fetch 1 (AW.ReadPath sessionPath)]).
 
 # ---- the session --------------------------------------------------------------
-update (AW.Resize w h) m = (follow (AV.resize w h m), Nil).
+update (AW.Resize w h) m = sized = follow (AV.resize w h m);
+  (if sized.running and sized.appRun then tellProg (PG.Resize (progCols sized) (progRows sized)) sized else sized, Nil).
 update (AW.Focus active) m = (AV.focus active m, Nil).
 update AW.Cancel m = (AV.focus m.focused m, Nil).
 update AW.Tick m = tick m.
 update (AW.Wheel dy dx) m = (wheelBy dy m, Nil).
 update (AW.Pointer x y buttons) m = (pointer x y buttons m, Nil).
-update (AW.Key k) m = if m.mode == 0 then editKey k m else promptKey k m.
+update (AW.Key k) m = if appKeys m and k != 4019 and k != 4036 then (tellProg (PG.KeyIn k) m, Nil)
+  else if m.mode == 0 then editKey k m else promptKey k m.
 update (AW.Arrived token result) m = arrived token result m.
 update other m = (m, Nil).
 
@@ -70,7 +81,7 @@ geo m =
   headH = 30 * s / 1000;
   gap = 8 * s / 1000;
   barH = 34 * s / 1000;
-  panelRows = (if m.mode == 1 then 8 else if m.outOpen then 7 else 0);
+  panelRows = (if m.mode == 1 then 8 else if appShown m then 12 else if m.outOpen then 7 else 0);
   panelH = (if panelRows == 0 then 0 else panelRows * pitch + 2 * gap + 18 * s / 1000);
   textY = a.margin + headH + gap;
   textH = E.imax pitch (m.h - 2 * a.margin - headH - barH - 2 * gap - panelH - (if panelH > 0 then gap else 0));
@@ -103,7 +114,7 @@ editKey 4024 m = openPicker m.
 editKey 4049 m = (newFile m, Nil).
 editKey 4033 m = (prompt 3 (findSeed m) m, Nil).
 editKey 4034 m = (prompt 4 "" m, Nil).
-editKey 4036 m = ({m | outOpen = not m.outOpen}, Nil).
+editKey 4036 m = if m.running and m.appRun then ({m | progFocus = not m.progFocus}, Nil) else ({m | outOpen = not m.outOpen}, Nil).
 editKey 4048 m = build m.
 editKey 4019 m = if m.running then halt m else runIt m.
 editKey 4044 m = (undo m, Nil).
@@ -195,9 +206,12 @@ gotoLine m = n = parseInt m.query;
   if n <= 0 then {m | mode = 0} else moved (E.gotoLine n m.buf) {m | mode = 0, msg = "Line {n}", warn = False}.
 
 # ---- files --------------------------------------------------------------------
-issue kind version path job m =
+issue kind version path job m = issueAs False kind version path job m.
+# `wrapped`: the source sent was Run's package of the buffer (its lines map
+# back past the entry: mods/runprog.fpr)
+issueAs wrapped kind version path job m =
   t = m.token + 1;
-  ({m | token = t, pending = {token = t, kind = kind, version = version, path = path} :: m.pending}, [AW.Fetch t job]).
+  ({m | token = t, pending = {token = t, kind = kind, version = version, path = path, wrapped = wrapped} :: m.pending}, [AW.Fetch t job]).
 openPicker m = issue kList 0 "" AW.ListRoot {m | mode = 1, query = "", pick = 0, listed = False, confirm = 0}.
 pickList m = filterS (fn u -> matches m.query u) m.files.
 matches q u = strlen q == 0 or strIndexOf (lower q) (lower u) >= 0.
@@ -213,7 +227,7 @@ openPath path m = if dirty m and m.confirm != 1 then
 newFile m = if dirty m and m.confirm != 2 then {m | confirm = 2, msg = "Unsaved changes in {name m}: ^N again to discard them, ^S to save", warn = True}
   else fresh "" E.empty {m | msg = "New file -- ^S saves it", warn = False}.
 fresh path b m = follow {m | buf = b, path = path, version = m.nextStamp, savedVersion = m.nextStamp, nextStamp = m.nextStamp + 1,
-  undo = Nil, redo = Nil, top = 0, left = 0, lastKind = 0, confirm = 0, mode = 0}.
+  undo = Nil, redo = Nil, top = 0, left = 0, lastKind = 0, confirm = 0, mode = 0, diags = Nil}.
 save m = if m.path == "" then (prompt 2 "/home/" m, Nil) else
   issue kSave m.version m.path (AW.SaveFile m.path (E.toText m.buf)) {m | msg = "Saving {m.path}", warn = False}.
 saveAs path m =
@@ -226,16 +240,23 @@ name m = if m.path == "" then "untitled" else baseName m.path.
 # Sys.compile); one build at a time
 build m = if m.building then ({m | msg = "Already building", warn = False}, Nil)
   else if not (colored m) then ({m | msg = "Only FP-RISC (.fpr) files build", warn = True}, Nil) else
-  issue kBuild m.version m.path (AW.Compile buildProfile (E.toText m.buf))
-    {m | building = True, outOpen = True, outBack = 0, out = say m.out ["", "build {name m}: compiling..."], msg = "Building {name m}", warn = False}.
-# a build is the package Run would start: what builds, runs
+  (wrapped, src) = package m;
+  issueAs wrapped kBuild m.version m.path (AW.Compile (if wrapped then runProfile else buildProfile) src)
+    {m | building = True, checker = True, outOpen = True, outBack = 0, out = say m.out ["", "build {name m}: compiling..."], msg = "Building {name m}", warn = False}.
+# a program is built as Run packages it -- so ^R after ^B is the daemon's
+# cached package -- and a module as it is
+package m = src = E.toText m.buf;
+  if RP.hasApp m.buf.lines then (True, RP.wrapApp src) else if RP.hasMain m.buf.lines then (True, RP.wrap src) else (False, src).
 buildProfile = "plugin:0:qedbuild".
+runProfile = "plugin:0:qedrun".
 # ^R: one program at a time; ^R while it runs stops it
 runIt m = if m.building then ({m | msg = "Already building", warn = False}, Nil)
   else if not (colored m) then ({m | msg = "Only FP-RISC (.fpr) files run", warn = True}, Nil)
-  else if not (RP.hasMain m.buf.lines) then ({m | msg = "Nothing to run: {name m} has no main", warn = True}, Nil) else
-  issue kRun m.version m.path (AW.Compile "plugin:0:qedrun" (RP.wrap (E.toText m.buf)))
-    {m | building = True, outOpen = True, outBack = 0, partial = "", out = say m.out ["", "run {name m}: compiling..."], msg = "Starting {name m}", warn = False}.
+  else if not (RP.hasMain m.buf.lines or RP.hasApp m.buf.lines) then ({m | msg = "Nothing to run: {name m} has no main and no app", warn = True}, Nil) else
+  (wrapped, src) = package m;
+  issueAs True kRun m.version m.path (AW.Compile runProfile src)
+    {m | building = True, checker = True, outOpen = True, outBack = 0, partial = "", appRun = RP.hasApp m.buf.lines, progView = Nil, progFocus = False,
+         out = say m.out ["", "run {name m}: compiling..."], msg = "Starting {name m}", warn = False}.
 halt m = (ended (stopProgram m) "stopped" m, Nil).
 
 say out lines = kept = E.append out lines; n = E.count kept; if n > outKeep then E.dropN (n - outKeep) kept else kept.
@@ -250,7 +271,21 @@ tidy nm at line = i = strIndexOf ".fpr:" line;
     if not (ours path) then line
     else if n <= 0 then strcat (strcat (substr line 0 st) nm) (substr line (i + 4) (strlen line - i - 4))
     else strcat (strcat (substr line 0 st) "{nm}:{at n}") (substr line (i + 5 + strlen "{n}") (strlen line - i - 5 - strlen "{n}")).
-ours path = E.endsWith "/in.fpr" path or E.endsWith "/qedbuild.fpr" path or E.endsWith "/qedrun.fpr" path.
+# a whole diagnostic: the location lines tidied, and the excerpt lines under
+# one in our file numbered as the buffer numbers them ("3 | x = ." is the
+# buffer's line 2 after a Run's entry), right-aligned where the number was so
+# the caret line under it still points at the column
+tidyLines nm at mine Nil = Nil.
+tidyLines nm at mine (l :: rest) = i = strIndexOf ".fpr:" l;
+  if i >= 0 then tidy nm at l :: tidyLines nm at (ours (substr l (lastSpace l i) (i + 4 - lastSpace l i))) rest
+  else if mine then excerpt at l :: tidyLines nm at mine rest
+  else l :: tidyLines nm at mine rest.
+excerpt at l = u = trimStartS l; lead = strlen l - strlen u; d = digitsAt u 0;
+  if d == 0 or not (E.startsWith " |" (substr u d (strlen u - d))) then l else
+    shown = "{at (parseInt (substr u 0 d))}";
+    strcat (strcat (spacesS (lead + d - strlen shown)) shown) (substr u d (strlen u - d)).
+spacesS k = if k <= 0 then "" else strcat " " (spacesS (k - 1)).
+ours path = E.endsWith "/in.fpr" path or E.endsWith "/qedbuild.fpr" path or E.endsWith "/qedrun.fpr" path or E.endsWith "/qedcheck.fpr" path.
 lastSpace s i = if i <= 0 then 0 else if charAt s (i - 1) == 32 or charAt s (i - 1) == 40 then i else lastSpace s (i - 1).
 # the first "<our file>:<line>:<column>" in the diagnostics (not an imported
 # module's); (0, 0) when there is none
@@ -276,8 +311,10 @@ settle p result m = case p.kind of
   | 2 -> listed result m
   | 3 -> saved p result m
   | 4 -> (case result of Ok r -> (m, Nil) | Err why -> ({m | msg = "Could not keep the recovery copy: {why}", warn = True}, Nil))
-  | 5 -> built result m
-  | 6 -> started result m
+  | 5 -> built p result m
+  | 6 -> started p result m
+  | 8 -> (checked p result m, Nil)
+  | 10 -> (answered p result m, Nil)
   | other -> (m, Nil).
 # the session record: "qed1", the path, 1 when the text that follows is
 # unsaved work, then that text
@@ -307,29 +344,30 @@ saved p result m = case result of
       ({m | savedVersion = (if p.path == m.path then p.version else m.savedVersion), msg = "Saved {p.path}", warn = False, recorded = ""}, Nil)
   | Err why -> ({m | msg = why, warn = True}, Nil)
   | other -> ({m | msg = "Save answered oddly", warn = True}, Nil).
-built result m = case result of
+built p result m = case result of
     Ok (AW.Text qa) -> _ = print "editor: build {name m}: ok";
       ({m | building = False, out = say m.out ["build {name m}: ok (a {strlen qa / 1024} KiB package)"],
-      msg = "Built {name m}: no errors", warn = False}, Nil)
-  | Err why -> failedBuild "build" why m
+      diags = (if p.version == m.version then Nil else m.diags), msg = "Built {name m}: no errors", warn = False}, Nil)
+  | Err why -> failedBuild "build" p why m
   | other -> ({m | building = False, msg = "Build answered oddly", warn = True}, Nil).
 # the diagnostics in the output panel, the caret on the first error in this file
-failedBuild what why m =
+failedBuild what p why m =
   lines = E.splitLines why;
   src = E.toText m.buf;
-  at = (if what == "run" then fn n -> RP.userLine src n else fn n -> n);
+  at = (if p.wrapped then fn n -> RP.userLine src n else fn n -> n);
   (first, col) = errorAt lines;
   line = (if first > 0 then at first else 0);
   # a column on the Run entry's own line is the entry's, not the buffer's
-  column = (if what == "run" and first == RP.entryLine src then 1 else E.imax 1 col);
+  column = (if p.wrapped and first == RP.entryLine src then 1 else E.imax 1 col);
   jumped = (if line > 0 then moved (E.gotoPos line column m.buf) m else m);
   _ = print "editor: {what} {name m}: failed{(if line > 0 then " at line {line}" else "")}";
-  ({jumped | building = False, out = say m.out (E.append (mapS (tidy (name m) at) lines) ["{what} {name m}: failed"]), outOpen = True,
-    outBack = E.count lines + 1,
+  ({jumped | building = False, appRun = (if what == "run" then False else m.appRun),
+    out = say m.out (E.append (tidyLines (name m) at False lines) ["{what} {name m}: failed"]), outOpen = True,
+    outBack = E.count lines + 1, diags = (if p.version == m.version then diagnose p.wrapped src m.buf.lines lines else m.diags),
     msg = (if line > 0 then "{(if what == "run" then "Run" else "Build")} failed at line {line} -- ^J shows the output" else "{(if what == "run" then "Run" else "Build")} failed -- ^J shows the output"), warn = True}, Nil).
-started result m = case result of
+started p result m = case result of
     Ok (AW.Text qa) -> (launch qa m, Nil)
-  | Err why -> failedBuild "run" why m
+  | Err why -> failedBuild "run" p why m
   | other -> ({m | building = False, msg = "Run answered oddly", warn = True}, Nil).
 
 # ---- a program of its own ---------------------------------------------------------
@@ -337,18 +375,68 @@ started result m = case result of
 # then owns the program's console capture; ticks drain what it printed and
 # notice its end, ^R kills it, and closing the Editor does too.  (In this
 # actor and not the shared app worker: no other app carries the loader.)
-launch qa m = case RP.start qa of
+launch qa m = budget = runBudget (Sys.memTotal Unit);
+  started = (if budget <= 0 then Err "no memory to give it"
+    else if m.appRun then RP.start qa budget (PG.Start (myself 0) (progCols m) (progRows m))
+    else RP.start qa budget 1);
+  case started of
     Err why -> failRun why m
-  | Ok (h, pid) -> _ = print "editor: run {name m}: started";
-      {m | building = False, running = True, runActor = h, runPid = pid, partial = "",
-      out = say m.out ["run {name m}: started as process {pid} -- ^R stops it"], msg = "Running {name m} -- ^R stops it", warn = False}.
+  | Ok proc ->
+      (pid, held) = RP.pidOf proc;
+      _ = print "editor: run {name m}: started";
+      {m | building = False, running = True, proc = held, partial = "", progFocus = m.appRun,
+      out = say m.out ["run {name m}: started as process {pid}, with {budget / 1048576} MiB -- ^R stops it"],
+      msg = "Running {name m} -- ^R stops it", warn = False}.
+# A run may take a quarter of the machine's memory (the host says how much:
+# Sys.memTotal); a program past it ends with that reason, the system does not.
+# 1 GiB when the host cannot say.
+runBudget total = if total > 0 then total / 4 else 1073741824.
 failRun why m = _ = print "editor: run {name m}: {why}";
-  {m | building = False, outBack = 0, out = say m.out ["run {name m}: {why}"], outOpen = True, msg = "Run failed: {why}", warn = True}.
-# a tick: what it printed since, and whether it has ended
-poll m = if not m.running then m else case RP.poll (myself 0) m.runActor m.runPid of
-    (text, RP.Running) -> printed text m
-  | (text, RP.Ended how) -> ended text how m.
-stopProgram m = if m.runPid <= 0 then "" else RP.stop m.runActor m.runPid.
+  {m | building = False, appRun = False, outBack = 0, out = say m.out ["run {name m}: {why}"], outOpen = True, msg = "Run failed: {why}", warn = True}.
+# a tick: what it printed since, what an app sent (its frames, its asks),
+# and whether it has ended
+poll m = if not m.running then (m, Nil) else case RP.poll (myself 0) m.proc of
+    (text, said, RP.Running proc) -> heard said (printed text {m | proc = proc}) Nil
+  | (text, said, RP.Ended how) -> (ended text how m, Nil).
+heard Nil m cmds = (m, cmds).
+heard (x :: rest) m cmds = case x of
+    PG.Frame lines -> heard rest {m | progView = lines} cmds
+  | PG.Ask token req -> (m2, c) = asked token req m; heard rest m2 (E.append cmds c).
+# An app's file command, asked of the Editor: a path under /home is done
+# by the worker and answered when it arrives; any other is answered at once,
+# refused.  The program holds no capability -- this is the whole of its reach.
+asked token req m = case req of
+    PG.ReadReq path -> forProgram token path (AW.ReadPath path) m
+  | PG.WriteReq path text -> forProgram token path (AW.WritePath path text) m
+  | PG.AppendReq path text -> forProgram token path (AW.AppendPath path text) m
+  | PG.RemoveReq path -> forProgram token path (AW.DeletePath path) m
+  | PG.ListReq prefix -> if allowedPrefix prefix then issue kAsk token prefix AW.ListRoot m
+      else (tellProg (PG.Answer token (PG.Failed "{prefix}: a program may list /home only")) m, Nil).
+forProgram token path job m = if allowedPath path then issue kAsk token path job m
+  else (tellProg (PG.Answer token (PG.Failed "{path}: a program may use files under /home only")) m, Nil).
+# what a program may touch: a file under /home, not the Editor's own records,
+# no `..` step, no longer than the file manager takes
+allowedPath p = E.startsWith "/home/" p and not (E.startsWith "/home/.editor/" p) and strlen p > 6 and strlen p <= 1024
+  and strIndexOf "/../" p < 0 and not (E.endsWith "/.." p).
+allowedPrefix p = (p == "/home" or E.startsWith "/home/" p) and strIndexOf "/.." p < 0.
+# the worker's answer, as the program's: Arrived for a kAsk
+answered p result m = if not m.running then m else
+  reply = (case result of
+      Ok (AW.Text t) -> PG.Text t
+    | Ok (AW.Done note) -> PG.Done
+    | Ok (AW.Lines lines label) -> PG.Names (filterS (fn u -> E.startsWith p.path u and not (E.startsWith "/home/.editor/" u)) lines)
+    | Ok other -> PG.Failed "an answer of the wrong kind"
+    | Err why -> PG.Failed why);
+  tellProg (PG.Answer p.version reply) m.
+tellProg x m = if not m.running then m else
+  (sent, proc) = RP.tell m.proc x;
+  {m | proc = proc}.
+appKeys m = m.running and m.appRun and m.progFocus and m.mode == 0.
+appShown m = m.appRun and (m.running or m.building).
+# the panel an app draws in, in characters (the font's average width)
+progCols m = g = geo m; E.imax 10 ((g.contentW - 2 * g.gap) * 10 / (E.imax 1 (g.em * 6))).
+progRows m = 11.
+stopProgram m = if not m.running then "" else RP.stop m.proc.
 # whole lines into the panel; a line still being written waits for its end
 printed text m = if strlen text == 0 then m else
   lines = E.splitLines (strcat m.partial text);
@@ -360,7 +448,10 @@ ended text how m =
   whole = E.take (E.count lines - 1) lines;
   shown = (if strlen tail > 0 then E.append whole [tail] else whole);
   kept = (if how == "finished" then dropUnit shown else shown);
-  {m | running = False, runActor = 0, runPid = 0, partial = "", outOpen = True, outBack = 0,
+  # its asks still with the worker are forgotten: an answer for this program
+  # must never reach the next one
+  {m | running = False, proc = RP.idle Unit, partial = "", outOpen = True, outBack = 0, appRun = False, progView = Nil, progFocus = False,
+    pending = filterS (fn p -> p.kind != kAsk) m.pending,
     out = say m.out (E.append kept ["run {name m}: {how}"]),
     msg = (if how == "finished" or how == "stopped" then "{name m}: {how}" else "{name m} failed: {how}"),
     warn = not (how == "finished" or how == "stopped")}.
@@ -369,8 +460,68 @@ dropUnit lines = case E.reverse lines of
     "()" :: rest -> E.reverse rest
   | other -> lines.
 
+# ---- live checks: the compiler's front end while the user pauses ----------------
+# Three quiet ticks after a change, the buffer -- as Run would package it --
+# goes to fprd's check op.  An answer for an older version of the buffer is
+# dropped (the next pause checks again); with no compiler server the checks
+# stop and say so once.
+liveCheck m = if not m.checker or m.checking or m.idle < 3 or m.version == m.checkedVersion or not (colored m) then (m, Nil) else
+  (wrapped, src) = package m;
+  issueAs wrapped kCheck m.version m.path (AW.Compile "check" src) {m | checking = True, checkedVersion = m.version}.
+checked p result m = if p.version != m.version then {m | checking = False} else case result of
+    Ok r -> {m | checking = False, diags = Nil}
+  | Err why -> if strIndexOf "no compiler server" why >= 0 then
+      {m | checking = False, checker = False, diags = Nil, msg = "Live checks are off: no compiler server (^B tries again)", warn = True}
+    else {m | checking = False, diags = diagnose p.wrapped (E.toText m.buf) m.buf.lines (E.splitLines why)}.
+# The diagnostics as (line, column, what), in the buffer's lines.  A location
+# in this file ("<file>:<line>[:<column>]:") starts one: what follows it on
+# the line, or a parse error's first plain line after its excerpt.  A finding
+# with no location that names a definition ("* spin is unsafe ...") is put
+# on the line that defines it.
+diagnose wrapped src lines texts = diagGo (if wrapped then fn n -> RP.userLine src n else fn n -> n) lines texts Nil.
+diagGo at lines Nil acc = E.reverse acc.
+diagGo at lines (t :: rest) acc = i = strIndexOf ".fpr:" t;
+  if i >= 0 and ours (substr t (lastSpace t i) (i + 4 - lastSpace t i)) then
+    after = substr t (i + 5) (strlen t - i - 5);
+    n = parseInt after;
+    tail = dropNumber (dropNumber after);
+    col = (if colonNumber after then parseInt (substr after (strlen "{n}" + 1) (strlen after - strlen "{n}" - 1)) else 1);
+    said = (if strlen (E.trimEnd tail) > 0 then unhash tail else firstPlain rest);
+    diagGo at lines rest (if n > 0 then (at n, E.imax 1 col, said) :: acc else acc)
+  else if E.startsWith "  * " t then
+    what = substr t 4 (strlen t - 4);
+    row = definedAt (firstWord what) lines 1;
+    diagGo at lines rest (if row > 0 then (row, 1, unhash what) :: acc else acc)
+  else diagGo at lines rest acc.
+# "12:5: rest" -> "5: rest" -> "rest": a number and its colon off the front
+dropNumber s = d = digitsAt s 0; if d > 0 and d < strlen s and charAt s d == 58 then trimStartS (substr s (d + 1) (strlen s - d - 1)) else s.
+colonNumber s = d = digitsAt s 0; d > 0 and d + 1 < strlen s and charAt s d == 58 and digitsAt s (d + 1) > 0.
+digitsAt s i = if i < strlen s and charAt s i >= 48 and charAt s i <= 57 then 1 + digitsAt s (i + 1) else 0.
+trimStartS s = if strlen s > 0 and charAt s 0 == 32 then trimStartS (substr s 1 (strlen s - 1)) else s.
+# a parse error's message: the first line that is not its excerpt
+firstPlain Nil = "".
+firstPlain (t :: rest) = u = trimStartS t;
+  if strlen u == 0 or charAt u 0 == 124 or (digitsAt u 0 > 0 and strIndexOf " | " u >= 0) then firstPlain rest else u.
+firstWord s = i = strIndexOf " " s; if i < 0 then s else substr s 0 i.
+definedAt nm Nil r = 0.
+definedAt nm (l :: rest) r = if E.startsWith (strcat nm " ") l or E.startsWith (strcat nm ":") l then r else definedAt nm rest (r + 1).
+# a definition's content hash ("output@73a503859861e1a8") is the compiler's, not the reader's
+unhash s = i = strIndexOf "@" s;
+  if i < 0 or i + 17 > strlen s or not (hexRun s (i + 1) 16) then s
+  else strcat (substr s 0 i) (unhash (substr s (i + 17) (strlen s - i - 17))).
+hexRun s i n = n == 0 or (i < strlen s and hexDigit (charAt s i) and hexRun s (i + 1) (n - 1)).
+hexDigit c = (c >= 48 and c <= 57) or (c >= 97 and c <= 102).
+# the problem on the caret's line, if any
+problemAt m = row = m.buf.row + 1; problemGo row m.diags.
+problemGo row Nil = "".
+problemGo row ((l, c, what) :: rest) = if l == row then what else problemGo row rest.
+hasProblem row diags = strlen (problemGo row diags) > 0.
+
 # ---- the session record, kept shortly after the buffer settles ------------------
-tick m0 = m = poll m0; if not m.focused then (m, Nil) else keepSession False {m | idle = m.idle + 1}.
+tick m0 = (m, c0) = poll m0; if not m.focused then (m, c0) else
+  (checking, c1) = liveCheck {m | idle = m.idle + 1};
+  (kept, c2) = keepSession False checking;
+  (kept, E.append c0 (E.append c1 c2)).
 # half a second after the last change -- or now, as the Editor closes: the
 # worker serves it before the stop that follows (appsession's finish)
 keepSession now m =
@@ -419,7 +570,9 @@ header m g =
   S2.Box [S2.Row, S2.W g.contentW, S2.H g.headH, S2.Mid, S2.Gap (10 * g.s / 1000)]
     (E.append [lbl g 19 ink (name m)]
       (E.append (if dirty m then [S2.Box [S2.W dotS, S2.H dotS, S2.Round (dotS / 2), S2.Bg accent] Nil] else Nil)
-        [lblW g 13 dim (g.contentW / 2) where, S2.Box [S2.Grow] Nil, lbl g 13 dim (position m)])).
+        [lblW g 13 dim (g.contentW / 2) where, S2.Box [S2.Grow] Nil, problems m g, lbl g 13 dim (position m)])).
+problems m g = n = E.count m.diags;
+  if n == 0 then S2.Box Nil Nil else lbl g 13 warmC "{n} problem{(if n == 1 then "" else "s")}".
 position m = b = m.buf;
   sel = E.selected b;
   n = E.count b.lines;
@@ -434,8 +587,12 @@ rowNode m g r l span color =
   isCur = r == m.buf.row;
   num = "{r + 1}";
   numW = Fm.width num * g.em / 1000;
+  marked = hasProblem (r + 1) m.diags;
+  mark = E.imax 2 (3 * g.s / 1000);
   gutter = S2.Box [S2.Row, S2.W g.gutterW, S2.H g.pitch, S2.Mid]
-    [S2.Box [S2.W (E.imax 0 (g.gutterW - numW - 14 * g.s / 1000))] Nil, S2.Lbl [S2.Fs g.em, S2.Fg (if isCur then gutterCur else gutterC)] num];
+    [S2.Box [S2.W mark, S2.H (g.em * 13 / 10), S2.Bg (if marked then warmC else (if isCur then curLineBg else bg))] Nil,
+     S2.Box [S2.W (E.imax 0 (g.gutterW - numW - mark - 14 * g.s / 1000))] Nil,
+     S2.Lbl [S2.Fs g.em, S2.Fg (if marked then warmC else if isCur then gutterCur else gutterC)] num];
   cur = (if isCur and m.mode == 0 then m.buf.col else 0 - 1);
   segs = segments g l (selOn r span (strlen l)) cur (if color then syntax l else [(0, strlen l, 0)]);
   attrs = [S2.Row, S2.W g.contentW, S2.H g.pitch, S2.Mid];
@@ -485,7 +642,15 @@ wordEnd l i n = if i < n and E.isWord (charAt l i) then wordEnd l (i + 1) n else
 keyword w = memberS w ["case", "of", "if", "then", "else", "fn", "use", "unsafe", "profile", "module", "program",
   "Type", "True", "False", "Nil", "Unit", "and", "or", "not"].
 
-panel m g = if g.panelH == 0 then Nil else [gapBox g.gap, (if m.mode == 1 then picker m g else outputPanel m g)].
+panel m g = if g.panelH == 0 then Nil else [gapBox g.gap, (if m.mode == 1 then picker m g else if appShown m then programPanel m g else outputPanel m g)].
+# a running app's view, a line each, under a title that says whose the keys are
+programPanel m g =
+  title = (if m.building then "PROGRAM   starting..." else if m.progFocus then "PROGRAM   {name m} has the keys -- ^J gives them back to the text, ^R stops it"
+    else "PROGRAM   {name m} -- ^J gives it the keys, ^R stops it");
+  S2.Box [S2.Col, S2.W g.contentW, S2.H g.panelH, S2.Pad g.gap, S2.Round (10 * g.s / 1000), S2.Bg (10, 26, 30), S2.Clip,
+          S2.Bord (if m.progFocus then accent else (10, 26, 30))]
+    (lbl g 11 (if m.progFocus then accent else dim) title :: mapS (progLine g) (E.take (g.panelRows - 1) m.progView)).
+progLine g l = S2.Box [S2.Row, S2.W (g.contentW - 2 * g.gap), S2.H g.pitch, S2.Mid] [lblW g 14 ink (g.contentW - 2 * g.gap) l].
 # the newest lines; after a failed build, from the start of its diagnostics
 outputPanel m g =
   rowsN = g.panelRows - 1;
@@ -512,10 +677,14 @@ pickRows m g (u :: rest) i =
 
 bottom m g = if m.mode != 0 then promptBar m g else statusBar m g.
 statusBar m g =
-  hints = (if m.running then "^R stop   ^J output   ^S save" else "^S save   ^O open   ^N new   ^F find   ^B build   ^R run   ^J output");
+  hints = (if m.running and m.appRun then "^J keys   ^R stop" else if m.running then "^R stop   ^J output   ^S save" else "^S save   ^O open   ^N new   ^F find   ^B build   ^R run   ^J output");
   hintsW = Fm.width hints * (12 * g.s / 1000) / 1000;
   S2.Box [S2.Row, S2.W g.contentW, S2.H g.barH, S2.Mid, S2.Gap (12 * g.s / 1000)]
-    [lblW g 14 (if m.warn then warmC else ink) (E.imax 1 (g.contentW - hintsW - 24 * g.s / 1000)) m.msg, S2.Box [S2.Grow] Nil, lbl g 12 dim hints].
+    [status m g (E.imax 1 (g.contentW - hintsW - 24 * g.s / 1000)), S2.Box [S2.Grow] Nil, lbl g 12 dim hints].
+# the problem on the caret's line, or what last happened
+status m g width = here = problemAt m;
+  if strlen here > 0 then lblW g 14 warmC width "Line {m.buf.row + 1}: {here}"
+  else lblW g 14 (if m.warn then warmC else ink) width m.msg.
 promptBar m g =
   S2.Box [S2.Row, S2.W g.contentW, S2.H g.barH, S2.Pad (8 * g.s / 1000), S2.Round (8 * g.s / 1000), S2.Bg (28, 44, 84), S2.Mid, S2.Gap (10 * g.s / 1000)]
     [lbl g 13 accent (promptLabel m.mode), lbl g 15 ink m.query, caret g, S2.Box [S2.Grow] Nil, lbl g 12 dim (promptHint m)].

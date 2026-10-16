@@ -140,14 +140,16 @@ static V mkreg(V dev, V off, uint32_t width) {
   r->addr = ((fpr_dev_t *)dev)->base + (uw)UNTAG(off);
   return (V)r;
 }
-static V h_reg8(V d, V o) { return mkreg(d, o, 1); }
-static V h_reg32(V d, V o) { return mkreg(d, o, 4); }
+static V h_reg8(V d, V o) { fpr_confined_refuse("reg8 (the machine's registers)"); return mkreg(d, o, 1); }
+static V h_reg32(V d, V o) { fpr_confined_refuse("reg32 (the machine's registers)"); return mkreg(d, o, 4); }
 static V h_read(V rv) {
+  fpr_confined_refuse("read (a machine register)");
   if (ISINT(rv) || TID(rv) != T_REGISTER) fpr_cpanic("read: not a Register");
   reg_t *r = (reg_t *)rv;
   return TAG((sw)qos_hal->mmio_read(r->addr, r->var));
 }
 static V h_write(V rv, V x) {
+  fpr_confined_refuse("write (a machine register)");
   if (ISINT(rv) || TID(rv) != T_REGISTER) fpr_cpanic("write: not a Register");
   reg_t *r = (reg_t *)rv;
   uw v;
@@ -164,29 +166,34 @@ FPR_FN(fpr_g_write, h_write, 2);
 
 /* ---- raw pins: not carried by the current QOS HAL table ------------ */
 static V h_pin_mode(V pin, V mode) {
+  fpr_confined_refuse("Pin.mode (the pin bus)");
   (void)pin;
   (void)mode;
   fpr_cpanic("Pin.mode: capability not granted by this host's HAL table");
   return 0;
 }
 static V h_pin_read(V pin) {
+  fpr_confined_refuse("Pin.read (the pin bus)");
   (void)pin;
   fpr_cpanic("Pin.read: capability not granted by this host's HAL table");
   return 0;
 }
 static V h_pin_write(V pin, V value) {
+  fpr_confined_refuse("Pin.write (the pin bus)");
   (void)pin;
   (void)value;
   fpr_cpanic("Pin.write: capability not granted by this host's HAL table");
   return 0;
 }
 static V h_pin_wire(V source, V destination) {
+  fpr_confined_refuse("Pin.wire (the pin bus)");
   (void)source;
   (void)destination;
   fpr_cpanic("Pin.wire: capability not granted by this host's HAL table");
   return 0;
 }
 static V h_pin_feed(V pin, V pattern, V bits) {
+  fpr_confined_refuse("Pin.feed (the pin bus)");
   (void)pin;
   (void)pattern;
   (void)bits;
@@ -194,6 +201,7 @@ static V h_pin_feed(V pin, V pattern, V bits) {
   return 0;
 }
 static V h_pin_trace(V value) {
+  fpr_confined_refuse("Pin.tget/tlen/tclear (the pin bus)");
   (void)value;
   fpr_cpanic("Pin trace: capability not granted by this host's HAL table");
   return 0;
@@ -213,6 +221,7 @@ static char devnames[8][16];
 static int ndevcells;
 
 static V h_device(V nameStr) {
+  fpr_confined_refuse("device (the machine's devices)");
   if (ISINT(nameStr) || TID(nameStr) != T_STR)
     fpr_cpanic("device: name must be a String");
   str_t *s = (str_t *)nameStr;
@@ -244,21 +253,25 @@ FPR_FN(fpr_g_device, h_device, 1);
  * netPoll 0 returns the next id with buffered bytes (0 = none), and
  * netRead/netWrite/netClose address that id. */
 static V h_netPoll(V d) {
+  fpr_confined_refuse("netPoll (the network)");
   (void)d;
   return TAG((sw)qos_hal->net_poll());
 }
 static V h_netRead(V d) {
+  fpr_confined_refuse("netRead (the network)");
   char buf[1024];
   int64_t n = qos_hal->net_read(ISINT(d) ? (int64_t)UNTAG(d) : 0, buf, sizeof buf);
   return (V)fpr_mkstr((const uint8_t *)buf, (uw)n);
 }
 static V h_netWrite(V d, V sv) {
+  fpr_confined_refuse("netWrite (the network)");
   if (ISINT(sv) || TID(sv) != T_STR) fpr_cpanic("netWrite: not a String");
   str_t *s = (str_t *)sv;
   return TAG((sw)qos_hal->net_write(ISINT(d) ? (int64_t)UNTAG(d) : 0,
                                     (const char *)s->bytes, s->len));
 }
 static V h_netClose(V d) {
+  fpr_confined_refuse("netClose (the network)");
   return TAG((sw)qos_hal->net_close(ISINT(d) ? (int64_t)UNTAG(d) : 0));
 }
 FPR_FN(fpr_g_netPoll, h_netPoll, 1);
@@ -309,11 +322,13 @@ static int64_t disk_wait(uint64_t page, const char *src, uint64_t len, int write
   return result;
 }
 static V h_blkPages(V d) {
+  fpr_confined_refuse("blkPages (the raw disk)");
   (void)d;
   if (!qos_hal->blk_pages) return TAG(0); /* pre-v5 table: honest no-disk */
   return TAG((sw)qos_hal->blk_pages());
 }
 static V h_blkRead(V d, V pv) {
+  fpr_confined_refuse("blkRead (the raw disk)");
   (void)d;
   if (!ISINT(pv)) fpr_cpanic("blkRead: page must be an Int");
   if (!qos_hal->blk_read)
@@ -324,6 +339,7 @@ static V h_blkRead(V d, V pv) {
   return (V)fpr_mkstr((const uint8_t *)buf, 4096);
 }
 static V h_blkWrite(V d, V pv, V sv) {
+  fpr_confined_refuse("blkWrite (the raw disk)");
   (void)d;
   if (!ISINT(pv)) fpr_cpanic("blkWrite: page must be an Int");
   if (ISINT(sv) || TID(sv) != T_STR) fpr_cpanic("blkWrite: payload must be a String");
@@ -341,6 +357,7 @@ FPR_FN(fpr_g_blkWrite, h_blkWrite, 3);
 /* ABI v19 gives operation 2 its barrier meaning. The worker serializes it
  * after preceding writes; a timeout abandons only the caller reference. */
 static V h_blkFlush(V d) {
+  fpr_confined_refuse("blkFlush (the raw disk)");
   (void)d;
   return TAG((sw)disk_wait(0, 0, 0, 2, 0));
 }
@@ -370,12 +387,14 @@ static V h_glInit_ret(void) {
   return (V)r;
 }
 static V h_glInit(V wv, V hv) {
+  fpr_confined_refuse("glInit (the display)");
   need_gfx();
   if (!ISINT(wv) || !ISINT(hv)) fpr_cpanic("glInit: w h must be Ints");
   qos_hal->gfx_init((int)UNTAG(wv), (int)UNTAG(hv));
   return h_glInit_ret();
 }
 static V h_glRender(V scene) {
+  fpr_confined_refuse("glRender (the display)");
   need_gfx();
   int64_t draws, dynBytes;
   qos_hal->gfx_render((uint64_t)scene, &draws, &dynBytes);
@@ -386,6 +405,7 @@ static V h_glRender(V scene) {
 }
 /* ---- glRenderUi scene ui dist -> (draws, dynBytes): the scene, then the 2D layer */
 static V h_glRenderUi(V scene, V ui, V distv) {
+  fpr_confined_refuse("glRenderUi (the display)");
   need_gfx();
   if (!qos_hal->gfx_render_ui) fpr_cpanic("gfx: the 2D layer is not granted by this host (a pre-v10 qosp)");
   if (!ISINT(distv)) fpr_cpanic("glRenderUi: dist must be an Int (milli)");
@@ -397,6 +417,7 @@ static V h_glRenderUi(V scene, V ui, V distv) {
   return (V)r;
 }
 static V h_glSavePpm(V pathv) {
+  fpr_confined_refuse("glSavePpm (the display)");
   need_gfx();
   if (ISINT(pathv) || TID(pathv) != T_STR) fpr_cpanic("glSavePpm: path must be a String");
   str_t *p = (str_t *)pathv;
@@ -407,6 +428,7 @@ static V h_glSavePpm(V pathv) {
   return TAG(qos_hal->gfx_save_ppm(path));
 }
 static V h_inputPoll(V u) {
+  fpr_confined_refuse("inputPoll (the keyboard and pointer)");
   (void)u;
   /* input is its OWN capability: the portable host grants it via the
    * tty/evdev tier without any GL slot populated.  Checking need_gfx
@@ -423,6 +445,7 @@ static V h_inputPoll(V u) {
 }
 /* ---- snd: sndPlay (wave, f0, f1, ms, vol, delay) -> voice slot -------- */
 static V h_sndPlay(V tone) {
+  fpr_confined_refuse("sndPlay (the sound device)");
   if (!qos_hal->snd_play)
     fpr_cpanic("snd: capability not granted by this host (a pre-v7 qosp)");
   if (ISINT(tone) || TID(tone) != T_TUP6) fpr_cpanic("sndPlay: tone must be (wave, f0, f1, ms, vol, delay)");
@@ -437,6 +460,7 @@ static V h_sndPlay(V tone) {
 FPR_FN(fpr_g_sndPlay, h_sndPlay, 1);
 /* ---- sndMusic path vol -> 1 playing / 0 off / -1 not found */
 static V h_sndMusic(V pathv, V volv) {
+  fpr_confined_refuse("sndMusic (the sound device)");
   if (!qos_hal->snd_music) fpr_cpanic("snd: music not granted by this host (a pre-v9 qosp)");
   if (ISINT(pathv) || TID(pathv) != T_STR) fpr_cpanic("sndMusic: path must be a String");
   if (!ISINT(volv)) fpr_cpanic("sndMusic: vol must be an Int");
@@ -450,6 +474,7 @@ static V h_sndMusic(V pathv, V volv) {
 FPR_FN(fpr_g_sndMusic, h_sndMusic, 2);
 /* ---- glMesh name text -> triangle count: register a program-carried mesh */
 static V h_glMesh(V namev, V textv) {
+  fpr_confined_refuse("glMesh (the display)");
   need_gfx();
   if (!qos_hal->gfx_mesh_load) fpr_cpanic("gfx: mesh registry not granted by this host (a pre-v8 qosp)");
   if (ISINT(namev) || TID(namev) != T_STR) fpr_cpanic("glMesh: name must be a String");
@@ -481,6 +506,7 @@ FPR_FN(fpr_g_inputPoll, h_inputPoll, 1);
 /* ---- Sys.captureConsole / takeConsole / releaseConsole -------------------
  * (the capture above; declared in core/foreign.fpr) */
 static V h_capture_console(V pidv) {
+  fpr_confined_refuse("Sys.captureConsole (another program's console)");
   if (!ISINT(pidv)) fpr_cpanic("Sys.captureConsole: pid must be an Int");
   if (UNTAG(pidv) <= 0) return fpr_mkresult(1, "pid 0 is the system's own console");
   uw pid = (uw)UNTAG(pidv);
@@ -516,6 +542,7 @@ static uw put_dec(char *d, uw v) {
   return k;
 }
 static V h_take_console(V pidv) {
+  fpr_confined_refuse("Sys.takeConsole (another program's console)");
   if (!ISINT(pidv)) fpr_cpanic("Sys.takeConsole: pid must be an Int");
   capture_t *c = capture_owned((uw)UNTAG(pidv));
   if (!c) return fpr_mkresult(1, "no console capture of that process by this actor");
@@ -535,6 +562,7 @@ static V h_take_console(V pidv) {
 FPR_FN(fpr_g_Sys_x2etakeConsole, h_take_console, 1);
 
 static V h_release_console(V pidv) {
+  fpr_confined_refuse("Sys.releaseConsole (another program's console)");
   if (!ISINT(pidv)) fpr_cpanic("Sys.releaseConsole: pid must be an Int");
   capture_t *c = capture_owned((uw)UNTAG(pidv));
   if (!c) return fpr_mkresult(1, "no console capture of that process by this actor");
@@ -544,3 +572,12 @@ static V h_release_console(V pidv) {
   return fpr_mkresult(0, "");
 }
 FPR_FN(fpr_g_Sys_x2ereleaseConsole, h_release_console, 1);
+
+/* Sys.memTotal () -> Int: the host's physical memory in bytes, 0 when it
+ * cannot say (ABI v22) -- what a launcher sizes a confined program's budget
+ * by, since the arena is address space, not memory */
+static V h_mem_total(V u) {
+  (void)u;
+  return TAG((sw)(qos_hal->mem_total ? qos_hal->mem_total() : 0));
+}
+FPR_FN(fpr_g_Sys_x2ememTotal, h_mem_total, 1);

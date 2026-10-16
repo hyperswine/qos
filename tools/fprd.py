@@ -16,6 +16,8 @@ tools/main-profile.py --run starts it beside qosp.
   frame    4-byte LE length + payload, both directions
   request  "<profile>\n<source bytes>" -- profile is a WHITELISTED
            token (never argv passthrough): qos-portable | bare-metal
+           | check (the front end only: types, safety, linearity,
+             contracts, as a plugin build checks them; nothing linked)
            | plugin:<slot>:<id>  (slot 0..7, id [a-z][a-z0-9_]{0,15})
            | publication:<id> (checked version + frozen QA)
            | watch:<id>:<hash-or-dash> (explicitly registered source files)
@@ -45,6 +47,7 @@ cached artifacts on the host side and do not ride the channel.
 """
 import argparse
 import fcntl
+import hashlib
 import os
 import platform
 import re
@@ -64,6 +67,8 @@ os.environ["FPR_PATH"] = FPRISC_ROOT
 os.environ["FPR_FOREIGN"] = os.path.join(os.environ["FPR_HOME"], "core", "foreign.fpr")
 
 PROFILES = {"qos-portable", "bare-metal"}
+# the plugin target this host's qosp runs (qos-app.mk's APP_HOST)
+PLUGIN_TARGET = {"arm64": "qa64", "aarch64": "qa64", "riscv64": "qrv64"}.get(platform.machine(), "qx64")
 PLUGIN_RE = re.compile(r"^plugin:([0-7]):([a-z][a-z0-9_]{0,15})$")
 PUBLICATION_RE = re.compile(r"^publication:([a-z][a-z0-9_]{0,15})$")
 WATCH_RE = re.compile(r"^watch:([a-z][a-z0-9_]{0,15}):([0-9a-f]{16}|-)$")
@@ -82,7 +87,72 @@ def recv_exact(c, n):
     return buf
 
 
+def check_source(source):
+    """The check op: the compiler's front end as a plugin build runs it --
+    types, the safe/unsafe line, linearity, contracts -- with nothing
+    generated or linked: about a tenth of a second for a small program,
+    against a second and more for the package, so an editor can check while
+    its user pauses.  "ok\n" or "err\n<diagnostics>"."""
+    with tempfile.TemporaryDirectory(prefix="fprd-") as td:
+        src = os.path.join(td, "qedcheck.fpr")
+        with open(src, "wb") as f:
+            f.write(source)
+        env = dict(os.environ, LC_ALL="C.UTF-8")
+        r = subprocess.run(
+            [COMPILER, "--target=" + PLUGIN_TARGET, "--plugin", "--check-only",
+             "--prelude=" + os.path.join(FPRISC_ROOT, "core/prelude.fpr"), src, os.path.join(td, "out.s")],
+            capture_output=True, env=env, timeout=120)
+        if r.returncode != 0:
+            return b"err\n" + diagnostics(r.stderr + r.stdout, b"check failed")
+        return b"ok\n"
+
+
+# The package cache: the last package built under each id, kept with what it
+# was built from -- the profile, the source, and the stat of everything a
+# program can reach (the compiler, the ABI stamp, the link scripts and
+# packaging tools, the platform's trust list, every module under the import
+# roots).  An edit to any of
+# those misses; the same request again (^R after ^B) answers at once.  One
+# entry per id: only the latest package is ever asked for twice.
+PACKAGES = {}
+
+
+def reachable():
+    home, root = Path(os.environ["FPR_HOME"]), Path(FPRISC_ROOT)
+    files = [Path(COMPILER), home / "qos/appside/qos_abi.h", home / "qos-app.mk",
+             home / "tools/mkqa.py", home / "tools/mkimports.py", home / "core/foreign.fpr",
+             home / "core/trusted-modules.txt"]
+    files += sorted(home.glob("qos/appside/link-qosplug*.ld"))
+    for top in (home / "std", home / "programs/mods", root / "std", root / "core"):
+        files += sorted(top.rglob("*.fpr"))
+    h = hashlib.sha256()
+    for f in files:
+        try:
+            st = f.stat()
+            h.update(f"{f}\0{st.st_mtime_ns}\0{st.st_size}\n".encode())
+        except OSError:
+            h.update(f"{f}\0missing\n".encode())
+    return h.hexdigest()
+
+
+def package_key(slot, plugid, source):
+    return hashlib.sha256(f"{slot}:{plugid}\0".encode() + source + b"\0" + reachable().encode()).hexdigest()
+
+
 def package_plugin(slot, plugid, source):
+    key = package_key(slot, plugid, source)
+    cached = PACKAGES.get(plugid)
+    if cached and cached[0] == key:
+        return cached[1]
+    reply = build_plugin(slot, plugid, source)
+    if reply.startswith(b"ok\n"):
+        PACKAGES[plugid] = (key, reply)
+    else:
+        PACKAGES.pop(plugid, None)
+    return reply
+
+
+def build_plugin(slot, plugid, source):
     """The package op: source -> a linked, mkqa-wrapped relocatable
     plugin .qa, via the plugin-qa make target (so the unit objects, link
     script, and manifest mechanics stay in ONE place).  Requests are
@@ -207,10 +277,12 @@ def compile_one(profile, source):
     m = PLUGIN_RE.match(profile)
     if m:
         return package_plugin(int(m.group(1)), m.group(2), source)
+    if profile == "check":
+        return check_source(source)
     if profile not in PROFILES:
         # NB: bytes %-formatting refuses str args -- the old %r here THREW,
         # and an exception in compile_one killed the whole serve loop
-        return ("err\nunknown profile %r (want: %s | plugin:<slot>:<id>)" % (
+        return ("err\nunknown profile %r (want: %s | check | plugin:<slot>:<id>)" % (
             profile, " | ".join(sorted(PROFILES)))).encode()
     with tempfile.TemporaryDirectory(prefix="fprd-") as td:
         src = os.path.join(td, "in.fpr")

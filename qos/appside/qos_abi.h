@@ -19,7 +19,7 @@
 
 #include <stdint.h>
 
-#define QOS_ABI_VERSION 21u /* v21: worker-backed compile (tag 7 retired); v20: app worker doorbells and timer parking; v19: explicit lifecycle; v18: tag 4 checks RELOC and IMPORT against LOAD's relsha */
+#define QOS_ABI_VERSION 22u /* v22: the host's memory size (run budgets); v21: worker-backed compile (tag 7 retired); v20: app worker doorbells and timer parking; v19: explicit lifecycle; v18: tag 4 checks RELOC and IMPORT against LOAD's relsha */
 
 /* ---- the address plan (linux-x86-64) --------------------------------
  * The host is linked non-PIE (default 0x400000 text); the arena is a
@@ -263,6 +263,11 @@ typedef struct {
   int (*compile_done)(void *job);
   int64_t (*compile_reply)(void *job, const char **bytes);
   void (*compile_release)(void *job);
+  /* v22: the host's physical memory in bytes, 0 when it cannot say.  The
+   * arena is address space (reserved, committed as touched), so it says
+   * nothing about how much a program may really take: a launcher sizes a
+   * confined program's budget from this (Sys.memTotal; the Editor's Run). */
+  uint64_t (*mem_total)(void);
 } qos_hal_t;
 
 /* ---- the memory-growth grant (RETIRED in v12) ----------------------

@@ -10,6 +10,8 @@ unsafe program.
 #: fprd
 #: expect runprog: HOLDS
 RP = use "../programs/mods/runprog".
+PG = use "std/hosted".
+Sys.killPid : (pid : Int | pid > 0) -> String -> Int .
 CP = use "std/compile".
 AC = use "std/actor#201a0e9bf98a5154".
 
@@ -27,16 +29,63 @@ tick self n = case receiveNow self of
 
 package src = CP.plugin 0 "qedrun" (RP.wrap src).
 
-# start it and poll it to its end (or until n polls): what it printed, how it ended
-runToEnd me src n = case package src of
+# start it (confined to `budget` bytes) and poll it to its end (or until n
+# polls): what it printed, how it ended
+runToEnd me src n = runWithin me src (64 * 1048576) n.
+runWithin me src budget n = case package src of
     Err why -> ("", "compile failed: {why}")
-  | Ok qa -> case RP.start qa of
+  | Ok qa -> case (if budget > 0 then RP.start qa budget 1 else Err "no budget") of
       Err why -> ("", "start failed: {why}")
-    | Ok (root, pid) -> drain me root pid n "".
-drain me root pid n acc = if n <= 0 then (strcat acc (RP.stop root pid), "still running") else
-  case RP.poll me root pid of
-    (text, RP.Running) -> _ = Sys.sleepUs 5000; drain me root pid (n - 1) (strcat acc text)
-  | (text, RP.Ended how) -> (strcat acc text, how).
+    | Ok proc -> drain me proc n "".
+drain : Int -> RP.Proc -> Int -> String -> (String, String) .
+drain me proc n acc = if n <= 0 then (strcat acc (RP.stop proc), "still running") else
+  case RP.poll me proc of
+    (text, said, RP.Running more) -> _ = Sys.sleepUs 5000; drain me more (n - 1) (strcat acc text)
+  | (text, said, RP.Ended how) -> (strcat acc text, how).
+
+# run a program to its end, then ask its pid to end again: how many were left
+startedPid me src n = case package src of
+    Err why -> 0 - 1
+  | Ok qa -> case RP.start qa (64 * 1048576) 1 of
+      Err why -> 0 - 2
+    | Ok proc -> (pid, held) = RP.pidOf proc; (out, how) = drain me held n ""; leftOf pid.
+# start one that waits for ever, stop it, and ask again
+stoppedPid me src = case package src of
+    Err why -> 0 - 1
+  | Ok qa -> case RP.start qa (64 * 1048576) 1 of
+      Err why -> 0 - 2
+    | Ok proc -> (pid, held) = RP.pidOf proc; _ = Sys.sleepUs 30000; _ = RP.stop held; leftOf pid.
+leftOf pid = _ = Sys.sleepUs 20000; if pid > 0 then Sys.killPid pid "left?" else 0 - 3.
+
+# ---- an app (std/hosted): this test is its host -------------------------------
+# (no header: the entry goes first, as for a plain main)
+appSource = "P = use \"std/hosted\".\nMsg = Type (Got (Result String String)).\ninit = \{n = 0, file = \"none\"}.\nupdate ev m = case ev of\n    P.Key P.Enter -> (\{m | n = m.n + 1}, P.readFile \"/home/x.txt\" (fn r -> Got r) :: Nil)\n  | P.Key (P.Char \"q\") -> (m, P.quit :: Nil)\n  | P.Msg (Got (Ok t)) -> (\{m | file = t}, Nil)\n  | P.Msg (Got (Err w)) -> (\{m | file = strcat \"refused \" w}, Nil)\n  | other -> (m, Nil).\nview size m = (cols, rows) = size; [\"n \{m.n} of \{cols}x\{rows}\", strcat \"file \" m.file].\nsubs m = Nil.\napp = \{ init = init, update = update, view = view, subs = subs }.\n".
+# poll until the app says something: what it said (frames, asks), and the program
+said : Int -> RP.Proc -> Int -> (List PG.ToHost, String, RP.Proc) .
+said me proc n = case RP.poll me proc of
+    (text, words, RP.Running more) -> (case words of
+        Nil -> if n <= 0 then (Nil, "silent", more) else _ = Sys.sleepUs 5000; said me more (n - 1)
+      | w :: rest -> (words, "", more))
+  | (text, words, RP.Ended how) -> (words, how, RP.idle Unit).
+frameIn words = case words of Nil -> Nil | w :: rest -> (case w of PG.Frame lines -> lines | other -> frameIn rest).
+askIn words = case words of Nil -> (0, "") | w :: rest -> (case w of PG.Ask token (PG.ReadReq path) -> (token, path) | other -> askIn rest).
+hostedApp me = case CP.plugin 0 "qedrun" (RP.wrapApp appSource) of
+    Err why -> "package: {why}"
+  | Ok qa -> case RP.start qa (64 * 1048576) (PG.Start me 40 10) of
+      Err why -> "start: {why}"
+    | Ok proc ->
+        (w1, e1, p1) = said me proc 400;
+        first = frameIn w1;
+        (t1, p2) = RP.tell p1 (PG.KeyIn 28);
+        (w2, e2, p3) = said me p2 400;
+        (token, path) = askIn w2;
+        (t2, p4) = RP.tell p3 (PG.Answer token (PG.Text "hello"));
+        (w3, e3, p5) = said me p4 400;
+        third = frameIn w3;
+        (t3, p6) = RP.tell p5 (PG.KeyIn 16);
+        (w4, e4, p7) = said me p6 400;
+        _ = RP.stop p7;
+        "{(case first of a :: rest -> a | Nil -> "-")}|{path}|{(case third of a :: b :: rest -> b | other -> "-")}|{e4}".
 
 main =
   me = myself 0;
@@ -66,6 +115,25 @@ main =
   (out5, how5) = runToEnd me "unsafe program.\nsay : unsafe Int -> Unit .\nsay n = if n <= 0 then Unit else _ = print \"0123456789012345678901234567890123456789\"; say (n - 1).\nmain = say 5000." 2000;
   _ = check "a flood keeps its last 64 KiB and says what it lost: {how5}"
     (how5 == "finished" and strIndexOf "earlier bytes not kept]" out5 >= 0 and strlen out5 < 70000);
+  # confinement: what would have stopped the machine ends the program, with its reason
+  (o6, how6) = runWithin me "unsafe program.\ndeep : unsafe Int -> Int .\ndeep n = 1 + deep (n + 1).\nmain = deep 0." (16 * 1048576) 2000;
+  _ = check "a runaway recursion ends the program: {how6}" (strIndexOf "budget of 16 MiB is used up" how6 >= 0 and strIndexOf "stack" how6 >= 0);
+  (o7, how7) = runWithin me "unsafe program.\nhog : unsafe Int -> List Int -> Int .\nhog n acc = hog (n + 1) (n :: acc).\nmain = hog 0 Nil." (16 * 1048576) 2000;
+  _ = check "a memory hog ends the program: {how7}" (strIndexOf "budget of 16 MiB is used up" how7 >= 0 and strIndexOf "heap" how7 >= 0);
+  (o8, how8) = runToEnd me "main = _ = device \"blk\"; 1." 400;
+  _ = check "a device is not granted: {how8}" (strIndexOf "device" how8 >= 0 and strIndexOf "not granted" how8 >= 0);
+  (o9, how9) = runToEnd me "main = blkPages 0." 400;
+  _ = check "nor the raw disk: {how9}" (strIndexOf "blkPages (the raw disk) is not granted" how9 >= 0);
+  (o10, how10) = runToEnd me "main = kill 5." 400;
+  _ = check "a handle that is not an actor is the program's mistake: {how10}" (strIndexOf "not an actor" how10 >= 0);
+  # what main started goes with it, and a stop ends every actor
+  left = startedPid me "unsafe program.\nnap : unsafe Int -> Unit .\nnap me = _ = receive me; nap me.\nmain = _ = spawn nap; _ = spawn nap; \"left two\"." 400;
+  _ = check "a program's actors end with its root ({left})" (left == 0);
+  stopped = stoppedPid me "unsafe program.\nnap : unsafe Int -> Unit .\nnap me = _ = receive me; nap me.\nmain = _ = spawn nap; _ = spawn nap; nap (myself 0)." ;
+  _ = check "a stop ends every actor ({stopped})" (stopped == 0);
+  # an app: its frames, its keys, its file ask answered by the host, its quit
+  hosted = hostedApp me;
+  _ = check "an app runs under its host: {hosted}" (hosted == "n 0 of 40x10|/home/x.txt|file hello|finished");
   # the capture went with each program: the console is the host's again
   _ = print "runprog: HOLDS";
   "runprog: HOLDS".

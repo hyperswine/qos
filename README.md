@@ -25,6 +25,10 @@ returns home, Page Up/Down changes pages, and Q exits from home. See the
 the current prototype's application contract. The run also starts the host
 compiler daemon, so the Editor app can build FP-RISC (^B) and run it as a
 process of its own (^R): [docs/2026-10-16-EDITOR.md](docs/2026-10-16-EDITOR.md).
+A run is confined to a memory budget and refused the devices, and a program
+can be an app in the Elm shape (`std/hosted`) that draws in the Editor's panel
+and reads and writes `/home` through it:
+[docs/2026-10-17-PROGRAMS.md](docs/2026-10-17-PROGRAMS.md).
 
 QOS Portable also runs on Linux riscv64. The [STAR64 implementation and
 hardware record](docs/2026-10-14-STAR64-PORTABLE.md) covers RV64 cross-builds,

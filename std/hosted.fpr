@@ -1,0 +1,224 @@
+# ============================================================================
+# std/hosted.fpr -- Hosted: an app its host runs (the Editor's Run), in the
+# shape of std/term's (docs/2026-10-17-PROGRAMS.md).  Not fprisc's
+# std/program, a process's arguments, environment and streams.
+#
+#   H = use "std/hosted".
+#   app = { init = ..., update = ..., view = ..., subs = ... }.
+#
+#     init    : model
+#     update  : H.Ev msg -> model -> (model, List (H.Cmd msg))
+#     view    : (Int, Int) -> model -> List String      a line each, for a
+#                                                       panel that size
+#     subs    : model -> List (H.Sub msg)
+#
+# `update` is a function of events; effects are DATA and their results come
+# back as messages, so nothing a program asks for can fail it -- a refusal is
+# an `Err` in its own message:
+#
+#   H.Key k              a key (H.Char "a", H.Enter, H.Up, (H.Ctrl "s"), ...)
+#   H.Resized cols rows  at the start, and when the panel changes
+#   H.Msg msg            what a command or a subscription produced
+#
+#   H.readFile path toMsg          toMsg : Result String String -> msg
+#   H.writeFile path text toMsg    toMsg : Result Unit String -> msg (replaces)
+#   H.appendFile path text toMsg   the same, adding to it
+#   H.removeFile path toMsg        the same, for a delete
+#   H.listFiles prefix toMsg       toMsg : Result (List String) String -> msg
+#   H.after ms msg                 msg once, ms milliseconds on
+#   H.quit                         the program ends
+#   H.every ms msg                 (a subscription) msg every ms milliseconds
+#
+# Files: a program may read and write under /home and nothing else.  It holds
+# no capability to do so: it ASKS its host (the Editor), which checks the
+# path, does the work and answers -- so there is nothing it could misuse, and
+# an answer is the only way a file reaches it.
+#
+# The program runs as a confined process of its own (programs/mods/runprog.fpr,
+# fprisc docs/2026-10-17-CONFINED-PROCESSES.md): a memory budget, no devices,
+# its actors ended with it.  This module is the loop inside it, between the
+# host's messages and the four functions.
+# ============================================================================
+AK = use "../programs/mods/appkit".
+
+Key = Type (Char String | Enter | Escape | Backspace | Tab | Up | Down | Left | Right
+          | Home | End | PageUp | PageDown | Insert | Delete | F Int | Ctrl String | Alt String).
+Ev msg = Type (Key Key | Resized Int Int | Msg msg).
+Cmd msg = Type (After Int msg | Quit
+              | ReadFile String (Result String String -> msg)
+              | WriteFile String String (Result Unit String -> msg)
+              | AppendFile String String (Result Unit String -> msg)
+              | RemoveFile String (Result Unit String -> msg)
+              | ListFiles String (Result (List String) String -> msg)).
+Sub msg = Type (Every Int msg).
+
+# ---- what a program writes -----------------------------------------------------------
+# A time is never negative and a tick never zero: the refinement makes the
+# caller show it (a constant does, a guard does), and the loop clamps
+# whatever reaches it another way.
+after : (ms : Int | ms >= 0) -> msg -> Cmd msg .
+after ms msg = After ms msg.
+every : (ms : Int | ms >= 1) -> msg -> Sub msg .
+every ms msg = Every ms msg.
+quit : Cmd msg .
+quit = Quit.
+readFile : String -> (Result String String -> msg) -> Cmd msg .
+readFile path toMsg = ReadFile path toMsg.
+writeFile : String -> String -> (Result Unit String -> msg) -> Cmd msg .
+writeFile path text toMsg = WriteFile path text toMsg.
+appendFile : String -> String -> (Result Unit String -> msg) -> Cmd msg .
+appendFile path text toMsg = AppendFile path text toMsg.
+removeFile : String -> (Result Unit String -> msg) -> Cmd msg .
+removeFile path toMsg = RemoveFile path toMsg.
+listFiles : String -> (Result (List String) String -> msg) -> Cmd msg .
+listFiles prefix toMsg = ListFiles prefix toMsg.
+
+# ---- the conversation with the host ---------------------------------------------------
+# The host (the Editor) sends a program ToProgram values; the program sends
+# its host ToHost values.  The host reads ONLY the program's root actor (the
+# runtime's selective receive: no other actor can speak for it) and checks
+# every Ask before it does anything.
+Req = Type (ReadReq String | WriteReq String String | AppendReq String String | RemoveReq String | ListReq String).
+Reply = Type (Text String | Done | Names (List String) | Failed String).
+ToHost = Type (Frame (List String) | Ask Int Req).
+ToProgram msg = Type (Start Int Int Int | KeyIn Int | Resize Int Int | Answer Int Reply | Fire msg).
+
+# a QOS key code (the input tier's: shift +1000, ctrl +4000, alt +8000) as
+# the keys a program sees; a code that is no key to it is none
+keyOf : Int -> List Key .
+keyOf 28 = Enter :: Nil.
+keyOf 1 = Escape :: Nil.
+keyOf 14 = Backspace :: Nil.
+keyOf 15 = Tab :: Nil.
+keyOf 103 = Up :: Nil.
+keyOf 108 = Down :: Nil.
+keyOf 105 = Left :: Nil.
+keyOf 106 = Right :: Nil.
+keyOf 102 = Home :: Nil.
+keyOf 107 = End :: Nil.
+keyOf 104 = PageUp :: Nil.
+keyOf 109 = PageDown :: Nil.
+keyOf 110 = Insert :: Nil.
+keyOf 111 = Delete :: Nil.
+keyOf c = if c >= 59 and c <= 68 then F (c - 58) :: Nil
+  else if c >= 8000 then named 2 (AK.keyChar (c - 8000))
+  else if c >= 4000 then named 1 (AK.keyChar (c - 4000))
+  else named 0 (AK.keyChar c).
+named : Int -> String -> List Key .
+named how s = if strlen s == 0 then Nil
+  else if how == 2 then Alt s :: Nil
+  else if how == 1 then Ctrl s :: Nil
+  else Char s :: Nil.
+
+# an answer as the Result its command promised; the wrong kind is an Err
+asText : Reply -> Result String String .
+asText r = case r of Text s -> Ok s | Failed why -> Err why | other -> Err "the host answered with the wrong kind of reply".
+asDone : Reply -> Result Unit String .
+asDone r = case r of Done -> Ok Unit | Failed why -> Err why | other -> Err "the host answered with the wrong kind of reply".
+asNames : Reply -> Result (List String) String .
+asNames r = case r of Names ns -> Ok ns | Failed why -> Err why | other -> Err "the host answered with the wrong kind of reply".
+
+clampMs : Int -> Int .
+clampMs ms = if ms < 0 then 0 else ms.
+clampTick : Int -> Int .
+clampTick ms = if ms < 1 then 1 else ms.
+
+# ---- the loop ---------------------------------------------------------------------------
+# The state: the host, the model, the panel as last sent, its size, the
+# asks waiting for answers (token -> what the answer becomes), the next
+# token, and whether the program has quit.
+PSt model msg = Type (PSt Int model (List String) Int Int (List (Int, Reply -> msg)) Int Bool).
+
+# the entry the Editor's Run calls (runprog.fpr appends it): the first
+# message from the host is its Start
+host : unsafe Int -> ToProgram msg -> { init : model, update : Ev msg -> model -> (model, List (Cmd msg)), view : (Int, Int) -> model -> List String, subs : model -> List (Sub msg) | r } -> Unit .
+host me go app = case go of
+    Start editor cols rows ->
+      _ = startSubs me (app.subs app.init) Nil;
+      first = step me app (Resized cols rows) (PSt editor app.init Nil cols rows Nil 1 False);
+      (if quitted first then Unit else _ = Sys.loop first (fn s -> listen me app s); Unit)
+  | other -> Unit.
+
+quitted : PSt model msg -> Bool .
+quitted st = case st of PSt editor model screen cols rows asks token q -> q.
+
+# one message from the host or a helper, one turn (Sys.loop reclaims each
+# turn's garbage: a program that runs all day does not grow by its turns)
+listen : unsafe Int -> { update : Ev msg -> model -> (model, List (Cmd msg)), view : (Int, Int) -> model -> List String, subs : model -> List (Sub msg) | r } -> PSt model msg -> (Bool, PSt model msg) .
+listen me app st =
+  m = receive me;
+  x = keep m;
+  _ = drop m;
+  next = (case x of
+      KeyIn code -> keys me app (keyOf code) st
+    | Resize cols rows -> resized me app cols rows st
+    | Answer token reply -> answered me app token reply st
+    | Fire msg -> step me app (Msg msg) st
+    | other -> st);
+  (not (quitted next), next).
+
+keys : unsafe Int -> { update : Ev msg -> model -> (model, List (Cmd msg)), view : (Int, Int) -> model -> List String, subs : model -> List (Sub msg) | r } -> List Key -> PSt model msg -> PSt model msg .
+keys me app ks st = case ks of
+    Nil -> st
+  | k :: rest -> next = step me app (Key k) st; (if quitted next then next else keys me app rest next).
+
+resized : unsafe Int -> { update : Ev msg -> model -> (model, List (Cmd msg)), view : (Int, Int) -> model -> List String, subs : model -> List (Sub msg) | r } -> Int -> Int -> PSt model msg -> PSt model msg .
+resized me app cols rows st = case st of PSt editor model screen c r asks token q ->
+  step me app (Resized cols rows) (PSt editor model Nil cols rows asks token q).
+
+answered : unsafe Int -> { update : Ev msg -> model -> (model, List (Cmd msg)), view : (Int, Int) -> model -> List String, subs : model -> List (Sub msg) | r } -> Int -> Reply -> PSt model msg -> PSt model msg .
+answered me app token reply st = case st of PSt editor model screen cols rows asks next q ->
+  (case takeAsk token asks Nil of
+      (Nil, kept) -> st
+    | (back :: more, kept) -> step me app (Msg (back reply)) (PSt editor model screen cols rows kept next q)).
+# the waiter for a token, and the asks without it
+takeAsk : unsafe Int -> List (Int, Reply -> msg) -> List (Int, Reply -> msg) -> (List (Reply -> msg), List (Int, Reply -> msg)) .
+takeAsk token asks seen = case asks of
+    Nil -> (Nil, seen)
+  | a :: rest -> (case a of (t, back) -> (if t == token then (back :: Nil, appendAsks seen rest) else takeAsk token rest (a :: seen))).
+appendAsks : unsafe List (Int, Reply -> msg) -> List (Int, Reply -> msg) -> List (Int, Reply -> msg) .
+appendAsks xs ys = case xs of Nil -> ys | x :: r -> x :: appendAsks r ys.
+
+# one update, its effects, and the panel sent when it changed
+step : unsafe Int -> { update : Ev msg -> model -> (model, List (Cmd msg)), view : (Int, Int) -> model -> List String, subs : model -> List (Sub msg) | r } -> Ev msg -> PSt model msg -> PSt model msg .
+step me app ev st = case st of PSt editor model screen cols rows asks token q ->
+  (case app.update ev model of (model2, cmds) ->
+      (case perform me editor cmds asks token False of (asks2, token2, quit) ->
+          _ = startSubs me (app.subs model2) (app.subs model);
+          lines = app.view (cols, rows) model2;
+          _ = (if lines == screen then Ok Unit else send editor (Frame lines));
+          PSt editor model2 lines cols rows asks2 token2 (q or quit))).
+
+# the commands: a timer is a helper actor of the program's own, a file is an
+# Ask of the host (its answer arrives as an Answer, becomes a Msg)
+perform : unsafe Int -> Int -> List (Cmd msg) -> List (Int, Reply -> msg) -> Int -> Bool -> (List (Int, Reply -> msg), Int, Bool) .
+perform me editor cmds asks token quit = case cmds of
+    Nil -> (asks, token, quit)
+  | c :: rest -> (case c of
+        Quit -> perform me editor rest asks token True
+      | After ms msg -> _ = spawn (fn self -> _ = Sys.sleepUs (clampMs ms * 1000); send me (Fire msg)); perform me editor rest asks token quit
+      | ReadFile path k -> ask me editor (ReadReq path) (fn r -> k (asText r)) rest asks token quit
+      | WriteFile path text k -> ask me editor (WriteReq path text) (fn r -> k (asDone r)) rest asks token quit
+      | AppendFile path text k -> ask me editor (AppendReq path text) (fn r -> k (asDone r)) rest asks token quit
+      | RemoveFile path k -> ask me editor (RemoveReq path) (fn r -> k (asDone r)) rest asks token quit
+      | ListFiles prefix k -> ask me editor (ListReq prefix) (fn r -> k (asNames r)) rest asks token quit).
+ask : unsafe Int -> Int -> Req -> (Reply -> msg) -> List (Cmd msg) -> List (Int, Reply -> msg) -> Int -> Bool -> (List (Int, Reply -> msg), Int, Bool) .
+ask me editor req back rest asks token quit = case send editor (Ask token req) of
+    Ok u -> perform me editor rest ((token, back) :: asks) (token + 1) quit
+  | Err why -> _ = send me (Fire (back (Failed "the host is gone ({why})"))); perform me editor rest asks (token + 1) quit.
+
+# a ticker per NEW subscription, a helper actor of the program's own: it sends
+# its message every ms until the program ends (an app's subs should be steady,
+# or ignore stale ticks -- std/term's rule)
+startSubs : unsafe Int -> List (Sub msg) -> List (Sub msg) -> Unit .
+startSubs me subs old = case subs of
+    Nil -> Unit
+  | s :: rest -> (case s of
+        Every ms msg -> (if member ms msg old then startSubs me rest old
+          else _ = spawn (fn self -> ticking me (clampTick ms) msg); startSubs me rest old)).
+member : unsafe Int -> msg -> List (Sub msg) -> Bool .
+member ms msg subs = case subs of
+    Nil -> False
+  | s :: rest -> (case s of Every m x -> (if m == ms and x == msg then True else member ms msg rest)).
+ticking : unsafe Int -> Int -> msg -> Unit .
+ticking me ms msg = _ = Sys.sleepUs (ms * 1000); _ = send me (Fire msg); ticking me ms msg.

@@ -1,32 +1,54 @@
 # runprog.fpr -- a program as a process of its own: the Editor's Run
 # (docs/2026-10-16-EDITOR.md; tests/runprog.fpr checks it in QOS).
 #
-#   wrap src          the source with the run entry appended (qedRun: wait
+#   wrap src          the source with the run entry put in (qedRun: wait
 #                     for the go, evaluate main, print its value)
-#   start qa          the package of `wrap src` (Sys.compile "plugin:..")
+#   wrapApp src       the same for a program with an `app` (std/hosted's
+#                     Elm shape): the entry is std/hosted's loop
+#   start qa budget go  the package of `wrap src` (Sys.compile "plugin:..")
 #                     attached, its entry spawned as a process of its own --
 #                     Sys.spawnApp: a fresh pid, the image freed when that pid
-#                     goes quiet -- with its console captured by the CALLING
-#                     actor, and only then told to go, so nothing it prints
-#                     escapes the capture: Ok (root actor, pid)
-#   poll me root pid  what it printed since the last poll, and whether it
-#                     still runs (Running) or how it ended (Ended "finished",
-#                     a trap's text, "killed")
-#   stop root pid     kill it if it still runs: what it printed last
+#                     goes quiet -- CONFINED to `budget` bytes, its console
+#                     captured by the CALLING actor, and only then sent
+#                     `go` (std/hosted's Start, for an app), so nothing it
+#                     does escapes either: Ok proc
+#   poll me proc      what it printed since the last poll, what its root
+#                     sent the caller (an app's frames and asks, oldest
+#                     first), and whether it still runs (Running proc) or
+#                     how it ended (Ended "finished", a trap's text,
+#                     "memory: ...", "stopped")
+#   tell proc x       x sent to its root (an app's keys and answers)
+#   stop proc         end it whole: what it printed last
+#
+# A program is confined (fprisc docs/2026-10-17-CONFINED-PROCESSES.md): the
+# blocks its actors take are charged to its budget and a take past it ends
+# the program whole, with the reason; a stack that cannot grow ends it; the
+# devices, other programs' consoles, code loading and the system's lifecycle
+# are refused it (qos/appside/hal.c, entry.c), each refusal ending it with
+# the capability named; and when its root ends, so does every actor it
+# started (Sys.killPid).  It is given no namespace and no grants.
 #
 # The capture belongs to the actor that called start: only it drains or
-# releases it, and its end releases it (qos/appside/hal.c).  This is not
-# isolation: the program is given no namespace (and has no grants), but
-# devices are not gated per process; a stop ends its root actor only; and a
-# program that exhausts the machine (its stack past what can grow, the
-# heap) still stops the machine.
+# releases it, and its end releases it (qos/appside/hal.c).
+#
+# A running program is a LINEAR value: poll hands it back while it runs and
+# keeps it when it has ended; stop takes it.  Within any function the
+# compiler holds a caller to that (a record field holding one is not
+# checked: a model is a value).
 unsafe module.
 Plug = use "plug".
+PG = use "std/hosted".
 
 Sys.pidOf : Int -> Int .
 Sys.alive : Int -> Bool .
+# the runtime's confinement (fprisc runtime/actors.c): pid 0 is the system,
+# never a program -- the refinement makes a caller show it
+Sys.confine : (pid : Int | pid > 0) -> (budget : Int | budget > 0) -> Result String String .
+Sys.killPid : (pid : Int | pid > 0) -> String -> Int .
 
-Run = Type (Running | Ended String).
+# a running program: its root actor and its pid
+Proc 1 = Type (Proc Int Int).
+Run 1 = Type (Running Proc | Ended String).
 
 # The entry goes in after the header line (`unsafe program.`, `profile
 # base.`), or first when there is none -- never after the program, where an
@@ -35,9 +57,14 @@ Run = Type (Running | Ended String).
 # (userLine).  No signature: the safety analysis decides what it is, from
 # main's.
 entry = "qedRun me = go = receive me; _ = drop go; v = main; _ = print v; Unit.".
-wrap src = (off, k) = place src;
+# an app's: std/hosted's loop over its four functions, under a name of its
+# own (the program's alias for the module may be anything)
+appEntry = "QedP = use \"std/hosted\". qedRun me = b = receive me; go = keep b; _ = drop b; QedP.host me go app.".
+wrap src = wrapWith entry src.
+wrapApp src = wrapWith appEntry src.
+wrapWith line src = (off, k) = place src;
   strcat (strcat (substr src 0 off) (if off > 0 and charAt src (off - 1) != 10 then "\n" else ""))
-    (strcat (strcat entry "\n") (substr src off (strlen src - off))).
+    (strcat (strcat line "\n") (substr src off (strlen src - off))).
 # a line of `wrap src`, as a line of src (the entry's own line is where it went)
 userLine src n = (off, k) = place src; if n > k + 1 then n - 1 else n.
 # the line of `wrap src` that is the entry
@@ -59,40 +86,73 @@ trimEnd s = if strlen s > 0 and blank (charAt s (strlen s - 1)) then trimEnd (su
 blank c = c == 32 or c == 9 or c == 13.
 endsWith suffix s = strlen s >= strlen suffix and substr s (strlen s - strlen suffix) (strlen suffix) == suffix.
 
-# a file with a main to run: a line that starts with it
+# a file with a main to run, or an app: a line that starts with it
 hasMain Nil = False.
 hasMain (l :: rest) = startsWith "main " l or startsWith "main=" l or hasMain rest.
+hasApp Nil = False.
+hasApp (l :: rest) = startsWith "app " l or startsWith "app=" l or hasApp rest.
 startsWith prefix s = strlen s >= strlen prefix and substr s 0 (strlen prefix) == prefix.
 
-start qa = case Plug.attach qa of
+start : String -> (budget : Int | budget > 0) -> a -> Result Proc String .
+start qa budget go = case Plug.attach qa of
     Err why -> Err "could not load it: {why}"
   | Ok u ->
       # the newest table is the package's: out of the registry at once (a
       # program is a process, not a binding -- std/loader's launch)
       found = Mod.findAt (Mod.plugs 0 - 1) "qedRun";
       _ = Mod.detachLast Unit;
-      spawned found.
-spawned found = case found of
+      spawned found budget go.
+spawned : (Int, Int -> Unit) -> (budget : Int | budget > 0) -> a -> Result Proc String .
+spawned found budget go = case found of
     (ok, f) -> if ok != 1 then Err "the package has no entry" else
       h = Sys.spawnApp f;
       pid = Sys.pidOf h;
-      case Sys.captureConsole pid of
-        Err why -> _ = kill h; Err why
-      | Ok u -> case send h 1 of
-          Err why -> _ = kill h; _ = Sys.releaseConsole pid; Err why
-        | Ok u2 -> Ok (h, pid).
+      if pid > 0 then confined h pid budget go else _ = kill h; Err "it did not start as a process of its own".
+# the program is still waiting for its go: confined and captured first
+confined : Int -> (pid : Int | pid > 0) -> (budget : Int | budget > 0) -> a -> Result Proc String .
+confined h pid budget go = case Sys.confine pid budget of
+    Err why -> _ = Sys.killPid pid "it could not be confined"; Err "could not confine it: {why}"
+  | Ok u -> case Sys.captureConsole pid of
+      Err why -> _ = Sys.killPid pid "its console could not be captured"; Err why
+    | Ok u2 -> case send h go of
+        Err why -> _ = Sys.killPid pid "it could not be started"; _ = Sys.releaseConsole pid; Err why
+      | Ok u3 -> Ok (Proc h pid).
 
-poll me root pid =
+poll : Int -> Proc -> (String, List PG.ToHost, Run) .
+poll me proc =
+  Proc root pid = proc;
   text = taken pid;
-  case receiveFromNow me root of
-    Ok borrowed -> _ = drop borrowed; (text, Running)
-  | Err why -> if why == "empty" then (text, Running) else
-      rest = taken pid;
-      _ = Sys.releaseConsole pid;
-      (strcat text rest, Ended (endedHow why)).
+  (said, gone) = heard me root Nil;
+  if strlen gone == 0 then (text, said, Running (Proc root pid)) else
+    # the root has ended: so does everything it started, for the same reason
+    how = endedHow gone;
+    _ = (if pid > 0 then Sys.killPid pid how else 0);
+    rest = taken pid;
+    _ = Sys.releaseConsole pid;
+    (strcat text rest, said, Ended how).
+# what the root has sent (the runtime's selective receive: no other actor can
+# speak for it), oldest first, and why it is gone ("" while it runs)
+heard : Int -> Int -> List PG.ToHost -> (List PG.ToHost, String) .
+heard me root acc = case receiveFromNow me root of
+    Ok borrowed -> x = keep borrowed; _ = drop borrowed; heard me root (x :: acc)
+  | Err why -> (revH acc Nil, (if why == "empty" then "" else why)).
+revH : List PG.ToHost -> List PG.ToHost -> List PG.ToHost .
+revH xs acc = case xs of Nil -> acc | x :: r -> revH r (x :: acc).
 
-stop root pid =
-  _ = (if Sys.alive root then kill root else Unit);
+tell : Proc -> a -> (Result Unit String, Proc) .
+tell proc x = Proc root pid = proc; (send root x, Proc root pid).
+
+# its pid, handed back with it (for the reader)
+pidOf : Proc -> (Int, Proc) .
+pidOf proc = Proc root pid = proc; (pid, Proc root pid).
+# the placeholder a model holds while nothing runs (never polled or stopped)
+idle : Unit -> Proc .
+idle u = Proc 0 0.
+
+stop : Proc -> String .
+stop proc =
+  Proc root pid = proc;
+  _ = (if pid > 0 then Sys.killPid pid "stopped" else 0);
   last = taken pid;
   _ = Sys.releaseConsole pid;
   last.

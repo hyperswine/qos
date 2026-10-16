@@ -32,6 +32,12 @@ int qos_headless_poll(int64_t *kind, int64_t *a, int64_t *c); /* the source poli
 #include <time.h>
 #include <unistd.h>
 
+/* v22: the host's memory (the confined budget's measure) */
+static uint64_t qosp_mem_total(void) {
+  long pages = sysconf(_SC_PHYS_PAGES), size = sysconf(_SC_PAGESIZE);
+  return pages > 0 && size > 0 ? (uint64_t)pages * (uint64_t)size : 0;
+}
+
 /* v21: the compiler bridge (compile.c) */
 void *qosp_compile_submit(const char *pay, uint64_t plen);
 int qosp_compile_done(void *job);
@@ -118,6 +124,8 @@ static qos_hal_t the_table = {
     .compile_done = qosp_compile_done,
     .compile_reply = qosp_compile_reply,
     .compile_release = qosp_compile_release,
+    /* v22: the host's memory */
+    .mem_total = qosp_mem_total,
     .nharts = 1, /* main.c raises this (and installs start_hart) at boot */
     .putc = t_putc,
     .poweroff = t_poweroff,

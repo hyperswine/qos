@@ -12,6 +12,8 @@ AW = use "../programs/mods/appwire".
 AP = use "../programs/mods/appclient".
 S2 = use "../programs/mods/scene2d".
 AC = use "std/actor#201a0e9bf98a5154".
+RP = use "../programs/mods/runprog".
+PG = use "std/hosted".
 check tag True = Unit.
 check tag False = error "appsession: {tag}".
 typeKeys Nil m = m.
@@ -21,6 +23,9 @@ ticks n m = (next, cmds) = ED.update AW.Tick m; if n == 1 then (next, cmds) else
 appMain : unsafe Int -> Unit .
 appMain me = C.run me.
 silent me = _ = receive me; _ = Sys.sleepUs 3000000; Unit.
+# a hosted program's stand-in: whatever the Editor tells it goes back to the test
+standIn : unsafe Int -> Int -> Unit .
+standIn parent me = x = receive me; _ = send parent x; _ = drop x; standIn parent me.
 adopt parent me =
   app = spawn C.run;
   _ = AC.callWithin 500 me app (AW.magic, AW, (7, (800, 480), (0, 0)));
@@ -167,15 +172,78 @@ main =
   _ = check "editor saved" (not (ED.dirty e9) and e9.path == "/home/x.fpr");
   broken = {e9 | buf = E.fromText "main = 6 * 7.\nx = ."};
   (b1, bcmds) = ED.update (AW.Key 4048) broken;
-  _ = check "editor build is a compile job" (case bcmds of AW.Fetch tok (AW.Compile prof src) :: Nil -> prof == "plugin:0:qedbuild" and src == "main = 6 * 7.\nx = ." | other -> False);
-  (b2, _) = ED.update (AW.Arrived b1.token (Err "/b/fprd-src/qedbuild.fpr:2:5:\nunexpected '.'")) b1;
-  _ = check "editor build error on its line and column" (b2.buf.row == 1 and b2.buf.col == 4 and not b2.building and E.nth b2.out (E.count b2.out - 3) == "x.fpr:2:5:" and b2.outBack == 3);
+  # a program is built as Run packages it (^R after ^B is the daemon's cache)
+  _ = check "editor build is Run's package" (case bcmds of AW.Fetch tok (AW.Compile prof src) :: Nil -> prof == "plugin:0:qedrun" and strIndexOf "qedRun me" src == 0 | other -> False);
+  (m1, mcmds) = ED.update (AW.Key 4048) {e9 | buf = E.fromText "helper n = n + 1."};
+  _ = check "editor builds a module as it is" (case mcmds of AW.Fetch tok (AW.Compile prof src) :: Nil -> prof == "plugin:0:qedbuild" and src == "helper n = n + 1." | other -> False);
+  (b2, _) = ED.update (AW.Arrived b1.token (Err "/b/fprd-src/qedrun.fpr:3:5:\nunexpected '.'")) b1;
+  _ = check "editor build error on its line and column" (b2.buf.row == 1 and b2.buf.col == 4 and not b2.building and E.nth b2.out (E.count b2.out - 3) == "x.fpr:2:5:" and b2.outBack == 3 and b2.diags == [(2, 5, "unexpected '.'")]);
   (r1, rcmds) = ED.update (AW.Key 4019) broken;
   _ = check "editor run compiles the entry first" (case rcmds of AW.Fetch tok (AW.Compile prof src) :: Nil -> prof == "plugin:0:qedrun" and strIndexOf "qedRun me" src == 0 | other -> False);
   (r2, _) = ED.update (AW.Arrived r1.token (Err "/b/fprd-src/qedrun.fpr:3:5:\nunexpected '.'")) r1;
   _ = check "editor run error mapped past the entry" (r2.buf.row == 1 and r2.buf.col == 4 and E.nth r2.out (E.count r2.out - 3) == "x.fpr:2:5:");
+  # the excerpt under it is the buffer's line too, its gutter kept
+  (r3, _) = ED.update (AW.Arrived r1.token (Err "/b/fprd-src/qedrun.fpr:3:5:\n  |\n3 | x = .\n  |     ^\nunexpected '.'")) r1;
+  _ = check "editor run excerpt mapped past the entry" (E.nth r3.out (E.count r3.out - 4) == "2 | x = ." and E.nth r3.out (E.count r3.out - 3) == "  |     ^");
+  _ = check "editor excerpt keeps its gutter" (ED.excerpt (fn n -> n - 1) "10 | x" == " 9 | x" and ED.excerpt (fn n -> n - 1) "  |  ^" == "  |  ^");
   (s5, scmds) = ticks 5 (typeKeys [30] e9);
   _ = check "editor keeps its session" (case scmds of AW.Fetch tok (AW.WritePath p t) :: Nil -> p == "/home/.editor/session" and t == "qed1\n/home/x.fpr\n1\naba" | other -> False);
+  # live checks: three quiet ticks after a change send the buffer to the check
+  # op; parse and type errors land on the buffer's lines (a program's mapped
+  # past the Run entry), a safety finding on its definition, a stale answer
+  # is dropped, and no compiler server turns the checks off
+  (c3, ccmds) = ticks 3 (typeKeys [30] e9);
+  _ = check "editor checks after a pause" (c3.checking and (case ccmds of AW.Fetch tok (AW.Compile prof src) :: Nil -> prof == "check" and src == "aba" | other -> False));
+  (c4, _) = ED.update (AW.Arrived c3.token (Err "/t/qedcheck.fpr:1:4:\n  |\n1 | aba\n  |    ^\nunexpected end of input\nexpecting '.'")) c3;
+  _ = check "editor parse error in the gutter" (c4.diags == [(1, 4, "unexpected end of input")] and not c4.checking and ED.problemAt {c4 | buf = E.at 0 1 c4.buf} == "unexpected end of input");
+  prog = {e9 | buf = E.fromText "main = \"a\" + 1.", version = 77};
+  (t3, tcmds) = ticks 3 prog;
+  _ = check "editor checks a program as Run packages it" (case tcmds of AW.Fetch tok (AW.Compile prof src) :: Nil -> prof == "check" and strIndexOf "qedRun me" src == 0 | other -> False);
+  (t4, _) = ED.update (AW.Arrived t3.token (Err "=== TYPE ERRORS ===\n  * /t/qedcheck.fpr:2: in main@0123456789abcdef: (+): cannot unify Int with String")) t3;
+  _ = check "editor type error mapped past the entry, hash dropped" (t4.diags == [(1, 1, "in main: (+): cannot unify Int with String")]);
+  spin = {e9 | buf = E.fromText "spin n = spin (n + 1).\nmain = spin 0.", version = 78};
+  (s3, _) = ticks 3 spin;
+  (s4, _) = ED.update (AW.Arrived s3.token (Err "=== SAFETY: the safe/unsafe line ===\n  * spin is unsafe (recursive) but has no explicit `spin : unsafe ...` signature")) s3;
+  _ = check "editor safety finding on its definition" (case s4.diags of (1, 1, what) :: Nil -> E.startsWith "spin is unsafe" what | other -> False);
+  (stale, _) = ED.update (AW.Arrived s3.token (Err "/t/qedcheck.fpr:1:1:\nunexpected x")) {s3 | version = 79};
+  _ = check "editor drops a stale check" (stale.diags == Nil and not stale.checking);
+  (off, _) = ED.update (AW.Arrived s3.token (Err "no compiler server (start tools/fprd.py)")) s3;
+  _ = check "editor stops checking without a compiler" (not off.checker and off.diags == Nil);
+  (again, _) = ED.update (AW.Key 4048) off;
+  _ = check "^B turns the checks back on" again.checker;
+  (a1, _) = ED.update (AW.Key 4019) {e9 | buf = E.fromText "app = 1.\nx = ."};
+  (a2, _) = ED.update (AW.Arrived a1.token (Err "/b/fprd-src/qedrun.fpr:3:5:\nunexpected '.'")) a1;
+  (a3, _) = ED.update (AW.Key 4048) a2;
+  _ = check "an app that never started leaves no program panel" (ED.appShown a1 and not (ED.appShown a2) and not (ED.appShown a3));
+  # a hosted program (std/hosted's app): its frames are the panel; its file
+  # asks are the Editor's to grant -- under /home, never the Editor's own
+  # records, no `..` step -- and answered under the program's own token; it
+  # has the keys until ^J; and when it ends, an answer still on its way is
+  # forgotten, so it can never reach the next program
+  _ = check "program paths" (ED.allowedPath "/home/notes/a.txt" and not (ED.allowedPath "/home/") and not (ED.allowedPath "/home/.editor/session")
+    and not (ED.allowedPath "/home/../sys/files") and not (ED.allowedPath "/home/a/..") and not (ED.allowedPath "/tmp/x") and not (ED.allowedPath "/homework/x"));
+  _ = check "program listings" (ED.allowedPrefix "/home" and ED.allowedPrefix "/home/notes" and not (ED.allowedPrefix "/")
+    and not (ED.allowedPrefix "/home/..") and not (ED.allowedPrefix "/tmp"));
+  stand = spawn (standIn me);
+  hosting = {e9 | running = True, appRun = True, progFocus = True, proc = RP.Proc stand 7};
+  (h1, hc1) = ED.heard [PG.Frame ["n 1", "ok"], PG.Ask 3 (PG.ReadReq "/home/x.txt"), PG.Ask 4 (PG.WriteReq "/home/.editor/session" "x")] hosting Nil;
+  _ = check "program frame shown, a /home ask is a job" (h1.progView == ["n 1", "ok"] and (case hc1 of AW.Fetch tok (AW.ReadPath p) :: Nil -> p == "/home/x.txt" | other -> False));
+  _ = check "program refused at once" (case receiveFromRes me stand of Ok (PG.Answer 4 (PG.Failed why)) -> strIndexOf "under /home only" why >= 0 | other -> False);
+  (h2, _) = ED.update (AW.Arrived h1.token (Ok (AW.Text "hello"))) h1;
+  _ = check "program answered under its token" (case receiveFromRes me stand of Ok (PG.Answer 3 (PG.Text t)) -> t == "hello" | other -> False);
+  (h3, _) = ED.update (AW.Key 30) h2;
+  _ = check "program has the keys" (E.toText h3.buf == E.toText h2.buf and (case receiveFromRes me stand of Ok (PG.KeyIn k) -> k == 30 | other -> False));
+  (h4, _) = ED.update (AW.Key 4036) h3;
+  (h5, _) = ED.update (AW.Key 30) h4;
+  _ = check "^J gives the keys back to the text" (not h4.progFocus and E.toText h5.buf != E.toText h4.buf);
+  (h6, hc6) = ED.heard [PG.Ask 5 (PG.ListReq "/home")] {h5 | progFocus = True} Nil;
+  _ = check "program listing is a job" (case hc6 of AW.Fetch tok AW.ListRoot :: Nil -> True | other -> False);
+  h7 = ED.ended "" "finished" h6;
+  (h8, _) = ED.update (AW.Arrived h6.token (Ok (AW.Lines ["/home/x.txt"] ""))) h7;
+  _ = Sys.sleepUs 20000;
+  _ = check "an ended program's answer is forgotten" (not (ED.pendingKind 10 h7.pending) and not h8.running
+    and (case receiveFromNow me stand of Ok b -> _ = drop b; False | Err why -> why == "empty"));
+  _ = kill stand;
   (q0, _) = ED.init;
   (q1, _) = ED.update (AW.Arrived 1 (Ok (AW.Text "qed1\n/home/y.fpr\n1\nhello\nworld"))) q0;
   _ = check "editor recovers unsaved work" (E.toText q1.buf == "hello\nworld" and q1.path == "/home/y.fpr" and ED.dirty q1);

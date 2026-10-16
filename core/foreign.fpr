@@ -59,6 +59,8 @@ Sys.compile : String -> String -> Result String String .
 Sys.captureConsole : Int -> Result String String .
 Sys.takeConsole : Int -> Result String String .
 Sys.releaseConsole : Int -> Result String String .
+# the host's physical memory in bytes, 0 when it cannot say (qos/appside/hal.c)
+Sys.memTotal : Unit -> Int .
 Sys.shutdownRequested : Unit -> Int .
 Sys.shutdownBegin : Unit -> Unit .
 Sys.shutdownComplete : Int -> Unit .

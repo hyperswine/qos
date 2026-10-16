@@ -37,15 +37,18 @@ const qos_hal_t *qos_hal; /* installed before anything can call out */
 static int g_shutdown_finished;
 static int g_shutdown_status;
 static V h_shutdown_requested(V u) {
+  fpr_confined_refuse("Sys.shutdownRequested (the system's lifecycle)");
   (void)u;
   return TAG(qos_hal->shutdown_requested ? qos_hal->shutdown_requested() : 0);
 }
 static V h_shutdown_begin(V u) {
+  fpr_confined_refuse("Sys.shutdownBegin (the system's lifecycle)");
   (void)u;
   if (qos_hal->shutdown_begin) qos_hal->shutdown_begin();
   return (V)&fpr_unit;
 }
 static V h_shutdown_complete(V status) {
+  fpr_confined_refuse("Sys.shutdownComplete (the system's lifecycle)");
   if (!ISINT(status)) fpr_cpanic("Sys.shutdownComplete: status must be an Int");
   int code = UNTAG(status) == 0 ? 0 : 1;
   __atomic_fetch_or(&g_shutdown_status, code, __ATOMIC_RELAXED);
@@ -58,6 +61,7 @@ static V h_shutdown_complete(V status) {
   return (V)&fpr_unit;
 }
 static V h_ready(V u) {
+  fpr_confined_refuse("Sys.ready (the system's lifecycle)");
   (void)u;
   if (qos_hal->ready && qos_hal->ready() < 0)
     fpr_actor_fail("Sys.ready: could not publish readiness");
@@ -265,6 +269,7 @@ static int digest_is(qos_span_t want, const unsigned char *a, uw an, const unsig
  * reason: nums is mods/qaimg.fpr's [base, entry, execsz, rwoff, memsz] (base
  * 0: relocatable); programs call Plug.attach with the .qa bytes. */
 static V h_sys_attach_image(V idv, V abiv, V shav, V relshav, V numsv, V secsv) {
+  fpr_confined_refuse("Sys.attachImage (loading code)");
   if (!g_syscall) return fpr_mkresult(1, "no syscall channel (standalone run)");
   uw n[5];
   if (!fpr_list_ints(numsv, n, 5)) fpr_cpanic("Sys.attachImage: nums must be [base, entry, execsz, rwoff, memsz]");
@@ -333,6 +338,7 @@ FPR_FN(fpr_g_Sys_x2eattachImage, h_sys_attach_image, 6);
  * Result.  The profile is a token the daemon whitelists, never argv
  * passthrough. */
 static V h_sys_compile(V profv, V srcv) {
+  fpr_confined_refuse("Sys.compile (the host compiler)");
   if (ISINT(profv) || ((hdr_t *)profv)->tid != T_STR)
     fpr_cpanic("Sys.compile: profile must be a String");
   if (ISINT(srcv) || ((hdr_t *)srcv)->tid != T_STR)
@@ -368,6 +374,7 @@ static V h_sys_compile(V profv, V srcv) {
 FPR_FN(fpr_g_Sys_x2ecompile, h_sys_compile, 2);
 
 static V h_sys_store_req(V tagv, V payv) {
+  fpr_confined_refuse("Sys.storeReq (the host's store)");
   if (!ISINT(tagv)) fpr_cpanic("Sys.storeReq: tag must be an Int");
   if (ISINT(payv) || ((hdr_t *)payv)->tid != T_STR)
     fpr_cpanic("Sys.storeReq: payload must be a String");
