@@ -5,6 +5,9 @@ Opens a real GL window on macOS; uses DISPLAY or xvfb-run on Linux.
 Retains screenshots and logs under --output (which must be a fresh directory).
 """
 import argparse
+import atexit
+from contextlib import ExitStack
+import importlib.util
 import os
 from pathlib import Path
 import queue
@@ -17,6 +20,10 @@ import time
 import zlib
 
 ROOT = Path(__file__).resolve().parents[1]
+# main-profile.py's compiler daemon: the Editor builds and runs through it
+_spec = importlib.util.spec_from_file_location('main_profile', ROOT / 'tools/main-profile.py')
+main_profile = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(main_profile)
 
 
 def png(path, rgb, width=960, height=600):
@@ -221,7 +228,7 @@ def viewport_checks(out, env, command, tag):
             shutil.move(path, out / f'{name}-{n}.ppm'); png(out / f'{name}-{n}.png', rgb, width, height)
             return rgb
         try:
-            wait('Main Profile ready (11 shortcuts,')
+            wait('Main Profile ready (12 shortcuts,')
             home = capture(1)
             point(1)
             assert 'shell: open clock' not in ''.join(log), 'press launched before release'
@@ -237,7 +244,7 @@ def viewport_checks(out, env, command, tag):
             key(102)
             for _ in range(6): key(106)
             key(28); wait('shell: open browser'); capture(6)
-            key(15); key(15); key(28); capture(7)  # focused Home, activated with Enter
+            key(1015); key(28); capture(7)  # Shift-Tab to Home (Tab is the app's), activated with Enter
             key(16); proc.wait(timeout=10); thread.join(timeout=3)
             assert proc.returncode == 0 and 'storage drained and flushed' in ''.join(log), ''.join(log)
         finally:
@@ -300,7 +307,7 @@ def check(out):
     (profile / 'broken.qa').write_bytes(b'not a QA archive')
     disk = out / 'check.disk'
     run('python3', 'tools/mkdisk.py', disk, 32,
-        *[profile / (name + '.qa') for name in ['clock', 'logs', 'browser', 'disk', 'terminal', 'plugmini', 'broken']])
+        *[profile / (name + '.qa') for name in ['clock', 'logs', 'browser', 'disk', 'terminal', 'editor', 'plugmini', 'broken']])
     run('make', '-s', 'qos-app', 'PROG=tests/guishell.fpr',
         f'QA_OUT={out / "unit.qa"}', f'BUILD={out / "unit-build"}')
     run('make', '-s', 'qos-app', 'PROG=tests/scrolltext.fpr',
@@ -342,6 +349,10 @@ def check(out):
 
     env['FPR_DISK'] = str(disk)
     command = [str(ROOT / 'qos/qosp-gl'), '--yes', str(out / 'check.qa')]
+    # the host compiler daemon, for the Editor's build and run (stopped at exit)
+    daemon = ExitStack()
+    atexit.register(daemon.close)
+    env['FPRD_SOCK'] = daemon.enter_context(main_profile.compiler(out))
 
     for boot in (1, 2):
         fifo = out / f'keys-{boot}.evd'
@@ -405,7 +416,7 @@ def check(out):
             raise TimeoutError(f'capture not written: {path}')
 
         try:
-            wait_for('Main Profile ready (11 shortcuts, 2 pages)')
+            wait_for('Main Profile ready (12 shortcuts, 2 pages)')
             deadline = time.monotonic() + 5
             while time.monotonic() < deadline and (not ready.exists() or ready.read_text().strip() != str(proc.pid)):
                 time.sleep(.01)
@@ -421,7 +432,7 @@ def check(out):
             resolved = shot(4)
             assert browser != resolved, 'onboard browser update did not change its view'
             key(1); wait_for('shell: home'); shot(5)
-            key(106); key(106); key(106); key(28); wait_for('shell: open plugmini')
+            key(106); key(106); key(106); key(106); key(28); wait_for('shell: open plugmini')
             refusal = shot(6)
             key(1); wait_for('shell: home'); shot(7)
             key(106); key(28); wait_for('shell: open broken')
@@ -480,6 +491,38 @@ def check(out):
             written = shot(27)
             assert written != helped, 'Terminal write/cat did not change the view'
             key(1); wait_for('shell: home'); shot(28)
+            # the Editor: a program typed, saved as /home/calc.fpr, run through
+            # the host compiler (its output in the panel), a broken line built
+            # (the caret on it), and the unsaved change kept across a close
+            # and a reboot by the session record
+            key(109); key(106); key(106); key(106); key(28); wait_for('shell: open editor')
+            if boot == 1:
+                editor = shot(29)
+                for code in (50, 30, 23, 49, 57, 13, 57, 7, 57, 1009, 57, 8, 52):  # main = 6 * 7.
+                    key(code)
+                typed = shot(30)
+                assert typed != editor, 'Editor did not show typing'
+                key(4031)                                                       # ^S: save as
+                for code in (46, 30, 38, 46, 52, 33, 25, 19, 28):               # calc.fpr Enter
+                    key(code)
+                wait_for('editor: saved /home/calc.fpr')
+                key(4019); wait_for('editor: run calc.fpr: started')            # ^R
+                wait_for('editor: run calc.fpr: finished')
+                ran = shot(31)
+                assert ran != typed, 'Editor did not show the run'
+                for code in (28, 45, 57, 13, 57, 52):                           # Enter x = .
+                    key(code)
+                key(4048); wait_for('editor: build calc.fpr: failed at line 2')  # ^B
+                shot(32)
+                time.sleep(1.0)                                                 # the session record
+                key(1); wait_for('shell: home')
+                key(28); wait_for('shell: open editor'); wait_for('editor: recovered /home/calc.fpr')
+                shot(33)
+                key(1); wait_for('shell: home'); shot(34)
+            else:
+                wait_for('editor: recovered /home/calc.fpr')
+                shot(29)
+                key(1); wait_for('shell: home'); shot(30)  # the shell numbers snapshots in order
             if boot == 1:
                 key(16)
             else:
@@ -511,7 +554,7 @@ def check(out):
             os.close(fd)
             fifo.unlink(missing_ok=True)
             (out / f'boot{boot}.log').write_text(''.join(log))
-            for n in range(1, 25):
+            for n in range(1, 40):
                 p = Path(f'/tmp/{tag}-{n}.ppm')
                 if p.exists():
                     shutil.move(p, out / f'boot{boot}-{n}.ppm')
@@ -547,7 +590,7 @@ def check(out):
     print('guishell: graphics death drains storage before failed exit HOLDS')
     check_live_deadline(out, env, profile)
     check_pane_recovery(out, env, profile)
-    print('guishell: real GL, Files/Logs vertical scrolling, two pages, all five onboard sessions (the Terminal typed and written to), reopen/close, refusals, pointer protocol and two boots HOLDS')
+    print('guishell: real GL, Files/Logs vertical scrolling, two pages, all six onboard sessions (the Terminal typed and written to, the Editor saving, running, building and recovering), reopen/close, refusals, pointer protocol and two boots HOLDS')
 
 
 if __name__ == '__main__':

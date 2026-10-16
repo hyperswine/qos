@@ -1,0 +1,243 @@
+# editbuf.fpr -- the Editor's text buffer: lines, a cursor, a selection and
+# the edits a modern editor makes, as pure functions (no service, no actor).
+# programs/mods/editapp.fpr is the app around it (docs/2026-10-16-EDITOR.md).
+#
+# A buffer is a list of lines -- never empty: the empty text is one empty
+# line -- and a cursor: a row and a BYTE column, always on a UTF-8 boundary.
+# The GOAL is the cursor's x position in milli-em of the shell's text face
+# (mods/fontm.fpr): up and down keep it, so the caret stays over the same
+# place in a proportional font.  A selection is the cursor and a mark; an
+# edit made with a selection replaces it.  Tabs are shown as four spaces
+# (`shown`), and widths count them that way.
+unsafe module.
+Fm = use "fontm".
+
+Buf = { lines : List String, row : Int, col : Int, goal : Int, marked : Bool, mrow : Int, mcol : Int }.
+
+empty = { lines = [""], row = 0, col = 0, goal = 0, marked = False, mrow = 0, mcol = 0 }.
+
+fromText s = {empty | lines = splitLines s}.
+toText b = joinLines b.lines.
+
+# ---- lists and strings ---------------------------------------------------------
+count Nil = 0.
+count (_ :: r) = 1 + count r.
+nth Nil i = "".
+nth (x :: r) i = if i <= 0 then x else nth r (i - 1).
+setNth Nil i v = Nil.
+setNth (x :: r) i v = if i <= 0 then v :: r else x :: setNth r (i - 1) v.
+take n xs = if n <= 0 then Nil else (case xs of Nil -> Nil | x :: r -> x :: take (n - 1) r).
+dropN n xs = if n <= 0 then xs else (case xs of Nil -> Nil | x :: r -> dropN (n - 1) r).
+append Nil ys = ys.
+append (x :: r) ys = x :: append r ys.
+reverse xs = revGo xs Nil.
+revGo Nil acc = acc.
+revGo (x :: r) acc = revGo r (x :: acc).
+# replace rows [a, b] (inclusive) by the list `with`
+splice lines a b with = append (take a lines) (append with (dropN (b + 1) lines)).
+imin a b = if a < b then a else b.
+imax a b = if a > b then a else b.
+clamp lo hi n = if n < lo then lo else if n > hi then hi else n.
+
+splitLines s = splitGo s 0 0 (strlen s) Nil.
+splitGo s i st n acc = if i >= n then reverse (seg s st n :: acc)
+  else if charAt s i == 10 then splitGo s (i + 1) (i + 1) n (seg s st i :: acc)
+  else splitGo s (i + 1) st n acc.
+# a CR before the LF is the line ending's, not the line's
+seg s st e = if e > st and charAt s (e - 1) == 13 then substr s st (e - st - 1) else substr s st (e - st).
+joinLines Nil = "".
+joinLines (x :: Nil) = x.
+joinLines (x :: r) = strcat (strcat x "\n") (joinLines r).
+
+before s c = substr s 0 c.
+after s c = substr s c (strlen s - c).
+isCont c = c >= 128 and c < 192.
+# the boundaries around a byte column
+prevAt s c = if c <= 0 then 0 else if isCont (charAt s (c - 1)) then prevAt s (c - 1) else c - 1.
+prevB s c = if c <= 0 then 0 else prevAt s c.
+nextB s c = n = strlen s; if c >= n then n else nextGo s (c + 1) n.
+nextGo s c n = if c >= n then n else if isCont (charAt s c) then nextGo s (c + 1) n else c.
+isWord c = (c >= 48 and c <= 57) or (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or c == 95 or c >= 128.
+isBlank c = c == 32 or c == 9.
+leading s = leadGo s 0 (strlen s).
+leadGo s i n = if i < n and isBlank (charAt s i) then leadGo s (i + 1) n else i.
+indentOf s = substr s 0 (leading s).
+spaces n = if n <= 0 then "" else strcat " " (spaces (n - 1)).
+trimEnd s = n = strlen s; if n > 0 and isBlank (charAt s (n - 1)) then trimEnd (substr s 0 (n - 1)) else s.
+endsWith suffix s = strlen s >= strlen suffix and substr s (strlen s - strlen suffix) (strlen suffix) == suffix.
+startsWith prefix s = strlen s >= strlen prefix and substr s 0 (strlen prefix) == prefix.
+
+# what the view draws for a line, and its width in milli-em
+shown s = if strIndexOf "\t" s < 0 then s else detab s 0 (strlen s) "".
+detab s i n acc = if i >= n then acc else detab s (i + 1) n (strcat acc (if charAt s i == 9 then "    " else substr s i 1)).
+wid s = Fm.width (shown s).
+# the boundary whose prefix is nearest to x milli-em
+colAt s x = colGo s x 0 (strlen s).
+colGo s x c n = if c >= n then n else
+  next = nextB s c;
+  if wid (before s next) > x then (if x - wid (before s c) <= wid (before s next) - x then c else next)
+  else colGo s x next n.
+
+# ---- the cursor ---------------------------------------------------------------
+line b = nth b.lines b.row.
+last b = count b.lines - 1.
+at row col b = {b | row = row, col = col, goal = wid (before (nth b.lines row) col)}.
+# a move: `extend` keeps (or starts) the selection, otherwise it ends
+moving extend b = if extend then (if b.marked then b else {b | marked = True, mrow = b.row, mcol = b.col}) else {b | marked = False}.
+selection b = if not b.marked or (b.mrow == b.row and b.mcol == b.col) then NoSpan
+  else if b.mrow < b.row or (b.mrow == b.row and b.mcol < b.col) then Span b.mrow b.mcol b.row b.col
+  else Span b.row b.col b.mrow b.mcol.
+Range = Type (Span Int Int Int Int | NoSpan).
+hasSelection b = case selection b of NoSpan -> False | other -> True.
+
+left extend b = case (extend, selection b) of
+    (False, Span r1 c1 r2 c2) -> at r1 c1 {b | marked = False}
+  | other -> m = moving extend b;
+      if m.col > 0 then at m.row (prevB (line m) m.col) m
+      else if m.row > 0 then at (m.row - 1) (strlen (nth m.lines (m.row - 1))) m else m.
+right extend b = case (extend, selection b) of
+    (False, Span r1 c1 r2 c2) -> at r2 c2 {b | marked = False}
+  | other -> m = moving extend b;
+      if m.col < strlen (line m) then at m.row (nextB (line m) m.col) m
+      else if m.row < last m then at (m.row + 1) 0 m else m.
+# up and down keep the goal
+vertical extend delta b =
+  m = moving extend b;
+  row = clamp 0 (last m) (m.row + delta);
+  if row == m.row then (if delta < 0 then at row 0 m else at row (strlen (line m)) m)
+  else {m | row = row, col = colAt (nth m.lines row) m.goal}.
+up extend b = vertical extend (0 - 1) b.
+down extend b = vertical extend 1 b.
+page extend rows b = vertical extend rows b.
+# Home goes to the first non-blank, then to column 0
+home extend b = m = moving extend b; l = line m; ind = leading l;
+  at m.row (if m.col == ind then 0 else ind) m.
+endOfLine extend b = m = moving extend b; at m.row (strlen (line m)) m.
+docStart extend b = at 0 0 (moving extend b).
+docEnd extend b = m = moving extend b; at (last m) (strlen (nth m.lines (last m))) m.
+# a word: a run of word characters, or of other non-blanks
+wordLeft extend b = m = moving extend b;
+  if m.col == 0 then left extend m else
+    l = line m; c = skipBack l m.col isBlank;
+    at m.row (if c == 0 then 0 else skipBack l c (sameClass (charAt l (c - 1)))) m.
+wordRight extend b = m = moving extend b;
+  l = line m;
+  if m.col >= strlen l then right extend m else
+    c = skipFwd l m.col isBlank;
+    at m.row (if c >= strlen l then c else skipFwd l c (sameClass (charAt l c))) m.
+sameClass c d = if isWord c then isWord d else not (isWord d) and not (isBlank d).
+skipBack s c p = if c > 0 and p (charAt s (c - 1)) then skipBack s (c - 1) p else c.
+skipFwd s c p = if c < strlen s and p (charAt s c) then skipFwd s (c + 1) p else c.
+selectAll b = docEnd True {b | marked = True, mrow = 0, mcol = 0, row = 0, col = 0}.
+
+# ---- edits --------------------------------------------------------------------
+# the text of the selection ("" without one)
+selected b = case selection b of
+    NoSpan -> ""
+  | Span r1 c1 r2 c2 -> if r1 == r2 then substr (nth b.lines r1) c1 (c2 - c1)
+      else joinLines (after (nth b.lines r1) c1 :: append (take (r2 - r1 - 1) (dropN (r1 + 1) b.lines)) [before (nth b.lines r2) c2]).
+# remove the selection, the cursor where it began
+deleteSelection b = case selection b of
+    NoSpan -> {b | marked = False}
+  | Span r1 c1 r2 c2 -> at r1 c1 {b | marked = False,
+      lines = splice b.lines r1 r2 [strcat (before (nth b.lines r1) c1) (after (nth b.lines r2) c2)]}.
+# insert text at the cursor (replacing the selection); the text may hold lines
+insert s b = m = deleteSelection b; insertAt (splitLines s) m.
+insertAt parts m =
+  l = line m; pre = before l m.col; post = after l m.col;
+  case parts of
+    one :: Nil -> at m.row (m.col + strlen one) {m | lines = setNth m.lines m.row (strcat (strcat pre one) post)}
+  | first :: rest ->
+      tail = reverse rest;
+      final = (case tail of x :: _ -> x | Nil -> "");
+      middle = reverse (dropN 1 tail);
+      at (m.row + count rest) (strlen final)
+        {m | lines = splice m.lines m.row m.row (strcat pre first :: append middle [strcat final post])}
+  | Nil -> m.
+# Enter: the new line keeps the indentation, two more after a line that
+# opens a block (`=`, `->`, `of`, `then`, `else`, an open bracket)
+newline b =
+  m = deleteSelection b;
+  l = line m; pre = before l m.col; post = after l m.col;
+  ind = substr l 0 (imin (leading l) m.col);
+  extra = if opens (trimEnd pre) then "  " else "";
+  fresh = strcat (strcat ind extra) (afterBlank post);
+  at (m.row + 1) (strlen ind + strlen extra) {m | lines = splice m.lines m.row m.row [trimEnd pre, fresh]}.
+afterBlank s = after s (leading s).
+opens s = (endsWith "=" s and not (endsWith "==" s)) or endsWith "->" s or endsWith "(" s or endsWith "[" s
+  or endsWith "\{" s or endsWith " of" s or endsWith " then" s or endsWith " else" s.
+# Backspace: the selection, else one character -- or back to the previous
+# two-space stop inside the indentation -- else join the line above
+backspace b = if hasSelection b then deleteSelection b else
+  l = line b;
+  if b.col > 0 then
+    stop = if b.col <= leading l and b.col >= 2 then b.col - (if b.col % 2 == 0 then 2 else 1) else prevB l b.col;
+    at b.row stop {b | marked = False, lines = setNth b.lines b.row (strcat (before l stop) (after l b.col))}
+  else if b.row > 0 then
+    above = nth b.lines (b.row - 1);
+    at (b.row - 1) (strlen above) {b | marked = False, lines = splice b.lines (b.row - 1) b.row [strcat above l]}
+  else {b | marked = False}.
+deleteForward b = if hasSelection b then deleteSelection b else
+  l = line b;
+  if b.col < strlen l then
+    {b | marked = False, lines = setNth b.lines b.row (strcat (before l b.col) (after l (nextB l b.col)))}
+  else if b.row < last b then
+    {b | marked = False, lines = splice b.lines b.row (b.row + 1) [strcat l (nth b.lines (b.row + 1))]}
+  else {b | marked = False}.
+# the rows an edit of whole lines touches: the selection's, else the cursor's
+rows b = case selection b of
+    NoSpan -> (b.row, b.row)
+  | Span r1 c1 r2 c2 -> (r1, if c2 == 0 and r2 > r1 then r2 - 1 else r2).
+indent b = (r1, r2) = rows b;
+  shift 2 r1 r2 {b | lines = mapRows (fn l -> if strlen l == 0 then l else strcat "  " l) r1 r2 b.lines 0}.
+outdent b = (r1, r2) = rows b;
+  {b | lines = mapRows (fn l -> after l (imin 2 (leading l))) r1 r2 b.lines 0,
+       col = imax 0 (b.col - imin 2 (leading (line b))), mcol = imax 0 (b.mcol - imin 2 (leading (nth b.lines b.mrow)))}.
+shift n r1 r2 b = {b | col = (if b.row >= r1 and b.row <= r2 and strlen (line b) > 0 then b.col + n else b.col),
+  mcol = (if b.marked and b.mrow >= r1 and b.mrow <= r2 and strlen (nth b.lines b.mrow) > 0 then b.mcol + n else b.mcol)}.
+mapRows f r1 r2 Nil i = Nil.
+mapRows f r1 r2 (l :: rest) i = (if i >= r1 and i <= r2 then f l else l) :: mapRows f r1 r2 rest (i + 1).
+duplicateLine b = (r1, r2) = rows b;
+  chunk = take (r2 - r1 + 1) (dropN r1 b.lines);
+  at (b.row + count chunk) b.col {b | marked = False, lines = append (take (r2 + 1) b.lines) (append chunk (dropN (r2 + 1) b.lines))}.
+deleteLines b = (r1, r2) = rows b;
+  rest = append (take r1 b.lines) (dropN (r2 + 1) b.lines);
+  kept = (case rest of Nil -> [""] | other -> rest);
+  row = imin r1 (count kept - 1);
+  at row (imin b.col (strlen (nth kept row))) {b | marked = False, lines = kept}.
+# the lines the selection touches (or the cursor's), as text with its newline
+lineText b =
+  (r1, r2) = rows b;
+  strcat (joinLines (take (r2 - r1 + 1) (dropN r1 b.lines))) "\n".
+moveLines delta b = (r1, r2) = rows b;
+  if (delta < 0 and r1 == 0) or (delta > 0 and r2 >= last b) then b else
+    chunk = take (r2 - r1 + 1) (dropN r1 b.lines);
+    without = append (take r1 b.lines) (dropN (r2 + 1) b.lines);
+    at2 = r1 + delta;
+    {b | lines = append (take at2 without) (append chunk (dropN at2 without)), row = b.row + delta, mrow = b.mrow + delta}.
+
+# ---- find ---------------------------------------------------------------------
+# the next occurrence after the cursor (wrapping), selected; the buffer as
+# it was when there is none
+findNext q b = if strlen q == 0 then b else
+  from = (case selection b of Span r1 c1 r2 c2 -> (r2, c2) | NoSpan -> (b.row, b.col));
+  (r, c) = from;
+  case findFrom q b.lines r c (count b.lines) 0 of
+    NoSpan -> b
+  | Span fr fc tr tc -> at fr (fc + strlen q) {b | marked = True, mrow = fr, mcol = fc}.
+findFrom q lines r c n k = if k > n then NoSpan else
+  l = nth lines r;
+  i = strIndexFrom q l c;
+  if i >= 0 then Span r i r (i + strlen q)
+  else findFrom q lines (if r + 1 >= n then 0 else r + 1) 0 n (k + 1).
+# how many times q occurs
+occurrences q b = if strlen q == 0 then 0 else occGo q b.lines 0.
+occGo q Nil acc = acc.
+occGo q (l :: rest) acc = occGo q rest (acc + occLine q l 0 0).
+occLine q l from acc = i = strIndexFrom q l from; if i < 0 then acc else occLine q l (i + strlen q) (acc + 1).
+# jump to a 1-based line
+gotoLine n b = row = clamp 0 (last b) (n - 1); at row (leading (nth b.lines row)) {b | marked = False}.
+# the caret where a compiler points: a line and a column, both from 1, the
+# column in characters (a UTF-8 character is one); past the end is the end
+gotoPos line col b = row = clamp 0 (last b) (line - 1); at row (charsIn (nth b.lines row) 0 (col - 1)) {b | marked = False}.
+charsIn s i k = if k <= 0 or i >= strlen s then i else charsIn s (nextB s i) (k - 1).

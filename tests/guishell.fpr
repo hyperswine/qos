@@ -34,6 +34,11 @@ retention me env initial =
   moved = S.reviseView hovered (S.pointerEvent env 0 (r.x + 11) (r.y + 11) hovered);
   _ = check (S.staticKey hovered > S.staticKey idle and S.staticKey moved == S.staticKey hovered);
   _ = check (changed moved (S.key env 15 moved));
+  # Tab inside an open app's content is the app's; Shift-Tab still leaves it
+  inApp = {moved | active = 1, focus = L.Content};
+  tabbed = S.key env 15 inApp;
+  backed = S.key env 1015 inApp;
+  _ = check (tabbed.focus == L.Content and backed.focus == L.Home);
   _ = check (changed moved (S.resize env 1024 600 moved));
   (shot, _) = S.update me env (MV.EKey 25) moved;
   _ = check (S.staticKey shot > S.staticKey moved and shot.snap == moved.snap + 1);

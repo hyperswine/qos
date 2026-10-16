@@ -19,7 +19,7 @@
 
 #include <stdint.h>
 
-#define QOS_ABI_VERSION 20u /* v20: app worker doorbells and timer parking; v19: explicit lifecycle; v18: tag 4 checks RELOC and IMPORT against LOAD's relsha */
+#define QOS_ABI_VERSION 21u /* v21: worker-backed compile (tag 7 retired); v20: app worker doorbells and timer parking; v19: explicit lifecycle; v18: tag 4 checks RELOC and IMPORT against LOAD's relsha */
 
 /* ---- the address plan (linux-x86-64) --------------------------------
  * The host is linked non-PIE (default 0x400000 text); the arena is a
@@ -62,10 +62,8 @@
  * 5 kv record index, 6 sleep (payload = decimal MICROSECONDS text;
  * the app-side Sys.sleepUs backend -- weak/strong linking cannot
  * cross the image boundary, so the sleep goes through the channel
- * every other host service already uses), 7 compile (payload =
- * "<profile>\n<source>"; the host bridges to the fpr compiler
- * server on its unix socket -- portable/compile.c + tools/fprd.py --
- * and out gets the framed "ok\n<asm>" / "err\n<msg>" reply) */
+ * every other host service already uses), 7 compile (RETIRED in v21:
+ * the compile_* table entries below replace it) */
 #define QOS_SYS_LOADQA 4
 /* tag 4's payload (v16).  The APP interprets the plugin's archive -- with
  * mods/qar.fpr and mods/manifest.fpr, the code the kernel and the host
@@ -89,7 +87,7 @@ typedef struct {
  * sorted by name.  A plugin's imports are completed from it by name. */
 typedef struct { const char *name; uint64_t addr, size; } qos_export_t;
 #define QOS_SYS_SLEEPUS 6
-#define QOS_SYS_COMPILE 7
+#define QOS_SYS_COMPILE 7 /* retired in v21: the compile_* entries */
 /* v17: tag 8 unload-plugin (payload = a qos_unload_t).  The process a
  * launched image belonged to has ended and the app is about to free its
  * block (appside/entry.c plug_image_quiet): the host makes the code pages
@@ -253,6 +251,18 @@ typedef struct {
   void (*hart_clear)(uint64_t hart);
   void (*hart_timer_arm)(uint64_t hart, uint64_t ticks);
   void (*hart_timer_park)(uint64_t hart);
+  /* v21: the compiler bridge (portable/compile.c + tools/fprd.py),
+   * worker-backed like the disk's v15 entries: submit copies the request
+   * ("<profile>\n<source>") and queues it for one host thread; the caller
+   * parks between done polls, so a compile holds no hart.  reply gives the
+   * framed reply's byte count ("ok\n..." / "err\n...") and a pointer to
+   * it, valid until release, or <0: -2 no compiler server, -3 it stopped
+   * answering, -1 any other error.  release drops the caller's reference
+   * (also the way to abandon a running job). */
+  void *(*compile_submit)(const char *pay, uint64_t plen);
+  int (*compile_done)(void *job);
+  int64_t (*compile_reply)(void *job, const char **bytes);
+  void (*compile_release)(void *job);
 } qos_hal_t;
 
 /* ---- the memory-growth grant (RETIRED in v12) ----------------------

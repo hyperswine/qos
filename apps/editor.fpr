@@ -1,0 +1,7 @@
+unsafe program.
+# Editor.qa: a minimalist text editor (programs/mods/editapp.fpr) that also
+# builds and runs FP-RISC through the host compiler (docs/2026-10-16-EDITOR.md).
+A = use "../programs/mods/editapp".
+appMain : unsafe Int -> Unit .
+appMain me = A.run me.
+main = Unit.

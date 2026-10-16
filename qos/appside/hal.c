@@ -13,8 +13,82 @@
 
 extern const qos_hal_t *qos_hal; /* entry.c installs it first thing */
 
+/* ---- per-process console capture ------------------------------------
+ * Sys.captureConsole pid sends what the actors of a launched process print
+ * to a buffer instead of the host console, until Sys.releaseConsole pid;
+ * the launcher drains it with Sys.takeConsole pid -- the Editor's Run shows
+ * a program's output this way (programs/mods/appjobs.fpr).
+ *
+ * The buffer keeps the LAST QOS_CAPTURE_KEEP bytes: a program that prints
+ * faster than its launcher drains loses its oldest output, and the next
+ * take says how much ("[N earlier bytes not kept]"), never silently.  The
+ * capture belongs to the actor that asked for it -- only that actor takes
+ * or releases it -- and if that actor ends first, its resource list
+ * releases the capture (fpr_actor_resource_add): a launcher that is killed
+ * cannot leak one.  hal_putc runs on any hart, under the console lock for
+ * a print; nothing allocates under g_capture_lock. */
+#define QOS_CAPTURE_KEEP (64u * 1024) /* well past the 400 lines the Editor keeps */
+#define QOS_CAPTURE_NOTE 64           /* room for the "[N earlier bytes not kept]" line */
+typedef struct capture {
+  struct capture *next;
+  uw pid, owner;  /* the process captured, the actor that captures it */
+  uw start, len;  /* the ring: len bytes from start */
+  uw lost;        /* bytes overwritten since the last take */
+  fpr_resource_t res;
+  char ring[QOS_CAPTURE_KEEP];
+  char out[QOS_CAPTURE_NOTE + QOS_CAPTURE_KEEP]; /* the owner's take, copied out under the lock */
+} capture_t;
+static capture_t *g_captures;
+static fpr_lock_t g_capture_lock;
+extern uw fpr_current_id(void);
+
+static int capture_put(uw pid, char ch) {
+  int kept = 0;
+  fpr_lock(&g_capture_lock);
+  for (capture_t *c = g_captures; c; c = c->next)
+    if (c->pid == pid) {
+      if (c->len < QOS_CAPTURE_KEEP) {
+        c->ring[(c->start + c->len) % QOS_CAPTURE_KEEP] = ch;
+        c->len++;
+      } else {
+        c->ring[c->start] = ch;
+        c->start = (c->start + 1) % QOS_CAPTURE_KEEP;
+        c->lost++;
+      }
+      kept = 1;
+      break;
+    }
+  fpr_unlock(&g_capture_lock);
+  return kept;
+}
+static void capture_unlink(capture_t *c) {
+  fpr_lock(&g_capture_lock);
+  for (capture_t **p = &g_captures; *p; p = &(*p)->next)
+    if (*p == c) { *p = c->next; break; }
+  fpr_unlock(&g_capture_lock);
+}
+/* the owner ended without releasing: its resource list calls this */
+static void capture_drop(void *arg) {
+  capture_unlink((capture_t *)arg);
+  buddy_free(arg);
+}
+static capture_t *capture_owned(uw pid) {
+  capture_t *found = 0;
+  fpr_lock(&g_capture_lock);
+  for (capture_t *c = g_captures; c; c = c->next)
+    if (c->pid == pid) { found = c; break; }
+  fpr_unlock(&g_capture_lock);
+  return found && found->owner == fpr_current_id() ? found : 0;
+}
+
 /* ---- the hal_* obligations (actors.c / runtime.c contract) ---------- */
-void hal_putc(char c) { qos_hal->putc(c); }
+void hal_putc(char c) {
+  if (__atomic_load_n(&g_captures, __ATOMIC_ACQUIRE)) {
+    uw pid = fpr_current_pid();
+    if (pid && capture_put(pid, c)) return;
+  }
+  qos_hal->putc(c);
+}
 /* actors.c's stack guard: this image cannot protect memory, its host can */
 void hal_stack_guard(void *lo, uw size) { qos_hal->stack_guard(lo, size); }
 void hal_stack_unguard(void *lo, uw size) { qos_hal->stack_unguard(lo, size); }
@@ -403,3 +477,70 @@ FPR_FN(fpr_g_inputPoll, h_inputPoll, 1);
 
 /* Shared actor binding; Portable uses its socket transport inside the actor. */
 #include "../../hal/net_actor_bridge.c"
+
+/* ---- Sys.captureConsole / takeConsole / releaseConsole -------------------
+ * (the capture above; declared in core/foreign.fpr) */
+static V h_capture_console(V pidv) {
+  if (!ISINT(pidv)) fpr_cpanic("Sys.captureConsole: pid must be an Int");
+  if (UNTAG(pidv) <= 0) return fpr_mkresult(1, "pid 0 is the system's own console");
+  uw pid = (uw)UNTAG(pidv);
+  capture_t *c = (capture_t *)buddy_alloc(sizeof(capture_t));
+  if (!c) return fpr_mkresult(1, "no memory for a console capture");
+  c->pid = pid;
+  c->owner = fpr_current_id();
+  c->start = c->len = c->lost = 0;
+  fpr_lock(&g_capture_lock);
+  for (capture_t *e = g_captures; e; e = e->next)
+    if (e->pid == pid) {
+      fpr_unlock(&g_capture_lock);
+      buddy_free(c);
+      return fpr_mkresult(1, "that process's console is already captured");
+    }
+  c->next = g_captures;
+  __atomic_store_n(&g_captures, c, __ATOMIC_RELEASE);
+  fpr_unlock(&g_capture_lock);
+  if (!fpr_actor_resource_add(&c->res, capture_drop, c)) {
+    capture_unlink(c);
+    buddy_free(c);
+    return fpr_mkresult(1, "this actor cannot own a console capture");
+  }
+  return fpr_mkresult(0, "");
+}
+FPR_FN(fpr_g_Sys_x2ecaptureConsole, h_capture_console, 1);
+
+static uw put_dec(char *d, uw v) {
+  char t[24];
+  uw n = 0, k = 0;
+  do { t[n++] = (char)('0' + v % 10); v /= 10; } while (v);
+  while (n) d[k++] = t[--n];
+  return k;
+}
+static V h_take_console(V pidv) {
+  if (!ISINT(pidv)) fpr_cpanic("Sys.takeConsole: pid must be an Int");
+  capture_t *c = capture_owned((uw)UNTAG(pidv));
+  if (!c) return fpr_mkresult(1, "no console capture of that process by this actor");
+  uw n = 0;
+  fpr_lock(&g_capture_lock);
+  if (c->lost) {
+    const char *a = "[", *b = " earlier bytes not kept]\n";
+    while (*a) c->out[n++] = *a++;
+    n += put_dec(c->out + n, c->lost);
+    while (*b) c->out[n++] = *b++;
+  }
+  for (uw i = 0; i < c->len; i++) c->out[n++] = c->ring[(c->start + i) % QOS_CAPTURE_KEEP];
+  c->start = c->len = c->lost = 0;
+  fpr_unlock(&g_capture_lock);
+  return fpr_mkresultn(0, c->out, n);
+}
+FPR_FN(fpr_g_Sys_x2etakeConsole, h_take_console, 1);
+
+static V h_release_console(V pidv) {
+  if (!ISINT(pidv)) fpr_cpanic("Sys.releaseConsole: pid must be an Int");
+  capture_t *c = capture_owned((uw)UNTAG(pidv));
+  if (!c) return fpr_mkresult(1, "no console capture of that process by this actor");
+  capture_unlink(c);
+  fpr_actor_resource_remove(&c->res);
+  buddy_free(c);
+  return fpr_mkresult(0, "");
+}
+FPR_FN(fpr_g_Sys_x2ereleaseConsole, h_release_console, 1);

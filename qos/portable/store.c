@@ -64,13 +64,8 @@ int64_t qosp_store_call(uint64_t tag, const char *pay, uint64_t plen,
     pthread_mutex_unlock(&store_mu);
     return r;
   }
-  if (tag == 7) { /* compile: bridge to the host fpr compiler server
-                   * over its unix socket (compile.c).  No store lock:
-                   * a compile can take seconds, and it touches no kv
-                   * state -- same reasoning as sleep below. */
-    int64_t qosp_compile_call(const char *, uint64_t, char *, uint64_t);
-    return qosp_compile_call(pay, plen, out, outcap);
-  }
+  /* tag 7 (compile) is retired: since v21 a compile is the HAL table's
+   * worker-backed compile_* entries (compile.c), which hold no hart */
   if (tag == 6) { /* sleep_us: payload = decimal microseconds text.
                    * No store lock: sleeping under it would starve
                    * every other hart's kv traffic for the duration. */

@@ -2,9 +2,15 @@
 # module changes. Bootstrap exchanges primitive tuples before these types.
 S2 = use "scene2d".
 Event = Type (Key Int | Tick | Resize Int Int | Pointer Int Int Int | Wheel Int Int | Focus Bool | Cancel | Arrived Int (Result Snapshot String)).
-# WritePath replaces a file's text (delete, then append), AppendPath adds to
-# it (creating it), DeletePath removes it: the file namespaces (/home, /tmp)
-Job = Type (Clock | Logs Int | ListRoot | ReadPath String | Disk | WritePath String String | AppendPath String String | DeletePath String).
+# WritePath replaces a file's text (an open in the "replace" mode, then one
+# write), AppendPath adds to it (creating it), DeletePath removes it: the
+# file namespaces (/home, /tmp).  SaveFile is WritePath that cannot lose the
+# text: a safety copy first, the file read back and compared, then the copy
+# goes (programs/mods/appjobs.fpr).
+# Compile is the host compiler (Sys.compile: a profile and the source; the
+# worker parks while it runs, holding no hart): the Editor's build and run.
+Job = Type (Clock | Logs Int | ListRoot | ReadPath String | Disk | WritePath String String | AppendPath String String | DeletePath String
+          | SaveFile String String | Compile String String).
 Snapshot = Type (Time Int | Lines (List String) String | Text String | Done String).
 Cmd = Type (Fetch Int Job).
 Request = Type (Event Int Int Event | Close Int).

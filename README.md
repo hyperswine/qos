@@ -22,7 +22,9 @@ python3 tools/main-profile.py --run
 It opens a paged shortcut grid. Click or use arrows and Enter to open; Escape
 returns home, Page Up/Down changes pages, and Q exits from home. See the
 [Main Profile guide](docs/2026-10-03-GUI-SHELL.md) for boot-image wiring and
-the current prototype's application contract.
+the current prototype's application contract. The run also starts the host
+compiler daemon, so the Editor app can build FP-RISC (^B) and run it as a
+process of its own (^R): [docs/2026-10-16-EDITOR.md](docs/2026-10-16-EDITOR.md).
 
 QOS Portable also runs on Linux riscv64. The [STAR64 implementation and
 hardware record](docs/2026-10-14-STAR64-PORTABLE.md) covers RV64 cross-builds,

@@ -4,11 +4,13 @@
 # The compiler itself never runs inside QOS: it is a host process
 # (tools/fprd.py hosting ./fprc behind a unix domain socket),
 # and Sys.compile is the app's one-call bridge -- the source string
-# rides the qosp syscall channel (tag 7), qosp's C side speaks the
-# socket, and the reply comes back as Ok <assembly .s text> or
-# Err <compiler diagnostics>.  What to compile, when, and where the
-# result goes (e.g. a NEW file on qosp.disk via mods/qlog) stays app
-# policy -- see tests/editor.fpr for the whole loop.
+# goes to qosp's compile worker (the HAL table's compile_* entries, ABI
+# v21; the calling actor parks meanwhile and holds no hart), qosp's C
+# side speaks the socket, and the reply comes back as Ok <assembly .s
+# text> or Err <compiler diagnostics>.  What to compile, when, and where
+# the result goes (e.g. a NEW file on qosp.disk via mods/qlog) stays app
+# policy -- see tests/editor.fpr for the whole loop, and the Editor app
+# (programs/mods/editapp.fpr, runprog.fpr) for build and run.
 #
 # Not in std/std.fpr on purpose: std's charter is "no unbounded worst
 # case", and a compile's cost is the program's, not std's.  This

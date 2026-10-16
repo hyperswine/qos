@@ -31,14 +31,30 @@ execute me ns storage AW.ListRoot state =
 execute me ns storage AW.Disk state =
   result = FS.rpcWithin 500 me storage 5 "" "";
   (case result of Ok text -> Ok (AW.Lines (AK.lines text) "STORAGE STATS") | Err why -> Err why, state).
-# the file namespaces: a write is open/write/close, a delete an open in
-# the "delete" mode that the manager answers by removing the file; a
-# replacing write deletes first and reads "no such file" as nothing to do
-execute me ns storage (AW.AppendPath path text) state = writePath me ns path text state.
-execute me ns storage (AW.WritePath path text) state =
-  case deletePath me ns path state of
-    (Err why, next) -> if strIndexOf "no such file" why >= 0 then writePath me ns path text next else (Err why, next)
-  | (Ok u, next) -> writePath me ns path text next.
+# the file namespaces: an append is open "write"/write/close, a replace the
+# same with the "replace" mode (the file emptied at the open), a delete an
+# open in the "delete" mode that the manager answers by removing the file
+execute me ns storage (AW.AppendPath path text) state = writePath me ns path "write" text state.
+execute me ns storage (AW.WritePath path text) state = writePath me ns path "replace" text state.
+# a save that cannot lose the text: the safety copy, the file, the file read
+# back and compared -- the copy goes only after that
+execute me ns storage (AW.SaveFile path text) state =
+  copy = strcat path ".~save";
+  case writePath me ns copy "replace" text state of
+    (Err why, s1) -> (Err "save {path}: the safety copy failed ({why}); the file is unchanged", s1)
+  | (Ok u, s1) -> case writePath me ns path "replace" text s1 of
+      (Err why, s2) -> (Err "save {path} failed ({why}); your text is safe in {copy}", s2)
+    | (Ok u2, s2) -> case execute me ns storage (AW.ReadPath path) s2 of
+        (Ok (AW.Text back), s3) -> if back == text then
+            (removed, s4) = deletePath me ns copy s3;
+            (Ok (AW.Done "saved {path} ({strlen text} bytes)"), s4)
+          else (Err "save {path}: it read back differently; your text is safe in {copy}", s3)
+      | (Ok other, s3) -> (Err "save {path}: it did not read back as text; your text is safe in {copy}", s3)
+      | (Err why, s3) -> (Err "save {path}: could not read it back ({why}); your text is safe in {copy}", s3).
+# the host compiler (tools/fprd.py through Sys.compile): this actor parks
+# while the host's worker compiles, and holds no hart
+execute me ns storage (AW.Compile profile src) state =
+  (case Sys.compile profile src of Ok out -> Ok (AW.Text out) | Err why -> Err why, state).
 execute me ns storage (AW.DeletePath path) state =
   case deletePath me ns path state of
     (Err why, next) -> (Err why, next)
@@ -67,12 +83,12 @@ execute me ns storage (AW.ReadPath path) state =
               | Ok other -> Err "endpoint did not return text", next).
 readError (Ok value) = "read completed".
 readError (Err why) = why.
-writePath me ns path text state =
+writePath me ns path mode text state =
   case cleanup me state of
     Err why -> (Err why, state)
-  | Ok u -> case AC.deadlineAfter 1000 of
+  | Ok u -> case AC.deadlineAfter 2000 of
       Err why -> (Err why, state)
-    | Ok deadline -> case openTracked deadline me ns path "write" of
+    | Ok deadline -> case openTracked deadline me ns path mode of
         Err (why, unknown) ->
           next = {state | held = (0, 0), uncertain = (if unknown then "open cleanup unconfirmed: {why}" else "")};
           (Err (if unknown then next.uncertain else why), next)

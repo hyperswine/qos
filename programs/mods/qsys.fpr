@@ -233,10 +233,17 @@ fileLoaded st path me body = case body of
 fileMsg : unsafe Int -> String -> Int -> Result String String -> Int -> (Int, Int) -> EP.Ep -> a .
 fileMsg st path me body next ret q = case q of
     EP.Timed until command -> fileTimed until st path me body next ret command
-  | Open url mode -> AC.reply ret (Opened next) >> fileServe st path me body (next + 1)
+  | Open url mode -> if strEq mode "replace" then fileTruncate st path me body next ret
+      else AC.reply ret (Opened next) >> fileServe st path me body (next + 1)
   | Read h n -> loaded = fileLoaded st path me body; AC.reply ret (fileText path loaded) >> fileServe st path me loaded next
   | Write h v -> fileWr st path me (fileLoaded st path me body) next ret v
   | Close h -> AC.reply ret (Ok 0) >> fileServe st path me body next.
+# open "replace": the file is emptied now (its records tombstoned), and what
+# the handle writes is its whole text -- open(2)'s O_TRUNC
+fileTruncate : unsafe Int -> String -> Int -> Result String String -> Int -> (Int, Int) -> a .
+fileTruncate st path me body next ret = case rpc me st 4 path "" of
+    Ok u -> AC.reply ret (Opened next) >> fileServe st path me (Ok "") (next + 1)
+  | Err why -> AC.reply ret (Refused "replace {path}: {why}") >> fileServe st path me body next.
 fileTimed until st path me body next ret q =
   if AC.nowUs Unit >= until then AC.reply ret (Err "endpoint: deadline exceeded before execution") >> fileServe st path me body next else
   case q of
@@ -249,7 +256,7 @@ fileTimed until st path me body next ret q =
 fileLoadedUntil until st path me body = case body of Ok bytes -> body | Err why -> FS.rpcUntil until me st 3 path "".
 fileText : unsafe String -> Result String String -> Result EP.IoV String .
 fileText path body = case body of
-    Ok b -> Ok (IStr (emptyAs b "(empty file)"))
+    Ok b -> Ok (IStr b)          # an empty file reads as "", like any other text
   | Err e -> Err "read failed: {path} ({e})".
 fileWr : unsafe Int -> String -> Int -> Result String String -> Int -> (Int, Int) -> EP.IoV -> a .
 fileWr st path me body next ret v = case v of
@@ -265,12 +272,51 @@ fileWr2 st path me b next ret text r = case r of
   | Err e -> AC.reply ret (Err "write failed: {e}") >> fileServe st path me
       (if strIndexOf "outcome unknown" e >= 0 then Err "write outcome unknown: {e}" else Ok b) next.
 
-# the manager owns the file NAMESPACES (/tmp, /home): an open of a path
-# nobody has claimed yet spawns the file's actor, registers the path (so
-# the next open resolves to the file directly) and redirects this one.
-# A read of a path that does not exist is refused; a write creates it.
-filesMgr : unsafe Int -> Int -> Int -> a .
-filesMgr st ns me = filesServe st ns me Nil.
+# the manager owns the file NAMESPACES (/tmp, /home) and every file in them.
+# A file's path is registered in the namespace with the MANAGER as its
+# owner, so an open comes here and the manager hands it to the file's
+# actor -- spawned on the first open: a known file costs one namespace
+# entry until it is used, and the manager may withdraw the path (delete).
+#
+# The set of files survives a reboot as the record `sys/files`: one line
+# per change, "+<path>" or "-<path>", replayed and folded at boot
+# (filesKnownAtBoot), so every file a previous boot made is listed and
+# openable again.  A path the record does not know but storage holds (a
+# file from before the record existed) is adopted on its first open.  A
+# read or delete of a path that does not exist is refused; a write creates
+# it.  (docs/2026-10-16-EDITOR.md)
+filesIndex = "sys/files".
+filesMgr : unsafe Int -> Int -> List String -> Int -> a .
+filesMgr st ns known me = filesServe st ns me (filesEntries known).
+filesEntries Nil = Nil.
+filesEntries (p :: rest) = (p, 0) :: filesEntries rest.
+# boot: the files the record names (and the seeded two), registered for mgr
+filesKnownAtBoot : unsafe Int -> Int -> List String .
+filesKnownAtBoot me st = case rpc me st 3 filesIndex "" of
+    Ok log -> filesFold (lines log) ["/home/notes.txt", "/tmp/scratch.txt"]
+  | Err why -> _ = Sys.logAt 1 "system: file index unreadable ({why}); only seeded files listed"; ["/home/notes.txt", "/tmp/scratch.txt"].
+filesFold : unsafe List String -> List String -> List String .
+filesFold changes acc = case changes of
+    Nil -> acc
+  | c :: rest -> filesFold rest (filesApply c acc).
+filesApply c acc = if strlen c < 2 then acc else
+  path = substr c 1 (strlen c - 1);
+  if charAt c 0 == 43 then (if filesHas acc path then acc else cat acc [path])
+  else if charAt c 0 == 45 then filesWithout acc path else acc.
+filesHas Nil p = False.
+filesHas (q :: rest) p = strEq q p or filesHas rest p.
+filesWithout Nil p = Nil.
+filesWithout (q :: rest) p = if strEq q p then filesWithout rest p else q :: filesWithout rest p.
+filesRegister : unsafe Int -> Int -> Int -> List String -> Unit .
+filesRegister me ns mgr known = case known of
+    Nil -> Unit
+  | p :: rest -> _ = (case EP.register me ns p mgr of Ok u -> Unit | Err why -> Sys.logAt 1 "system: {p}: {why}"); filesRegister me ns mgr rest.
+# one change to the record; a failure is logged, the file itself is unaffected
+filesNote : unsafe Int -> Int -> String -> Unit .
+filesNote st me change = case rpc me st 2 filesIndex "{change}\n" of
+    Ok u -> Unit
+  | Err why -> Sys.logAt 1 "system: file index not updated ({change}: {why})".
+
 filesServe : unsafe Int -> Int -> Int -> List (String, Int) -> a .
 filesServe st ns me act =
   m = receive me;
@@ -283,42 +329,76 @@ filesMsg st ns me act ret from q = case q of
   | Read h n -> AC.reply ret (Err "a file namespace: open a path under it") >> filesServe st ns me act
   | Write h v -> AC.reply ret (Err "a file namespace: open a path under it") >> filesServe st ns me act
   | Close h -> AC.reply ret (Ok 0) >> filesServe st ns me act.
+# the entry for a path: -1 unknown, 0 known with no actor, else its actor
+filesEntry : unsafe List (String, Int) -> String -> Int .
+filesEntry act url = case act of
+    Nil -> 0 - 1
+  | (p, a) :: rest -> if strEq p url then a else filesEntry rest url.
+filesSet : unsafe List (String, Int) -> String -> Int -> List (String, Int) .
+filesSet act url a = case act of
+    Nil -> [(strcat url "", a)]
+  | (p, b) :: rest -> if strEq p url then (p, a) :: rest else (p, b) :: filesSet rest url a.
+filesDrop : unsafe List (String, Int) -> String -> List (String, Int) .
+filesDrop act url = case act of
+    Nil -> Nil
+  | (p, b) :: rest -> if strEq p url then rest else (p, b) :: filesDrop rest url.
 filesOpen : unsafe Int -> Int -> Int -> List (String, Int) -> (Int, Int) -> Int -> String -> String -> a .
 filesOpen st ns me act ret from url mode =
-  a0 = EP.ownerOf act url;
-  live = case a0 == 0 of True -> False | False -> Sys.alive a0;
-  act2 = case a0 != 0 and not live of True -> EP.without act url | False -> act;
-  case live of
-    True -> (case strEq mode "delete" of
-        True -> filesDelete st ns me act2 ret url a0
-      | False -> filesHand st ns me act2 ret from url mode a0)
-  | False -> (case strEq mode "read" or strEq mode "delete" of
-      True -> AC.reply ret (Refused "no such file: {url}") >> filesServe st ns me act2
-    | False -> filesMake st ns me act2 ret from url mode).
-# delete: the file's actor ends, its path leaves the namespace (the manager
-# registered it, so the manager may withdraw it), its records leave the log
+  a0 = filesEntry act url;
+  reading = strEq mode "read";
+  deleting = strEq mode "delete";
+  if a0 > 0 and Sys.alive a0 then
+    (if deleting then filesDelete st ns me act ret url a0 else filesHand st ns me act ret from url mode a0)
+  else if a0 >= 0 then
+    (if deleting then filesDelete st ns me act ret url 0 else filesSpawn st ns me act ret from url mode)
+  else if not reading and not deleting then filesMake st ns me act ret from url mode
+  else if filesStored st me url then
+    # a file older than the record: adopt it, then serve this open
+    _ = Sys.logAt 0 "system: adopting {url}";
+    _ = EP.register me ns url 0;
+    _ = filesNote st me "+{url}";
+    next = filesSet act url 0;
+    (if deleting then filesDelete st ns me next ret url 0 else filesSpawn st ns me next ret from url mode)
+  else AC.reply ret (Refused "no such file: {url}") >> filesServe st ns me act.
+# does storage hold records for the path? (stats: "... url-records=N ...")
+filesStored : unsafe Int -> Int -> String -> Bool .
+filesStored st me url = case rpc me st 5 url "" of
+    Ok text -> filesRecords text > 0
+  | Err why -> False.
+filesRecords text = at = strIndexOf "url-records=" text;
+  if at < 0 then 0 else parseInt (substr text (at + 12) (strlen text - at - 12)).
+# delete: the file's actor ends, its path leaves the namespace and the
+# record, its records leave the log
 filesDelete : unsafe Int -> Int -> Int -> List (String, Int) -> (Int, Int) -> String -> Int -> a .
 filesDelete st ns me act ret url a =
-  _ = kill a;
+  _ = (if a > 0 then kill a else Unit);
   _ = EP.unregister me ns url;
-  _ = (case rpc me st 4 url "" of Ok u -> Unit | Err why -> Sys.logAt 1 "system: delete {url}: {why}");
-  _ = Sys.logAt 0 "system: deleted {url}";
-  AC.reply ret (Opened 0) >> filesServe st ns me (EP.without act url).
+  deleted = rpc me st 4 url "";
+  _ = (if filesTransient url then Unit else filesNote st me "-{url}");
+  _ = (if filesTransient url then Unit else Sys.logAt 0 "system: deleted {url}");
+  case deleted of
+    Ok u -> AC.reply ret (Opened 0) >> filesServe st ns me (filesDrop act url)
+  | Err why -> AC.reply ret (Refused "delete {url}: {why}") >> filesServe st ns me (filesDrop act url).
+# a new path: registered, recorded, then served like a known one
 filesMake : unsafe Int -> Int -> Int -> List (String, Int) -> (Int, Int) -> Int -> String -> String -> a .
 filesMake st ns me act ret from url mode =
-  if fileCount act >= 64 or strlen url > 1024 then
-    AC.reply ret (Refused "file actor budget exhausted") >> filesServe st ns me act
-  else filesMakeAdmitted st ns me act ret from url mode.
-fileCount Nil = 0.
-fileCount (_ :: rest) = 1 + fileCount rest.
-filesMakeAdmitted st ns me act ret from url mode =
-  _ = Sys.logAt 0 "system: creating {url}";
+  if strlen url > 1024 then AC.reply ret (Refused "path longer than 1024 bytes") >> filesServe st ns me act else
+  _ = (if filesTransient url then Unit else Sys.logAt 0 "system: creating {url}");
+  _ = EP.register me ns url 0;
+  _ = (if filesTransient url then Unit else filesNote st me "+{url}");
+  filesSpawn st ns me (filesSet act url 0) ret from url mode.
+# an editor's safety copy lives only for one save: never in the record
+filesTransient url = strlen url > 6 and strEq (substr url (strlen url - 6) 6) ".~save".
+# a known path's actor, on its first open (live actors are bounded: each
+# caches its file's text; known files cost only their namespace entry)
+filesSpawn : unsafe Int -> Int -> Int -> List (String, Int) -> (Int, Int) -> Int -> String -> String -> a .
+filesSpawn st ns me act ret from url mode =
+  if filesLive act >= 64 then AC.reply ret (Refused "file actor budget exhausted (64 files open since boot)") >> filesServe st ns me act else
   p2 = strcat url "";      # OWN COPY: curried into the actor + the set
   a = Wire.spawn 8 Wire.inboxBytes (fileActor st p2);
-  # the MANAGER owns the path in the namespace (an open comes here and is
-  # redirected to the file's actor), so that it can also withdraw it
-  _ = EP.register me ns p2 0;
-  filesHand st ns me ((p2, a) :: act) ret from url mode a.
+  filesHand st ns me (filesSet act p2 a) ret from url mode a.
+filesLive Nil = 0.
+filesLive ((p, a) :: rest) = (if a > 0 and Sys.alive a then 1 else 0) + filesLive rest.
 # forward the client's own envelope to the file and point the client at it
 filesHand : unsafe Int -> Int -> Int -> List (String, Int) -> (Int, Int) -> Int -> String -> String -> Int -> a .
 filesHand st ns me act ret from url mode a =
@@ -462,9 +542,10 @@ caStep me ns appsA r a = case a of App aid anm ati ->
 bootDiskUrls : unsafe Int -> Int -> Int -> Unit .
 bootDiskUrls me ns st =
   _ = claim me ns "/services/storage" (Wire.spawn 8 Wire.inboxBytes (Endpoint.simple (stR st) (stW st)));
-  mgr = Wire.spawn 8 Wire.inboxBytes (filesMgr st ns);
+  known = filesKnownAtBoot me st;
+  mgr = Wire.spawn 8 Wire.inboxBytes (filesMgr st ns known);
   _ = claim me ns "/tmp" mgr;
   _ = claim me ns "/home" mgr;
-  _ = claim me ns "/home/notes.txt" (Wire.spawn 8 Wire.inboxBytes (fileActor st "/home/notes.txt"));
-  _ = claim me ns "/tmp/scratch.txt" (Wire.spawn 8 Wire.inboxBytes (fileActor st "/tmp/scratch.txt"));
-  Unit.
+  # every file a previous boot made (and the two seeded ones), owned by the
+  # manager: its actor is spawned on the first open
+  filesRegister me ns mgr known.

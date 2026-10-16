@@ -77,8 +77,12 @@ main =
   (sized, adapter) = I.adapt 5 1024 600 initial;
   _ = check "resize resets raw capture" (adapter.w == 1024 and adapter.h == 600 and adapter.buttons == 0);
   appPressed = {S.init env | active = 1, focus = L.Content, down = True, capture = L.Content};
+  # Tab inside the content is the child's: the capture is cancelled, then the
+  # key goes in; Shift-Tab cancels it and moves the focus to Home
   tabbedApp = S.key env 15 appPressed;
-  _ = check "Tab cancels child capture" (not tabbedApp.down and tabbedApp.appCommands == [AP.Deliver AW.Cancel]);
+  _ = check "Tab cancels child capture, then reaches the child" (not tabbedApp.down and tabbedApp.appCommands == [AP.Deliver AW.Cancel, AP.Deliver (AW.Key 15)]);
+  backTabbed = S.key env 1015 appPressed;
+  _ = check "Shift-Tab cancels child capture and leaves" (not backTabbed.down and backTabbed.focus == L.Home and backTabbed.appCommands == [AP.Deliver AW.Cancel]);
   wheeledApp = S.wheel env 10 0 appPressed;
   _ = check "wheel cancels child capture before scrolling" (not wheeledApp.down and wheeledApp.appCommands == [AP.Deliver AW.Cancel, AP.Deliver (AW.Wheel 10 0)]);
   (b, _) = B.init;

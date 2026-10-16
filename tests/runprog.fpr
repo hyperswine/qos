@@ -1,0 +1,71 @@
+unsafe program.
+# runprog.fpr -- the Editor's Run, end to end in QOS: source strings packaged
+# by the host compiler (Sys.compile, worker-backed since ABI v21), started as
+# processes of their own by programs/mods/runprog.fpr, their consoles
+# captured, their ends seen: a return, a trap, a stop.  And a compile that
+# takes seconds holds no hart: on ONE hart, a ticker keeps ticking through it.
+#
+#   ./qos.py run tests/runprog.fpr --harts 1     (the directive below starts
+#                                                 the compiler daemon)
+#: fprd
+#: expect runprog: HOLDS
+RP = use "../programs/mods/runprog".
+CP = use "std/compile".
+AC = use "std/actor#201a0e9bf98a5154".
+
+check what ok = if ok then Unit else error "runprog: {what}".
+
+# a ticker: counts 2 ms naps until asked, then answers the count
+tick self n = case receiveNow self of
+    Ok borrowed ->
+      m = keep borrowed;
+      _ = drop borrowed;
+      (from, id, q) = m;
+      _ = AC.reply (from, id) n;
+      Unit
+  | Err why -> _ = Sys.sleepUs 2000; tick self (n + 1).
+
+package src = CP.plugin 0 "qedrun" (RP.wrap src).
+
+# start it and poll it to its end (or until n polls): what it printed, how it ended
+runToEnd me src n = case package src of
+    Err why -> ("", "compile failed: {why}")
+  | Ok qa -> case RP.start qa of
+      Err why -> ("", "start failed: {why}")
+    | Ok (root, pid) -> drain me root pid n "".
+drain me root pid n acc = if n <= 0 then (strcat acc (RP.stop root pid), "still running") else
+  case RP.poll me root pid of
+    (text, RP.Running) -> _ = Sys.sleepUs 5000; drain me root pid (n - 1) (strcat acc text)
+  | (text, RP.Ended how) -> (strcat acc text, how).
+
+main =
+  me = myself 0;
+  ticker = spawn (fn self -> tick self 0);
+  hello = package "main = _ = print \"hello from run\"; 6 * 7.";
+  ticks = (case AC.call me ticker 0 of Ok n -> n | Err why -> 0 - 1);
+  _ = check "a compile holds no hart (ticks {ticks})" (ticks > 20);
+  _ = check "the package" (case hello of Ok qa -> strlen qa > 1000 | Err why -> error "runprog: package: {why}");
+  (out1, how1) = runToEnd me "main = _ = print \"hello from run\"; 6 * 7." 400;
+  _ = check "output captured: [{out1}] {how1}" (out1 == "hello from run\n42\n" and how1 == "finished");
+  (out2, how2) = runToEnd me "main = print \"only this\"." 400;
+  _ = check "a Unit main: [{out2}]" (out2 == "only this\n()\n" and how2 == "finished");
+  (out3, how3) = runToEnd me "main = _ = print \"before\"; error \"boom\"." 400;
+  # what the program printed, then the runtime's own line for its failure
+  # (logged from the failing actor, so captured with the rest)
+  _ = check "a trap ends it with its reason: [{out3}] {how3}" (out3 == "before\n[ERR] actor failed: boom\n" and how3 == "boom");
+  bad = package "main = 1 +";
+  badWhy = (case bad of Ok qa -> "packaged?!" | Err why -> why);
+  # the entry goes in before the program: an unfinished last line is
+  # reported as the program's own (line 2 of the package is line 1 of it)
+  _ = check "a compile error names the line: [{badWhy}]" (strIndexOf "qedrun.fpr:2:" badWhy >= 0);
+  _ = check "the entry maps back" (RP.userLine "main = 1 +" 2 == 1 and RP.userLine "unsafe program.\nmain = 1." 3 == 2);
+  _ = check "after the header" (RP.wrap "# hi\nunsafe program.\nmain = 1." == "# hi\nunsafe program.\n{RP.entry}\nmain = 1.");
+  _ = check "first without one" (RP.wrap "main = 1." == "{RP.entry}\nmain = 1.");
+  (out4, how4) = runToEnd me "unsafe program.\nspin : unsafe Int -> Int .\nspin n = spin (n + 1).\nmain = _ = print \"spinning\"; spin 0." 20;
+  _ = check "a spinning program is stopped: [{out4}] {how4}" (out4 == "spinning\n" and how4 == "still running");
+  (out5, how5) = runToEnd me "unsafe program.\nsay : unsafe Int -> Unit .\nsay n = if n <= 0 then Unit else _ = print \"0123456789012345678901234567890123456789\"; say (n - 1).\nmain = say 5000." 2000;
+  _ = check "a flood keeps its last 64 KiB and says what it lost: {how5}"
+    (how5 == "finished" and strIndexOf "earlier bytes not kept]" out5 >= 0 and strlen out5 < 70000);
+  # the capture went with each program: the console is the host's again
+  _ = print "runprog: HOLDS";
+  "runprog: HOLDS".

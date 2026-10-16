@@ -5,6 +5,8 @@ L = use "../programs/mods/logsapp".
 B = use "../programs/mods/browserapp".
 D = use "../programs/mods/diskapp".
 T = use "../programs/mods/termapp".
+ED = use "../programs/mods/editapp".
+E = use "../programs/mods/editbuf".
 AS = use "../programs/mods/appsession".
 AW = use "../programs/mods/appwire".
 AP = use "../programs/mods/appclient".
@@ -12,6 +14,10 @@ S2 = use "../programs/mods/scene2d".
 AC = use "std/actor#201a0e9bf98a5154".
 check tag True = Unit.
 check tag False = error "appsession: {tag}".
+typeKeys Nil m = m.
+typeKeys (k :: rest) m = (next, cmds) = ED.update (AW.Key k) m; typeKeys rest next.
+ticks 0 m = (m, Nil).
+ticks n m = (next, cmds) = ED.update AW.Tick m; if n == 1 then (next, cmds) else ticks (n - 1) next.
 appMain : unsafe Int -> Unit .
 appMain me = C.run me.
 silent me = _ = receive me; _ = Sys.sleepUs 3000000; Unit.
@@ -139,4 +145,38 @@ main =
   _ = check "browser descends a prefix" (inHome.dir == "/home" and inHome.paths == [("notes", 1), ("t.txt", 0)] and not inHome.busy);
   (upAgain, _) = B.update (AW.Key 14) inHome;
   _ = check "browser backspace goes up" (upAgain.dir == "" and upAgain.cursor == 0);
+  # the Editor: its session record first; typing undone a run at a time; a
+  # save through the safety job; a build's and a run's errors on the
+  # buffer's own line (the Run entry is a line the buffer does not have);
+  # the session record half a second after a change, and a recovery
+  (e0, initCmds) = ED.init;
+  _ = check "editor reads its session first" (case initCmds of AW.Fetch tok (AW.ReadPath p) :: Nil -> p == "/home/.editor/session" | other -> False);
+  (e1, _) = ED.update (AW.Arrived 1 (Err "no such file")) e0;
+  e3 = typeKeys [30, 48] e1;
+  _ = check "editor typing" (E.toText e3.buf == "ab" and ED.dirty e3);
+  (e4, _) = ED.update (AW.Key 4044) e3;
+  _ = check "editor undoes a run of typing" (E.toText e4.buf == "" and not (ED.dirty e4));
+  (e5, _) = ED.update (AW.Key 4021) e4;
+  _ = check "editor redo" (E.toText e5.buf == "ab" and ED.dirty e5);
+  (e6, cmds6) = ED.update (AW.Key 4031) e5;
+  _ = check "editor save asks where" (e6.mode == 2 and e6.query == "/home/" and cmds6 == Nil);
+  e7 = typeKeys [45, 52, 33, 25, 19] e6;
+  (e8, cmds8) = ED.update (AW.Key 28) e7;
+  _ = check "editor save is the safe job" (case cmds8 of AW.Fetch tok (AW.SaveFile p t) :: Nil -> p == "/home/x.fpr" and t == "ab" | other -> False);
+  (e9, _) = ED.update (AW.Arrived e8.token (Ok (AW.Done "saved"))) e8;
+  _ = check "editor saved" (not (ED.dirty e9) and e9.path == "/home/x.fpr");
+  broken = {e9 | buf = E.fromText "main = 6 * 7.\nx = ."};
+  (b1, bcmds) = ED.update (AW.Key 4048) broken;
+  _ = check "editor build is a compile job" (case bcmds of AW.Fetch tok (AW.Compile prof src) :: Nil -> prof == "plugin:0:qedbuild" and src == "main = 6 * 7.\nx = ." | other -> False);
+  (b2, _) = ED.update (AW.Arrived b1.token (Err "/b/fprd-src/qedbuild.fpr:2:5:\nunexpected '.'")) b1;
+  _ = check "editor build error on its line and column" (b2.buf.row == 1 and b2.buf.col == 4 and not b2.building and E.nth b2.out (E.count b2.out - 3) == "x.fpr:2:5:" and b2.outBack == 3);
+  (r1, rcmds) = ED.update (AW.Key 4019) broken;
+  _ = check "editor run compiles the entry first" (case rcmds of AW.Fetch tok (AW.Compile prof src) :: Nil -> prof == "plugin:0:qedrun" and strIndexOf "qedRun me" src == 0 | other -> False);
+  (r2, _) = ED.update (AW.Arrived r1.token (Err "/b/fprd-src/qedrun.fpr:3:5:\nunexpected '.'")) r1;
+  _ = check "editor run error mapped past the entry" (r2.buf.row == 1 and r2.buf.col == 4 and E.nth r2.out (E.count r2.out - 3) == "x.fpr:2:5:");
+  (s5, scmds) = ticks 5 (typeKeys [30] e9);
+  _ = check "editor keeps its session" (case scmds of AW.Fetch tok (AW.WritePath p t) :: Nil -> p == "/home/.editor/session" and t == "qed1\n/home/x.fpr\n1\naba" | other -> False);
+  (q0, _) = ED.init;
+  (q1, _) = ED.update (AW.Arrived 1 (Ok (AW.Text "qed1\n/home/y.fpr\n1\nhello\nworld"))) q0;
+  _ = check "editor recovers unsaved work" (E.toText q1.buf == "hello\nworld" and q1.path == "/home/y.fpr" and ED.dirty q1);
   "appsession: HOLDS".

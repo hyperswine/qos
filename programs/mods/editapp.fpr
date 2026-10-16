@@ -1,0 +1,594 @@
+# editapp.fpr -- Editor.qa: a minimalist text editor for the Main Profile
+# (docs/2026-10-16-EDITOR.md).  The buffer and its edits are
+# mods/editbuf.fpr; this module is the app around them: keys and the
+# pointer in, a view out, files and the compiler through the app's worker.
+#
+#   typing, Enter (keeps the indentation; two more after `=`, `->`, `of`,
+#   ...), Backspace/Delete, arrows, Home/End, PgUp/PgDn, ctrl+arrows by
+#   word, ctrl+Home/End, shift extends a selection, the pointer places the
+#   caret and drags a selection, the wheel scrolls
+#   ^S save  ^shift-S save as  ^O open (type to filter, Enter)  ^N new
+#   ^Z undo  ^Y redo  ^A all  ^C ^X ^V (a line, without a selection)
+#   ^D duplicate line  ^K delete line  alt+up/down move lines
+#   Tab / ^] indent  ^[ outdent  ^F find (Enter: next)  ^G go to line
+#   ^B build: the buffer through the host compiler (Sys.compile), the
+#   diagnostics in the output panel, the caret on the first error
+#   ^R run: built the same way, started as a process of its own, what it
+#   prints streamed into the output panel; ^R again stops it
+#   ^J show or hide the output panel
+#
+# Work is never lost to a closed app: shortly after the buffer changes, the
+# session record (/home/.editor/session) keeps the path and, while there
+# are unsaved changes, the text; opening the Editor again reopens the file
+# and its unsaved changes.  A save writes a safety copy first and reads the
+# file back (appjobs SaveFile).
+#
+# Recursive MVU: viewport, focus and pointer capture are model values.
+unsafe module.
+AW = use "appwire".
+AS = use "appsession".
+AV = use "appview".
+L = use "shelllayout".
+AK = use "appkit".
+E = use "editbuf".
+Fm = use "fontm".
+S2 = use "scene2d".
+AC = use "std/actor#201a0e9bf98a5154".
+RP = use "runprog".
+
+sessionPath = "/home/.editor/session".
+undoDepth = 200.
+outKeep = 400.
+# the kinds of job in flight (a list: the worker serves them in order)
+kOpen = 1. kList = 2. kSave = 3. kSession = 4. kBuild = 5. kRun = 6. kRestore = 7.
+
+init = ({buf = E.empty, path = "", version = 0, savedVersion = 0, nextStamp = 1, recorded = "", idle = 0,
+         top = 0, left = 0, undo = Nil, redo = Nil, lastKind = 0, clip = "",
+         mode = 0, query = "", files = Nil, listed = False, pick = 0, findText = "", msg = "", warn = False,
+         out = Nil, outOpen = False, confirm = 0, pending = [{token = 1, kind = kRestore, version = 0, path = sessionPath}],
+         outBack = 0, token = 1, building = False, running = False, runActor = 0, runPid = 0, partial = "", busy = False, phase = AW.Ready, w = 960, h = 530, focused = True,
+         down = False, capture = 0 - 1, wheel = 0, scroll = 0, dragY = 0, dragScroll = 0, dragged = False},
+        [AW.Fetch 1 (AW.ReadPath sessionPath)]).
+
+# ---- the session --------------------------------------------------------------
+update (AW.Resize w h) m = (follow (AV.resize w h m), Nil).
+update (AW.Focus active) m = (AV.focus active m, Nil).
+update AW.Cancel m = (AV.focus m.focused m, Nil).
+update AW.Tick m = tick m.
+update (AW.Wheel dy dx) m = (wheelBy dy m, Nil).
+update (AW.Pointer x y buttons) m = (pointer x y buttons m, Nil).
+update (AW.Key k) m = if m.mode == 0 then editKey k m else promptKey k m.
+update (AW.Arrived token result) m = arrived token result m.
+update other m = (m, Nil).
+
+# ---- geometry, shared by the view, the pointer and scrolling -------------------
+geo m =
+  a = AV.layout m.w m.h;
+  s = a.scale;
+  em = E.imax 10 (15 * s / 1000);
+  pitch = E.imax 14 (24 * s / 1000);
+  headH = 30 * s / 1000;
+  gap = 8 * s / 1000;
+  barH = 34 * s / 1000;
+  panelRows = (if m.mode == 1 then 8 else if m.outOpen then 7 else 0);
+  panelH = (if panelRows == 0 then 0 else panelRows * pitch + 2 * gap + 18 * s / 1000);
+  textY = a.margin + headH + gap;
+  textH = E.imax pitch (m.h - 2 * a.margin - headH - barH - 2 * gap - panelH - (if panelH > 0 then gap else 0));
+  digits = E.imax 3 (digitsOf (E.count m.buf.lines));
+  gutterW = digits * 696 * em / 1000 + 20 * s / 1000;
+  {s = s, em = em, pitch = pitch, headH = headH, gap = gap, barH = barH, panelH = panelH, panelRows = panelRows,
+   margin = a.margin, textY = textY, textH = textH, rows = E.imax 1 (textH / pitch), gutterW = gutterW,
+   textX = a.margin + gutterW, textW = E.imax 1 (m.w - 2 * a.margin - gutterW), contentW = E.imax 1 (m.w - 2 * a.margin)}.
+digitsOf n = if n < 10 then 1 else 1 + digitsOf (n / 10).
+
+# keep the caret in view: the rows, and the columns of a long line
+follow m =
+  g = geo m;
+  n = E.count m.buf.lines;
+  row = m.buf.row;
+  top = (if row < m.top then row else if row >= m.top + g.rows then row - g.rows + 1 else m.top);
+  top2 = E.imin (E.imax 0 top) (E.imax 0 (n - g.rows));
+  top3 = (if row < top2 then row else top2);
+  x = E.wid (E.before (E.line m.buf) m.buf.col) * g.em / 1000;
+  edge = 24 * g.s / 1000;
+  left = (if x < m.left + edge then E.imax 0 (x - g.textW / 3)
+          else if x > m.left + g.textW - edge then x - g.textW + g.textW / 3 else m.left);
+  {m | top = top3, left = E.imax 0 left}.
+
+# ---- keys ---------------------------------------------------------------------
+# keycodes are the input tier's: shift +1000, ctrl +4000, alt +8000
+editKey 4031 m = save m.
+editKey 5031 m = (prompt 2 (if m.path == "" then "/home/" else m.path) m, Nil).
+editKey 4024 m = openPicker m.
+editKey 4049 m = (newFile m, Nil).
+editKey 4033 m = (prompt 3 (findSeed m) m, Nil).
+editKey 4034 m = (prompt 4 "" m, Nil).
+editKey 4036 m = ({m | outOpen = not m.outOpen}, Nil).
+editKey 4048 m = build m.
+editKey 4019 m = if m.running then halt m else runIt m.
+editKey 4044 m = (undo m, Nil).
+editKey 4021 m = (redo m, Nil).
+editKey 5044 m = (redo m, Nil).
+editKey 4030 m = (moved (E.selectAll m.buf) m, Nil).
+editKey 4046 m = (copy m, Nil).
+editKey 4045 m = (cut m, Nil).
+editKey 4047 m = (paste m, Nil).
+editKey 4032 m = (edit 4 (E.duplicateLine m.buf) m, Nil).
+editKey 4037 m = (edit 4 (E.deleteLines m.buf) m, Nil).
+editKey 4027 m = (edit 4 (E.indent m.buf) m, Nil).
+editKey 4026 m = (edit 4 (E.outdent m.buf) m, Nil).
+editKey 8103 m = (edit 4 (E.moveLines (0 - 1) m.buf) m, Nil).
+editKey 8108 m = (edit 4 (E.moveLines 1 m.buf) m, Nil).
+editKey 15 m = (edit 4 (tab m.buf) m, Nil).
+editKey 28 m = (edit 2 (E.newline m.buf) m, Nil).
+editKey 14 m = (edit 5 (E.backspace m.buf) m, Nil).
+editKey 111 m = (edit 5 (E.deleteForward m.buf) m, Nil).
+editKey k m = case navigate k m of
+    (True, b) -> (moved b m, Nil)
+  | (False, b) -> c = AK.keyChar k;
+      if strlen c == 0 then (m, Nil) else (edit 1 (E.insert c m.buf) m, Nil).
+# a navigation key: (True, the buffer with the caret moved); others (False, _)
+navigate k m = g = geo m; b = m.buf; case k of
+    105 -> (True, E.left False b)          | 1105 -> (True, E.left True b)
+  | 106 -> (True, E.right False b)         | 1106 -> (True, E.right True b)
+  | 103 -> (True, E.up False b)            | 1103 -> (True, E.up True b)
+  | 108 -> (True, E.down False b)          | 1108 -> (True, E.down True b)
+  | 102 -> (True, E.home False b)          | 1102 -> (True, E.home True b)
+  | 107 -> (True, E.endOfLine False b)     | 1107 -> (True, E.endOfLine True b)
+  | 104 -> (True, E.page False (0 - g.rows) b) | 1104 -> (True, E.page True (0 - g.rows) b)
+  | 109 -> (True, E.page False g.rows b)   | 1109 -> (True, E.page True g.rows b)
+  | 4105 -> (True, E.wordLeft False b)     | 5105 -> (True, E.wordLeft True b)
+  | 4106 -> (True, E.wordRight False b)    | 5106 -> (True, E.wordRight True b)
+  | 4102 -> (True, E.docStart False b)     | 5102 -> (True, E.docStart True b)
+  | 4107 -> (True, E.docEnd False b)       | 5107 -> (True, E.docEnd True b)
+  | other -> (False, b).
+# Tab: a selection is indented, otherwise spaces to the next two-column stop
+tab b = if E.hasSelection b then E.indent b else E.insert (E.spaces (2 - b.col % 2)) b.
+
+# an edit: one undo step per run of typing (or of deleting), one per other edit
+edit kind b m =
+  coalesce = kind == m.lastKind and (kind == 1 or kind == 5) and m.undo != Nil;
+  undos = (if coalesce then m.undo else E.take undoDepth ((m.buf, m.version) :: m.undo));
+  follow {m | buf = b, version = m.nextStamp, nextStamp = m.nextStamp + 1, undo = undos, redo = Nil,
+              lastKind = kind, idle = 0, confirm = 0, warn = False}.
+moved b m = follow {m | buf = b, lastKind = 0, confirm = 0}.
+undo m = case m.undo of
+    Nil -> {m | msg = "Nothing to undo", warn = False}
+  | (b, v) :: rest -> follow {m | buf = b, version = v, undo = rest, redo = (m.buf, m.version) :: m.redo, lastKind = 0, idle = 0}.
+redo m = case m.redo of
+    Nil -> {m | msg = "Nothing to redo", warn = False}
+  | (b, v) :: rest -> follow {m | buf = b, version = v, redo = rest, undo = (m.buf, m.version) :: m.undo, lastKind = 0, idle = 0}.
+copy m = if E.hasSelection m.buf then {m | clip = E.selected m.buf, msg = "Copied", warn = False}
+  else {m | clip = E.lineText m.buf, msg = "Copied the line", warn = False}.
+cut m = if E.hasSelection m.buf then edit 3 (E.deleteSelection m.buf) {m | clip = E.selected m.buf, msg = "Cut", warn = False}
+  else edit 4 (E.deleteLines m.buf) {m | clip = E.lineText m.buf, msg = "Cut the line", warn = False}.
+# a whole line (copied without a selection) goes in above the caret's line
+paste m = if strlen m.clip == 0 then {m | msg = "Nothing to paste", warn = False}
+  else if E.endsWith "\n" m.clip and not (E.hasSelection m.buf) then
+    b = m.buf; edit 3 (E.at (b.row + E.count (E.splitLines m.clip) - 1) b.col (E.insert m.clip (E.at b.row 0 b))) m
+  else edit 3 (E.insert m.clip m.buf) m.
+dirty m = m.version != m.savedVersion.
+
+# ---- the prompt: open, save as, find, go to line ------------------------------
+prompt mode seed m = {m | mode = mode, query = seed, pick = 0, confirm = 0}.
+findSeed m = s = E.selected m.buf; if strlen s > 0 and strIndexOf "\n" s < 0 then s else m.findText.
+promptKey 28 m = submit m.
+promptKey 14 m = if strlen m.query == 0 then ({m | mode = 0}, Nil) else ({m | query = E.before m.query (E.prevB m.query (strlen m.query)), pick = 0, confirm = 0}, Nil).
+promptKey 103 m = ({m | pick = E.imax 0 (m.pick - 1), confirm = 0}, Nil).
+promptKey 108 m = ({m | pick = E.imin (E.imax 0 (E.count (pickList m) - 1)) (m.pick + 1), confirm = 0}, Nil).
+promptKey k m = if k == ownKey m.mode then ({m | mode = 0}, Nil) else
+  c = AK.keyChar k;
+  if strlen c == 0 then (m, Nil) else ({m | query = strcat m.query c, pick = 0, confirm = 0}, Nil).
+ownKey 1 = 4024. ownKey 2 = 5031. ownKey 3 = 4033. ownKey 4 = 4034. ownKey other = 0 - 1.
+submit m = case m.mode of
+    1 -> pickOpen m
+  | 2 -> saveAs m.query m
+  | 3 -> (find m, Nil)
+  | 4 -> (gotoLine m, Nil)
+  | other -> ({m | mode = 0}, Nil).
+find m = if strlen m.query == 0 then {m | mode = 0} else
+  b = E.findNext m.query m.buf;
+  n = E.occurrences m.query m.buf;
+  if n == 0 then {m | findText = m.query, msg = "No match for {m.query}", warn = True}
+  else moved b {m | findText = m.query, msg = "{n} match{(if n == 1 then "" else "es")} -- Enter for the next, ^F closes", warn = False}.
+gotoLine m = n = parseInt m.query;
+  if n <= 0 then {m | mode = 0} else moved (E.gotoLine n m.buf) {m | mode = 0, msg = "Line {n}", warn = False}.
+
+# ---- files --------------------------------------------------------------------
+issue kind version path job m =
+  t = m.token + 1;
+  ({m | token = t, pending = {token = t, kind = kind, version = version, path = path} :: m.pending}, [AW.Fetch t job]).
+openPicker m = issue kList 0 "" AW.ListRoot {m | mode = 1, query = "", pick = 0, listed = False, confirm = 0}.
+pickList m = filterS (fn u -> matches m.query u) m.files.
+matches q u = strlen q == 0 or strIndexOf (lower q) (lower u) >= 0.
+pickOpen m =
+  items = pickList m;
+  path = (case items of Nil -> m.query | other -> E.nth items m.pick);
+  if strlen path == 0 or charAt path 0 != 47 then ({m | msg = "Type a path (/home/name.fpr) or pick a file", warn = True}, Nil)
+  else openPath path m.
+# unsaved work is not thrown away by a second open without being asked
+openPath path m = if dirty m and m.confirm != 1 then
+    ({m | confirm = 1, msg = "Unsaved changes in {name m}: Enter again to discard them, ^S to save", warn = True}, Nil)
+  else issue kOpen 0 path (AW.ReadPath path) {m | mode = 0, confirm = 0, msg = "Opening {path}", warn = False}.
+newFile m = if dirty m and m.confirm != 2 then {m | confirm = 2, msg = "Unsaved changes in {name m}: ^N again to discard them, ^S to save", warn = True}
+  else fresh "" E.empty {m | msg = "New file -- ^S saves it", warn = False}.
+fresh path b m = follow {m | buf = b, path = path, version = m.nextStamp, savedVersion = m.nextStamp, nextStamp = m.nextStamp + 1,
+  undo = Nil, redo = Nil, top = 0, left = 0, lastKind = 0, confirm = 0, mode = 0}.
+save m = if m.path == "" then (prompt 2 "/home/" m, Nil) else
+  issue kSave m.version m.path (AW.SaveFile m.path (E.toText m.buf)) {m | msg = "Saving {m.path}", warn = False}.
+saveAs path m =
+  if not (E.startsWith "/home/" path or E.startsWith "/tmp/" path) or E.endsWith "/" path then ({m | msg = "Files live under /home/ and /tmp/", warn = True}, Nil)
+  else save {m | path = path, mode = 0}.
+name m = if m.path == "" then "untitled" else baseName m.path.
+
+# ---- the compiler ---------------------------------------------------------------
+# ^B: the buffer through the host compiler daemon (tools/fprd.py, reached by
+# Sys.compile); one build at a time
+build m = if m.building then ({m | msg = "Already building", warn = False}, Nil)
+  else if not (colored m) then ({m | msg = "Only FP-RISC (.fpr) files build", warn = True}, Nil) else
+  issue kBuild m.version m.path (AW.Compile buildProfile (E.toText m.buf))
+    {m | building = True, outOpen = True, outBack = 0, out = say m.out ["", "build {name m}: compiling..."], msg = "Building {name m}", warn = False}.
+# a build is the package Run would start: what builds, runs
+buildProfile = "plugin:0:qedbuild".
+# ^R: one program at a time; ^R while it runs stops it
+runIt m = if m.building then ({m | msg = "Already building", warn = False}, Nil)
+  else if not (colored m) then ({m | msg = "Only FP-RISC (.fpr) files run", warn = True}, Nil)
+  else if not (RP.hasMain m.buf.lines) then ({m | msg = "Nothing to run: {name m} has no main", warn = True}, Nil) else
+  issue kRun m.version m.path (AW.Compile "plugin:0:qedrun" (RP.wrap (E.toText m.buf)))
+    {m | building = True, outOpen = True, outBack = 0, partial = "", out = say m.out ["", "run {name m}: compiling..."], msg = "Starting {name m}", warn = False}.
+halt m = (ended (stopProgram m) "stopped" m, Nil).
+
+say out lines = kept = E.append out lines; n = E.count kept; if n > outKeep then E.dropN (n - outKeep) kept else kept.
+# the compiler names the daemon's copy of the source: show the buffer's name
+# and, for a run, the line as the buffer numbers it (the Run entry is one
+# line the compiler saw and the buffer does not have: mods/runprog.fpr)
+tidy nm at line = i = strIndexOf ".fpr:" line;
+  if i < 0 then line else
+    st = lastSpace line i;
+    path = substr line st (i + 4 - st);
+    n = parseInt (substr line (i + 5) (E.imin 8 (strlen line - i - 5)));
+    if not (ours path) then line
+    else if n <= 0 then strcat (strcat (substr line 0 st) nm) (substr line (i + 4) (strlen line - i - 4))
+    else strcat (strcat (substr line 0 st) "{nm}:{at n}") (substr line (i + 5 + strlen "{n}") (strlen line - i - 5 - strlen "{n}")).
+ours path = E.endsWith "/in.fpr" path or E.endsWith "/qedbuild.fpr" path or E.endsWith "/qedrun.fpr" path.
+lastSpace s i = if i <= 0 then 0 else if charAt s (i - 1) == 32 or charAt s (i - 1) == 40 then i else lastSpace s (i - 1).
+# the first "<our file>:<line>:<column>" in the diagnostics (not an imported
+# module's); (0, 0) when there is none
+errorAt Nil = (0, 0).
+errorAt (l :: rest) = i = strIndexOf ".fpr:" l;
+  if i >= 0 and ours (substr l (lastSpace l i) (i + 4 - lastSpace l i)) then
+    after = substr l (i + 5) (strlen l - i - 5);
+    j = strIndexOf ":" after;
+    (parseInt after, (if j >= 0 then parseInt (substr after (j + 1) (strlen after - j - 1)) else 0))
+  else errorAt rest.
+
+# ---- what the worker answers ----------------------------------------------------
+arrived token result m = case findJob token m.pending of
+    Nil -> (m, Nil)
+  | p :: rest -> settle p result {m | pending = withoutJob token m.pending}.
+findJob token Nil = Nil.
+findJob token (p :: rest) = if p.token == token then [p] else findJob token rest.
+withoutJob token Nil = Nil.
+withoutJob token (p :: rest) = if p.token == token then rest else p :: withoutJob token rest.
+settle p result m = case p.kind of
+    7 -> restore result m
+  | 1 -> opened p result m
+  | 2 -> listed result m
+  | 3 -> saved p result m
+  | 4 -> (case result of Ok r -> (m, Nil) | Err why -> ({m | msg = "Could not keep the recovery copy: {why}", warn = True}, Nil))
+  | 5 -> built result m
+  | 6 -> started result m
+  | other -> (m, Nil).
+# the session record: "qed1", the path, 1 when the text that follows is
+# unsaved work, then that text
+restore result m = case result of
+    Ok (AW.Text t) -> (case E.splitLines t of
+        "qed1" :: path :: flag :: rest -> if flag == "1" then
+            _ = print "editor: recovered {(if path == "" then "untitled" else path)}";
+            ({(fresh path (E.fromText (E.joinLines rest)) m) | savedVersion = 0, msg = "Recovered your unsaved changes to {(if path == "" then "untitled" else path)}", warn = False}, Nil)
+          else if strlen path > 0 then openPath path m
+          else (welcome m, Nil)
+      | other -> (welcome m, Nil))
+  | other -> (welcome m, Nil).
+welcome m = {m | msg = "^O open   ^N new   ^S save   ^R run", warn = False}.
+opened p result m = case result of
+    Ok (AW.Text t) -> _ = print "editor: opened {p.path}";
+      ({(fresh p.path (E.fromText t) m) | msg = "Opened {p.path} ({E.count (E.splitLines t)} lines)", recorded = ""}, Nil)
+  | Err why -> if strIndexOf "no such file" why >= 0 then ({(fresh p.path E.empty m) | savedVersion = 0, msg = "New file {p.path} -- ^S creates it", recorded = ""}, Nil)
+      else ({m | msg = "Could not open {p.path}: {why}", warn = True}, Nil)
+  | other -> ({m | msg = "{p.path} is not text", warn = True}, Nil).
+listed result m = case result of
+    Ok (AW.Lines lines label) -> ({m | files = sortS (filterS userFile lines), listed = True}, Nil)
+  | Err why -> ({m | listed = True, msg = "Could not list the files: {why}", warn = True}, Nil)
+  | other -> ({m | listed = True}, Nil).
+userFile u = (E.startsWith "/home/" u or E.startsWith "/tmp/" u) and strIndexOf "/." u < 0 and not (E.endsWith ".~save" u).
+saved p result m = case result of
+    Ok (AW.Done note) -> _ = print "editor: saved {p.path}";
+      ({m | savedVersion = (if p.path == m.path then p.version else m.savedVersion), msg = "Saved {p.path}", warn = False, recorded = ""}, Nil)
+  | Err why -> ({m | msg = why, warn = True}, Nil)
+  | other -> ({m | msg = "Save answered oddly", warn = True}, Nil).
+built result m = case result of
+    Ok (AW.Text qa) -> _ = print "editor: build {name m}: ok";
+      ({m | building = False, out = say m.out ["build {name m}: ok (a {strlen qa / 1024} KiB package)"],
+      msg = "Built {name m}: no errors", warn = False}, Nil)
+  | Err why -> failedBuild "build" why m
+  | other -> ({m | building = False, msg = "Build answered oddly", warn = True}, Nil).
+# the diagnostics in the output panel, the caret on the first error in this file
+failedBuild what why m =
+  lines = E.splitLines why;
+  src = E.toText m.buf;
+  at = (if what == "run" then fn n -> RP.userLine src n else fn n -> n);
+  (first, col) = errorAt lines;
+  line = (if first > 0 then at first else 0);
+  # a column on the Run entry's own line is the entry's, not the buffer's
+  column = (if what == "run" and first == RP.entryLine src then 1 else E.imax 1 col);
+  jumped = (if line > 0 then moved (E.gotoPos line column m.buf) m else m);
+  _ = print "editor: {what} {name m}: failed{(if line > 0 then " at line {line}" else "")}";
+  ({jumped | building = False, out = say m.out (E.append (mapS (tidy (name m) at) lines) ["{what} {name m}: failed"]), outOpen = True,
+    outBack = E.count lines + 1,
+    msg = (if line > 0 then "{(if what == "run" then "Run" else "Build")} failed at line {line} -- ^J shows the output" else "{(if what == "run" then "Run" else "Build")} failed -- ^J shows the output"), warn = True}, Nil).
+started result m = case result of
+    Ok (AW.Text qa) -> (launch qa m, Nil)
+  | Err why -> failedBuild "run" why m
+  | other -> ({m | building = False, msg = "Run answered oddly", warn = True}, Nil).
+
+# ---- a program of its own ---------------------------------------------------------
+# Run's package is started by mods/runprog.fpr HERE, in this actor, which
+# then owns the program's console capture; ticks drain what it printed and
+# notice its end, ^R kills it, and closing the Editor does too.  (In this
+# actor and not the shared app worker: no other app carries the loader.)
+launch qa m = case RP.start qa of
+    Err why -> failRun why m
+  | Ok (h, pid) -> _ = print "editor: run {name m}: started";
+      {m | building = False, running = True, runActor = h, runPid = pid, partial = "",
+      out = say m.out ["run {name m}: started as process {pid} -- ^R stops it"], msg = "Running {name m} -- ^R stops it", warn = False}.
+failRun why m = _ = print "editor: run {name m}: {why}";
+  {m | building = False, outBack = 0, out = say m.out ["run {name m}: {why}"], outOpen = True, msg = "Run failed: {why}", warn = True}.
+# a tick: what it printed since, and whether it has ended
+poll m = if not m.running then m else case RP.poll (myself 0) m.runActor m.runPid of
+    (text, RP.Running) -> printed text m
+  | (text, RP.Ended how) -> ended text how m.
+stopProgram m = if m.runPid <= 0 then "" else RP.stop m.runActor m.runPid.
+# whole lines into the panel; a line still being written waits for its end
+printed text m = if strlen text == 0 then m else
+  lines = E.splitLines (strcat m.partial text);
+  {m | out = say m.out (E.take (E.count lines - 1) lines), partial = lastOf lines, outBack = 0}.
+ended text how m =
+  _ = print "editor: run {name m}: {how}";
+  lines = E.splitLines (strcat m.partial text);
+  tail = lastOf lines;
+  whole = E.take (E.count lines - 1) lines;
+  shown = (if strlen tail > 0 then E.append whole [tail] else whole);
+  kept = (if how == "finished" then dropUnit shown else shown);
+  {m | running = False, runActor = 0, runPid = 0, partial = "", outOpen = True, outBack = 0,
+    out = say m.out (E.append kept ["run {name m}: {how}"]),
+    msg = (if how == "finished" or how == "stopped" then "{name m}: {how}" else "{name m} failed: {how}"),
+    warn = not (how == "finished" or how == "stopped")}.
+# a main of type Unit prints as "()": not output anyone wrote
+dropUnit lines = case E.reverse lines of
+    "()" :: rest -> E.reverse rest
+  | other -> lines.
+
+# ---- the session record, kept shortly after the buffer settles ------------------
+tick m0 = m = poll m0; if not m.focused then (m, Nil) else keepSession False {m | idle = m.idle + 1}.
+# half a second after the last change -- or now, as the Editor closes: the
+# worker serves it before the stop that follows (appsession's finish)
+keepSession now m =
+  key = "{m.path}|{m.version}|{m.savedVersion}";
+  if (now or m.idle >= 5) and key != m.recorded and (now or not (pendingKind kSession m.pending)) then
+    record = "qed1\n{m.path}\n{(if dirty m then "1\n" else "0\n")}{(if dirty m then E.toText m.buf else "")}";
+    issue kSession m.version sessionPath (AW.WritePath sessionPath record) {m | recorded = key}
+  else (m, Nil).
+pendingKind k Nil = False.
+pendingKind k (p :: rest) = p.kind == k or pendingKind k rest.
+
+# ---- the pointer and the wheel ----------------------------------------------------
+pointer x y buttons m =
+  g = geo m;
+  inText = y >= g.textY and y < g.textY + g.rows * g.pitch and x >= g.margin and x < m.w - g.margin;
+  if buttons == 1 then
+    if not m.down then
+      (if inText then place False x y g {m | down = True, capture = 1, mode = 0} else {m | down = True, capture = 0 - 1})
+    else if m.capture == 1 then place True x y g m else m
+  else {m | down = False, capture = 0 - 1}.
+place extend x y g m =
+  r = E.clamp 0 (E.count m.buf.lines - 1) (m.top + (y - g.textY) / g.pitch);
+  c = E.colAt (E.nth m.buf.lines r) ((x - g.textX + m.left) * 1000 / g.em);
+  moved (E.at r c (E.moving extend m.buf)) m.
+wheelBy dy m = amount = m.wheel - dy * 3; g = geo m;
+  {m | wheel = amount % 10, top = E.clamp 0 (E.imax 0 (E.count m.buf.lines - g.rows)) (m.top + amount / 10)}.
+
+# ---- the view --------------------------------------------------------------------
+bg = (18, 30, 60). ink = (930, 940, 970). dim = (530, 610, 750). accent = (380, 800, 980).
+warmC = (1000, 640, 430). gutterC = (360, 440, 600). gutterCur = (760, 830, 940).
+curLineBg = (30, 50, 95). selBg = (150, 300, 470). commentC = (470, 600, 540). stringC = (990, 770, 520). keywordC = (760, 650, 1000).
+lbl g size color text = S2.Lbl [S2.Fs (size * g.s / 1000), S2.Fg color] text.
+lblW g size color width text = S2.Lbl [S2.Fs (size * g.s / 1000), S2.Fg color, S2.Ellip width] text.
+gapBox h = S2.Box [S2.H h] Nil.
+
+view vp m =
+  (w, h) = vp;
+  g = geo m;
+  (S2.Box [S2.Col, S2.W w, S2.H h, S2.Pad g.margin, S2.Bg bg, S2.Clip]
+    (E.append [header m g, gapBox g.gap, S2.Box [S2.Col, S2.W g.contentW, S2.H g.textH] (textRows m g)]
+      (E.append (panel m g) [gapBox g.gap, bottom m g])), Nil).
+
+header m g =
+  dotS = 9 * g.s / 1000;
+  where = (if m.path == "" then "not saved yet" else dirOf m.path);
+  S2.Box [S2.Row, S2.W g.contentW, S2.H g.headH, S2.Mid, S2.Gap (10 * g.s / 1000)]
+    (E.append [lbl g 19 ink (name m)]
+      (E.append (if dirty m then [S2.Box [S2.W dotS, S2.H dotS, S2.Round (dotS / 2), S2.Bg accent] Nil] else Nil)
+        [lblW g 13 dim (g.contentW / 2) where, S2.Box [S2.Grow] Nil, lbl g 13 dim (position m)])).
+position m = b = m.buf;
+  sel = E.selected b;
+  n = E.count b.lines;
+  "{(if strlen sel > 0 then "{strlen sel} selected   " else "")}Ln {b.row + 1}, Col {b.col + 1}   {n} line{(if n == 1 then "" else "s")}{(if E.endsWith ".fpr" m.path or m.path == "" then "   FP-RISC" else "")}".
+
+# the visible rows: a gutter with the line number, then the text in runs
+textRows m g = rowsGo m g m.top (E.take g.rows (E.dropN m.top m.buf.lines)) (E.selection m.buf) (colored m).
+colored m = m.path == "" or E.endsWith ".fpr" m.path or E.endsWith ".sol" m.path.
+rowsGo m g r Nil span color = Nil.
+rowsGo m g r (l :: rest) span color = rowNode m g r l span color :: rowsGo m g (r + 1) rest span color.
+rowNode m g r l span color =
+  isCur = r == m.buf.row;
+  num = "{r + 1}";
+  numW = Fm.width num * g.em / 1000;
+  gutter = S2.Box [S2.Row, S2.W g.gutterW, S2.H g.pitch, S2.Mid]
+    [S2.Box [S2.W (E.imax 0 (g.gutterW - numW - 14 * g.s / 1000))] Nil, S2.Lbl [S2.Fs g.em, S2.Fg (if isCur then gutterCur else gutterC)] num];
+  cur = (if isCur and m.mode == 0 then m.buf.col else 0 - 1);
+  segs = segments g l (selOn r span (strlen l)) cur (if color then syntax l else [(0, strlen l, 0)]);
+  attrs = [S2.Row, S2.W g.contentW, S2.H g.pitch, S2.Mid];
+  S2.Box (if isCur then S2.Bg curLineBg :: attrs else attrs)
+    [gutter, S2.Box [S2.Row, S2.W g.textW, S2.H g.pitch, S2.Mid, S2.Clip, S2.Scroll m.left 0] segs].
+# the part of row r the selection covers: (from, to, continues past the end)
+selOn r span n = case span of
+    E.NoSpan -> (0 - 1, 0 - 1, False)
+  | E.Span r1 c1 r2 c2 -> if r < r1 or r > r2 then (0 - 1, 0 - 1, False)
+      else ((if r == r1 then c1 else 0), (if r == r2 then c2 else n), r < r2).
+# a line cut at its syntax runs, the selection's ends and the caret
+segments g l sel cur runs =
+  (s, e, cont) = sel;
+  cuts = sortI (E.append [0, strlen l] (E.append (runCuts runs) (E.append (if s >= 0 then [s, e] else Nil) (if cur >= 0 then [cur] else Nil))));
+  E.append (segGo g l (pairs cuts) runs s e cur)
+    (E.append (if cur == strlen l then [caret g] else Nil) (if cont then [S2.Box [S2.W (g.em / 3), S2.H (g.em * 12 / 10), S2.Bg selBg] Nil] else Nil)).
+segGo g l Nil runs s e cur = Nil.
+segGo g l ((p, q) :: rest) runs s e cur =
+  text = S2.Lbl [S2.Fs g.em, S2.Fg (kindColor (kindAt runs p))] (E.shown (substr l p (q - p)));
+  node = (if s >= 0 and p >= s and q <= e then S2.Box [S2.Bg selBg] [text] else text);
+  E.append (if cur == p then [caret g] else Nil) (node :: segGo g l rest runs s e cur).
+caret g = S2.Box [S2.W (E.imax 2 (2 * g.s / 1000)), S2.H (g.em * 13 / 10), S2.Bg accent] Nil.
+kindColor 1 = commentC.
+kindColor 2 = stringC.
+kindColor 3 = keywordC.
+kindColor other = ink.
+kindAt Nil p = 0.
+kindAt ((a, b, k) :: rest) p = if p >= a and p < b then k else kindAt rest p.
+runCuts Nil = Nil.
+runCuts ((a, b, k) :: rest) = a :: b :: runCuts rest.
+pairs (a :: b :: rest) = if a < b then (a, b) :: pairs (b :: rest) else pairs (b :: rest).
+pairs other = Nil.
+# FP-RISC's light syntax: a comment from #, strings, the keywords
+syntax l = synGo l 0 (strlen l) Nil.
+synGo l i n acc = if i >= n then E.reverse acc else
+  c = charAt l i;
+  if c == 35 then E.reverse (push (i, n, 1) acc)
+  else if c == 34 then e = strEnd l (i + 1) n; synGo l e n (push (i, e, 2) acc)
+  else if E.isWord c then e = wordEnd l i n; synGo l e n (push (i, e, (if keyword (substr l i (e - i)) then 3 else 0)) acc)
+  else synGo l (i + 1) n (push (i, i + 1, 0) acc).
+push run acc = (s, e, k) = run;
+  case acc of
+    (s0, e0, k0) :: rest -> if k0 == k and e0 == s then (s0, e, k) :: rest else run :: acc
+  | Nil -> [run].
+strEnd l j n = if j >= n then n else if charAt l j == 92 then strEnd l (j + 2) n else if charAt l j == 34 then j + 1 else strEnd l (j + 1) n.
+wordEnd l i n = if i < n and E.isWord (charAt l i) then wordEnd l (i + 1) n else i.
+keyword w = memberS w ["case", "of", "if", "then", "else", "fn", "use", "unsafe", "profile", "module", "program",
+  "Type", "True", "False", "Nil", "Unit", "and", "or", "not"].
+
+panel m g = if g.panelH == 0 then Nil else [gapBox g.gap, (if m.mode == 1 then picker m g else outputPanel m g)].
+# the newest lines; after a failed build, from the start of its diagnostics
+outputPanel m g =
+  rowsN = g.panelRows - 1;
+  n = E.count m.out;
+  from = (if m.outBack > rowsN then n - m.outBack else n - rowsN);
+  shown = E.take rowsN (E.dropN (E.imax 0 from) m.out);
+  S2.Box [S2.Col, S2.W g.contentW, S2.H g.panelH, S2.Pad g.gap, S2.Round (10 * g.s / 1000), S2.Bg (12, 20, 42), S2.Clip]
+    (lbl g 11 dim (if m.building then "OUTPUT   compiling..." else if m.running then "OUTPUT   running -- ^R stops it" else "OUTPUT   ^J hides") :: mapS (outLine g) shown).
+outLine g l = S2.Box [S2.Row, S2.W (g.contentW - 2 * g.gap), S2.H g.pitch, S2.Mid] [lblW g 14 (if failing l then warmC else ink) (g.contentW - 2 * g.gap) l].
+failing l = strIndexOf "error" l >= 0 or strIndexOf "failed" l >= 0 or strIndexOf "unexpected" l >= 0 or strIndexOf "* " l == 2.
+picker m g =
+  items = pickList m;
+  n = E.count items;
+  shownN = g.panelRows - 1;
+  first = E.clamp 0 (E.imax 0 (n - shownN)) (m.pick - shownN / 2);
+  S2.Box [S2.Col, S2.W g.contentW, S2.H g.panelH, S2.Pad g.gap, S2.Round (10 * g.s / 1000), S2.Bg (24, 38, 74), S2.Clip]
+    (lbl g 11 dim (if not m.listed then "LISTING..." else if n == 0 then "NO MATCH -- ENTER OPENS (OR CREATES) THE PATH YOU TYPED" else "{n} FILES -- UP/DOWN, ENTER")
+      :: pickRows m g (E.take shownN (E.dropN first items)) first).
+pickRows m g Nil i = Nil.
+pickRows m g (u :: rest) i =
+  attrs = [S2.Row, S2.W (g.contentW - 2 * g.gap), S2.H g.pitch, S2.Mid, S2.Gap (12 * g.s / 1000), S2.Pad (4 * g.s / 1000), S2.Round (6 * g.s / 1000)];
+  S2.Box (if i == m.pick then S2.Bg selBg :: attrs else attrs) [lbl g 15 ink (baseName u), lbl g 12 dim (dirOf u)]
+    :: pickRows m g rest (i + 1).
+
+bottom m g = if m.mode != 0 then promptBar m g else statusBar m g.
+statusBar m g =
+  hints = (if m.running then "^R stop   ^J output   ^S save" else "^S save   ^O open   ^N new   ^F find   ^B build   ^R run   ^J output");
+  hintsW = Fm.width hints * (12 * g.s / 1000) / 1000;
+  S2.Box [S2.Row, S2.W g.contentW, S2.H g.barH, S2.Mid, S2.Gap (12 * g.s / 1000)]
+    [lblW g 14 (if m.warn then warmC else ink) (E.imax 1 (g.contentW - hintsW - 24 * g.s / 1000)) m.msg, S2.Box [S2.Grow] Nil, lbl g 12 dim hints].
+promptBar m g =
+  S2.Box [S2.Row, S2.W g.contentW, S2.H g.barH, S2.Pad (8 * g.s / 1000), S2.Round (8 * g.s / 1000), S2.Bg (28, 44, 84), S2.Mid, S2.Gap (10 * g.s / 1000)]
+    [lbl g 13 accent (promptLabel m.mode), lbl g 15 ink m.query, caret g, S2.Box [S2.Grow] Nil, lbl g 12 dim (promptHint m)].
+promptLabel 1 = "Open".
+promptLabel 2 = "Save as".
+promptLabel 3 = "Find".
+promptLabel 4 = "Go to line".
+promptLabel other = "".
+promptHint m = case m.mode of
+    1 -> "type to filter   ENTER opens   ^O closes"
+  | 2 -> "ENTER saves   ^shift-S closes"
+  | 3 -> "ENTER next match   ^F closes"
+  | 4 -> "ENTER goes   ^G closes"
+  | other -> "".
+
+# ---- small helpers ------------------------------------------------------------------
+baseName p = i = lastSlash p (strlen p - 1); substr p (i + 1) (strlen p - i - 1).
+dirOf p = i = lastSlash p (strlen p - 1); if i <= 0 then "/" else substr p 0 i.
+lastSlash s i = if i < 0 then 0 - 1 else if charAt s i == 47 then i else lastSlash s (i - 1).
+lower s = lowerGo s 0 (strlen s) "".
+lowerGo s i n acc = if i >= n then acc else
+  c = charAt s i;
+  lowerGo s (i + 1) n (strcat acc (if c >= 65 and c <= 90 then chr (c + 32) else substr s i 1)).
+filterS f Nil = Nil.
+filterS f (x :: r) = if f x then x :: filterS f r else filterS f r.
+mapS f Nil = Nil.
+mapS f (x :: r) = f x :: mapS f r.
+memberS x Nil = False.
+memberS x (y :: r) = x == y or memberS x r.
+sortS Nil = Nil.
+sortS (x :: r) = insS x (sortS r).
+insS x Nil = [x].
+insS x (y :: r) = if strCmp x y <= 0 then x :: y :: r else y :: insS x r.
+sortI xs = uniqI (sortIGo xs).
+sortIGo Nil = Nil.
+sortIGo (x :: r) = insI x (sortIGo r).
+insI x Nil = [x].
+insI x (y :: r) = if x <= y then x :: y :: r else y :: insI x r.
+uniqI (a :: b :: r) = if a == b then uniqI (b :: r) else a :: uniqI (b :: r).
+uniqI other = other.
+lastOf (x :: Nil) = x.
+lastOf (x :: rest) = lastOf rest.
+lastOf Nil = "".
+
+# This actor owns the child model. Transport and effects exchange data only.
+run me = case AS.start me of
+    Err why -> Unit
+  | Ok ctx ->
+      (initial, commands) = init;
+      (model, ignored) = update (AW.Resize ctx.w ctx.h) initial;
+      _ = AS.issue me ctx commands;
+      _ = Sys.loop (ctx, model) (step me); Unit.
+step me state =
+  (ctx, model) = state;
+  case AS.next me ctx of
+    AS.Idle -> _ = Sys.sleepUs 1000; (True, state)
+  | AS.Gone -> _ = stopProgram model; _ = AS.abandon me ctx; (False, state)
+  | AS.JobResult token result ->
+      (fresh2, commands) = update (AW.Arrived token result) model;
+      _ = AS.issue me ctx commands;
+      (True, (AS.advance ctx ctx.sequence, fresh2))
+  | AS.Message ret request -> case request of
+      AW.Close session -> if session != ctx.session then (AS.close me ctx ret session, state) else
+        _ = stopProgram model;
+        (kept, commands) = keepSession True model;
+        _ = AS.issue me ctx commands;
+        (AS.close me ctx ret session, state)
+    | AW.Event session sequence event -> case AS.valid ctx session sequence of
+        False -> _ = AC.reply ret (AW.Refused "stale session or sequence"); (True, state)
+      | True ->
+          next = AS.advance (AS.resized ctx event) sequence;
+          (fresh2, commands) = update event model;
+          _ = AS.issue me next commands;
+          (tree, vals) = view (next.w, next.h) fresh2;
+          _ = AC.reply ret (AW.Frame next.session next.revision tree vals (AW.status fresh2.phase));
+          (True, (next, fresh2)).

@@ -1,7 +1,8 @@
 # editor.fpr -- the Editor.qa loop, end to end on QOS Portable, THE
 # SERVICE WAY: a source string edited INSIDE the app goes out through
-# std.compile (the qosp tag-7 syscall channel -> unix domain socket ->
-# the host fprd server running ./fprc), the compiled ASSEMBLY comes
+# std.compile (the HAL table's worker-backed compile entries, ABI v21 ->
+# unix domain socket -> the host fprd server running ./fprc; the caller
+# parks meanwhile, holding no hart), the compiled ASSEMBLY comes
 # back the same way, and both land on the disk as NEW records through
 # the Files service (std.fs -- the app touches no device) -- the whole
 # editing/storing policy inside QOS, the compiler outside.

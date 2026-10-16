@@ -2,10 +2,13 @@
 """fprd.py -- the fpr compiler hosted as a UNIX-DOMAIN-SOCKET server.
 
 QOS Portable apps reach it through Sys.compile (std/compile.fpr):
-the app-side shim rides the qosp syscall channel (tag 7), qosp's
-host side (qos/portable/compile.c) connects HERE, and this daemon
-runs the actual ./fprc pipeline -- so the compiler stays a host
-process while the editing/storing policy stays inside QOS.
+the app-side shim hands the request to qosp's compile worker (the HAL
+table's compile_* entries, ABI v21; the caller parks, holding no
+hart), qosp's host side (qos/portable/compile.c) connects HERE, and
+this daemon runs the actual ./fprc pipeline -- so the compiler stays a
+host process while the editing/storing policy stays inside QOS.  The
+Editor app builds and runs through it (docs/2026-10-16-EDITOR.md);
+tools/main-profile.py --run starts it beside qosp.
 
     cd fp-risc && python3 tools/fprd.py [sock-path]
 
@@ -88,22 +91,40 @@ def package_plugin(slot, plugid, source):
     and to no shell build (its runtime imports resolve by name)."""
     # intermediates go where the caller's run keeps them (qos.py passes
     # its workspace build dir); a bare `fprd.py` from fp-risc/ uses build/
-    bdir = os.environ.get("FPRD_BUILD", "build")
+    bdir = os.path.abspath(os.environ.get("FPRD_BUILD", "build"))
     os.makedirs(os.path.join(bdir, "fprd-src"), exist_ok=True)
     src = os.path.join(bdir, "fprd-src", plugid + ".fpr")
     with open(src, "wb") as f:
         f.write(source)
+    # the package and its intermediates stay in the build directory (they
+    # used to land beside the checkout), and a stale package is gone before
+    # the build, so a failed one can never answer with an older .qa
+    qa = os.path.join(bdir, "fprd-packages", plugid + ".qa")
+    os.makedirs(os.path.dirname(qa), exist_ok=True)
+    if os.path.exists(qa):
+        os.unlink(qa)
     target = "plugin-qa"  # qos-app.mk picks the image this host's qosp runs
     env = dict(os.environ, LC_ALL="C.UTF-8")
     r = subprocess.run(
-        ["make", "-s", target, "PROG=" + src],
-        capture_output=True, env=env, timeout=300)
-    qa = plugid + ".qa"
+        ["make", "-s", target, "PROG=" + src, "PLUG_OUT=" + qa,
+         "BUILD=" + os.path.join(bdir, "fprd-objects")],
+        cwd=os.environ["FPR_HOME"], capture_output=True, env=env, timeout=300)
     if r.returncode != 0 or not os.path.exists(qa):
-        msg = (r.stderr + r.stdout).strip() or b"plugin build failed"
-        return b"err\n" + msg
+        return b"err\n" + diagnostics(r.stderr + r.stdout, b"plugin build failed")
     with open(qa, "rb") as f:
         return b"ok\n" + f.read()
+
+
+# what a failed build said, without the build's progress chatter ("use:",
+# "unit ...", the make recipe): the compiler's own diagnostics first
+NOISE = (b"use: ", b"unit ", b"autodrop: ", b"precond: ", b"linear types: ", b"wrote ",
+         b"module table: ", b"assumed external", b"mkimports: ", b"make: ", b"make[")
+
+
+def diagnostics(text, fallback):
+    lines = [line for line in text.strip().splitlines()
+             if line.strip() and not line.startswith(NOISE)]
+    return b"\n".join(lines) or fallback
 
 
 def package_version(plugid, source):

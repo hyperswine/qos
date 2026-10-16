@@ -54,6 +54,11 @@ Pin.tclear : a -> Unit .
 Sys.caps : Unit -> a .
 Sys.storeReq : a -> b .
 Sys.compile : String -> String -> Result String String .
+# a launched process's console: what its actors print goes to a buffer the
+# capturing actor drains, until it releases it (qos/appside/hal.c)
+Sys.captureConsole : Int -> Result String String .
+Sys.takeConsole : Int -> Result String String .
+Sys.releaseConsole : Int -> Result String String .
 Sys.shutdownRequested : Unit -> Int .
 Sys.shutdownBegin : Unit -> Unit .
 Sys.shutdownComplete : Int -> Unit .

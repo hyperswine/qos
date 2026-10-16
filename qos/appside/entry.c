@@ -321,18 +321,25 @@ static V h_sys_attach_image(V idv, V abiv, V shav, V relshav, V numsv, V secsv) 
 }
 FPR_FN(fpr_g_Sys_x2eattachImage, h_sys_attach_image, 6);
 
-/* Sys.compile <profile> <source> -> Ok asm | Err reason: the host-
- * side fpr compiler server, reached over the syscall channel (tag 7,
- * qos_abi.h) -- qosp bridges to the daemon's unix socket, and the
- * "ok\n"/"err\n" status line framed into the reply is parsed HERE so
- * callers get one Result.  The profile is a token the daemon
- * whitelists (qos-portable | bare-metal), never argv passthrough. */
+/* Sys.compile <profile> <source> -> Ok reply | Err reason: the host-side
+ * fpr compiler server (tools/fprd.py), reached through the HAL table's
+ * worker-backed compile_* entries (ABI v21, portable/compile.c).  The
+ * calling actor PARKS while the host's worker does the exchange: a compile
+ * takes seconds and must hold no hart (whatever shares the hart -- the
+ * shell, on hart 0 -- would freeze for it), and a caller killed mid-compile
+ * hands its request back through the actor's cleanup hook.  The reply has
+ * no size limit here: it is copied from the host's job into this actor's
+ * heap.  The "ok\n"/"err\n" status line is parsed HERE so callers get one
+ * Result.  The profile is a token the daemon whitelists, never argv
+ * passthrough. */
 static V h_sys_compile(V profv, V srcv) {
   if (ISINT(profv) || ((hdr_t *)profv)->tid != T_STR)
     fpr_cpanic("Sys.compile: profile must be a String");
   if (ISINT(srcv) || ((hdr_t *)srcv)->tid != T_STR)
     fpr_cpanic("Sys.compile: source must be a String");
-  if (!g_syscall) return fpr_mkresult(1, "no syscall channel (standalone run)");
+  if (!qos_hal->compile_submit || !qos_hal->compile_done || !qos_hal->compile_reply ||
+      !qos_hal->compile_release)
+    return fpr_mkresult(1, "this host has no compiler bridge");
   str_t *prof = (str_t *)profv;
   str_t *src = (str_t *)srcv;
   uint64_t plen = prof->len + 1 + src->len;
@@ -340,16 +347,23 @@ static V h_sys_compile(V profv, V srcv) {
   for (uw i = 0; i < prof->len; i++) req[i] = (char)prof->bytes[i];
   req[prof->len] = '\n';
   for (uw i = 0; i < src->len; i++) req[prof->len + 1 + i] = (char)src->bytes[i];
-  int64_t r = g_syscall(7, req, plen, g_sysout, sizeof g_sysout);
-  if (r == -2) return fpr_mkresult(1, "no compiler server (start tools/fprd.py)");
-  if (r == -4) return fpr_mkresult(1, "compiled asm larger than the channel buffer");
-  if (r < 3) return fpr_mkresult(1, "compiler channel error");
-  if (g_sysout[0] == 'o' && g_sysout[1] == 'k' && g_sysout[2] == '\n')
-    return fpr_mkresultn(0, g_sysout + 3, (uw)r - 3);
-  if (r >= 4 && g_sysout[0] == 'e' && g_sysout[1] == 'r' && g_sysout[2] == 'r' &&
-      g_sysout[3] == '\n')
-    return fpr_mkresultn(1, g_sysout + 4, (uw)r - 4);
-  return fpr_mkresult(1, "malformed compiler reply");
+  void *job = qos_hal->compile_submit(req, plen);
+  if (!job) return fpr_mkresult(1, "compile request refused (the host has no compile worker, or no memory)");
+  fpr_actor_cleanup_set(qos_hal->compile_release, job);
+  while (!qos_hal->compile_done(job)) fpr_actor_sleep_us(2000);
+  const char *b;
+  int64_t r = qos_hal->compile_reply(job, &b);
+  V out;
+  if (r == -2) out = fpr_mkresult(1, "no compiler server (start tools/fprd.py)");
+  else if (r == -3) out = fpr_mkresult(1, "the compiler server stopped answering");
+  else if (r < 3 || !b) out = fpr_mkresult(1, "compiler channel error");
+  else if (b[0] == 'o' && b[1] == 'k' && b[2] == '\n') out = fpr_mkresultn(0, b + 3, (uw)r - 3);
+  else if (r >= 4 && b[0] == 'e' && b[1] == 'r' && b[2] == 'r' && b[3] == '\n')
+    out = fpr_mkresultn(1, b + 4, (uw)r - 4);
+  else out = fpr_mkresult(1, "malformed compiler reply");
+  fpr_actor_cleanup_clear(job);
+  qos_hal->compile_release(job);
+  return out;
 }
 FPR_FN(fpr_g_Sys_x2ecompile, h_sys_compile, 2);
 

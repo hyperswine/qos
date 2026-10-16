@@ -1,0 +1,81 @@
+# The Editor's buffer (programs/mods/editbuf.fpr): pure edits, checked on
+# their text and cursor.  Runs on the host (`fpr run`) and on QOS alike.
+#: expect editbuf: HOLDS
+unsafe program.
+E = use "../programs/mods/editbuf".
+
+check what ok = if ok then Unit else error "editbuf: {what}".
+text b = E.toText b.
+cur b = (b.row, b.col).
+typed s b = E.insert s b.
+
+main =
+  b0 = E.fromText "main = 6 * 7 .";
+  _ = check "round trip" (text b0 == "main = 6 * 7 .");
+  cr = chr 13;
+  _ = check "crlf read as lines" (text (E.fromText "a{cr}\nb{cr}\n") == "a\nb\n");
+  e0 = E.fromText "";
+  _ = check "empty is one line" (E.count e0.lines == 1);
+  b1 = E.endOfLine False b0;
+  _ = check "end" (cur b1 == (0, 14));
+  b2 = E.newline (E.endOfLine False (E.fromText "  fib n ="));
+  _ = check "enter after = indents two more" (text b2 == "  fib n =\n    " and cur b2 == (1, 4));
+  smart = E.home False (E.endOfLine False (E.fromText "  fib n ="));
+  _ = check "home goes to the first non-blank" (cur smart == (0, 2) and cur (E.home False smart) == (0, 0));
+  b3 = E.backspace b2;
+  _ = check "backspace in indentation goes to the previous stop" (text b3 == "  fib n =\n  " and cur b3 == (1, 2));
+  b4 = typed "x" b3;
+  _ = check "typing" (text b4 == "  fib n =\n  x" and cur b4 == (1, 3));
+  b5 = E.backspace (E.home False b4);
+  _ = check "backspace at a first non-blank deletes the indentation step" (text b5 == "  fib n =\nx");
+  joined = E.backspace (E.at 1 0 (E.fromText "ab\ncd"));
+  _ = check "backspace at column 0 joins" (text joined == "abcd" and cur joined == (0, 2));
+  fwd = E.deleteForward (E.at 0 2 (E.fromText "ab\ncd"));
+  _ = check "delete at the end joins the next line" (text fwd == "abcd" and cur fwd == (0, 2));
+  utf = E.fromText "café!";
+  l1 = E.left False (E.endOfLine False utf);
+  l2 = E.left False l1;
+  _ = check "left steps over a two-byte character" (cur l1 == (0, 5) and cur l2 == (0, 3));
+  _ = check "deleting a two-byte character" (text (E.backspace l1) == "caf!");
+  multi = E.insert "one\ntwo\nthree" (E.at 0 1 (E.fromText "[]"));
+  _ = check "pasting lines" (text multi == "[one\ntwo\nthree]" and cur multi == (2, 5));
+  sel = E.right True (E.right True (E.at 0 1 (E.fromText "abcd")));
+  _ = check "a selection's text" (E.selected sel == "bc");
+  _ = check "typing replaces the selection" (text (typed "X" sel) == "aXd");
+  across = E.down True (E.at 0 1 (E.fromText "abc\ndef"));
+  _ = check "a selection across lines" (E.selected across == "bc\nd" and text (E.deleteSelection across) == "aef");
+  all = E.selectAll (E.fromText "a\nb");
+  _ = check "select all" (E.selected all == "a\nb");
+  collapsed = E.left False sel;
+  _ = check "left without shift lands at the selection's start" (cur collapsed == (0, 1) and not collapsed.marked);
+  ind = E.indent (E.endOfLine True (E.down True (E.fromText "a\nb\nc")));
+  _ = check "a selection ending at column 0 leaves that row out" (text (E.indent (E.down True (E.fromText "a\nb"))) == "  a\nb");
+  _ = check "indent the selected lines" (text ind == "  a\n  b\nc");
+  out = E.outdent ind;
+  _ = check "outdent them" (text out == "a\nb\nc");
+  dup = E.duplicateLine (E.at 1 0 (E.fromText "a\nb\nc"));
+  _ = check "duplicate a line" (text dup == "a\nb\nb\nc" and dup.row == 2);
+  del = E.deleteLines (E.at 1 0 (E.fromText "a\nb\nc"));
+  _ = check "delete a line" (text del == "a\nc" and del.row == 1);
+  last = E.deleteLines (E.fromText "only");
+  _ = check "delete the only line" (text last == "");
+  moved = E.moveLines 1 (E.fromText "a\nb\nc");
+  _ = check "move a line down" (text moved == "b\na\nc" and moved.row == 1);
+  found = E.findNext "fib" (E.fromText "a\nfib 1\nfib 2");
+  _ = check "find selects the next match" (cur found == (1, 3) and E.selected found == "fib");
+  again = E.findNext "fib" found;
+  _ = check "find again goes on" (cur again == (2, 3));
+  wrapped = E.findNext "fib" again;
+  _ = check "find wraps" (cur wrapped == (1, 3));
+  _ = check "occurrences" (E.occurrences "fib" again == 2);
+  word = E.wordRight False (E.fromText "fib n = 1");
+  _ = check "word right" (cur word == (0, 3));
+  back = E.wordLeft False (E.endOfLine False (E.fromText "fib n = 10"));
+  _ = check "word left" (cur back == (0, 8));
+  tall = E.fromText "a long line here\nx\nanother long line";
+  down2 = E.down False (E.down False (E.endOfLine False (E.up False (E.at 0 9 tall))));
+  _ = check "up and down keep the goal" (down2.row == 2 and down2.col > 9);
+  _ = check "goto line" (cur (E.gotoLine 2 (E.fromText "a\n  b")) == (1, 2));
+  _ = check "goto a compiler's line and column" (cur (E.gotoPos 2 5 (E.fromText "a\ncafé!")) == (1, 5) and cur (E.gotoPos 2 99 (E.fromText "a\nbc")) == (1, 2));
+  _ = check "a line's text for copying" (E.lineText (E.at 1 0 (E.fromText "a\nb")) == "b\n");
+  print "editbuf: HOLDS".

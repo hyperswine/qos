@@ -137,6 +137,9 @@ keyCode env 1 m =
 # typed p is the app's, and ctrl-P (the input tier's +4000 bias) snapshots
 keyCode env 25 m | m.active <= 0 = _ = print "shell: snapshot {m.snap + 1}"; {m | snap = m.snap + 1}.
 keyCode env 4025 m = _ = print "shell: snapshot {m.snap + 1}"; {m | snap = m.snap + 1}.
+# Tab inside an open app's content is the app's (the Editor indents with
+# it); Shift-Tab always moves the focus, so the chrome stays reachable
+keyCode env 15 m | m.active > 0 and m.focus == L.Content and not m.appFailed = appKey env 15 m.
 keyCode env 15 m = tab False m.
 keyCode env 1015 m = tab True m.
 # Enter activates the focused control; so does Space, except inside an

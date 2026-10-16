@@ -32,6 +32,12 @@ int qos_headless_poll(int64_t *kind, int64_t *a, int64_t *c); /* the source poli
 #include <time.h>
 #include <unistd.h>
 
+/* v21: the compiler bridge (compile.c) */
+void *qosp_compile_submit(const char *pay, uint64_t plen);
+int qosp_compile_done(void *job);
+int64_t qosp_compile_reply(void *job, const char **bytes);
+void qosp_compile_release(void *job);
+
 #ifndef QOSP_GFX
 static int size_hook_state; /* 0 unchecked, 1 pending, 2 done */
 static int64_t size_hook_c, size_hook_r;
@@ -107,6 +113,11 @@ static qos_hal_t the_table = {
     .hart_clear = qosp_hart_clear,
     .hart_timer_arm = qosp_hart_timer_arm,
     .hart_timer_park = qosp_hart_timer_park,
+    /* v21: the compiler bridge, worker-backed (compile.c) */
+    .compile_submit = qosp_compile_submit,
+    .compile_done = qosp_compile_done,
+    .compile_reply = qosp_compile_reply,
+    .compile_release = qosp_compile_release,
     .nharts = 1, /* main.c raises this (and installs start_hart) at boot */
     .putc = t_putc,
     .poweroff = t_poweroff,

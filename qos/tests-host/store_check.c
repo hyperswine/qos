@@ -50,9 +50,6 @@ int64_t qosp_load_plugin(const qos_plugin_t *p, char *out, uint64_t cap) {
 int64_t qosp_unload_plugin(const qos_unload_t *p, char *out, uint64_t cap) {
   (void)p; (void)out; (void)cap; return -1;
 }
-int64_t qosp_compile_call(const char *p, uint64_t n, char *out, uint64_t cap) {
-  (void)p; (void)n; (void)out; (void)cap; return -1;
-}
 static int hex_digit(char c) {
   if (c >= '0' && c <= '9') return c - '0';
   if (c >= 'a' && c <= 'f') return c - 'a' + 10;
