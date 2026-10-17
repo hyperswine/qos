@@ -1291,11 +1291,11 @@ def cmd_test(a):
             continue
         if backend == "qosp":
             qa = build_app(prog)
-            r = subprocess.run([str(QOS / "qosp"), "--yes", str(qa)], cwd=WS.out, capture_output=True, timeout=180)
+            r = subprocess.run([str(QOS / "qosp"), "--yes", str(qa)], cwd=WS.out, stdin=subprocess.DEVNULL, capture_output=True, timeout=180)
             out = r.stdout.decode("utf-8", "replace")
         else:
             r = subprocess.run(["make", "-s", "bare-metal-run", f"PROG={prog}", f"IMAGE={WS.mk().image(prog)}"] + WS.make_vars(),
-                               cwd=ROOT, capture_output=True, timeout=300)
+                               cwd=ROOT, stdin=subprocess.DEVNULL, capture_output=True, timeout=300)
             out = r.stdout.decode("utf-8", "replace")
         ok = r.returncode == 0 and expect in out
         ran += 1
@@ -1304,7 +1304,7 @@ def cmd_test(a):
             fails.append(label)
     # the multi-client LiveView wire rides its own script
     if not a.legs or any("web" in k or "live" in k for k in a.legs):
-        r = subprocess.run(["sh", "tests-host/mvuweb-check.sh"], cwd=QOS, capture_output=True, timeout=300)
+        r = subprocess.run(["sh", "tests-host/mvuweb-check.sh"], cwd=QOS, stdin=subprocess.DEVNULL, capture_output=True, timeout=300)
         ok = r.returncode == 0 and b"ALL LEGS PASS" in r.stdout
         ran += 1
         say(f"{'ok  ' if ok else 'FAIL'} liveview multi-client")
