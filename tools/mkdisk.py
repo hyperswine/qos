@@ -32,8 +32,48 @@ def chunk_hash(payload: bytes) -> int:
     return h or 1
 
 
+def preserved_pages(img: str, seed_urls: set[str]) -> list[bytes]:
+    if not os.path.exists(img):
+        return []
+    with open(img, "rb") as f:
+        raw = f.read()
+    if len(raw) < PG or len(raw) % PG != 0:
+        return []
+    npages = len(raw) // PG
+    head = 0
+    best_gen = -1
+    for slot in (0, npages - 1):
+        line = raw[slot * PG:(slot + 1) * PG].split(b"\n", 1)[0].decode("ascii", "replace").split()
+        if len(line) >= 2 and line[0] == "QLOG" and line[1].isdigit():
+            gen = next((int(w[1:]) for w in line[2:] if w.startswith("g") and w[1:].isdigit()), 0)
+            if gen > best_gen:
+                best_gen = gen
+                head = int(line[1])
+    if head <= 1 or head > npages:
+        return []
+    kept = []
+    p = 1
+    while p < head:
+        hdr = raw[p * PG:(p + 1) * PG].split(b"\n", 1)[0].decode("ascii", "replace").split()
+        if len(hdr) < 4 or hdr[0] not in ("QREC", "QDEL", "QBLK") or not hdr[1].isdigit():
+            break
+        tag, np, url = hdr[0], int(hdr[1]), hdr[3]
+        if p + 1 + np > head:
+            break
+        if not (tag in ("QREC", "QDEL") and url in seed_urls):
+            for k in range(1 + np):
+                kept.append(raw[(p + k) * PG:(p + k + 1) * PG])
+        p += 1 + np
+    return kept
+
+
 def main():
-    img, size_mb, qas = sys.argv[1], int(sys.argv[2]), sys.argv[3:]
+    args = sys.argv[1:]
+    preserve = False
+    if args and args[0] == "--preserve":
+        preserve = True
+        args = args[1:]
+    img, size_mb, qas = args[0], int(args[1]), args[2:]
     pages = []
 
     def record(url, payload: bytes):
@@ -50,6 +90,9 @@ def main():
         with open(qa, "rb") as f:
             record(f"apps/{app_id}.qa", f.read())
     record("apps/index", ("\n".join(ids) + "\n").encode())
+    if preserve:
+        seed_urls = {"apps/index"} | {f"apps/{app_id}.qa" for app_id in ids}
+        pages.extend(preserved_pages(img, seed_urls))
 
     head = 1 + len(pages)
     npages = size_mb * 1024 * 1024 // PG

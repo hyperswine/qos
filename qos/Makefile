@@ -94,7 +94,8 @@ fpr_host = FPR_HOME="$(FPRISC_ROOT)" "$(FPRC)" build portable/qosp.fpr -o $(1) -
 	  $(foreach f,$(4),--link $(f))
 
 QOSP_OUT ?= qosp
-portable: $(QOSP_SRC) $(QOSP_FPR) appside/qos_abi.h portable/park.h $(FPRISC_ROOT)/compiler/Codegen.hs
+portable: $(QOSP_OUT)
+$(QOSP_OUT): $(QOSP_SRC) $(QOSP_FPR) $(RT_CORE) $(FPRC) $(FPRISC_ROOT)/core/prelude.fpr appside/qos_abi.h portable/park.h $(FPRISC_ROOT)/compiler/Codegen.hs
 	$(call fpr_host,$(QOSP_OUT),$(QOSP_SRC),$(SND_FLAGS),$(SND_LIBS))
 
 portable-run: portable
@@ -107,7 +108,8 @@ portable-run: portable
 # untouched).  The same source builds on macOS (OpenGL/gl3.h declares
 # prototypes; Linux needs GL_GLEXT_PROTOTYPES, set in gfx.c).
 QOSP_GL_SRC = $(QOSP_SRC) $(HAL)/unix/gfx.c
-portable-gl: $(QOSP_GL_SRC) $(QOSP_FPR) appside/qos_abi.h portable/park.h $(FPRISC_ROOT)/compiler/Codegen.hs
+portable-gl: qosp-gl
+qosp-gl: $(QOSP_GL_SRC) $(QOSP_FPR) $(RT_CORE) $(FPRC) $(FPRISC_ROOT)/core/prelude.fpr appside/qos_abi.h portable/park.h $(FPRISC_ROOT)/compiler/Codegen.hs
 	$(call fpr_host,qosp-gl,$(QOSP_GL_SRC),-DQOSP_GFX -DFPR_DESKTOP_GL $(SND_FLAGS) $(DESKTOP_GL_CFLAGS),$(DESKTOP_GL_LIBS) $(SND_LIBS))
 
 # ---- QOS Portable with the EGL/GLES gfx tier (no window system) --------

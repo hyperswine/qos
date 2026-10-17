@@ -60,31 +60,31 @@ leftOf pid = _ = Sys.sleepUs 20000; if pid > 0 then Sys.killPid pid "left?" else
 # ---- an app (std/hosted): this test is its host -------------------------------
 # (no header: the entry goes first, as for a plain main)
 appSource = "P = use \"std/hosted\".\nMsg = Type (Got (Result String String)).\ninit = \{n = 0, file = \"none\"}.\nupdate ev m = case ev of\n    P.Key P.Enter -> (\{m | n = m.n + 1}, P.readFile \"/home/x.txt\" (fn r -> Got r) :: Nil)\n  | P.Key (P.Char \"q\") -> (m, P.quit :: Nil)\n  | P.Msg (Got (Ok t)) -> (\{m | file = t}, Nil)\n  | P.Msg (Got (Err w)) -> (\{m | file = strcat \"refused \" w}, Nil)\n  | other -> (m, Nil).\nview size m = (cols, rows) = size; [\"n \{m.n} of \{cols}x\{rows}\", strcat \"file \" m.file].\nsubs m = Nil.\napp = \{ init = init, update = update, view = view, subs = subs }.\n".
-# poll until the app says something: what it said (frames, asks), and the program
-said : Int -> RP.Proc -> Int -> (List PG.ToHost, String, RP.Proc) .
-said me proc n = case RP.poll me proc of
-    (text, words, RP.Running more) -> (case words of
-        Nil -> if n <= 0 then (Nil, "silent", more) else _ = Sys.sleepUs 5000; said me more (n - 1)
-      | w :: rest -> (words, "", more))
-  | (text, words, RP.Ended how) -> (words, how, RP.idle Unit).
+# poll the process actor until the app says something: what it said (frames, asks), and why it ended
+said : Int -> Int -> Int -> (List PG.ToHost, String) .
+said me actor n = case RP.pollActor me actor of
+    RP.Step text words True how -> (case words of
+        Nil -> if n <= 0 then (Nil, "silent") else _ = Sys.sleepUs 5000; said me actor (n - 1)
+      | w :: rest -> (words, ""))
+  | RP.Step text words False how -> (words, how).
 frameIn words = case words of Nil -> Nil | w :: rest -> (case w of PG.Frame lines -> lines | other -> frameIn rest).
 askIn words = case words of Nil -> (0, "") | w :: rest -> (case w of PG.Ask token (PG.ReadReq path) -> (token, path) | other -> askIn rest).
 hostedApp me = case CP.plugin 0 "qedrun" (RP.wrapApp appSource) of
     Err why -> "package: {why}"
-  | Ok qa -> case RP.start qa (64 * 1048576) (PG.Start me 40 10) of
+  | Ok qa -> case RP.open me qa (64 * 1048576) 40 10 of
       Err why -> "start: {why}"
-    | Ok proc ->
-        (w1, e1, p1) = said me proc 400;
+    | Ok (actor, pid) ->
+        (w1, e1) = said me actor 400;
         first = frameIn w1;
-        (t1, p2) = RP.tell p1 (PG.KeyIn 28);
-        (w2, e2, p3) = said me p2 400;
+        _ = RP.tellActor actor (PG.KeyIn 28);
+        (w2, e2) = said me actor 400;
         (token, path) = askIn w2;
-        (t2, p4) = RP.tell p3 (PG.Answer token (PG.Text "hello"));
-        (w3, e3, p5) = said me p4 400;
+        _ = RP.tellActor actor (PG.Answer token (PG.Text "hello"));
+        (w3, e3) = said me actor 400;
         third = frameIn w3;
-        (t3, p6) = RP.tell p5 (PG.KeyIn 16);
-        (w4, e4, p7) = said me p6 400;
-        _ = RP.stop p7;
+        _ = RP.tellActor actor (PG.KeyIn 16);
+        (w4, e4) = said me actor 400;
+        _ = RP.stopActor me actor;
         "{(case first of a :: rest -> a | Nil -> "-")}|{path}|{(case third of a :: b :: rest -> b | other -> "-")}|{e4}".
 
 main =

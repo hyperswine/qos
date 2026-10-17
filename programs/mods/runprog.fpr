@@ -31,13 +31,17 @@
 # The capture belongs to the actor that called start: only it drains or
 # releases it, and its end releases it (qos/appside/hal.c).
 #
-# A running program is a LINEAR value: poll hands it back while it runs and
-# keeps it when it has ended; stop takes it.  Within any function the
-# compiler holds a caller to that (a record field holding one is not
-# checked: a model is a value).
+# A running program is a LINEAR value (Proc 1, Run 1): poll hands it back
+# while it runs and keeps it when it has ended; stop takes it.  A model is an
+# unrestricted value and cannot hold a linear Proc (fprisc
+# docs/2026-10-17-VALUE-SEMANTICS.md, rule 2): `open` spawns a process actor
+# that owns the Proc and the console capture in its loop (`serve`), and the
+# Editor's model holds that actor's address (`pollActor`, `tellActor`,
+# `stopActor`).
 unsafe module.
 Plug = use "plug".
 PG = use "std/hosted".
+AC = use "std/actor#201a0e9bf98a5154".
 
 Sys.pidOf : Int -> Int .
 Sys.alive : Int -> Bool .
@@ -49,6 +53,8 @@ Sys.killPid : (pid : Int | pid > 0) -> String -> Int .
 # a running program: its root actor and its pid
 Proc 1 = Type (Proc Int Int).
 Run 1 = Type (Running Proc | Ended String).
+Cmd = Type (Poll | Tell (PG.ToProgram Int) | Stop).
+Step = Type (Step String (List PG.ToHost) Bool String).
 
 # The entry goes in after the header line (`unsafe program.`, `profile
 # base.`), or first when there is none -- never after the program, where an
@@ -145,9 +151,6 @@ tell proc x = Proc root pid = proc; (send root x, Proc root pid).
 # its pid, handed back with it (for the reader)
 pidOf : Proc -> (Int, Proc) .
 pidOf proc = Proc root pid = proc; (pid, Proc root pid).
-# the placeholder a model holds while nothing runs (never polled or stopped)
-idle : Unit -> Proc .
-idle u = Proc 0 0.
 
 stop : Proc -> String .
 stop proc =
@@ -157,8 +160,60 @@ stop proc =
   _ = Sys.releaseConsole pid;
   last.
 
+# ---- the process actor (Rule 2: a service owns its linear Proc) ----------------
+open : Int -> String -> (budget : Int | budget > 0) -> Int -> Int -> Result (Int, Int) String .
+open me qa budget cols rows =
+  actor = spawn (fn self -> boot self me qa budget cols rows);
+  case receiveFromRes me actor of
+    Err why -> Err "process actor ended: {why}"
+  | Ok res -> res.
+
+boot : Int -> Int -> String -> Int -> Int -> Int -> Unit .
+boot self owner qa budget cols rows =
+  started = (if budget > 0 then start qa budget (PG.Start self cols rows) else Err "no memory to give it");
+  case started of
+    Err why -> _ = send owner (Err why); Unit
+  | Ok proc ->
+      (pid, held) = pidOf proc;
+      case send owner (Ok (self, pid)) of
+        Err why -> _ = stop held; Unit
+      | Ok u -> serve self owner held.
+
+serve : unsafe Int -> Int -> Proc -> Unit .
+serve self owner proc = case receiveFromRes self owner of
+    Err why -> _ = stop proc; Unit
+  | Ok (from, id, cmd) -> case cmd of
+      Tell x ->
+        (sent, next) = tell proc x;
+        serve self owner next
+    | Stop ->
+        last = stop proc;
+        _ = AC.reply (from, id) (Step last Nil False "stopped");
+        Unit
+    | Poll -> case poll self proc of
+        (text, said, Running next) ->
+          _ = AC.reply (from, id) (Step text said True "");
+          serve self owner next
+      | (text, said, Ended how) ->
+          _ = AC.reply (from, id) (Step text said False how);
+          Unit.
+
+pollActor : Int -> Int -> Step .
+pollActor me actor = case AC.call me actor Poll of
+    Ok step -> step
+  | Err why -> Step "" Nil False (endedHow why).
+
+tellActor : Int -> PG.ToProgram Int -> Unit .
+tellActor actor x = if actor <= 0 then Unit else _ = send actor (0, 0, Tell x); Unit.
+
+stopActor : Int -> Int -> String .
+stopActor me actor = if actor <= 0 then "" else case AC.call me actor Stop of
+    Ok (Step text said running how) -> text
+  | Err why -> "".
+
 taken pid = case Sys.takeConsole pid of Ok text -> text | Err why -> "".
 # the end, from the root actor's death: a return, a trap, a kill
 endedHow why = if why == "dead actor" then "finished"
   else if strlen why > 12 and substr why 0 12 == "dead actor: " then substr why 12 (strlen why - 12)
   else why.
+

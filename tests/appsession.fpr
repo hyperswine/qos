@@ -23,9 +23,11 @@ ticks n m = (next, cmds) = ED.update AW.Tick m; if n == 1 then (next, cmds) else
 appMain : unsafe Int -> Unit .
 appMain me = C.run me.
 silent me = _ = receive me; _ = Sys.sleepUs 3000000; Unit.
-# a hosted program's stand-in: whatever the Editor tells it goes back to the test
+# a hosted program's stand-in: whatever the Editor tells its process actor goes back to the test
 standIn : unsafe Int -> Int -> Unit .
-standIn parent me = x = receive me; _ = send parent x; _ = drop x; standIn parent me.
+standIn parent me = case receive me of
+    (from, id, RP.Tell x) -> _ = send parent x; standIn parent me
+  | other -> _ = drop other; standIn parent me.
 adopt parent me =
   app = spawn C.run;
   _ = AC.callWithin 500 me app (AW.magic, AW, (7, (800, 480), (0, 0)));
@@ -225,7 +227,7 @@ main =
   _ = check "program listings" (ED.allowedPrefix "/home" and ED.allowedPrefix "/home/notes" and not (ED.allowedPrefix "/")
     and not (ED.allowedPrefix "/home/..") and not (ED.allowedPrefix "/tmp"));
   stand = spawn (standIn me);
-  hosting = {e9 | running = True, appRun = True, progFocus = True, proc = (stand, 7)};
+  hosting = {e9 | running = True, appRun = True, progFocus = True, proc = stand};
   (h1, hc1) = ED.heard [PG.Frame ["n 1", "ok"], PG.Ask 3 (PG.ReadReq "/home/x.txt"), PG.Ask 4 (PG.WriteReq "/home/.editor/session" "x")] hosting Nil;
   _ = check "program frame shown, a /home ask is a job" (h1.progView == ["n 1", "ok"] and (case hc1 of AW.Fetch tok (AW.ReadPath p) :: Nil -> p == "/home/x.txt" | other -> False));
   _ = check "program refused at once" (case receiveFromRes me stand of Ok (PG.Answer 4 (PG.Failed why)) -> strIndexOf "under /home only" why >= 0 | other -> False);
