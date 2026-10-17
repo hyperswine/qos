@@ -55,7 +55,7 @@ init = ({buf = E.empty, path = "", version = 0, savedVersion = 0, nextStamp = 1,
          mode = 0, query = "", files = Nil, listed = False, pick = 0, findText = "", msg = "", warn = False,
          out = Nil, outOpen = False, confirm = 0, pending = [{token = 1, kind = kRestore, version = 0, path = sessionPath, wrapped = False}],
          diags = Nil, checking = False, checker = True, checkedVersion = 0 - 1,
-         outBack = 0, token = 1, building = False, running = False, proc = RP.idle Unit, partial = "", appRun = False, progView = Nil, progFocus = False, busy = False, phase = AW.Ready, w = 960, h = 530, focused = True,
+         outBack = 0, token = 1, building = False, running = False, proc = (0, 0), partial = "", appRun = False, progView = Nil, progFocus = False, busy = False, phase = AW.Ready, w = 960, h = 530, focused = True,
          down = False, capture = 0 - 1, wheel = 0, scroll = 0, dragY = 0, dragScroll = 0, dragged = False},
         [AW.Fetch 1 (AW.ReadPath sessionPath)]).
 
@@ -382,9 +382,9 @@ launch qa m = budget = runBudget (Sys.memTotal Unit);
   case started of
     Err why -> failRun why m
   | Ok proc ->
-      (pid, held) = RP.pidOf proc;
+      RP.Proc root pid = proc;
       _ = print "editor: run {name m}: started";
-      {m | building = False, running = True, proc = held, partial = "", progFocus = m.appRun,
+      {m | building = False, running = True, proc = (root, pid), partial = "", progFocus = m.appRun,
       out = say m.out ["run {name m}: started as process {pid}, with {budget / 1048576} MiB -- ^R stops it"],
       msg = "Running {name m} -- ^R stops it", warn = False}.
 # A run may take a quarter of the machine's memory (the host says how much:
@@ -395,8 +395,12 @@ failRun why m = _ = print "editor: run {name m}: {why}";
   {m | building = False, appRun = False, outBack = 0, out = say m.out ["run {name m}: {why}"], outOpen = True, msg = "Run failed: {why}", warn = True}.
 # a tick: what it printed since, what an app sent (its frames, its asks),
 # and whether it has ended
-poll m = if not m.running then (m, Nil) else case RP.poll (myself 0) m.proc of
-    (text, said, RP.Running proc) -> heard said (printed text {m | proc = proc}) Nil
+poll m = if not m.running then (m, Nil) else
+  (root, pid) = m.proc;
+  case RP.poll (myself 0) (RP.Proc root pid) of
+    (text, said, RP.Running proc) ->
+      RP.Proc r2 p2 = proc;
+      heard said (printed text {m | proc = (r2, p2)}) Nil
   | (text, said, RP.Ended how) -> (ended text how m, Nil).
 heard Nil m cmds = (m, cmds).
 heard (x :: rest) m cmds = case x of
@@ -429,14 +433,18 @@ answered p result m = if not m.running then m else
     | Err why -> PG.Failed why);
   tellProg (PG.Answer p.version reply) m.
 tellProg x m = if not m.running then m else
-  (sent, proc) = RP.tell m.proc x;
-  {m | proc = proc}.
+  (root, pid) = m.proc;
+  (sent, proc) = RP.tell (RP.Proc root pid) x;
+  RP.Proc r2 p2 = proc;
+  {m | proc = (r2, p2)}.
 appKeys m = m.running and m.appRun and m.progFocus and m.mode == 0.
 appShown m = m.appRun and (m.running or m.building).
 # the panel an app draws in, in characters (the font's average width)
 progCols m = g = geo m; E.imax 10 ((g.contentW - 2 * g.gap) * 10 / (E.imax 1 (g.em * 6))).
 progRows m = 11.
-stopProgram m = if not m.running then "" else RP.stop m.proc.
+stopProgram m = if not m.running then "" else
+  (root, pid) = m.proc;
+  RP.stop (RP.Proc root pid).
 # whole lines into the panel; a line still being written waits for its end
 printed text m = if strlen text == 0 then m else
   lines = E.splitLines (strcat m.partial text);
@@ -450,7 +458,7 @@ ended text how m =
   kept = (if how == "finished" then dropUnit shown else shown);
   # its asks still with the worker are forgotten: an answer for this program
   # must never reach the next one
-  {m | running = False, proc = RP.idle Unit, partial = "", outOpen = True, outBack = 0, appRun = False, progView = Nil, progFocus = False,
+  {m | running = False, proc = (0, 0), partial = "", outOpen = True, outBack = 0, appRun = False, progView = Nil, progFocus = False,
     pending = filterS (fn p -> p.kind != kAsk) m.pending,
     out = say m.out (E.append kept ["run {name m}: {how}"]),
     msg = (if how == "finished" or how == "stopped" then "{name m}: {how}" else "{name m} failed: {how}"),

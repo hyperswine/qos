@@ -225,7 +225,7 @@ main =
   _ = check "program listings" (ED.allowedPrefix "/home" and ED.allowedPrefix "/home/notes" and not (ED.allowedPrefix "/")
     and not (ED.allowedPrefix "/home/..") and not (ED.allowedPrefix "/tmp"));
   stand = spawn (standIn me);
-  hosting = {e9 | running = True, appRun = True, progFocus = True, proc = RP.Proc stand 7};
+  hosting = {e9 | running = True, appRun = True, progFocus = True, proc = (stand, 7)};
   (h1, hc1) = ED.heard [PG.Frame ["n 1", "ok"], PG.Ask 3 (PG.ReadReq "/home/x.txt"), PG.Ask 4 (PG.WriteReq "/home/.editor/session" "x")] hosting Nil;
   _ = check "program frame shown, a /home ask is a job" (h1.progView == ["n 1", "ok"] and (case hc1 of AW.Fetch tok (AW.ReadPath p) :: Nil -> p == "/home/x.txt" | other -> False));
   _ = check "program refused at once" (case receiveFromRes me stand of Ok (PG.Answer 4 (PG.Failed why)) -> strIndexOf "under /home only" why >= 0 | other -> False);
