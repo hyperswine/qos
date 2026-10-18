@@ -1,0 +1,484 @@
+{
+  "format": 1,
+  "observed_utc": "2026-10-18T05:09:18.918033+00:00",
+  "fprisc_revision": "66b79999328387c66f253a5be522ba748bd48ebe",
+  "qos_application_revision": "8eabf737b970a020a6577cf5629cfb35d80b71c0",
+  "disk_updater_revision": "cc2d706bf3e8eb8dc5f73ac0312ba46489ddaa5c",
+  "portable_abi": 22,
+  "codegen_revision": 48,
+  "build": {
+    "platform": "native AArch64 Ubuntu 24.04",
+    "ghc": "9.4.7",
+    "gcc": "13.3.0",
+    "rv64_cc": "riscv64-linux-gnu-gcc"
+  },
+  "checks": {
+    "disk_updater": 20,
+    "deployment_helper": 9,
+    "health_sampler": 7
+  },
+  "boards": {
+    "pi": {
+      "address": "192.168.0.233",
+      "installed": {
+        "arch": "aarch64",
+        "compiler_state": "running pid=24199 restarts=0",
+        "configuration_preserved": true,
+        "disk_upgrade": {
+          "apps": [
+            "clock",
+            "logs",
+            "browser",
+            "disk",
+            "terminal",
+            "editor"
+          ],
+          "new_generation": 13,
+          "new_head": 2527,
+          "old_apps": [
+            "clock",
+            "logs",
+            "browser",
+            "disk",
+            "terminal",
+            "editor"
+          ],
+          "old_generation": 11,
+          "old_head": 6383,
+          "preserved_records": 25,
+          "reclaimed_app_records": 25
+        },
+        "fprisc_revision": "66b79999328387c66f253a5be522ba748bd48ebe",
+        "graphics_markers": [
+          "[gfx] scanout: /dev/dri/card1 1024x600 (frame fullscreen)",
+          "[host] [gfx] scanout: /dev/dri/card1 1024x600 (frame fullscreen)",
+          "[gfx] EGL 1.4 (surfaceless)  V3D 4.2.14 / OpenGL ES 3.1 Mesa 24.0.9",
+          "[host] [gfx] EGL 1.4 (surfaceless)  V3D 4.2.14 / OpenGL ES 3.1 Mesa 24.0.9"
+        ],
+        "health": {
+          "boundary": "passive installed Main/compiler observation",
+          "clock_ticks_per_second": 100,
+          "cpu_percent_of_one_core": {
+            "mean_over_interval": 6.766339067146612,
+            "peak_sample_interval": 7.019057377074937
+          },
+          "cpu_scale": "100 percent is one fully occupied CPU core",
+          "elapsed_seconds": 60.00290496397065,
+          "frequency_khz": {
+            "max": 600000,
+            "min": 600000
+          },
+          "identities": {
+            "compiler": {
+              "pid": 24199,
+              "starttime_ticks": 33393440,
+              "state": "running pid=24199 restarts=0"
+            },
+            "main": {
+              "pid": 24571,
+              "starttime_ticks": 33394422,
+              "state": "running pid=24571 restarts=0"
+            }
+          },
+          "limitation": "A short observation does not establish long-term memory stability.",
+          "output_directory": "/tmp/qos-allocation-20261018/install-20261018T050418Z/health",
+          "passed": true,
+          "pss_kib": {
+            "change": 705,
+            "first": 69840,
+            "last": 70545,
+            "max": 70545,
+            "min": 69840
+          },
+          "raw_samples_retained_on_pi": "/tmp/qos-allocation-20261018/install-20261018T050418Z/health/samples.jsonl",
+          "requested_seconds": 60.0,
+          "rss_kib": {
+            "change": 704,
+            "first": 71368,
+            "last": 72072,
+            "max": 72072,
+            "min": 71368
+          },
+          "samples": 13,
+          "temperature_c": {
+            "max": 53.069,
+            "min": 51.608
+          }
+        },
+        "installed_sha256": {
+          "/usr/bin/qosp": "6e578eade3674a9bd7cdfb57a1f06a7c0b160f0f463cbc39e9b1bd579d5dce3a",
+          "/usr/share/qosp/Main.disk": "1e5cfe488456754a8d96d363830c610da23c327b75dc818e078376cf80f1a100",
+          "/usr/share/qosp/app.qa": "ab6b70e65f816a969851b5cbb0cd57356beaf6fa6f73ed32a8998d6ad9f62158",
+          "/usr/share/qosp/compiler-sdk.tar.gz": "151ca1d9b27c276310bc6a270f6c4122c3937d15e5a2fdfc1ae25b9b07c438a9"
+        },
+        "normal_writable_disk": "/var/lib/qosp/Main.disk",
+        "passed": true,
+        "qos_revision": "8eabf737b970a020a6577cf5629cfb35d80b71c0",
+        "renderer": "V3D",
+        "rollback": "/var/lib/qosp/deployment-allocation-20261018T050418Z/rollback.sh",
+        "rollback_sha256": "e96acc14e895c3eccdea6cb534228a74aa7fc78e18e5fef0848bbe4308e4c5aa",
+        "state": "running pid=24571 restarts=0"
+      },
+      "bundle": {
+        "abi": 22,
+        "apps": [
+          "clock",
+          "logs",
+          "browser",
+          "disk",
+          "terminal",
+          "editor"
+        ],
+        "arch": "aarch64",
+        "codegen_rev": 48,
+        "files": {
+          "Main.disk": "1e5cfe488456754a8d96d363830c610da23c327b75dc818e078376cf80f1a100",
+          "browser.qa": "4e814cc3cc236fc81ce91c619fb878dab13f7590199a62743a5e1f19e18476e0",
+          "clock.qa": "7a8a571bae1857ca5aae4b1386b4781f325b47d715a68d04f75af201e56f7f8b",
+          "disk.qa": "bf0cf1acbf5f5e610993ba90538ad1d0772f672fc9acaa519f1d10790057338f",
+          "editor.qa": "2672a4223a431b90351614a0d4ba876150febfa7cc5a560aef1740d88d39eeb0",
+          "logs.qa": "fc8e3037f76e9da52a622de092d7cb37f59747faabe00bfadebc49d2789b104f",
+          "main.qa": "ab6b70e65f816a969851b5cbb0cd57356beaf6fa6f73ed32a8998d6ad9f62158",
+          "qosp-es": "6e578eade3674a9bd7cdfb57a1f06a7c0b160f0f463cbc39e9b1bd579d5dce3a",
+          "runner": "a26d3454c49d3ba89876b52d24b38ca017f6afee6260621b50d36a5142ba498b",
+          "terminal.qa": "23b564217166992949370c818a4deda278e874b03f66e7a554a640e9afbc9334"
+        },
+        "fprisc_revision": "66b79999328387c66f253a5be522ba748bd48ebe",
+        "production": true,
+        "qos_revision": "8eabf737b970a020a6577cf5629cfb35d80b71c0"
+      },
+      "optimization_checks": {
+        "budgets": {
+          "class-cost": {
+            "alloc_bytes": 349648,
+            "alloc_requests": 6953,
+            "copies": 0,
+            "copy_bytes": 0,
+            "message_slabs": 0
+          },
+          "prefix-cost": {
+            "alloc_bytes": 0,
+            "alloc_requests": 0,
+            "copies": 0,
+            "copy_bytes": 0,
+            "message_slabs": 0
+          },
+          "stage-cost": {
+            "alloc_bytes": 394224,
+            "alloc_requests": 7468,
+            "copies": 0,
+            "copy_bytes": 0,
+            "message_slabs": 0
+          },
+          "tree-cost": {
+            "alloc_bytes": 1581488,
+            "alloc_requests": 31607,
+            "copies": 0,
+            "copy_bytes": 0,
+            "message_slabs": 0
+          }
+        },
+        "passed": true,
+        "view_bytes": [
+          {
+            "bytes": 125308,
+            "sha256": "9119d98d67cab660377e5ac554473a30a10620a7866d326b907a600958e799cd",
+            "workers": 1
+          },
+          {
+            "bytes": 125308,
+            "sha256": "9119d98d67cab660377e5ac554473a30a10620a7866d326b907a600958e799cd",
+            "workers": 4
+          }
+        ],
+        "workers": [
+          1,
+          4
+        ]
+      },
+      "preflight": {
+        "passed": true,
+        "boots": [
+          {
+            "boot": 1,
+            "exit": 0,
+            "signal": 0,
+            "seconds": 118.458989,
+            "user_seconds": 13.008388,
+            "system_seconds": 4.951289,
+            "max_rss_kib": 72436,
+            "peak_temp_millic": 53556,
+            "min_cpu_khz": 600000,
+            "max_cpu_khz": 600000,
+            "timeout": false,
+            "stop_requested": false,
+            "killed": false,
+            "cycles": 2,
+            "samples": 2,
+            "rss_first_kib": 71720,
+            "rss_last_kib": 72640,
+            "rss_min_kib": 71720,
+            "rss_max_kib": 72640
+          },
+          {
+            "boot": 2,
+            "exit": 0,
+            "signal": 0,
+            "seconds": 30.064353,
+            "user_seconds": 5.601409,
+            "system_seconds": 1.629347,
+            "max_rss_kib": 68848,
+            "peak_temp_millic": 53556,
+            "min_cpu_khz": 600000,
+            "max_cpu_khz": 600000,
+            "timeout": false,
+            "stop_requested": true,
+            "killed": false
+          }
+        ],
+        "harts": 4,
+        "viewport": "1024x600",
+        "scope": "isolated Main UI workload and two graceful shutdown paths; residency and optional allocator reservations/root counts, not reachability proof"
+      },
+      "retention": {
+        "retained": "/var/lib/qosp/deployment-allocation-20261018T050418Z/verification",
+        "files": 17,
+        "passed": true
+      }
+    },
+    "star64": {
+      "address": "192.168.0.215",
+      "installed": {
+        "arch": "riscv64",
+        "compiler_state": null,
+        "configuration_preserved": true,
+        "disk_upgrade": {
+          "apps": [
+            "clock",
+            "logs",
+            "browser",
+            "disk",
+            "terminal",
+            "editor"
+          ],
+          "new_generation": 6,
+          "new_head": 2319,
+          "old_apps": [
+            "clock",
+            "logs",
+            "browser",
+            "disk"
+          ],
+          "old_generation": 4,
+          "old_head": 1799,
+          "preserved_records": 9,
+          "reclaimed_app_records": 9
+        },
+        "fprisc_revision": "66b79999328387c66f253a5be522ba748bd48ebe",
+        "graphics_markers": [
+          "[gfx] EGL 1.5 (surfaceless)  PowerVR B-Series BXE-4-32 / OpenGL ES 3.2 build 1.17@6210866",
+          "[host] [gfx] EGL 1.5 (surfaceless)  PowerVR B-Series BXE-4-32 / OpenGL ES 3.2 build 1.17@6210866"
+        ],
+        "health": {
+          "boundary": "passive installed Main/compiler observation",
+          "clock_ticks_per_second": 100,
+          "cpu_percent_of_one_core": {
+            "mean_over_interval": 13.365892224591033,
+            "peak_sample_interval": 14.314767014239957
+          },
+          "cpu_scale": "100 percent is one fully occupied CPU core",
+          "elapsed_seconds": 60.003476500016404,
+          "frequency_khz": {
+            "max": 1500000,
+            "min": 625000
+          },
+          "identities": {
+            "main": {
+              "pid": 28343,
+              "starttime_ticks": 21757922,
+              "state": "running pid=28343 restarts=0"
+            }
+          },
+          "limitation": "A short observation does not establish long-term memory stability.",
+          "output_directory": "/tmp/qos-allocation-20261018/install-19700103T122503Z/health",
+          "passed": true,
+          "pss_kib": {
+            "change": 1099,
+            "first": 56016,
+            "last": 57115,
+            "max": 57119,
+            "min": 56016
+          },
+          "raw_samples_retained_on_pi": "/tmp/qos-allocation-20261018/install-19700103T122503Z/health/samples.jsonl",
+          "requested_seconds": 60.0,
+          "rss_kib": {
+            "change": 1204,
+            "first": 57304,
+            "last": 58508,
+            "max": 58508,
+            "min": 57304
+          },
+          "samples": 13,
+          "temperature_c": {
+            "max": 44.959,
+            "min": 40.666
+          }
+        },
+        "installed_sha256": {
+          "/usr/bin/qosp": "3f29267892956bd0e7a64df1f55b7bcad274c917f445a1a966a4511f5ba2bd0e",
+          "/usr/share/qosp/Main.disk": "32b81627aa4cc82cd5b9ad0e3660a0d307df8f0cc2a650ccaeae572a814f933d",
+          "/usr/share/qosp/app.qa": "f70109fa3808fcc79d39782158f0beda8057ea8dd61e3dcdcdb2dbeb8b8c18ed"
+        },
+        "normal_writable_disk": "/var/lib/qosp/Main.disk",
+        "passed": true,
+        "qos_revision": "8eabf737b970a020a6577cf5629cfb35d80b71c0",
+        "renderer": "PowerVR B-Series",
+        "rollback": "/var/lib/qosp/deployment-allocation-19700103T122503Z/rollback.sh",
+        "rollback_sha256": "c07bb07a6b4f4b8a1b61b9d1d8353c59fe3a157654db592e146cf8d9be9cf728",
+        "state": "running pid=28343 restarts=0"
+      },
+      "bundle": {
+        "abi": 22,
+        "apps": [
+          "clock",
+          "logs",
+          "browser",
+          "disk",
+          "terminal",
+          "editor"
+        ],
+        "arch": "riscv64",
+        "codegen_rev": 48,
+        "files": {
+          "Main.disk": "32b81627aa4cc82cd5b9ad0e3660a0d307df8f0cc2a650ccaeae572a814f933d",
+          "browser.qa": "63049f1f2e201612838666aeff7a11582c121f2cb911e90cbbd83556ccc99271",
+          "clock.qa": "965dde565e126ce6d9ed420c8ba5e9322ce010a104a7e150fdbbeb0f4c51b2f9",
+          "disk.qa": "a2eea5d0b2aa1ea43fafc1b4b440183c0be8529bc70b43d375b063ee641cc512",
+          "editor.qa": "b367eddf1f95c645f22ea7ddf3e7dfcdcbfb1e85f897c1a401bda0f607f53a32",
+          "logs.qa": "a3e6f22475fcdabdb2140d51a18cee3d1834554ff13251cf1a94c4927b2d49db",
+          "main.qa": "f70109fa3808fcc79d39782158f0beda8057ea8dd61e3dcdcdb2dbeb8b8c18ed",
+          "qosp-es": "3f29267892956bd0e7a64df1f55b7bcad274c917f445a1a966a4511f5ba2bd0e",
+          "runner": "2c54851a9574ca4ff8e0fe624d822129a75a6dd087059d985575d1bc8282eafe",
+          "terminal.qa": "cd1a74f6b8add7225652ccaac7b3ea82b2ee7c722d33a8f475c08273ec4726a5"
+        },
+        "fprisc_revision": "66b79999328387c66f253a5be522ba748bd48ebe",
+        "production": true,
+        "qos_revision": "8eabf737b970a020a6577cf5629cfb35d80b71c0"
+      },
+      "optimization_checks": {
+        "budgets": {
+          "class-cost": {
+            "alloc_bytes": 349648,
+            "alloc_requests": 6953,
+            "copies": 0,
+            "copy_bytes": 0,
+            "message_slabs": 0
+          },
+          "prefix-cost": {
+            "alloc_bytes": 0,
+            "alloc_requests": 0,
+            "copies": 0,
+            "copy_bytes": 0,
+            "message_slabs": 0
+          },
+          "stage-cost": {
+            "alloc_bytes": 394224,
+            "alloc_requests": 7468,
+            "copies": 0,
+            "copy_bytes": 0,
+            "message_slabs": 0
+          },
+          "tree-cost": {
+            "alloc_bytes": 1581488,
+            "alloc_requests": 31607,
+            "copies": 0,
+            "copy_bytes": 0,
+            "message_slabs": 0
+          }
+        },
+        "passed": true,
+        "view_bytes": [
+          {
+            "bytes": 125308,
+            "sha256": "9119d98d67cab660377e5ac554473a30a10620a7866d326b907a600958e799cd",
+            "workers": 1
+          },
+          {
+            "bytes": 125308,
+            "sha256": "9119d98d67cab660377e5ac554473a30a10620a7866d326b907a600958e799cd",
+            "workers": 4
+          }
+        ],
+        "workers": [
+          1,
+          4
+        ]
+      },
+      "preflight": {
+        "passed": true,
+        "boots": [
+          {
+            "boot": 1,
+            "exit": 0,
+            "signal": 0,
+            "seconds": 74.387241,
+            "user_seconds": 14.426483,
+            "system_seconds": 1.739363,
+            "max_rss_kib": 61904,
+            "peak_temp_millic": 41710,
+            "min_cpu_khz": 375000,
+            "max_cpu_khz": 1500000,
+            "timeout": false,
+            "stop_requested": false,
+            "killed": false,
+            "cycles": 1,
+            "samples": 1,
+            "rss_first_kib": 61576,
+            "rss_last_kib": 61576,
+            "rss_min_kib": 61576,
+            "rss_max_kib": 61576
+          },
+          {
+            "boot": 2,
+            "exit": 0,
+            "signal": 0,
+            "seconds": 30.111981,
+            "user_seconds": 8.290442,
+            "system_seconds": 0.873245,
+            "max_rss_kib": 58004,
+            "peak_temp_millic": 42000,
+            "min_cpu_khz": 375000,
+            "max_cpu_khz": 1500000,
+            "timeout": false,
+            "stop_requested": true,
+            "killed": false
+          }
+        ],
+        "harts": 4,
+        "viewport": "1280x800",
+        "scope": "isolated Main UI workload and two graceful shutdown paths; residency and optional allocator reservations/root counts, not reachability proof"
+      },
+      "retention": {
+        "retained": "/var/lib/qosp/deployment-allocation-19700103T122503Z/verification",
+        "files": 14,
+        "passed": true
+      }
+    }
+  },
+  "pi_native_sdk_selftest": {
+    "check": "ok",
+    "plugin": "QAR2",
+    "plugin_bytes": 203386,
+    "compiler_sha256": "ccdb1c16ec0a78965a68f55de1785e6c270d554bf9fe34fd2ec6873460ec3ea2",
+    "publication": "committed-frozen-stable-updated",
+    "publication_version": "v1.1",
+    "invalid_source": "refused",
+    "target": "native-aarch64"
+  },
+  "initial_pi_preflight": {
+    "timeout": true,
+    "seconds": 120.067053,
+    "worker_stop_warnings": 8,
+    "followup": "Longer harness bound, matching candidate compiler and app-job settling; no production deadline change."
+  }
+}
