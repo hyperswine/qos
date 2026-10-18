@@ -1,0 +1,461 @@
+{
+  "format": 1,
+  "observed_utc": "2026-10-18T09:46:01.707134+00:00",
+  "fprisc_revision": "2ce2f5a48f4490fdce0d641b32b97d364d0cb590",
+  "qos_application_revision": "cd83f0a6022db591527d0bb685fc5db7b9da8637",
+  "portable_abi": 22,
+  "codegen_revision": 49,
+  "build": {
+    "platform": "native ARM64 Ubuntu 24.04",
+    "ghc": "9.4.7",
+    "gcc": "13.3.0",
+    "rv64_cc": "riscv64-linux-gnu-gcc",
+    "source": "clean committed Git exports"
+  },
+  "checks": {
+    "dependency_pins": 245,
+    "qos_smoke": "16/16",
+    "deployment_helper": 9,
+    "health_sampler": 7,
+    "disk_updater": 20,
+    "compiler_workers": "PASS"
+  },
+  "boards": {
+    "pi": {
+      "address": "192.168.0.233",
+      "installed": {
+        "arch": "aarch64",
+        "compiler_state": "running pid=7289 restarts=0",
+        "configuration_preserved": true,
+        "disk_upgrade": {
+          "apps": [
+            "clock",
+            "logs",
+            "browser",
+            "disk",
+            "terminal",
+            "editor"
+          ],
+          "new_generation": 15,
+          "new_head": 2527,
+          "old_apps": [
+            "clock",
+            "logs",
+            "browser",
+            "disk",
+            "terminal",
+            "editor"
+          ],
+          "old_generation": 13,
+          "old_head": 2527,
+          "preserved_records": 7,
+          "reclaimed_app_records": 7
+        },
+        "fprisc_revision": "2ce2f5a48f4490fdce0d641b32b97d364d0cb590",
+        "graphics_markers": [
+          "[gfx] scanout: /dev/dri/card1 1024x600 (frame fullscreen)",
+          "[host] [gfx] scanout: /dev/dri/card1 1024x600 (frame fullscreen)",
+          "[gfx] EGL 1.4 (surfaceless)  V3D 4.2.14 / OpenGL ES 3.1 Mesa 24.0.9",
+          "[host] [gfx] EGL 1.4 (surfaceless)  V3D 4.2.14 / OpenGL ES 3.1 Mesa 24.0.9"
+        ],
+        "health": {
+          "boundary": "passive installed Main/compiler observation",
+          "clock_ticks_per_second": 100,
+          "cpu_percent_of_one_core": {
+            "mean_over_interval": 6.716344518319451,
+            "peak_sample_interval": 7.019249860446079
+          },
+          "cpu_scale": "100 percent is one fully occupied CPU core",
+          "elapsed_seconds": 60.00287789001595,
+          "frequency_khz": {
+            "max": 600000,
+            "min": 600000
+          },
+          "identities": {
+            "compiler": {
+              "pid": 7289,
+              "starttime_ticks": 35035751,
+              "state": "running pid=7289 restarts=0"
+            },
+            "main": {
+              "pid": 7660,
+              "starttime_ticks": 35036734,
+              "state": "running pid=7660 restarts=0"
+            }
+          },
+          "limitation": "A short observation does not establish long-term memory stability.",
+          "output_directory": "/tmp/qos-workers-20261018/install-20261018T093826Z/health",
+          "passed": true,
+          "pss_kib": {
+            "change": 639,
+            "first": 69916,
+            "last": 70555,
+            "max": 70556,
+            "min": 69916
+          },
+          "raw_samples_retained_on_pi": "/tmp/qos-workers-20261018/install-20261018T093826Z/health/samples.jsonl",
+          "requested_seconds": 60.0,
+          "rss_kib": {
+            "change": 640,
+            "first": 71420,
+            "last": 72060,
+            "max": 72060,
+            "min": 71420
+          },
+          "samples": 13,
+          "temperature_c": {
+            "max": 54.53,
+            "min": 52.582
+          }
+        },
+        "installed_sha256": {
+          "/usr/bin/qosp": "4a06e46dce31f4e1ce1fb90c70b73bcac5b82de9c815ad2754416f421b4a9af7",
+          "/usr/share/qosp/Main.disk": "ee004045911f23377518019126478ae90e3b339c0f0b6fdd337cee7411807d4d",
+          "/usr/share/qosp/app.qa": "43e4d2229349fbd8df8523789a71000fcd0650d1cded1608b3d64ce0ad7379e3",
+          "/usr/share/qosp/compiler-sdk.tar.gz": "2aa03c83c41c0a1b17d6a8878057435ee059e72ee4129e1f31c1466655460bf0"
+        },
+        "normal_writable_disk": "/var/lib/qosp/Main.disk",
+        "passed": true,
+        "qos_revision": "cd83f0a6022db591527d0bb685fc5db7b9da8637",
+        "renderer": "V3D",
+        "rollback": "/var/lib/qosp/deployment-workers-20261018T093826Z/rollback.sh",
+        "rollback_sha256": "b351494b1cd0173e602d261ebf4c3451c9d9be82c255b36cc0d1758358560408",
+        "state": "running pid=7660 restarts=0"
+      },
+      "bundle": {
+        "abi": 22,
+        "apps": [
+          "clock",
+          "logs",
+          "browser",
+          "disk",
+          "terminal",
+          "editor"
+        ],
+        "arch": "aarch64",
+        "codegen_rev": 49,
+        "files": {
+          "Main.disk": "ee004045911f23377518019126478ae90e3b339c0f0b6fdd337cee7411807d4d",
+          "browser.qa": "2ac3a71d99aae0ca572f27c709b380053fdf2daf61963645f28a6eb778f2f8f8",
+          "clock.qa": "30e836888b4ce4739138008b7040d5e63c5c9fc5bf4b8adb430fbc8bb499285d",
+          "disk.qa": "1a55e5c918e2252d1183399da302d48c90569c591b602cc277bbc4593919be2d",
+          "editor.qa": "5361f4d6c632dd971e3e926c93d595ee38aceebc45e227bf4a7f49e97d92e547",
+          "logs.qa": "6774218c436fef213be555a24a375084650a11bf0c579e62088fff03eac0ad7e",
+          "main.qa": "43e4d2229349fbd8df8523789a71000fcd0650d1cded1608b3d64ce0ad7379e3",
+          "qosp-es": "4a06e46dce31f4e1ce1fb90c70b73bcac5b82de9c815ad2754416f421b4a9af7",
+          "runner": "a26d3454c49d3ba89876b52d24b38ca017f6afee6260621b50d36a5142ba498b",
+          "terminal.qa": "3c67b47f63f427b804169a58ef5aed142230718c2b32288228747c7a2486273a"
+        },
+        "fprisc_revision": "2ce2f5a48f4490fdce0d641b32b97d364d0cb590",
+        "production": true,
+        "qos_revision": "cd83f0a6022db591527d0bb685fc5db7b9da8637"
+      },
+      "retention": {
+        "retained": "/var/lib/qosp/deployment-workers-20261018T093826Z/verification",
+        "files": 16,
+        "passed": true
+      },
+      "preflight": {
+        "passed": true,
+        "boots": [
+          {
+            "boot": 1,
+            "exit": 0,
+            "signal": 0,
+            "seconds": 116.848155,
+            "user_seconds": 12.886894,
+            "system_seconds": 4.703214,
+            "max_rss_kib": 71452,
+            "peak_temp_millic": 55504,
+            "min_cpu_khz": 600000,
+            "max_cpu_khz": 600000,
+            "timeout": false,
+            "stop_requested": false,
+            "killed": false,
+            "cycles": 2,
+            "samples": 2,
+            "rss_first_kib": 71248,
+            "rss_last_kib": 71640,
+            "rss_min_kib": 71248,
+            "rss_max_kib": 71640
+          },
+          {
+            "boot": 2,
+            "exit": 0,
+            "signal": 0,
+            "seconds": 30.077802,
+            "user_seconds": 5.630645,
+            "system_seconds": 1.589121,
+            "max_rss_kib": 68996,
+            "peak_temp_millic": 55504,
+            "min_cpu_khz": 600000,
+            "max_cpu_khz": 600000,
+            "timeout": false,
+            "stop_requested": true,
+            "killed": false
+          }
+        ],
+        "harts": 4,
+        "viewport": "1024x600",
+        "scope": "isolated Main UI workload and two graceful shutdown paths; residency and optional allocator reservations/root counts, not reachability proof"
+      },
+      "preflight_logs": {
+        "boot1.log": {
+          "sha256": "1b376390271ce5d1439e95a76546d030f3ee66e4459f0af622b664c0e1b05cec",
+          "renderer": [
+            "[gfx] EGL 1.4 (surfaceless)  V3D 4.2.14 / OpenGL ES 3.1 Mesa 24.0.9",
+            "[host] [gfx] EGL 1.4 (surfaceless)  V3D 4.2.14 / OpenGL ES 3.1 Mesa 24.0.9"
+          ]
+        },
+        "boot2.log": {
+          "sha256": "d034d3480ef4ee211935d8ce40153220196ad1ec4b7922101019a1e6873374ba",
+          "renderer": [
+            "[gfx] EGL 1.4 (surfaceless)  V3D 4.2.14 / OpenGL ES 3.1 Mesa 24.0.9",
+            "[host] [gfx] EGL 1.4 (surfaceless)  V3D 4.2.14 / OpenGL ES 3.1 Mesa 24.0.9"
+          ]
+        }
+      },
+      "worker_selection": [
+        {
+          "assembly": "plugin-editor/units/u-2bac0a80d3db-pa5a8a113-s83952031-g49rt3pc5-c7f3923cc5be5-qa64r12.s",
+          "fields": 0,
+          "scalar": 1,
+          "names": [
+            "$worker.scalar.digitsOf@2bac0a80d3db8d60"
+          ]
+        }
+      ],
+      "private_staging_removed": true,
+      "cleanup_verification": "/usr/bin/qosp: OK\n/usr/share/qosp/app.qa: OK\n/usr/share/qosp/Main.disk: OK\noriginal.tar.gz: OK\n/usr/bin/qosp: OK\n/usr/share/qosp/app.qa: OK\n/usr/share/qosp/Main.disk: OK\nrunning pid=7660 restarts=0\nFilesystem           1K-blocks      Used Available Use% Mounted on\n/dev/root               499284    403680     58908  87% /\ntmpfs                  3998000    226952   3771048   6% /tmp\nPRIVATE_STAGING_REMOVED"
+    },
+    "star64": {
+      "address": "192.168.0.215",
+      "installed": {
+        "arch": "riscv64",
+        "compiler_state": null,
+        "configuration_preserved": true,
+        "disk_upgrade": {
+          "apps": [
+            "clock",
+            "logs",
+            "browser",
+            "disk",
+            "terminal",
+            "editor"
+          ],
+          "new_generation": 8,
+          "new_head": 2319,
+          "old_apps": [
+            "clock",
+            "logs",
+            "browser",
+            "disk",
+            "terminal",
+            "editor"
+          ],
+          "old_generation": 6,
+          "old_head": 2319,
+          "preserved_records": 7,
+          "reclaimed_app_records": 7
+        },
+        "fprisc_revision": "2ce2f5a48f4490fdce0d641b32b97d364d0cb590",
+        "graphics_markers": [
+          "[gfx] EGL 1.5 (surfaceless)  PowerVR B-Series BXE-4-32 / OpenGL ES 3.2 build 1.17@6210866",
+          "[host] [gfx] EGL 1.5 (surfaceless)  PowerVR B-Series BXE-4-32 / OpenGL ES 3.2 build 1.17@6210866"
+        ],
+        "health": {
+          "boundary": "passive installed Main/compiler observation",
+          "clock_ticks_per_second": 100,
+          "cpu_percent_of_one_core": {
+            "mean_over_interval": 13.765877365672681,
+            "peak_sample_interval": 14.315398855844732
+          },
+          "cpu_scale": "100 percent is one fully occupied CPU core",
+          "elapsed_seconds": 60.00344025000231,
+          "frequency_khz": {
+            "max": 1500000,
+            "min": 750000
+          },
+          "identities": {
+            "main": {
+              "pid": 32320,
+              "starttime_ticks": 23461525,
+              "state": "running pid=32320 restarts=0"
+            }
+          },
+          "limitation": "A short observation does not establish long-term memory stability.",
+          "output_directory": "/tmp/qos-workers-20261018/install-19700103T170853Z/health",
+          "passed": true,
+          "pss_kib": {
+            "change": 1196,
+            "first": 55815,
+            "last": 57011,
+            "max": 57014,
+            "min": 55815
+          },
+          "raw_samples_retained_on_pi": "/tmp/qos-workers-20261018/install-19700103T170853Z/health/samples.jsonl",
+          "requested_seconds": 60.0,
+          "rss_kib": {
+            "change": 1252,
+            "first": 57172,
+            "last": 58424,
+            "max": 58424,
+            "min": 57172
+          },
+          "samples": 13,
+          "temperature_c": {
+            "max": 45.597,
+            "min": 41.188
+          }
+        },
+        "installed_sha256": {
+          "/usr/bin/qosp": "d1254e7e8547b8c005033c98e4cba59ddf2ca2991d449e26442b55d271ac450c",
+          "/usr/share/qosp/Main.disk": "eeae68c3bd88b603ad1e2d2a635d47664edb227b91ffb1e004a165e43a38c34b",
+          "/usr/share/qosp/app.qa": "eda4375eb7d0d6b5ea4170648938164e6fca419859c72a2408549457c6067564"
+        },
+        "normal_writable_disk": "/var/lib/qosp/Main.disk",
+        "passed": true,
+        "qos_revision": "cd83f0a6022db591527d0bb685fc5db7b9da8637",
+        "renderer": "PowerVR B-Series",
+        "rollback": "/var/lib/qosp/deployment-workers-19700103T170853Z/rollback.sh",
+        "rollback_sha256": "302ec125d13e976ca8f22650035622e3acfea506e1f6f9d1234033768a312f04",
+        "state": "running pid=32320 restarts=0"
+      },
+      "bundle": {
+        "abi": 22,
+        "apps": [
+          "clock",
+          "logs",
+          "browser",
+          "disk",
+          "terminal",
+          "editor"
+        ],
+        "arch": "riscv64",
+        "codegen_rev": 49,
+        "files": {
+          "Main.disk": "eeae68c3bd88b603ad1e2d2a635d47664edb227b91ffb1e004a165e43a38c34b",
+          "browser.qa": "e77429543282b6e3853b139c09c640b9e51ef54b5d3890a1962dfbb5bc09bea6",
+          "clock.qa": "7c5efbd15efcf66a0c430a23894a2f69203790ed86f309221abf0d2ec53e2e92",
+          "disk.qa": "6c87b50c5477ddc4bc505bfb8b7a34a811d9f8b68013ca8db426f0ccf68bc6ab",
+          "editor.qa": "42cc8382e59e428ec97299d986ef79e80162a60b62f18ab7d6bcd09843d4cd4f",
+          "logs.qa": "628bd85b3100f873c2f2d56de431847938bd39d37b8a7f6e720c0800065e20aa",
+          "main.qa": "eda4375eb7d0d6b5ea4170648938164e6fca419859c72a2408549457c6067564",
+          "qosp-es": "d1254e7e8547b8c005033c98e4cba59ddf2ca2991d449e26442b55d271ac450c",
+          "runner": "2c54851a9574ca4ff8e0fe624d822129a75a6dd087059d985575d1bc8282eafe",
+          "terminal.qa": "46987925bae6059feae49dc217c4eb6ec22c72baa895d44b6695fb09284e5806"
+        },
+        "fprisc_revision": "2ce2f5a48f4490fdce0d641b32b97d364d0cb590",
+        "production": true,
+        "qos_revision": "cd83f0a6022db591527d0bb685fc5db7b9da8637"
+      },
+      "retention": {
+        "retained": "/var/lib/qosp/deployment-workers-19700103T170853Z/verification",
+        "files": 15,
+        "passed": true
+      },
+      "preflight": {
+        "passed": true,
+        "boots": [
+          {
+            "boot": 1,
+            "exit": 0,
+            "signal": 0,
+            "seconds": 67.513583,
+            "user_seconds": 13.801254,
+            "system_seconds": 1.395267,
+            "max_rss_kib": 60832,
+            "peak_temp_millic": 42755,
+            "min_cpu_khz": 375000,
+            "max_cpu_khz": 1500000,
+            "timeout": false,
+            "stop_requested": false,
+            "killed": false,
+            "cycles": 1,
+            "samples": 1,
+            "rss_first_kib": 60576,
+            "rss_last_kib": 60576,
+            "rss_min_kib": 60576,
+            "rss_max_kib": 60576
+          },
+          {
+            "boot": 2,
+            "exit": 0,
+            "signal": 0,
+            "seconds": 30.080327,
+            "user_seconds": 7.860804,
+            "system_seconds": 0.838485,
+            "max_rss_kib": 57752,
+            "peak_temp_millic": 42697,
+            "min_cpu_khz": 375000,
+            "max_cpu_khz": 1500000,
+            "timeout": false,
+            "stop_requested": true,
+            "killed": false
+          }
+        ],
+        "harts": 4,
+        "viewport": "1280x720",
+        "scope": "isolated Main UI workload and two graceful shutdown paths; residency and optional allocator reservations/root counts, not reachability proof"
+      },
+      "preflight_logs": {
+        "boot1.log": {
+          "sha256": "989d7f83c768bd5785e28ed5f98ed43d25a88f8f549f26ae7a91fa55f5794ca8",
+          "renderer": [
+            "[gfx] EGL 1.5 (surfaceless)  PowerVR B-Series BXE-4-32 / OpenGL ES 3.2 build 1.17@6210866",
+            "[host] [gfx] EGL 1.5 (surfaceless)  PowerVR B-Series BXE-4-32 / OpenGL ES 3.2 build 1.17@6210866"
+          ]
+        },
+        "boot2.log": {
+          "sha256": "9dc838db4af74a6387c322748697b7f66192f1d7713db2ff7f2df6c8b7878715",
+          "renderer": [
+            "[gfx] EGL 1.5 (surfaceless)  PowerVR B-Series BXE-4-32 / OpenGL ES 3.2 build 1.17@6210866",
+            "[host] [gfx] EGL 1.5 (surfaceless)  PowerVR B-Series BXE-4-32 / OpenGL ES 3.2 build 1.17@6210866"
+          ]
+        }
+      },
+      "worker_selection": [
+        {
+          "assembly": "plugin-editor/units/u-2bac0a80d3db-pa5a8a113-s83952031-g49rt3pc5-c7f3923cc5be5-qrv64r3.s",
+          "fields": 0,
+          "scalar": 1,
+          "names": [
+            "$worker.scalar.digitsOf@2bac0a80d3db8d60"
+          ]
+        }
+      ],
+      "private_staging_removed": true,
+      "cleanup_verification": "/usr/bin/qosp: OK\n/usr/share/qosp/app.qa: OK\n/usr/share/qosp/Main.disk: OK\noriginal.tar.gz: OK\n/usr/bin/qosp: OK\n/usr/share/qosp/app.qa: OK\n/usr/share/qosp/Main.disk: OK\nrunning pid=32320 restarts=0\nFilesystem           1K-blocks      Used Available Use% Mounted on\n/dev/root               499284    415016     47572  90% /\ntmpfs                  1980800       312   1980488   0% /tmp\nPRIVATE_STAGING_REMOVED"
+    }
+  },
+  "qos_smoke_output": "[qos] fpr (compiler; no-op when fresh)\n[qos] qosp (portable host; no-op when fresh)\n[qos] qos-app tests/hello.fpr -> .qos/hello.qa\n[qos] ok   hello / qosp\n[qos] qos-app tests/epecho.fpr -> .qos/epecho.qa\n[qos] ok   endpoints\n[qos] qos-app tests/filessvc.fpr -> .qos/filessvc.qa\n[qos] ok   files shared\n[qos] qos-app tests/gfxshare.fpr -> .qos/gfxshare.qa\n[qos] ok   graphics shared\n[qos] qos-app tests/guishell.fpr -> .qos/guishell.qa\n[qos] ok   GUI shell controls\n[qos] qos-app tests/mvutick.fpr -> .qos/mvutick.qa\n[qos] ok   mvu engine\n[qos] qos-app tests/tuiframes.fpr -> .qos/tuiframes.qa\n[qos] ok   display O(1)\n[qos] qos-app tests/qdisk2.fpr -> .qos/qdisk2.qa\n[qos] ok   disk recovery\n[qos] qos-app tests/dtree.fpr -> .qos/dtree.qa\n[qos] ok   dtree == GHC\n[qos] qos-app tests/bigfree.fpr -> .qos/bigfree.qa\n[qos] ok   bigfree\n[qos] qos-app tests/eq.fpr -> .qos/eq.qa\n[qos] ok   equality is deep\n[qos] qos-app tests/dungeon.fpr -> .qos/dungeon.qa\n[qos] ok   dungeon rules\n[qos] ok   fmath / virt\n[qos] ok   autodrop / virt\n[qos] ok   bigframe / virt\n[qos] ok   liveview multi-client\n[qos] smoke: 16/16 in 278s",
+  "sdk_linux_selftest": {
+    "check": "ok",
+    "plugin": "QAR2",
+    "plugin_bytes": 203386,
+    "compiler_sha256": "2d55bba126294634c757c199e4e5a56c32a08e1f21b1faaa474d5c6a7bc7a7a9",
+    "publication": "committed-frozen-stable-updated",
+    "publication_version": "v1.1",
+    "invalid_source": "refused",
+    "target": "native-aarch64"
+  },
+  "sdk_pi_selftest": {
+    "check": "ok",
+    "plugin": "QAR2",
+    "plugin_bytes": 203386,
+    "compiler_sha256": "2d55bba126294634c757c199e4e5a56c32a08e1f21b1faaa474d5c6a7bc7a7a9",
+    "publication": "committed-frozen-stable-updated",
+    "publication_version": "v1.1",
+    "invalid_source": "refused",
+    "target": "native-aarch64"
+  },
+  "deployment_helper_sha256": {
+    "remote-deploy-helper.py": "3652a8105ba191316aedbf3db901d883d51e8dcef19ad5338b22444a8fbfad64",
+    "remote-health.py": "155ccc66cf369018df842dde81d513aa55624a649720906d572468c8998afe9d",
+    "deploy.sh": "79e3a493b9e3d83eebb524977067e71cb2fc591fcf9fce53d04ddf2a915cda00",
+    "final-verify.py": "48cb6986466aa0952fa9d6e44a650583b60a6d1581b7125e38f09cada76df925",
+    "retain.py": "08c4025658fda19de0d70def971771089121c7cf9d9a3d7abb5044b6eb0cd58d",
+    "update-main-disk.py": "ea8a5bba8e91d2782713aa398b8d8755bf64101e551ec532a89a3cfee589eed9",
+    "update-main-disk-check.py": "11565265bb364e0f8ca8e5c54b60bedde93a25a916d8b0a30d89346efa1562e0"
+  }
+}
