@@ -18,6 +18,8 @@
  */
 #include "fpr.h"
 #include "qos_abi.h"
+#define QOS_STORE_ABI_RUNTIME
+#include "../store_abi.h"
 
 /* the TLS BORROW (ABI v2, qos_abi.h): the one plain global the
  * deTlsQosApp* passes and fpr.h's FPR_QOSAPP accessors index the
@@ -380,12 +382,20 @@ static V h_sys_store_req(V tagv, V payv) {
     fpr_cpanic("Sys.storeReq: payload must be a String");
   if (!g_syscall) return fpr_mkresult(1, "no syscall channel (standalone run)");
   str_t *s = (str_t *)payv;
-  int64_t r = g_syscall((uw)UNTAG(tagv), (const char *)s->bytes, s->len,
-                        g_sysout, sizeof g_sysout);
-  if (r == -2) return fpr_mkresult(1, "no disk");
-  if (r == -5) return fpr_mkresult(1, "storage outcome unknown");
-  if (r < 0) return fpr_mkresult(1, "storage error");
-  return fpr_mkresultn(0, g_sysout, (uw)r);
+  /* a reply larger than g_sysout comes back as -6 + its size, and lands
+   * in a String that large (store_abi.h): a big replay is data, not an
+   * "output capacity exceeded" error */
+  str_t *big;
+  sw r = qos_store_call_grow((sw (*)(uw, const char *, uw, char *, uw))g_syscall,
+                             (uw)UNTAG(tagv), (const char *)s->bytes, s->len,
+                             g_sysout, sizeof g_sysout, &big);
+  if (r >= 0) return big ? qos_store_ok_str(big) : fpr_mkresultn(0, g_sysout, (uw)r);
+  const char *why = big ? (const char *)big->bytes : g_sysout;
+  V res = r == -2 ? fpr_mkresult(1, "no disk")
+        : r == -5 ? fpr_mkresult(1, "storage outcome unknown")
+        : fpr_mkresult(1, why[0] ? why : "storage error"); /* the host's reason, as on native */
+  if (big) fpr_free((V)big);
+  return res;
 }
 FPR_FN(fpr_g_Sys_x2estoreReq, h_sys_store_req, 2);
 
