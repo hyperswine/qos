@@ -178,3 +178,44 @@ front end accepts but is still a scan); TTL eviction for handles whose
 dead owners are never followed by another message to that file; the
 `qsys` two-boot script currently fails identically with and without this
 batch (pre-existing, under investigation separately).
+
+## Implemented 2026-10-19: lease retirement race, dead-client slots
+
+Two faults in the 2026-10-18 lease work (`programs/mods/qsys.fpr`):
+
+- **Open/retire race.** A file actor ended itself on its last close while
+  the manager could already be forwarding a new `Open` to it; that open
+  went to a dead actor and the client got no answer (4 harts: 3 of 200
+  cycled opens lost). Retirement is now asked of the manager: an actor
+  that becomes idle sends the manager an idle note (from a one-shot
+  relay actor, so it cannot be mistaken for a reply), and the manager
+  retires it with a synchronous `Timed`/`Close -1` call. The actor
+  agrees (and ends) only if the call comes from its manager, it still
+  holds no lease, and at least a second of the deadline remains; it
+  refuses otherwise and keeps serving. Because the manager is blocked
+  in that call, no `Open` can be in flight to the actor when it ends,
+  and the manager drops the URL from its table before serving anything
+  else.
+- **Slot leak on client death.** Leases whose client died without
+  `Close` were swept only on the next message to that file, so 64 dead
+  holders on 64 files exhausted the budget forever. Sweeping that
+  empties a file now raises the idle note too, and when an `Open` hits
+  the 64-file budget the manager first asks every live actor to
+  retire (`filesReclaim`) before refusing.
+
+Regression: `tests/qsysfail.fpr` legs 12 (64 holders die without
+closing; the 65th open succeeds) and 13 (4 clients x 50
+open/read/close on one file; every read answers and the owner is
+retired afterwards). On the previous code leg 12 fails on 1 and 4 harts
+and leg 13 fails on 4 harts; with this change `qsysfail: HOLDS` on 1
+and 4 harts (Portable, riscv64 Linux host under qemu-user, since the
+x86-64 backend's six-argument limit rejects `qsys.fpr`).
+
+Residual, by design: lease owners are the client keys the client
+*claims* in its message; the actor IPC exposes no authenticated sender
+of a `receive`, so a client can still name another client's key and
+act on its handles. Closing that needs the runtime to expose the
+sender (an fprisc/IPC change), not a qsys change. A forged idle note or
+retire request can at most retire an actor that holds no lease. The
+manager's 2 s deadline against the actor's 1 s margin leaves a
+documented window in which a refused retire is reported as such.
