@@ -99,6 +99,9 @@ jobs:
           done
       - name: portable quickstart (x86-64)
         run: |
+          # qos.py build runs this quietly; build it loudly first so a
+          # failure shows its compiler output in the log
+          make -C qos portable
           ./qos.py build
           ./qos.py run tests/hello.fpr | tee "$RUNNER_TEMP/hello.out"
           grep -q 'fold(1..10)=55' "$RUNNER_TEMP/hello.out"
