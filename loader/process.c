@@ -11,6 +11,7 @@
  * last actor of its process has been reclaimed.
  */
 #include "fpr.h"
+#include "../qos/store_abi.h"
 
 /* set from system.fpr's boot path via a thin wrapper below; keeps
  * buddy_init out of the fully-shared fpr_rt_init (a plain machine boot
@@ -144,7 +145,7 @@ extern V fpr_g_Sys_x2enextId_call1(V);
 sw qos_store_call(uw tag, const char *pay, uw plen, char *out, uw outcap) {
   if (!g_store_actor) return -2; /* no disk */
   if (tag != 2 && tag != 3) return -3;
-  if (plen > 4194304)
+  if (plen > QOS_KV_PAYLOAD_MAX)
     return store_refused("storage: payload too large", out, outcap);
   /* apps/<id>/<id>.kv, where <id> is the CALLING process's own app id */
   fpr_lock(&g_img_lock);
@@ -210,6 +211,16 @@ sw qos_store_call(uw tag, const char *pay, uw plen, char *out, uw outcap) {
     }
     hdr_t *h = (hdr_t *)r;
     str_t *s = (str_t *)FPR_FLD(r, 0);
+    if (h->var == 0 && s->len > outcap) {
+      /* a reply larger than the caller's buffer: name the size it needs
+       * (-6, store_abi.h) instead of truncating it into an Ok */
+      uw need = s->len;
+      fpr_arc_decref(message);
+      if (need > QOS_KV_REPLY_MAX)
+        return store_refused("storage: reply exceeds the " QOS_KV_REPLY_LIMIT_TEXT " limit", out, outcap);
+      sw a = (sw)qos_store_answer_need((unsigned long)need, out, (unsigned long)outcap);
+      return a == QOS_SYS_ENEED ? a : store_refused("storage: reply larger than the buffer", out, outcap);
+    }
     uw cp = s->len < outcap ? s->len : outcap;
     for (uw i = 0; i < cp; i++) out[i] = (char)s->bytes[i];
     if (cp < outcap) out[cp] = 0;

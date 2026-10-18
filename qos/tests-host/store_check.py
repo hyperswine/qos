@@ -150,4 +150,34 @@ p = subprocess.run([str(EXE), 'lock'], cwd=ROOT / 'fresh', capture_output=True,
                    text=True, timeout=5)
 assert p.returncode == 0 and p.stdout == '-1 11\n', (p.stdout, p.stderr)
 print('store: EINTR retry, invalid length/directory refusal, invalid-plugin request unlock: PASS')
+
+# A reply larger than the caller's buffer answers -6 with the size it needs
+# (store_abi.h), so the app side can bring a buffer that large; it is not
+# an error.  The 256 KiB app buffer was the old ceiling: 200 KB, exactly
+# 256 KiB and 300 KB logs.
+for total in (200_000, 256 * 1024, 300_000):
+    folder = ROOT / f'large-{total}'
+    chunk = 64 * 1024
+    pays = [bytes([65 + i % 26]) * min(chunk, total - off) for i, off in enumerate(range(0, total, chunk))]
+    seed(folder, b''.join(map(record, pays)))
+    rc, why, _ = call(folder, 3, cap=1024)
+    assert rc == -6 and why == str(total), (total, rc, why)
+    rc, data, _ = call(folder, 3, cap=total)
+    assert rc == total and data == b''.join(pays), (total, rc)
+    rc, why, _ = call(folder, 3, cap=total - 1)
+    assert rc == -6 and why == str(total), (total, rc, why)
+    want = index(pays)
+    rc, why, _ = call(folder, 5, cap=24)
+    assert rc == -6 and why == str(len(want)), (rc, why)
+    assert call(folder, 5, cap=len(want))[:2] == (len(want), want)
+folder = ROOT / 'large-limit'
+seed(folder, record(b'q' * (16 * 1024 * 1024 + 1)))
+rc, why, _ = call(folder, 3, cap=4096)
+assert rc == -1 and why == 'storage: reply exceeds the 16 MiB limit', (rc, why)
+folder = ROOT / 'large-payload'
+rc, why, _ = call(folder, 2, env={'QOS_STORE_TEST_PAYLOAD_LEN': str(4 * 1024 * 1024 + 1)})
+assert rc == -1 and why == 'storage: payload too large', (rc, why)
+assert not (folder / 'qos-store').exists()
+assert call(folder, 2, env={'QOS_STORE_TEST_PAYLOAD_LEN': str(4 * 1024 * 1024)})[0] == 0
+print('store: replies past the buffer answer -6 + their size (200 KB, 256 KiB, 300 KB), 16 MiB reply and 4 MiB record limits: PASS')
 print('store-check: PASS (fresh processes and injected faults; physical power cuts untested)')

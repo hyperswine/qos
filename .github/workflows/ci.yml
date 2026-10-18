@@ -1,0 +1,149 @@
+# CI for QOS: what runs on a stock x86-64 runner without hardware or a GPU.
+#
+# The jobs run in a Debian trixie container because the FP-RISC compiler
+# needs libgit2 >= 1.9 (fp-risc.cabal pkgconfig-depends), which Ubuntu
+# 24.04 does not ship.  The compiler is built once from the revision pinned
+# in fprisc.lock.json and cached by that revision.
+#
+# Not covered here: the full check-all.sh sweep (GL/GLFW hosts, Sol/compiler
+# legs, Pi 4/STAR64 hardware) and the portable legs whose apps need the X64
+# backend to lower more than six arguments (fprisc's Tup7/Tup8 builtins);
+# run `./qos.py test --all` locally for those.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DEBIAN_FRONTEND: noninteractive
+
+jobs:
+  fprisc:
+    name: build fprisc (pinned)
+    runs-on: ubuntu-latest
+    container: debian:trixie
+    outputs:
+      rev: ${{ steps.lock.outputs.rev }}
+    steps:
+      - name: tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git ca-certificates python3 zstd \
+            make gcc pkg-config ghc cabal-install libghc-megaparsec-dev \
+            libghc-network-dev libghc-utf8-string-dev libgit2-dev libarchive-dev \
+            libegl-dev libgl-dev
+      - uses: actions/checkout@v4
+      - id: lock
+        run: |
+          echo "rev=$(python3 -c 'import json;print(json.load(open("fprisc.lock.json"))["revision"])')" >> "$GITHUB_OUTPUT"
+      - id: cache
+        uses: actions/cache@v4
+        with:
+          path: fprisc
+          key: fprisc-trixie-${{ steps.lock.outputs.rev }}
+      - name: clone fprisc at the locked revision
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          git init -q fprisc
+          git -C fprisc remote add origin https://github.com/hyperswine/fprisc.git
+          git -C fprisc fetch -q --depth 1 origin "${{ steps.lock.outputs.rev }}"
+          git -C fprisc checkout -q FETCH_HEAD
+      - name: make fpr
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          cabal update
+          make -C fprisc fpr
+          rm -rf fprisc/dist-newstyle
+      - run: ./fprisc/fpr --version || test -x ./fprisc/fpr
+
+  host:
+    name: host checks, unittest, lock
+    needs: fprisc
+    runs-on: ubuntu-latest
+    container: debian:trixie
+    steps:
+      - name: tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git ca-certificates python3 zstd \
+            make gcc libc6-dev pkg-config libgit2-1.9 libarchive13t64 libegl1 libgl1 \
+            libgmp10 libffi8 libnuma1 libegl-dev libgl-dev
+      - uses: actions/checkout@v4
+      - uses: actions/cache/restore@v4
+        with:
+          path: fprisc
+          key: fprisc-trixie-${{ needs.fprisc.outputs.rev }}
+          fail-on-cache-miss: true
+      # in a container job ${{ github.workspace }} is the HOST's path;
+      # $GITHUB_WORKSPACE is the one the container sees
+      - run: echo "FPRISC_ROOT=$GITHUB_WORKSPACE/fprisc" >> "$GITHUB_ENV"
+      - name: lock --check
+        run: ./qos.py lock --check
+      - name: unittest
+        # FPRISC_ROOT stays exported: the tests isolate themselves from it
+        run: python3 -m unittest discover -s tests -p 'test_*.py' -v
+      - name: host C checks
+        run: |
+          for c in buddy store park blkraw blkflush compile drm-scanout pointer; do
+            echo "::group::$c"; sh qos/tests-host/$c-check.sh; echo "::endgroup::"
+          done
+      - name: portable quickstart (x86-64)
+        run: |
+          # qos.py build runs this quietly; build it loudly first so a
+          # failure shows its compiler output in the log
+          make -C qos portable
+          ./qos.py build
+          ./qos.py run tests/hello.fpr | tee "$RUNNER_TEMP/hello.out"
+          grep -q 'fold(1..10)=55' "$RUNNER_TEMP/hello.out"
+      - name: portable legs that build on x86-64
+        run: |
+          python3 tools/portable-store-check.py
+          python3 tools/disk-suspend-check.py
+
+  native:
+    name: QOS Native under QEMU (riscv64 virt)
+    needs: fprisc
+    runs-on: ubuntu-latest
+    container: debian:trixie
+    timeout-minutes: 60
+    steps:
+      - name: tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git ca-certificates python3 zstd \
+            make gcc libc6-dev pkg-config libgit2-1.9 libarchive13t64 libegl1 libgl1 \
+            libgmp10 libffi8 libnuma1 gcc-riscv64-unknown-elf picolibc-riscv64-unknown-elf \
+            qemu-system-misc
+      - uses: actions/checkout@v4
+      - uses: actions/cache/restore@v4
+        with:
+          path: fprisc
+          key: fprisc-trixie-${{ needs.fprisc.outputs.rev }}
+          fail-on-cache-miss: true
+      # in a container job ${{ github.workspace }} is the HOST's path;
+      # $GITHUB_WORKSPACE is the one the container sees
+      - run: echo "FPRISC_ROOT=$GITHUB_WORKSPACE/fprisc" >> "$GITHUB_ENV"
+      - name: native smoke boot
+        run: ./qos.py native --smoke
+      - name: native legs
+        run: |
+          set -e
+          for t in tools/native-integrity-check.py tools/error-process-check.sh \
+                   tools/mailbox-process-check.sh tools/admission-check.sh \
+                   tools/native-inbox-check.py tools/virtio-check.py \
+                   tools/block-service-check.py tools/storage-fallback-check.py \
+                   tools/failure-injections-check.py tools/diagnostics-check.py; do
+            echo "::group::$t"
+            case "$t" in *.py) python3 "$t" ;; *) sh "$t" ;; esac
+            echo "::endgroup::"
+          done

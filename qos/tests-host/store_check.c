@@ -88,6 +88,14 @@ int main(int argc, char **argv) {
   if (cap && !out) return 2;
   uint64_t len = n;
   if (getenv("QOS_STORE_TEST_INVALID_LENGTH")) { len = UINT64_MAX; free(pay); pay = NULL; }
+  const char *synth = getenv("QOS_STORE_TEST_PAYLOAD_LEN"); /* too big for argv */
+  if (synth) {
+    len = strtoull(synth, NULL, 10);
+    free(pay);
+    pay = malloc(len ? len : 1);
+    if (!pay) return 2;
+    memset(pay, 'p', len);
+  }
   int64_t rc = qosp_store_call(tag, pay, len, out, cap);
   printf("%lld ", (long long)rc);
   if (rc >= 0) for (int64_t i = 0; i < rc; i++) printf("%02x", (unsigned char)out[i]);
