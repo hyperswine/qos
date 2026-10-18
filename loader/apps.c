@@ -1,27 +1,19 @@
 /* apps.c -- the baked-in .qa app registry (the rodata half of /apps).
  *
  * QOS apps live at /apps/<Id>.qa. This file is the SHIPPED set: .qa
- * archives compiled into the image as rodata, plus the name->entry
- * table that lets the launcher run a co-compiled app once its manifest
- * permissions are granted. A disk-backed /apps (diskfs) overrides these
- * by Id at the System.qa VFS layer -- rodata is the fallback, disk is
- * the install target (docs/2026-07-19-QA-FORMAT.md).
+ * archives compiled into the image as rodata. A disk-backed /apps
+ * overrides these by Id at the System.qa layer -- rodata is the
+ * fallback, disk is the install target (docs/2026-07-19-QA-FORMAT.md).
+ * Every app runs as a loaded process (Sys.placeImageAt, loader/process.c);
+ * the co-compiled name->entry table and Apps.entry/Apps.run are gone.
  *
- * Two tables, both generated into apps_data.c by tools/genapps.py:
+ * The table, generated into apps_data.c by tools/genapps.py:
  *   fpr_qa_blobs[]   : { id, bytes, len }   the .qa archives
- *   fpr_app_entries[]: { symbol, pap }      entry-symbol -> runnable PAP
  *
  * FPRISC surface (fpr_g_*):
  *   Apps.list  Unit   -> String   newline-joined app ids present in rodata
  *   Apps.read  id     -> String   the raw .qa bytes for that id (Err-empty
  *                                  if absent; the VFS turns "" into Err)
- *   Apps.entry symbol -> Int      opaque handle (index+1) into the entry
- *                                  table, 0 if the symbol is unknown
- *   Apps.run   handle arg -> a    apply the entry PAP from `handle` to arg
- *                                  -- THE name-dispatch launch seam. When
- *                                  the real ELF-in-ELF loader lands, only
- *                                  System.qa's LaunchElf changes; this
- *                                  stays as the co-compiled fast path.
  */
 #include "fpr.h"
 

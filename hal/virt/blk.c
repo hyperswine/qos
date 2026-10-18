@@ -3,7 +3,7 @@
  * The contract is deliberately dumb: the disk is an array of 4 KiB PAGES
  * (8 virtio sectors each), read and written whole. No log, no records, no
  * index, no files — every one of those is POLICY and lives in FPRISC
- * (see programs/diskfs.fpr). The HAL will happily read or overwrite any
+ * (the log is programs/mods/qlog.fpr). The HAL will happily read or overwrite any
  * page directly; that the filesystem above chooses to only ever APPEND
  * is the filesystem's discipline, not the driver's.
  *
