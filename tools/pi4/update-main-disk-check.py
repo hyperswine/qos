@@ -162,6 +162,44 @@ class Upgrade(unittest.TestCase):
         self.archives['terminal'] = b''
         self.refuses(self.data, 'empty terminal')
 
+    def test_reclaim_keeps_user_history_and_chunk_records_byte_identical(self):
+        original = bytes(self.data)
+        replaced = {b'apps/index'} | {f'apps/{a}.qa'.encode() for a in up.APPS}
+        kept, removed = up.kept_history(original, self.meta.head, replaced)
+        out, report = up.prepare(original, self.archives, reclaim_app_history=True)
+        self.assertEqual(bytes(self.data), original)
+        self.assertEqual(removed, len(up.LEGACY_APPS) + 1)
+        self.assertEqual(report['reclaimed_app_records'], removed)
+        for page in (out[:up.PG], out[-up.PG:]):
+            meta = up.parse_seal(page, len(out) // up.PG)
+            self.assertEqual(up.kept_history(out, meta.head, replaced)[0], kept)
+            values, _ = up.scan(out, meta.head)
+            self.assertEqual(values[b'user/note'], b'keep this\0binary\xff')
+            self.assertEqual(values[b'user/chunk'], b'one')
+            self.assertNotIn(b'deleted', values)
+            for a, payload in self.archives.items():
+                self.assertEqual(values[f'apps/{a}.qa'.encode()], payload)
+
+    def test_reclaim_repeated_full_logs_fit_without_losing_user_history(self):
+        data = self.data
+        for _ in range(8):
+            data, report = up.prepare(data, self.archives, reclaim_app_history=True)
+        self.assertEqual(report['reclaimed_app_records'], 7)
+        self.assertLess(report['new_head'], self.meta.data_end)
+
+    def test_reclaim_refuses_compaction_merkle_or_live_swap(self):
+        for meta in (up.replace(self.meta, merkle=123), up.replace(self.meta, swap=57)):
+            data = bytearray(self.data)
+            data[:up.PG] = meta.line().ljust(up.PG, b'\0')
+            data[-up.PG:] = up.replace(meta, generation=meta.generation+1).line().ljust(up.PG, b'\0')
+            with self.assertRaisesRegex(ValueError, 'unsealed DATA'):
+                up.prepare(data, self.archives, reclaim_app_history=True)
+
+    def test_reclaim_still_refuses_when_user_history_exceeds_space(self):
+        archives = {a: b'x' * (20 * up.PG) for a in up.APPS}
+        with self.assertRaisesRegex(ValueError, 'insufficient DATA'):
+            up.prepare(self.data, archives, reclaim_app_history=True)
+
     def test_cli_preserves_source_and_refuses_existing_output(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)

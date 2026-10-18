@@ -6,6 +6,9 @@ superblocks and a verified committed log. Preserve all history; accept the
 standard four-app index or current six-app index and append the six-app bundle
 and index together. Refuse a custom index because its additional native
 archives also need rebuilding together.
+With --reclaim-app-history, remove only old onboard QREC/QDEL records before
+appending. All other history, including QBLK records, is retained byte for
+byte. This mode requires an unsealed DATA log with no live SWAP operation.
 Use only while the installed service is stopped, then install with rollback.
 """
 import argparse
@@ -131,7 +134,22 @@ def scan(data, head):
     return latest, count
 
 
-def prepare(data, archives):
+def kept_history(data, head, replaced):
+    """Retain every byte of records except replaced onboard QREC/QDELs."""
+    records, p, removed = bytearray(), 1, 0
+    while p < head:
+        match = REC.fullmatch(first_line(data[p * PG:(p + 1) * PG]))
+        tag, np, _, key, _ = match.groups()
+        end = p + 1 + int(np)
+        if tag in (b'QREC', b'QDEL') and key in replaced:
+            removed += 1
+        else:
+            records.extend(data[p * PG:end * PG])
+        p = end
+    return records, removed
+
+
+def prepare(data, archives, reclaim_app_history=False):
     check(len(data) % PG == 0 and len(data) >= 3 * PG, 'invalid disk size')
     pages = len(data) // PG
     slots = [parse_seal(data[:PG], pages), parse_seal(data[-PG:], pages)]
@@ -151,17 +169,33 @@ def prepare(data, archives):
         check(bool(payload), f'empty {app} archive')
         records.extend(archive_record(f'apps/{app}.qa', payload))
     records.extend(archive_record('apps/index', app_index(APPS)))
-    new_head = meta.head + len(records) // PG
-    check(new_head <= meta.data_end, 'insufficient DATA space; compact in QOS first')
+    replaced = {b'apps/index'} | {f'apps/{app}.qa'.encode() for app in APPS}
+    removed, base_head = 0, meta.head
     out = bytearray(data)
-    out[meta.head * PG:new_head * PG] = records
+    if reclaim_app_history:
+        # Relocation is permitted only for a clean, unsealed DATA log. Never
+        # reinterpret an outstanding SWAP operation or a compaction tree.
+        check(meta.merkle == 0 and meta.swap == meta.data_end,
+              'app-history reclamation requires an unsealed DATA log')
+        kept, removed = kept_history(data, meta.head, replaced)
+        base_head = 1 + len(kept) // PG
+        out[PG:meta.data_end * PG] = bytes((meta.data_end - 1) * PG)
+        out[PG:base_head * PG] = kept
+    new_head = base_head + len(records) // PG
+    check(new_head <= meta.data_end, 'insufficient DATA space; compact in QOS first')
+    out[base_head * PG:new_head * PG] = records
+    values, _ = scan(out, new_head)
+    check({k: v for k, v in latest.items() if k not in replaced} ==
+          {k: v for k, v in values.items() if k not in replaced},
+          'upgrade changed user values')
     # Both fallback slots describe the matching bundle; parity follows Qlog.
     for gen in (meta.generation + 1, meta.generation + 2):
         pos = 0 if gen % 2 == 0 else (pages - 1) * PG
         out[pos:pos + PG] = replace(meta, head=new_head, generation=gen).line().ljust(PG, b'\0')
     return out, {'old_head': meta.head, 'new_head': new_head, 'preserved_records': count,
                  'old_generation': meta.generation, 'new_generation': meta.generation + 2,
-                 'old_apps': list(known_indexes[old_index]), 'apps': list(APPS)}
+                 'old_apps': list(known_indexes[old_index]), 'apps': list(APPS),
+                 'reclaimed_app_records': removed}
 
 
 def main():
@@ -170,11 +204,14 @@ def main():
     ap.add_argument('output', type=Path)
     ap.add_argument('bundle', type=Path,
                     help='directory containing clock.qa, logs.qa, browser.qa, disk.qa, terminal.qa, editor.qa')
+    ap.add_argument('--reclaim-app-history', action='store_true',
+                    help='retain all user history but replace old onboard QREC/QDEL records')
     args = ap.parse_args()
     try:
         check(args.source.resolve() != args.output.resolve(), 'source and output must differ')
         data, report = prepare(args.source.read_bytes(),
-                               {a: (args.bundle / (a + '.qa')).read_bytes() for a in APPS})
+                               {a: (args.bundle / (a + '.qa')).read_bytes() for a in APPS},
+                               reclaim_app_history=args.reclaim_app_history)
         with args.output.open('xb') as f:
             try:
                 f.write(data)
