@@ -166,16 +166,19 @@ declared : unsafe String -> String -> Int .
 declared s key = abiGo s key (strlen key) 0 (strlen s) (0 - 1).
 abiGo : unsafe String -> String -> Int -> Int -> Int -> Int -> Int .
 abiGo s key kl i n seen | i >= n = seen.
-abiGo s key kl i n seen = abiLine s key kl i n seen (lineStop s i n).
-abiLine : unsafe String -> String -> Int -> Int -> Int -> Int -> Int -> Int .
-abiLine s key kl i n seen e = case substr s i kl == key of
-    False -> abiGo s key kl (e + 1) n seen
+abiGo s key kl i n seen = abiLine s key i n seen (lineStop s i n).
+# abiLine/abiValue take six arguments at most (the key length is re-read
+# with strlen, which is O(1)): the X64 backend lowers only the six SysV
+# register arguments, and a seventh failed the x86-64 portable build.
+abiLine : unsafe String -> String -> Int -> Int -> Int -> Int -> Int .
+abiLine s key i n seen e = case substr s i (strlen key) == key of
+    False -> abiGo s key (strlen key) (e + 1) n seen
   | True -> (case seen >= 0 of
       True -> 0 - 1
-    | False -> (case e - i - kl > 0 and e - i - kl <= 9 of
-        True -> abiValue s key kl e n (decimal s (i + kl) e 0 0) (e - i - kl)
+    | False -> (case e - i - strlen key > 0 and e - i - strlen key <= 9 of
+        True -> abiValue s key e n (decimal s (i + strlen key) e 0 0) (e - i - strlen key)
       | False -> 0 - 1)).
-abiValue : unsafe String -> String -> Int -> Int -> Int -> (Int, Int) -> Int -> Int .
-abiValue s key kl e n r digits = case r of (value, k) -> case k > 0 and k == digits of
-    True -> abiGo s key kl (e + 1) n value
+abiValue : unsafe String -> String -> Int -> Int -> (Int, Int) -> Int -> Int .
+abiValue s key e n r digits = case r of (value, k) -> case k > 0 and k == digits of
+    True -> abiGo s key (strlen key) (e + 1) n value
   | False -> 0 - 1.

@@ -1,0 +1,21 @@
+unsafe program.
+# kv replays past the old 256 KiB reply buffer (qos/store_abi.h): the app
+# grows its log to 200 KB, exactly 256 KiB and 300 KB and must read every
+# byte back.  Runs as a portable app (tools/kv-large-check.py) and as a
+# native process (tests/kvlargenative.fpr) -- the same Sys.storeReq.
+rep : unsafe Int -> String .
+rep n = if n == 0 then "" else (if n == 1 then "x" else twice (rep (n / 2)) (n - 2 * (n / 2))).
+twice : unsafe String -> Int -> String .
+twice h odd = if odd == 1 then strcat (strcat h h) "x" else strcat h h.
+grow : unsafe Int -> String .
+grow want =
+  have = case Sys.storeReq 3 "" of Ok b -> strlen b | Err e -> error "replay before {want}: {e}";
+  _ = case Sys.storeReq 2 (rep (want - have)) of Ok _ -> Unit | Err e -> error "append to {want}: {e}";
+  case Sys.storeReq 3 "" of
+    Ok b -> "{strlen b}:{b == rep want}"
+  | Err e -> "Err {e}".
+main =
+  a = grow 200000;
+  b = grow 262144;
+  c = grow 300000;
+  "kvlarge: {a} {b} {c}".
