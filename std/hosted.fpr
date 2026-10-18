@@ -28,6 +28,12 @@
 #   H.after ms msg                 msg once, ms milliseconds on
 #   H.quit                         the program ends
 #   H.every ms msg                 (a subscription) msg every ms milliseconds
+#   H.tryAfter / H.tryEvery        Result for user-entered durations
+#
+# Removed subscriptions are cancelled; the same (period, message) retains
+# one worker. Periods coalesce while an app is
+# busy. After/Every share defaults.maxTimers (32); hostWith accepts an explicit
+# configuration and returns Result after closing the linear timer pool.
 #
 # Files: a program may read and write under /home and nothing else.  It holds
 # no capability to do so: it ASKS its host (the Editor), which checks the
@@ -40,6 +46,8 @@
 # host's messages and the four functions.
 # ============================================================================
 AK = use "../programs/mods/appkit".
+Timers = use "hostedtimers".
+Time = use "hostedtime".
 
 Key = Type (Char String | Enter | Escape | Backspace | Tab | Up | Down | Left | Right
           | Home | End | PageUp | PageDown | Insert | Delete | F Int | Ctrl String | Alt String).
@@ -53,13 +61,16 @@ Cmd msg = Type (After Int msg | Quit
 Sub msg = Type (Every Int msg).
 
 # ---- what a program writes -----------------------------------------------------------
-# A time is never negative and a tick never zero: the refinement makes the
-# caller show it (a constant does, a guard does), and the loop clamps
-# whatever reaches it another way.
+# A bad internal duration is named contract blame. User-entered durations
+# instead use tryAfter/tryEvery and get an ordinary Result. Direct constructor
+# use is checked again by the host before acquiring any timer resource.
 after : (ms : Int | ms >= 0) -> msg -> Cmd msg .
 after ms msg = After ms msg.
 every : (ms : Int | ms >= 1) -> msg -> Sub msg .
 every ms msg = Every ms msg.
+tryAfter ms msg = if Time.validDelay ms then Ok (After ms msg) else Err "delay must be nonnegative".
+tryEvery ms msg = if Time.validPeriod ms then Ok (Every ms msg) else Err "period must be positive".
+defaults = Timers.defaults.
 quit : Cmd msg .
 quit = Quit.
 readFile : String -> (Result String String -> msg) -> Cmd msg .
@@ -81,7 +92,7 @@ listFiles prefix toMsg = ListFiles prefix toMsg.
 Req = Type (ReadReq String | WriteReq String String | AppendReq String String | RemoveReq String | ListReq String).
 Reply = Type (Text String | Done | Names (List String) | Failed String).
 ToHost = Type (Frame (List String) | Ask Int Req).
-ToProgram msg = Type (Start Int Int Int | KeyIn Int | Resize Int Int | Answer Int Reply | Fire msg).
+ToProgram msg = Type (Start Int Int Int | KeyIn Int | Resize Int Int | Answer Int Reply | Fire msg | TimerFired Int).
 
 # a QOS key code (the input tier's: shift +1000, ctrl +4000, alt +8000) as
 # the keys a program sees; a code that is no key to it is none
@@ -118,107 +129,145 @@ asDone r = case r of Done -> Ok Unit | Failed why -> Err why | other -> Err "the
 asNames : Reply -> Result (List String) String .
 asNames r = case r of Names ns -> Ok ns | Failed why -> Err why | other -> Err "the host answered with the wrong kind of reply".
 
-clampMs : Int -> Int .
-clampMs ms = if ms < 0 then 0 else ms.
-clampTick : Int -> Int .
-clampTick ms = if ms < 1 then 1 else ms.
-
 # ---- the loop ---------------------------------------------------------------------------
 # The state: the host, the model, the panel as last sent, its size, the
 # asks waiting for answers (token -> what the answer becomes), the next
-# token, and whether the program has quit.
-PSt model msg = Type (PSt Int model (List String) Int Int (List (Int, Reply -> msg)) Int Bool).
+# token, quit/failure, and the timer owner. Only this service state is linear;
+# the model given to update/view/subs remains an ordinary immutable value.
+PSt 1 model msg = Type (PSt Int model (List String) Int Int (List (Int, Reply -> msg)) Int Bool String (Timers.Pool msg)).
 
 # the entry the Editor's Run calls (runprog.fpr appends it): the first
 # message from the host is its Start
 host : unsafe Int -> ToProgram msg -> { init : model, update : Ev msg -> model -> (model, List (Cmd msg)), view : (Int, Int) -> model -> List String, subs : model -> List (Sub msg) | r } -> Unit .
-host me go app = case go of
-    Start editor cols rows ->
-      _ = startSubs me (app.subs app.init) Nil;
-      first = step me app (Resized cols rows) (PSt editor app.init Nil cols rows Nil 1 False);
-      (if quitted first then Unit else _ = Sys.loop first (fn s -> listen me app s); Unit)
-  | other -> Unit.
+host me go app = case hostWith defaults me go app of
+    Ok u -> Unit
+  | Err why -> error "hosted: {why}".
 
-quitted : PSt model msg -> Bool .
-quitted st = case st of PSt editor model screen cols rows asks token q -> q.
+# A configured host reports admission failure after releasing every acquired
+# timer. The compatible entry above turns that Result into a captured program
+# failure, rather than silently losing a requested effect.
+hostWith : unsafe { maxTimers : Int, checkMs : Int } -> Int -> ToProgram msg -> { init : model, update : Ev msg -> model -> (model, List (Cmd msg)), view : (Int, Int) -> model -> List String, subs : model -> List (Sub msg) | r } -> Result Unit String .
+hostWith config me go app = if not (Time.validLimits config.maxTimers config.checkMs) then
+    Err "timer limits must be 1..1024 timers and 1..1000 ms owner checks"
+  else case go of
+    Start editor cols rows ->
+      # Resized is the first update. Only its resulting subscriptions are
+      # acquired; an initial subscription removed there never starts.
+      first = step config me app (Resized cols rows) (PSt editor app.init Nil cols rows Nil 1 False "" (Timers.open config.maxTimers));
+      (again, ready) = continuing first;
+      finish (if again then Sys.loop ready (fn s -> listen config me app s) else ready)
+  | other -> Err "expected the host's Start message".
+
+continuing : PSt model msg -> (Bool, PSt model msg) .
+continuing st = case st of PSt editor model screen cols rows asks token q why timers ->
+  (not q and why == "", PSt editor model screen cols rows asks token q why timers).
+finish : PSt model msg -> Result Unit String .
+finish st = case st of PSt editor model screen cols rows asks token q why timers ->
+  _ = Timers.close timers;
+  if why == "" then Ok Unit else Err why.
 
 # one message from the host or a helper, one turn (Sys.loop reclaims each
 # turn's garbage: a program that runs all day does not grow by its turns)
-listen : unsafe Int -> { update : Ev msg -> model -> (model, List (Cmd msg)), view : (Int, Int) -> model -> List String, subs : model -> List (Sub msg) | r } -> PSt model msg -> (Bool, PSt model msg) .
-listen me app st =
+listen : unsafe { maxTimers : Int, checkMs : Int } -> Int -> { update : Ev msg -> model -> (model, List (Cmd msg)), view : (Int, Int) -> model -> List String, subs : model -> List (Sub msg) | r } -> PSt model msg -> (Bool, PSt model msg) .
+listen config me app st =
   m = receive me;
   x = keep m;
   _ = drop m;
   next = (case x of
-      KeyIn code -> keys me app (keyOf code) st
-    | Resize cols rows -> resized me app cols rows st
-    | Answer token reply -> answered me app token reply st
-    | Fire msg -> step me app (Msg msg) st
+      KeyIn code -> keys config me app (keyOf code) st
+    | Resize cols rows -> resized config me app cols rows st
+    | Answer token reply -> answered config me app token reply st
+    | Fire msg -> step config me app (Msg msg) st
+    | TimerFired token -> fired config me app token st
     | other -> st);
-  (not (quitted next), next).
+  continuing next.
 
-keys : unsafe Int -> { update : Ev msg -> model -> (model, List (Cmd msg)), view : (Int, Int) -> model -> List String, subs : model -> List (Sub msg) | r } -> List Key -> PSt model msg -> PSt model msg .
-keys me app ks st = case ks of
+keys : unsafe { maxTimers : Int, checkMs : Int } -> Int -> { update : Ev msg -> model -> (model, List (Cmd msg)), view : (Int, Int) -> model -> List String, subs : model -> List (Sub msg) | r } -> (ks : List Key | measure ks) -> PSt model msg -> PSt model msg .
+keys config me app ks st = case ks of
     Nil -> st
-  | k :: rest -> next = step me app (Key k) st; (if quitted next then next else keys me app rest next).
+  | k :: rest -> (again, next) = continuing (step config me app (Key k) st);
+      if again then keys config me app rest next else next.
 
-resized : unsafe Int -> { update : Ev msg -> model -> (model, List (Cmd msg)), view : (Int, Int) -> model -> List String, subs : model -> List (Sub msg) | r } -> Int -> Int -> PSt model msg -> PSt model msg .
-resized me app cols rows st = case st of PSt editor model screen c r asks token q ->
-  step me app (Resized cols rows) (PSt editor model Nil cols rows asks token q).
+resized : unsafe { maxTimers : Int, checkMs : Int } -> Int -> { update : Ev msg -> model -> (model, List (Cmd msg)), view : (Int, Int) -> model -> List String, subs : model -> List (Sub msg) | r } -> Int -> Int -> PSt model msg -> PSt model msg .
+resized config me app cols rows st = case st of PSt editor model screen c r asks token q why timers ->
+  step config me app (Resized cols rows) (PSt editor model Nil cols rows asks token q why timers).
 
-answered : unsafe Int -> { update : Ev msg -> model -> (model, List (Cmd msg)), view : (Int, Int) -> model -> List String, subs : model -> List (Sub msg) | r } -> Int -> Reply -> PSt model msg -> PSt model msg .
-answered me app token reply st = case st of PSt editor model screen cols rows asks next q ->
+answered : unsafe { maxTimers : Int, checkMs : Int } -> Int -> { update : Ev msg -> model -> (model, List (Cmd msg)), view : (Int, Int) -> model -> List String, subs : model -> List (Sub msg) | r } -> Int -> Reply -> PSt model msg -> PSt model msg .
+answered config me app token reply st = case st of PSt editor model screen cols rows asks next q why timers ->
   (case takeAsk token asks Nil of
-      (Nil, kept) -> st
-    | (back :: more, kept) -> step me app (Msg (back reply)) (PSt editor model screen cols rows kept next q)).
+      (Nil, kept) -> PSt editor model screen cols rows asks next q why timers
+    | (back :: more, kept) -> step config me app (Msg (back reply)) (PSt editor model screen cols rows kept next q why timers)).
 # the waiter for a token, and the asks without it
-takeAsk : unsafe Int -> List (Int, Reply -> msg) -> List (Int, Reply -> msg) -> (List (Reply -> msg), List (Int, Reply -> msg)) .
+takeAsk : Int -> (asks : List (Int, Reply -> msg) | measure asks) -> List (Int, Reply -> msg) -> (List (Reply -> msg), List (Int, Reply -> msg)) .
 takeAsk token asks seen = case asks of
     Nil -> (Nil, seen)
   | a :: rest -> (case a of (t, back) -> (if t == token then (back :: Nil, appendAsks seen rest) else takeAsk token rest (a :: seen))).
-appendAsks : unsafe List (Int, Reply -> msg) -> List (Int, Reply -> msg) -> List (Int, Reply -> msg) .
+appendAsks : (xs : List (Int, Reply -> msg) | measure xs) -> List (Int, Reply -> msg) -> List (Int, Reply -> msg) .
 appendAsks xs ys = case xs of Nil -> ys | x :: r -> x :: appendAsks r ys.
 
 # one update, its effects, and the panel sent when it changed
-step : unsafe Int -> { update : Ev msg -> model -> (model, List (Cmd msg)), view : (Int, Int) -> model -> List String, subs : model -> List (Sub msg) | r } -> Ev msg -> PSt model msg -> PSt model msg .
-step me app ev st = case st of PSt editor model screen cols rows asks token q ->
+step : unsafe { maxTimers : Int, checkMs : Int } -> Int -> { update : Ev msg -> model -> (model, List (Cmd msg)), view : (Int, Int) -> model -> List String, subs : model -> List (Sub msg) | r } -> Ev msg -> PSt model msg -> PSt model msg .
+step config me app ev st = case st of PSt editor model screen cols rows asks token q why timers ->
   (case app.update ev model of (model2, cmds) ->
-      (case perform me editor cmds asks token False of (asks2, token2, quit) ->
-          _ = startSubs me (app.subs model2) (app.subs model);
-          lines = app.view (cols, rows) model2;
-          _ = (if lines == screen then Ok Unit else send editor (Frame lines));
-          PSt editor model2 lines cols rows asks2 token2 (q or quit))).
+    case specs (app.subs model2) config.maxTimers of
+      Err failure -> PSt editor model2 screen cols rows asks token True failure timers
+    | Ok wanted -> (case Timers.retain wanted timers of
+      (Err failure, retained) -> PSt editor model2 screen cols rows asks token True failure retained
+    | (Ok u0, retained) -> (case perform config me editor cmds asks token retained of
+          (asks2, token2, quit, result, held) ->
+            case result of
+                Err failure -> PSt editor model2 screen cols rows asks2 token2 True failure held
+              | Ok u -> if quit then PSt editor model2 screen cols rows asks2 token2 True "" held else
+                  case Timers.add TimerFired me config.checkMs wanted held of
+                      (Err failure, active) -> PSt editor model2 screen cols rows asks2 token2 True failure active
+                    | (Ok u2, active) ->
+                        lines = app.view (cols, rows) model2;
+                        sent = (if lines == screen then Ok Unit else send editor (Frame lines));
+                        failure = case sent of Ok u3 -> "" | Err e -> "the host is gone ({e})";
+                        PSt editor model2 lines cols rows asks2 token2 q failure active))).
+
+specs : (subs : List (Sub msg) | measure subs) -> Int -> Result (List (Int, msg)) String .
+specs subs left = case subs of
+    Nil -> Ok Nil
+  | Every ms msg :: rest -> if left <= 0 then Err "subscription budget exhausted"
+      else if not (Time.validPeriod ms) then Err "subscription period must be positive"
+      else case specs rest (left - 1) of
+          Err why -> Err why
+        | Ok tail -> Ok ((ms, msg) :: tail).
+
+fired : unsafe { maxTimers : Int, checkMs : Int } -> Int -> { update : Ev msg -> model -> (model, List (Cmd msg)), view : (Int, Int) -> model -> List String, subs : model -> List (Sub msg) | r } -> Int -> PSt model msg -> PSt model msg .
+fired config me app wanted st = case st of PSt editor model screen cols rows asks token q why timers ->
+  case Timers.fire wanted timers of
+      (Err failure, held) -> PSt editor model screen cols rows asks token True failure held
+    | (Ok Nil, held) -> PSt editor model screen cols rows asks token q why held
+    | (Ok (msg :: rest), held) -> step config me app (Msg msg) (PSt editor model screen cols rows asks token q why held).
 
 # the commands: a timer is a helper actor of the program's own, a file is an
 # Ask of the host (its answer arrives as an Answer, becomes a Msg)
-perform : unsafe Int -> Int -> List (Cmd msg) -> List (Int, Reply -> msg) -> Int -> Bool -> (List (Int, Reply -> msg), Int, Bool) .
-perform me editor cmds asks token quit = case cmds of
-    Nil -> (asks, token, quit)
+perform : unsafe { maxTimers : Int, checkMs : Int } -> Int -> Int -> (cmds : List (Cmd msg) | measure cmds) -> List (Int, Reply -> msg) -> Int -> Timers.Pool msg -> (List (Int, Reply -> msg), Int, Bool, Result Unit String, Timers.Pool msg) .
+perform config me editor cmds asks token timers = case cmds of
+    Nil -> (asks, token, False, Ok Unit, timers)
   | c :: rest -> (case c of
-        Quit -> perform me editor rest asks token True
-      | After ms msg -> _ = spawn (fn self -> _ = Sys.sleepUs (clampMs ms * 1000); send me (Fire msg)); perform me editor rest asks token quit
-      | ReadFile path k -> ask me editor (ReadReq path) (fn r -> k (asText r)) rest asks token quit
-      | WriteFile path text k -> ask me editor (WriteReq path text) (fn r -> k (asDone r)) rest asks token quit
-      | AppendFile path text k -> ask me editor (AppendReq path text) (fn r -> k (asDone r)) rest asks token quit
-      | RemoveFile path k -> ask me editor (RemoveReq path) (fn r -> k (asDone r)) rest asks token quit
-      | ListFiles prefix k -> ask me editor (ListReq prefix) (fn r -> k (asNames r)) rest asks token quit).
-ask : unsafe Int -> Int -> Req -> (Reply -> msg) -> List (Cmd msg) -> List (Int, Reply -> msg) -> Int -> Bool -> (List (Int, Reply -> msg), Int, Bool) .
-ask me editor req back rest asks token quit = case send editor (Ask token req) of
-    Ok u -> perform me editor rest ((token, back) :: asks) (token + 1) quit
-  | Err why -> _ = send me (Fire (back (Failed "the host is gone ({why})"))); perform me editor rest asks (token + 1) quit.
-
-# a ticker per NEW subscription, a helper actor of the program's own: it sends
-# its message every ms until the program ends (an app's subs should be steady,
-# or ignore stale ticks -- std/term's rule)
-startSubs : unsafe Int -> List (Sub msg) -> List (Sub msg) -> Unit .
-startSubs me subs old = case subs of
-    Nil -> Unit
-  | s :: rest -> (case s of
-        Every ms msg -> (if member ms msg old then startSubs me rest old
-          else _ = spawn (fn self -> ticking me (clampTick ms) msg); startSubs me rest old)).
-member : unsafe Int -> msg -> List (Sub msg) -> Bool .
-member ms msg subs = case subs of
-    Nil -> False
-  | s :: rest -> (case s of Every m x -> (if m == ms and x == msg then True else member ms msg rest)).
-ticking : unsafe Int -> Int -> msg -> Unit .
-ticking me ms msg = _ = Sys.sleepUs (ms * 1000); _ = send me (Fire msg); ticking me ms msg.
+        Quit -> (asks, token, True, Ok Unit, timers)
+      | After ms msg -> (case Timers.arm TimerFired me config.checkMs False ms msg timers of
+          (Err why, held) -> (asks, token, True, Err why, held)
+        | (Ok u, held) -> perform config me editor rest asks token held)
+      | ReadFile path k ->
+          (waiting, next) = ask me editor (ReadReq path) (fn r -> k (asText r)) asks token;
+          perform config me editor rest waiting next timers
+      | WriteFile path text k ->
+          (waiting, next) = ask me editor (WriteReq path text) (fn r -> k (asDone r)) asks token;
+          perform config me editor rest waiting next timers
+      | AppendFile path text k ->
+          (waiting, next) = ask me editor (AppendReq path text) (fn r -> k (asDone r)) asks token;
+          perform config me editor rest waiting next timers
+      | RemoveFile path k ->
+          (waiting, next) = ask me editor (RemoveReq path) (fn r -> k (asDone r)) asks token;
+          perform config me editor rest waiting next timers
+      | ListFiles prefix k ->
+          (waiting, next) = ask me editor (ListReq prefix) (fn r -> k (asNames r)) asks token;
+          perform config me editor rest waiting next timers).
+ask : Int -> Int -> Req -> (Reply -> msg) -> List (Int, Reply -> msg) -> Int -> (List (Int, Reply -> msg), Int) .
+ask me editor req back asks token = case send editor (Ask token req) of
+    Ok u -> ((token, back) :: asks, token + 1)
+  | Err why -> _ = send me (Fire (back (Failed "the host is gone ({why})"))); (asks, token + 1).

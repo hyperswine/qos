@@ -4,7 +4,8 @@
 #
 #   1. a write that storage refuses (Err) is reported, and the cached
 #      body is unchanged: a read after it returns what the disk holds
-#   2. storage that has ENDED: the write says so, the body is unchanged
+#   2. storage that has ENDED: the write says so; a later open replays
+#      honestly (dead storage) instead of serving a retired cache
 #   3. a file actor whose first replay failed says "read failed", never
 #      serves "" as the file, and refuses writes until it can read
 #   4. a service that ended is Err "dead actor" (not a caller parked for
@@ -12,6 +13,13 @@
 #   5. a full mailbox is Err "mailbox full" (the request never queued)
 #   6. an unrelated message queued by another actor is not read as the
 #      reply, and is still there afterwards
+#   7. an uncertain append: the cache goes unknown, the replay recovers it
+#   8. handle leases: closing one of two handles refuses the closed one
+#      ("no such handle") while the other still reads
+#   9. another client's handle is refused; the last close retires the actor
+#  10. 70 sequential open/close pairs succeed (closed files free the
+#      manager's 64-live-actor budget)
+#  11. 64 files held open bound the 65th; closing them admits it again
 #
 #   ./qos.py run tests/qsysfail.fpr
 #: expect qsysfail: HOLDS
@@ -65,6 +73,54 @@ fileAt me ns st path =
   case EP.register me ns path f of
     Ok n -> Unit
   | Err e -> error "qsysfail: claim {path}: {e}".
+fileAtR : unsafe Int -> Int -> Int -> String -> Int .
+fileAtR me ns st path =
+  f = AC.spawnWith (AC.Dynamic 64) (QS.fileActor st path);
+  case EP.register me ns path f of
+    Ok n -> f
+  | Err e -> error "qsysfail: claim {path}: {e}".
+# the production path: one file manager over the store, the path claimed
+# to it, so a retired file actor is respawned on the next open
+mgrAt : unsafe Int -> Int -> Int -> String -> Unit .
+mgrAt me ns st path =
+  mgr = spawn (QS.filesMgr st ns [path]);
+  case EP.register me ns path mgr of
+    Ok n -> Unit
+  | Err e -> error "qsysfail: claim {path}: {e}".
+waitDead : unsafe Int -> Int -> Bool .
+waitDead a n = if Sys.alive a then (if n <= 0 then False else _ = Sys.sleepUs 5000; waitDead a (n - 1)) else True.
+# a read through an endpoint owned by someone else, reported to the boss
+spyRead ep boss me = _ = send boss (EP.read me ep 0); Unit.
+holdMany : unsafe Int -> Int -> List String -> List (Int, Int) -> List (Int, Int) .
+holdMany me ns paths acc = case paths of
+    Nil -> acc
+  | p :: rest -> (case EP.open me ns p "read" of Err why -> acc | Ok ep -> holdMany me ns rest (ep :: acc)).
+closeAll : unsafe Int -> List (Int, Int) -> Unit .
+closeAll me eps = case eps of
+    Nil -> Unit
+  | ep :: rest -> _ = EP.close me ep; closeAll me rest.
+ownersOf : unsafe List (Int, Int) -> List Int .
+ownersOf eps = case eps of
+    Nil -> Nil
+  | (o, h) :: rest -> o :: ownersOf rest.
+waitDeads : unsafe List Int -> Bool .
+waitDeads actors = case actors of
+    Nil -> True
+  | a :: rest -> waitDead a 400 and waitDeads rest.
+takeN : unsafe List a -> Int -> List a .
+takeN xs n = case xs of
+    Nil -> Nil
+  | x :: rest -> if n <= 0 then Nil else x :: takeN rest (n - 1).
+seqAll : unsafe Int -> Int -> List String -> Bool .
+seqAll me ns paths = case paths of
+    Nil -> True
+  | p :: rest -> (case EP.open me ns p "read" of
+      Err why -> False
+    | Ok ep -> _ = EP.close me ep; seqAll me ns rest).
+mkPaths : unsafe String -> Int -> List String .
+mkPaths pre n = mpGo pre 1 n.
+mpGo : unsafe String -> Int -> Int -> List String .
+mpGo pre i n = if i > n then Nil else "{pre}{i}" :: mpGo pre (i + 1) n.
 
 main =
   me = myself 0;
@@ -72,22 +128,22 @@ main =
   _ = EP.register me ns "/" (AC.spawnWith (AC.Dynamic 64) (EP.lister ns));
   # 1. a refused append
   st1 = spawn (store "abc" (Err "data partition full"));
-  _ = fileAt me ns st1 "/tmp/a";
+  _ = mgrAt me ns st1 "/tmp/a";
   w1 = AK.vfsWrite me ns "/tmp/a" "X";
   r1 = AK.vfsRead me ns "/tmp/a";
   ok1 = expect "refused write" w1 "write failed: data partition full"
     and expect "body after refused write" r1 "abc";
   # 2. storage that ended after the replay
   st2 = spawn storeOnce;
-  _ = fileAt me ns st2 "/tmp/b";
+  _ = mgrAt me ns st2 "/tmp/b";
   w2 = AK.vfsWrite me ns "/tmp/b" "X";
   r2 = AK.vfsRead me ns "/tmp/b";
   ok2 = expect "write to ended storage" w2 "write failed: storage service: dead actor"
-    and expect "body after ended storage" r2 "abc";
+    and expect "reopen after ended storage" r2 "read failed: /tmp/b (storage service: dead actor)";
   # 3. a file actor that never could read its body
   st3 = spawn gone;
   _ = Sys.sleepUs 20000;
-  _ = fileAt me ns st3 "/tmp/c";
+  _ = mgrAt me ns st3 "/tmp/c";
   r3 = AK.vfsRead me ns "/tmp/c";
   w3 = AK.vfsWrite me ns "/tmp/c" "X";
   ok3 = expect "unreadable file" r3 "read failed: /tmp/c (storage service: dead actor)"
@@ -114,11 +170,43 @@ main =
   ev = receive me;
   ok6 = expect "reply with an event queued" r6 "note" and expect "the event" ev "tick";
   st7 = spawn (uncertainStore "abc");
-  _ = fileAt me ns st7 "/tmp/f";
+  _ = mgrAt me ns st7 "/tmp/f";
   w7 = AK.vfsWrite me ns "/tmp/f" "X";
   r7 = AK.vfsRead me ns "/tmp/f";
   ok7 = expect "unknown write" w7 "write failed: storage service: deadline exceeded (outcome unknown)"
     and expect "reloaded unknown outcome" r7 "abcX";
-  case ok1 and ok2 and ok3 and ok4 and ok5 and ok6 and ok7 of
+  # 8. two handles on one file: closing one refuses it, the other reads on
+  st8 = spawn (store "abc" (Ok "1"));
+  f8 = fileAtR me ns st8 "/tmp/g";
+  epA = (case EP.open me ns "/tmp/g" "read" of Ok ep -> ep | Err why -> error "qsysfail: open g: {why}");
+  epB = (case EP.open me ns "/tmp/g" "read" of Ok ep -> ep | Err why -> error "qsysfail: reopen g: {why}");
+  _ = EP.close me epA;
+  staleA = EP.read me epA 0;
+  liveB = EP.read me epB 0;
+  ok8 = (case staleA of Err why -> QS.strEq why "no such handle" | Ok v -> False)
+    and (case liveB of Ok v -> (case v of EP.IStr s -> QS.strEq s "abc" | other -> False) | Err why -> False);
+  # 9. another client's handle is refused; the last close retires the actor
+  _ = spawn (spyRead epB me);
+  spyGot = receive me;
+  ok9a = case spyGot of Err why -> QS.strEq why "no such handle" | Ok v -> False;
+  _ = EP.close me epB;
+  ok9 = ok9a and waitDead f8 400;
+  # 10. 70 sequential open/close pairs against one manager
+  stM = spawn (store "abc" (Ok "1"));
+  knownM = mkPaths "/tmp/m" 70;
+  mgr = spawn (QS.filesMgr stM ns knownM);
+  _ = (case EP.register me ns "/tmp" mgr of Ok n -> Unit | Err e -> error "qsysfail: claim /tmp: {e}");
+  _ = QS.filesRegister me ns mgr knownM;
+  ok10 = seqAll me ns knownM;
+  # 11. 64 held open bound the 65th; closing them admits it again
+  held = holdMany me ns (takeN knownM 64) Nil;
+  extra1 = EP.open me ns "/tmp/m65" "read";
+  ok11a = case extra1 of Err why -> QS.strEq why "file actor budget exhausted (64 live files)" | Ok ep -> False;
+  _ = closeAll me held;
+  _ = waitDeads (ownersOf held);
+  extra2 = EP.open me ns "/tmp/m65" "read";
+  ok11b = case extra2 of Ok ep -> _ = EP.close me ep; True | Err why -> False;
+  ok11 = QS.lenL held == 64 and ok11a and ok11b;
+  case ok1 and ok2 and ok3 and ok4 and ok5 and ok6 and ok7 and ok8 and ok9 and ok10 and ok11 of
     True -> "qsysfail: HOLDS"
   | False -> "qsysfail: FAILED".

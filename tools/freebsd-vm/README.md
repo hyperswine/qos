@@ -1,5 +1,11 @@
 # QOS Portable on FreeBSD
 
+Current revalidation: [2026-10-18 compatibility check](../../docs/2026-10-18-FREEBSD-PORTABLE.md).
+Portable ABI v22 works headlessly after two explicit networking-header fixes
+in the pinned FP-RISC runtime. The current native server passed 100 concurrent
+sessions; 1,000 exhausted the 4 GiB guest's RAM and swap. Figures below are
+historical and do not describe the current build's capacity.
+
 FreeBSD/arm64, the server shape: no graphics, no input devices, and **nothing
 installed in the guest**. A stock release image runs the binaries as they are.
 

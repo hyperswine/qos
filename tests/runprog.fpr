@@ -127,6 +127,16 @@ main =
   _ = check "the entry maps back" (RP.userLine "main = 1 +" 2 == 1 and RP.userLine "unsafe program.\nmain = 1." 3 == 2);
   _ = check "after the header" (RP.wrap "# hi\nunsafe program.\nmain = 1." == "# hi\nunsafe program.\n{RP.entry}\nmain = 1.");
   _ = check "first without one" (RP.wrap "main = 1." == "{RP.entry}\nmain = 1.");
+  _ = check "tab, split and signature entries count"
+    (RP.hasMain ["main\t= 42."] and RP.hasMain ["main", "  = 42."] and RP.hasMain ["main : unsafe Int ."]
+     and RP.hasMain ["main # run it"] and RP.hasApp ["app\t= 1."] and RP.hasApp ["app", ": Type ."]);
+  _ = check "near misses are not entries"
+    (not (RP.hasMain ["mainfoo = 1"]) and not (RP.hasMain ["  main = 1"]) and not (RP.hasMain ["# main = 1"])
+     and not (RP.hasMain ["main"]) and not (RP.hasMain ["main", "print 1."]) and not (RP.hasApp ["application = 1"]));
+  (outT, howT) = runToEnd me "main\t= 42." 400;
+  _ = check "a tab entry runs: [{outT}] {howT}" (outT == "42\n" and howT == "finished");
+  (outS, howS) = runToEnd me "main\n  = 40 + 2." 400;
+  _ = check "a split entry runs: [{outS}] {howS}" (outS == "42\n" and howS == "finished");
   (out4, how4) = runToEnd me "unsafe program.\nspin : unsafe Int -> Int .\nspin n = spin (n + 1).\nmain = _ = print \"spinning\"; spin 0." 20;
   _ = check "a spinning program is stopped: [{out4}] {how4}" (out4 == "spinning\n" and how4 == "still running");
   (out5, how5) = runUndrained me "unsafe program.\nsay : unsafe Int -> Unit .\nsay n = if n <= 0 then Unit else _ = print \"0123456789012345678901234567890123456789\"; say (n - 1).\nmain = say 5000." 2000;

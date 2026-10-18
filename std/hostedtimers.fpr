@@ -1,0 +1,152 @@
+# The hosted loop owns a Pool, never the application model. Every timer is
+# moved through its chain exactly once, retained or cancelled. No keep/drop
+# copies an owner. The actor address is private mechanism inside that owner.
+Time = use "hostedtime".
+Sys.alive : Int -> Bool .
+
+defaults = { maxTimers = 32, checkMs = 50 }.
+Chain 1 msg = Type (Empty | Armed Int Int msg Bool Int (Chain msg)).
+Pool 1 msg = Type (Pool Int Int (Chain msg)).
+
+open : (limit : Int | limit >= 1 and limit <= 1024) -> Pool msg .
+open limit = Pool limit 0 Empty.
+
+# Ordinary data, including a directly constructed Every, is validated before
+# changing the active set. Duplicate declarations share one timer, and each
+# declaration still counts towards the bounded reconciliation input.
+validate : (specs : List (Int, msg) | measure specs) -> Int -> Result Unit String .
+validate specs left = case specs of
+    Nil -> Ok Unit
+  | (ms, msg) :: rest -> if left <= 0 then Err "subscription budget exhausted"
+      else if not (Time.validPeriod ms) then Err "subscription period must be positive"
+      else validate rest (left - 1).
+
+member : Int -> msg -> (specs : List (Int, msg) | measure specs) -> Bool .
+member ms msg specs = case specs of
+    Nil -> False
+  | (period, value) :: rest -> (period == ms and value == msg) or member ms msg rest.
+
+# A finite structural traversal also moves every owned tail. The returned
+# count is the number released, not an unverified cache of open actors.
+trim : List (Int, msg) -> (chain : Chain msg | measure chain) -> (Int, Chain msg) .
+trim specs chain = case chain of
+    Empty -> (0, Empty)
+  | Armed token ms msg repeating actor rest ->
+      (removed, tail) = trim specs rest;
+      if repeating and not (member ms msg specs) then
+        _ = kill actor; (removed + 1, tail)
+      else (removed, Armed token ms msg repeating actor tail).
+
+contains : Int -> msg -> (chain : Chain msg | measure chain) -> (Bool, Chain msg) .
+contains ms msg chain = case chain of
+    Empty -> (False, Empty)
+  | Armed token period value repeating actor rest ->
+      if repeating and period == ms and value == msg then
+        (True, Armed token period value repeating actor rest)
+      else (found, tail) = contains ms msg rest;
+        (found, Armed token period value repeating actor tail).
+
+sync : unsafe (Int -> event) -> Int -> Int -> List (Int, msg) -> Pool msg -> (Result Unit String, Pool msg) .
+sync wake owner checkMs specs pool = case retain specs pool of
+    (Err why, held) -> (Err why, held)
+  | (Ok u, held) -> add wake owner checkMs specs held.
+
+# Release obsolete subscriptions before admitting commands from the same
+# update. Replacing a subscription with an After can reuse its last slot.
+retain : List (Int, msg) -> Pool msg -> (Result Unit String, Pool msg) .
+retain specs pool = Pool limit used chain = pool;
+  case validate specs limit of
+    Err why -> (Err why, Pool limit used chain)
+  | Ok u ->
+      (removed, retained) = trim specs chain;
+      (Ok Unit, Pool limit (used - removed) retained).
+
+add : unsafe (Int -> event) -> Int -> Int -> (specs : List (Int, msg) | measure specs) -> Pool msg -> (Result Unit String, Pool msg) .
+add wake owner checkMs specs pool = case specs of
+    Nil -> (Ok Unit, pool)
+  | (ms, msg) :: rest ->
+      Pool limit used chain = pool;
+      (found, retained) = contains ms msg chain;
+      if found then add wake owner checkMs rest (Pool limit used retained)
+      else case arm wake owner checkMs True ms msg (Pool limit used retained) of
+          (Err why, next) -> (Err why, next)
+        | (Ok u, next) -> add wake owner checkMs rest next.
+
+# A timer's quota remains charged while its notification waits in the host.
+# After and Every share the quota; failure hands back the entire owner so
+# that the caller can release partial initialization before reporting it.
+arm : unsafe (Int -> event) -> Int -> Int -> Bool -> Int -> msg -> Pool msg -> (Result Unit String, Pool msg) .
+arm wake owner checkMs repeating ms msg pool = Pool limit used chain = pool;
+  if not (Time.validDelay ms) or (repeating and ms == 0) then
+    (Err "timer duration is outside its checked range", Pool limit used chain)
+  else if checkMs < 1 or checkMs > 1000 then
+    (Err "timer owner check must be 1..1000 ms", Pool limit used chain)
+  else if used >= limit then (Err "timer budget exhausted", Pool limit used chain)
+  else
+    token = Sys.nextId Unit;
+    actor = spawn (worker wake owner checkMs repeating ms token);
+    (Ok Unit, Pool limit (used + 1) (Armed token ms msg repeating actor chain)).
+
+# A queued notification is accepted only while its original token is still
+# owned. Removing and re-adding the same subscription cannot revive an old
+# notification. Repeating workers require acknowledgement before another nap.
+fire : Int -> Pool msg -> (Result (List msg) String, Pool msg) .
+fire token pool = Pool limit used chain = pool;
+  (result, removed, next) = deliver token chain;
+  (result, Pool limit (used - removed) next).
+deliver : Int -> (chain : Chain msg | measure chain) -> (Result (List msg) String, Int, Chain msg) .
+deliver wanted chain = case chain of
+    Empty -> (Ok Nil, 0, Empty)
+  | Armed token ms msg repeating actor rest ->
+      if token != wanted then
+        (result, removed, tail) = deliver wanted rest;
+        (result, removed, Armed token ms msg repeating actor tail)
+      else if not repeating then
+        _ = kill actor; (Ok [msg], 1, rest)
+      else case send actor Unit of
+          Ok u -> (Ok [msg], 0, Armed token ms msg repeating actor rest)
+        | Err why -> _ = kill actor; (Err "timer ended before acknowledgement ({why})", 1, rest).
+
+close : Pool msg -> Unit .
+close pool = Pool limit used chain = pool; closeChain chain.
+closeChain : (chain : Chain msg | measure chain) -> Unit .
+closeChain chain = case chain of
+    Empty -> Unit
+  | Armed token ms msg repeating actor rest -> _ = kill actor; closeChain rest.
+
+# Immutable inspection hands the owner back, as Vec.len does. Used by focused
+# lifecycle tests; application models do not receive this resource.
+usage : Pool msg -> (Int, Pool msg) .
+usage pool = Pool limit used chain = pool; (used, Pool limit used chain).
+tokens : Pool msg -> (List Int, Pool msg) .
+tokens pool = Pool limit used chain = pool;
+  (ids, next) = chainTokens chain;
+  (ids, Pool limit used next).
+chainTokens : (chain : Chain msg | measure chain) -> (List Int, Chain msg) .
+chainTokens chain = case chain of
+    Empty -> (Nil, Empty)
+  | Armed token ms msg repeating actor rest ->
+      (ids, next) = chainTokens rest;
+      (token :: ids, Armed token ms msg repeating actor next).
+
+# Only these loops are persistent. Waiting is a parked sleep; owner death
+# is checked at most checkMs of scheduled sleeping apart, including long
+# durations. Once a notification is queued, receiveFromRes watches death.
+worker : unsafe (Int -> event) -> Int -> Int -> Bool -> Int -> Int -> Int -> Unit .
+worker wake owner checkMs repeating ms token self =
+  _ = Sys.loop Unit (fn state ->
+    again = if not (waitOwner owner checkMs ms) then False else
+      case send owner (wake token) of
+          Err why -> False
+        | Ok u -> if not repeating then False else
+            case receiveFromRes self owner of
+                Err why -> False
+              | Ok borrowed -> _ = drop borrowed; True;
+    (again, Unit));
+  Unit.
+waitOwner : unsafe Int -> Int -> Int -> Bool .
+waitOwner owner checkMs left = if not (Sys.alive owner) then False
+  else if left <= 0 then True
+  else nap = Time.slice checkMs left;
+    _ = Sys.sleepUs (Time.microseconds nap);
+    waitOwner owner checkMs (left - nap).

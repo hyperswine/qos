@@ -1,0 +1,224 @@
+#: expect hostedtimers: HOLDS
+unsafe program.
+H = use "std/hosted".
+T = use "std/hostedtimers".
+Time = use "std/hostedtime".
+
+check what yes = if yes then Unit else error "hostedtimers: {what}".
+success (Ok value) = value.
+success (Err why) = error "hostedtimers: {why}".
+failed (Err why) = True.
+failed other = False.
+
+liveAt most n = if Sys.actLive 0 <= most then Unit
+  else if n <= 0 then error "hostedtimers: actors were not reclaimed"
+  else _ = Sys.sleepUs 1000; liveAt most (n - 1).
+notification me n = case receiveNow me of
+    Ok borrowed -> event = keep borrowed; _ = drop borrowed;
+      (case event of H.TimerFired token -> token | other -> error "hostedtimers: unexpected notification")
+  | Err why -> if n <= 0 then error "hostedtimers: notification deadline" else
+      _ = Sys.sleepUs 1000; notification me (n - 1).
+emptyInbox me = case receiveNow me of
+    Err why -> True
+  | Ok borrowed -> _ = drop borrowed; False.
+drain me = case receiveNow me of
+    Err why -> Unit
+  | Ok borrowed -> _ = drop borrowed; drain me.
+count want pool = (n, held) = T.usage pool;
+  _ = check "owned timer count" (n == want); held.
+
+churn : (n : Int | measure n) -> Int -> T.Pool Int -> T.Pool Int .
+churn n me pool = if n <= 0 then pool else
+  (made, active) = T.sync H.TimerFired me 5 [(86400000, n)] pool;
+  _ = success made;
+  (removed, empty) = T.sync H.TimerFired me 5 Nil active;
+  _ = success removed;
+  churn (n - 1) me empty.
+
+# Retain the linear owner while waiting. Killing this actor exercises the
+# runtime death path, where its local close cannot execute.
+adopt parent short self =
+  (made, pool) = T.sync H.TimerFired self 5 [(if short then 1 else 1099511627776, 7)] (T.open 2);
+  _ = success made;
+  (started, held) = T.arm H.TimerFired self 5 False 1099511627776 8 pool;
+  _ = success started;
+  _ = send parent Unit;
+  _ = receiveFromRes self parent;
+  T.close held.
+
+initial = {active = True, n = 0}.
+update (H.Key H.Enter) model = ({model | active = not model.active}, Nil).
+update (H.Key (H.Char "q")) model = (model, [H.quit, H.after 86400000 99]).
+update (H.Msg n) model = ({model | n = model.n + n}, Nil).
+update other model = (model, Nil).
+view size model = ["{model.active}:{model.n}"].
+subs model = if model.active then [H.every 2 1] else Nil.
+app = {init = initial, update = update, view = view, subs = subs}.
+run config chosen parent self =
+  result = H.hostWith config self (H.Start parent 40 10) chosen;
+  _ = send parent result; _ = receiveFromRes self parent; Unit.
+frame me actor n = case receiveFromNow me actor of
+    Ok borrowed -> value = keep borrowed; _ = drop borrowed;
+      (case value of H.Frame lines -> lines | other -> error "hostedtimers: expected frame")
+  | Err why -> if n <= 0 then error "hostedtimers: frame deadline" else
+      _ = Sys.sleepUs 1000; frame me actor (n - 1).
+offFrame me actor n = if n <= 0 then error "hostedtimers: off frame deadline" else
+  lines = frame me actor n;
+  case lines of
+    text :: rest -> if strlen text >= 6 and substr text 0 6 == "False:" then lines else offFrame me actor (n - 1)
+  | Nil -> error "hostedtimers: empty frame".
+finishResult me actor = case receiveFromRes me actor of
+    Err why -> error "hostedtimers: host ended without result ({why})"
+  | Ok borrowed -> result = keep borrowed; _ = drop borrowed; result.
+
+quotaUpdate ev model = (model, [H.after 86400000 1]).
+quotaSubs model = [H.every 86400000 2].
+quotaApp = {app | update = quotaUpdate, subs = quotaSubs}.
+badSubs model = [H.Every 0 1].
+badApp = {app | subs = badSubs}.
+quietUpdate (H.Resized cols rows) model = ({model | active = False}, Nil).
+quietUpdate event model = update event model.
+switchUpdate (H.Key H.Enter) model = ({model | active = False}, [H.after 0 5]).
+switchUpdate event model = update event model.
+switchSubs model = if model.active then [H.every 86400000 1] else Nil.
+pendingUpdate (H.Resized cols rows) model = (model, [H.after 1099511627776 9]).
+pendingUpdate event model = update event model.
+
+main =
+  me = myself 0;
+  _ = check "external duration errors are Results" (failed (H.tryEvery 0 1) and failed (H.tryAfter (0 - 1) 1));
+  _ = success (H.tryEvery 1099511627776 1);
+  _ = success (H.tryAfter 1099511627776 1);
+  _ = success (H.tryAfter 0 1);
+  _ = check "bounded duration arithmetic" (Time.microseconds 1000 == 1000000 and Time.slice 5 3 == 3 and Time.slice 5 1099511627776 == 5);
+  _ = Sys.sleepUs 5000;
+  baseline = Sys.actLive 0;
+  (r1, p1) = T.sync H.TimerFired me 5 [(86400000, 7)] (T.open 2);
+  _ = success r1;
+  _ = check "one live worker acquired" (Sys.actLive 0 == baseline + 1);
+  (firstIds, p2) = T.tokens (count 1 p1);
+  (r2, p3) = T.sync H.TimerFired me 5 [(86400000, 7), (86400000, 7)] p2;
+  _ = success r2;
+  (sameIds, p4) = T.tokens (count 1 p3);
+  _ = check "unchanged and duplicate subscriptions retain one worker" (sameIds == firstIds);
+  (r3, p5) = T.sync H.TimerFired me 5 Nil p4;
+  _ = success r3;
+  _ = liveAt baseline 1000;
+  old = case firstIds of token :: rest -> token | Nil -> error "hostedtimers: no token";
+  (oldReply, p6) = T.fire old (count 0 p5);
+  _ = check "removed queued notification is stale" (success oldReply == Nil);
+  (r4, p7) = T.sync H.TimerFired me 5 [(86400000, 7)] p6;
+  _ = success r4;
+  (newIds, p8) = T.tokens p7;
+  _ = check "resubscription has a fresh identity" (newIds != firstIds);
+  (oldAgain, p9) = T.fire old p8;
+  _ = check "resubscription rejects old identity" (success oldAgain == Nil);
+  (r5, p10) = T.sync H.TimerFired me 5 [(86399999, 7)] p9;
+  _ = success r5;
+  (changedIds, p11) = T.tokens p10;
+  _ = check "changed period replaces worker" (changedIds != newIds);
+  (invalid, p12) = T.sync H.TimerFired me 5 [(0, 8)] p11;
+  _ = check "direct invalid period refused before changing pool" (failed invalid);
+  (stillIds, p13) = T.tokens p12;
+  _ = check "failed validation preserves existing owner" (stillIds == changedIds);
+  (tooMany, p14) = T.sync H.TimerFired me 5 [(10, 1), (20, 2), (30, 3)] p13;
+  _ = check "subscription input bound" (failed tooMany);
+  _ = T.close p14;
+  _ = liveAt baseline 1000;
+  (r6, one) = T.arm H.TimerFired me 5 False 0 42 (T.open 1);
+  _ = success r6;
+  token = notification me 1000;
+  (once, none) = T.fire token one;
+  _ = check "After delivers and releases its quota" (success once == [42]);
+  (staleOnce, none2) = T.fire token (count 0 none);
+  _ = check "After cannot deliver twice" (success staleOnce == Nil);
+  _ = T.close none2;
+  (r7, fast) = T.sync H.TimerFired me 5 [(1, 1)] (T.open 1);
+  _ = success r7;
+  tick1 = notification me 1000;
+  _ = Sys.sleepUs 30000;
+  _ = check "slow recipient retains at most one tick" (emptyInbox me);
+  (delivered, fast2) = T.fire tick1 fast;
+  _ = check "tick delivers once" (success delivered == [1]);
+  tick2 = notification me 1000;
+  _ = check "acknowledgement enables next tick" (tick2 == tick1);
+  # Leave the real queued notification unacknowledged, remove its owner,
+  # and present the old notification after the transition.
+  (r8, stopped) = T.sync H.TimerFired me 5 Nil fast2;
+  _ = success r8;
+  (staleTick, stopped2) = T.fire tick2 stopped;
+  _ = check "real queued tick rejected after removal" (success staleTick == Nil);
+  _ = T.close stopped2;
+  _ = liveAt baseline 1000;
+  (r9, full) = T.sync H.TimerFired me 5 [(86400000, 1)] (T.open 1);
+  _ = success r9;
+  (denied, full2) = T.arm H.TimerFired me 5 False 86400000 2 full;
+  _ = check "After shares subscription quota" (failed denied);
+  (r10, freed) = T.retain Nil full2;
+  _ = success r10;
+  (r11, reused) = T.arm H.TimerFired me 5 False 86400000 2 freed;
+  _ = success r11;
+  _ = T.close (count 1 reused);
+  _ = T.close (churn 200 me (T.open 1));
+  _ = liveAt baseline 1000;
+  longOwner = spawn (adopt me False);
+  _ = receiveFromRes me longOwner;
+  _ = kill longOwner;
+  _ = liveAt baseline 1000;
+  waitingOwner = spawn (adopt me True);
+  _ = receiveFromRes me waitingOwner;
+  _ = Sys.sleepUs 20000;
+  _ = kill waitingOwner;
+  _ = liveAt baseline 1000;
+  _ = drain me;
+  # The actual hosted loop: removing/re-adding changes the live worker
+  # count, no removed tick reaches update, and Quit closes the whole pool.
+  hosted = spawn (run {H.defaults | maxTimers = 2, checkMs = 5} app me);
+  _ = frame me hosted 1000;
+  _ = frame me hosted 1000;
+  _ = send hosted (H.KeyIn 28);
+  _ = offFrame me hosted 1000;
+  _ = liveAt (baseline + 1) 1000;
+  _ = Sys.sleepUs 30000;
+  _ = check "removed tick never reaches app update" (case receiveFromNow me hosted of Err why -> True | Ok borrowed -> _ = drop borrowed; False);
+  _ = send hosted (H.KeyIn 28);
+  _ = frame me hosted 1000;
+  _ = frame me hosted 1000;
+  _ = send hosted (H.KeyIn 28);
+  _ = offFrame me hosted 1000;
+  _ = liveAt (baseline + 1) 1000;
+  _ = send hosted (H.KeyIn 16);
+  _ = success (finishResult me hosted);
+  _ = send hosted Unit;
+  _ = liveAt baseline 1000;
+  quiet = spawn (run {H.defaults | maxTimers = 1} {app | update = quietUpdate} me);
+  _ = frame me quiet 1000;
+  _ = check "initial resize can remove subscriptions before acquisition" (Sys.actLive 0 == baseline + 1);
+  _ = send quiet (H.KeyIn 16);
+  _ = success (finishResult me quiet);
+  _ = send quiet Unit;
+  _ = liveAt baseline 1000;
+  switched = spawn (run {H.defaults | maxTimers = 1} {app | update = switchUpdate, subs = switchSubs} me);
+  _ = frame me switched 1000;
+  _ = send switched (H.KeyIn 28);
+  _ = frame me switched 1000;
+  _ = check "host reuses removed subscription's last slot for After" (frame me switched 1000 == ["False:5"]);
+  _ = send switched (H.KeyIn 16);
+  _ = success (finishResult me switched);
+  _ = send switched Unit;
+  _ = liveAt baseline 1000;
+  pending = spawn (run {H.defaults | maxTimers = 2} {app | update = pendingUpdate, subs = switchSubs} me);
+  _ = frame me pending 1000;
+  _ = check "host owns pending After and Every workers" (Sys.actLive 0 == baseline + 3);
+  _ = send pending (H.KeyIn 16);
+  _ = success (finishResult me pending);
+  _ = send pending Unit;
+  _ = liveAt baseline 1000;
+  quota = H.hostWith {H.defaults | maxTimers = 1} me (H.Start me 40 10) quotaApp;
+  _ = check "host reports quota refusal after partial acquisition" (failed quota);
+  _ = liveAt baseline 1000;
+  invalidHost = H.hostWith H.defaults me (H.Start me 40 10) badApp;
+  _ = check "host rejects raw invalid subscription" (failed invalidHost);
+  _ = check "host validates configuration" (failed (H.hostWith {H.defaults | maxTimers = 0} me (H.Start me 40 10) app));
+  _ = check "host validates first message" (failed (H.hostWith H.defaults me (H.KeyIn 28) app));
+  "hostedtimers: HOLDS".

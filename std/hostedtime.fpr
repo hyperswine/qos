@@ -1,0 +1,15 @@
+# Pure timer admission and arithmetic, in milliseconds. Keep the full delay
+# in that unit and convert only bounded sleep slices. Long timers then need
+# no arbitrary upper limit or overflowing full-duration multiplication.
+validDelay ms = ms >= 0.
+validPeriod ms = ms >= 1.
+validLimits count checkMs = count >= 1 and count <= 1024 and checkMs >= 1 and checkMs <= 1000.
+
+microseconds : (ms : Int | ms >= 0 and ms <= 1000) -> Int
+  | work microseconds <= 1 | alloc microseconds <= 0.
+microseconds ms = ms * 1000.
+
+slice : (checkMs : Int | checkMs >= 1 and checkMs <= 1000)
+  -> (left : Int | left >= 1) -> Int
+  | work slice <= 3 | alloc slice <= 0.
+slice checkMs left = if left < checkMs then left else checkMs.

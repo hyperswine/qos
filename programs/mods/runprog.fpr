@@ -92,11 +92,27 @@ trimEnd s = if strlen s > 0 and blank (charAt s (strlen s - 1)) then trimEnd (su
 blank c = c == 32 or c == 9 or c == 13.
 endsWith suffix s = strlen s >= strlen suffix and substr s (strlen s - strlen suffix) (strlen suffix) == suffix.
 
-# a file with a main to run, or an app: a line that starts with it
-hasMain Nil = False.
-hasMain (l :: rest) = startsWith "main " l or startsWith "main=" l or hasMain rest.
-hasApp Nil = False.
-hasApp (l :: rest) = startsWith "app " l or startsWith "app=" l or hasApp rest.
+# a file with a main to run, or an app: a TOP-LEVEL definition of that
+# name. The name is the first token of a non-comment line at column 0,
+# followed by end of line (its `=`/`:` on a later line), `=`, `:`, or
+# blank (space, tab, CR). A tab separator or a split `name` / `=`
+# binding therefore counts; `mainfoo`, an indented use, and
+# `# main = ...` do not. This is still a source scan, not compiler
+# metadata -- the structured entry/diagnostic interface is the
+# follow-up -- but it accepts what the compiler's front end accepts.
+hasMain lines = hasDef lines "main".
+hasApp lines = hasDef lines "app".
+hasDef Nil name = False.
+hasDef (l :: rest) name = defAt l rest name or hasDef rest name.
+defAt l rest name = startsWith name l and defTail (substr l (strlen name) (strlen l - strlen name)) rest.
+defTail tail rest = if strlen tail == 0 then contDef rest
+  else c = charAt tail 0; c == 61 or c == 58 or blank c.
+# `name` alone on its line: a definition iff the next code line opens
+# with `=` or `:` (a signature or a split binding); a bare use is not
+contDef Nil = False.
+contDef (l :: rest) = t = trimStart l;
+  if strlen t == 0 or charAt t 0 == 35 then contDef rest
+  else charAt t 0 == 61 or charAt t 0 == 58.
 startsWith prefix s = strlen s >= strlen prefix and substr s 0 (strlen prefix) == prefix.
 
 start : String -> (budget : Int | budget > 0) -> a -> Result Proc String .

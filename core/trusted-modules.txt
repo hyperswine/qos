@@ -82,8 +82,12 @@
 ../.fpr/store/201a0e9bf98a5154.fpr
 
 # The loop an app the Editor runs lives in (docs/2026-10-17-PROGRAMS.md):
-# actor loops that run until stopped (host, ticking) and structural
-# recursion over the program's own lists (keys, perform/ask, takeAsk,
-# appendAsks, startSubs, member); listen, step, resized and answered only
-# call those.  An app's own update and view stay under the safe/unsafe line.
+# the persistent host loop and its effect interpreter (perform).
+# Finite local traversals carry checked structural measures. The host owns
+# a linear timer pool and releases it before returning a failure or quit.
+# An app's own update and view stay under the safe/unsafe line.
 ../std/hosted.fpr
+# Reviewed timer mechanism: persistent parked worker/owner-death loop;
+# sync/add/arm acquire bounded actors for the host above. Finite owner-chain
+# traversals are measured. No application callback runs in a timer worker.
+../std/hostedtimers.fpr

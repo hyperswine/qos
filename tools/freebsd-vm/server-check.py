@@ -15,7 +15,7 @@ guest and can.
 
   QOS_BSD_BINARY   the server in the guest (default ~/liveboard-freebsd)
 """
-import base64, json, os, socket, struct, subprocess, sys, time
+import base64, json, os, socket, struct, subprocess, sys, tempfile, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DIR = os.environ.get("QOS_BSD_DIR", os.path.expanduser("~/.cache/qos-freebsd-vm"))
@@ -118,8 +118,9 @@ def main():
         fail("the server never said 'ready'", guest("cat /tmp/sc.log").stdout)
     print(f"server-check: started in the guest ({guest('uname -sr').stdout.strip()})")
 
+    tunnel_log = tempfile.TemporaryFile(mode="w+")
     tun = subprocess.Popen(SSH[:-1] + ["-N", "-L", f"{LPORT}:127.0.0.1:{RPORT}", SSH[-1]],
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                           stdout=subprocess.DEVNULL, stderr=tunnel_log)
     conns = []
     try:
         for _ in range(60):
@@ -132,7 +133,9 @@ def main():
             fail("the ssh tunnel never opened")
 
         page = urllib.request.urlopen(f"http://127.0.0.1:{LPORT}/", timeout=30).read().decode()
-        for marker in ('id="lv-root"', "window.__LV__", "new WebSocket", ".col"):
+        # The typed JS emitter may use bracket access and parenthesized
+        # constructors; check the page contract, not its source spelling.
+        for marker in ('id="lv-root"', "__LV__", "WebSocket", "<style>"):
             if marker not in page:
                 fail(f"the served page has no {marker}")
         print(f"server-check: page served, {len(page)} bytes "
@@ -167,13 +170,22 @@ def main():
         print("server-check: a subscription ticked and stopped")
 
         a.send("Hash")
-        a.until(lambda m: has(m, "working"))
+        # Writers coalesce model versions. A fast job may finish before
+        # the intermediate "working" frame is sent; completion is required.
         a.until(lambda m: has(m, "digest ready"))
         print("server-check: a command ran in its own actor and returned as an event")
 
         t0 = time.time()
-        many = [Ws(LPORT) for _ in range(MANY)]
-        conns += many
+        many = []
+        for i in range(MANY):
+            try:
+                w = Ws(LPORT)
+            except Exception as error:
+                tunnel_log.seek(0)
+                fail(f"session {i + 1}/{MANY}: {error}",
+                     guest("cat /tmp/sc.log").stdout + tunnel_log.read())
+            many.append(w)
+            conns.append(w)
         for w in many:
             w.recv()
         opened = time.time() - t0
@@ -196,6 +208,8 @@ def main():
             except OSError:
                 pass
         tun.terminate()
+        tun.wait(timeout=5)
+        tunnel_log.close()
         guest("kill $(cat /tmp/sc.pid) 2>/dev/null; true")
 
 
