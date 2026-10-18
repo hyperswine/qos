@@ -25,7 +25,6 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  FPRISC_ROOT: ${{ github.workspace }}/fprisc
   DEBIAN_FRONTEND: noninteractive
 
 jobs:
@@ -85,6 +84,9 @@ jobs:
           path: fprisc
           key: fprisc-trixie-${{ needs.fprisc.outputs.rev }}
           fail-on-cache-miss: true
+      # in a container job ${{ github.workspace }} is the HOST's path;
+      # $GITHUB_WORKSPACE is the one the container sees
+      - run: echo "FPRISC_ROOT=$GITHUB_WORKSPACE/fprisc" >> "$GITHUB_ENV"
       - name: lock --check
         run: ./qos.py lock --check
       - name: unittest
@@ -125,6 +127,9 @@ jobs:
           path: fprisc
           key: fprisc-trixie-${{ needs.fprisc.outputs.rev }}
           fail-on-cache-miss: true
+      # in a container job ${{ github.workspace }} is the HOST's path;
+      # $GITHUB_WORKSPACE is the one the container sees
+      - run: echo "FPRISC_ROOT=$GITHUB_WORKSPACE/fprisc" >> "$GITHUB_ENV"
       - name: native smoke boot
         run: ./qos.py native --smoke
       - name: native legs
