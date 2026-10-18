@@ -20,11 +20,17 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <unistd.h>
+#include "../app_id.h"
 
 static char g_path[192];
 
 void qosp_store_bind(const char *app_id) {
-  /* Directory creation belongs to the checked durable append, not bind. */
+  /* Directory creation belongs to the checked durable append, not bind.
+   * The id is a path component: an invalid one (qos/app_id.h: "..", "/",
+   * over 64 bytes...) binds no store at all rather than a path outside
+   * qos-store/ -- Host.run refuses it before this, by name. */
+  g_path[0] = 0;
+  if (!app_id || qos_app_id_invalid((const unsigned char *)app_id, strlen(app_id))) return;
   int n = snprintf(g_path, sizeof g_path, "qos-store/%s.kv", app_id);
   if (n < 0 || (size_t)n >= sizeof g_path) g_path[0] = 0;
 }

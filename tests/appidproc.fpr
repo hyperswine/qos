@@ -1,0 +1,7 @@
+unsafe program.
+# A process that uses its own kv store: tests/appidnative.fpr places it
+# under several bound ids (tools/app-id-check.py).
+main =
+  a = case Sys.storeReq 2 "v" of Ok _ -> "ok" | Err e -> "Err {e}";
+  r = case Sys.storeReq 3 "" of Ok b -> "{strlen b}" | Err e -> "Err {e}";
+  "appidproc: {a} {r}".

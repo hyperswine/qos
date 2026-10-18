@@ -110,6 +110,8 @@ std/actor v3.0 201a0e9bf98a5154 std/storage.fpr
 std/actor v3.0 201a0e9bf98a5154 std/timer.fpr
 std/actor v3.0 201a0e9bf98a5154 std/uart.fpr
 std/fs v5.0 84826bc9e8ddb4b5 tests/admissionnative.fpr
+std/fs v5.0 84826bc9e8ddb4b5 tests/appidnative.fpr
+../programs/mods/svc v5.0 75479fb6d5f34670 tests/appidnative.fpr
 ../programs/mods/ep v3.0 c66ad65e68dd97f5 tests/appjobs.fpr
 std/actor v3.0 201a0e9bf98a5154 tests/appjobs.fpr
 std/fs v5.0 84826bc9e8ddb4b5 tests/apps.fpr

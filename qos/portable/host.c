@@ -29,6 +29,7 @@
  *     Memory.qa analogue, the syscall trampoline the System.qa one.
  */
 #include "qos_abi.h"
+#include "../app_id.h" /* the id is a path component */
 #include "park.h"
 #include "snd_raw.h"
 
@@ -588,6 +589,10 @@ static V h_run(V idv, V namev, V capsv) {
   const str_t *name = arg_str(namev, "Host.run: name must be a String");
   const str_t *capss = arg_str(capsv, "Host.run: caps must be a String");
   if (!g_ld.ok) return res_err("Host.run before Host.loadImage");
+  /* the id names qos-store/<id>.kv: one safe path component (qos/app_id.h;
+   * the manifest parser refuses a bad one first, this is the same rule) */
+  const char *badid = qos_app_id_invalid(id->bytes, id->len);
+  if (badid) return res_err(badid);
   /* the app reads these for as long as it runs: out of this runtime's heap */
   char *cid = malloc(id->len + 1), *caps = malloc(capss->len + 1);
   if (!cid || !caps) return res_err("out of memory");
