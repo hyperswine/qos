@@ -31,6 +31,13 @@ class FpriscPath(unittest.TestCase):
             spec = importlib.util.spec_from_file_location("qos_cli_under_test", HERE / "qos.py")
             self.cli = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(self.cli)
+        # each test sees no ambient FPRISC_ROOT (a developer shell or CI
+        # exporting one changed which lookup won); the tests that want
+        # one set it themselves
+        env = patch.dict(os.environ)
+        env.start()
+        self.addCleanup(env.stop)
+        os.environ.pop("FPRISC_ROOT", None)
 
     def test_nothing_found_says_how(self):
         with patch.dict(os.environ, {}, clear=True):
