@@ -2,8 +2,10 @@
 """Append matching onboard archives to a stopped Main v3 disk snapshot.
 
 Never edits the source or overwrites an output. Requires two valid, stable
-superblocks and a verified committed log. Preserve all history; refuse a custom
-app index because its additional native archives also need rebuilding together.
+superblocks and a verified committed log. Preserve all history; accept the
+standard four-app index or current six-app index and append the six-app bundle
+and index together. Refuse a custom index because its additional native
+archives also need rebuilding together.
 Use only while the installed service is stopped, then install with rollback.
 """
 import argparse
@@ -14,7 +16,8 @@ from pathlib import Path
 import re
 
 PG = 4096
-APPS = ('clock', 'logs', 'browser', 'disk')
+LEGACY_APPS = ('clock', 'logs', 'browser', 'disk')
+APPS = (*LEGACY_APPS, 'terminal', 'editor')
 NUM = rb'(0|[1-9][0-9]*)'
 SEAL = re.compile(rb'QLOG ' + NUM + rb' v3 w' + NUM + rb' c' + NUM +
                   rb' d' + NUM + rb' s' + NUM + rb' m' + NUM +
@@ -77,6 +80,17 @@ def valid_key(key):
     return bool(key) and all(b > 32 and b != 127 for b in key)
 
 
+def app_index(apps):
+    """The canonical newline-separated index written by tools/mkdisk.py."""
+    return ''.join(a + '\n' for a in apps).encode()
+
+
+def archive_record(key, payload):
+    np = (len(payload) + PG - 1) // PG
+    line = f'QREC {np} {len(payload)} {key} h{digest(payload)}\n'.encode()
+    return line.ljust(PG, b'\0') + payload.ljust(np * PG, b'\0')
+
+
 def scan(data, head):
     """Verify Qlog framing/hash rules, retaining the latest value for each key."""
     data = bytes(data)
@@ -126,17 +140,17 @@ def prepare(data, archives):
     meta = max(slots, key=lambda x: x.generation)
     check(meta.generation <= 1000000000 - 2, 'generation exhausted')
     latest, count = scan(data, meta.head)
-    check(latest.get(b'apps/index') == ''.join(a + '\n' for a in APPS).encode(),
+    old_index = latest.get(b'apps/index')
+    known_indexes = {app_index(apps): apps for apps in (LEGACY_APPS, APPS)}
+    check(old_index in known_indexes,
           'custom/missing app index; rebuild every indexed archive before updating')
-    check(set(archives) == set(APPS), 'exactly the four onboard archives are required')
+    check(set(archives) == set(APPS), 'exactly the six onboard archives are required')
     records = bytearray()
     for app in APPS:
         payload = archives[app]
         check(bool(payload), f'empty {app} archive')
-        np = (len(payload) + PG - 1) // PG
-        line = f'QREC {np} {len(payload)} apps/{app}.qa h{digest(payload)}\n'.encode()
-        records.extend(line.ljust(PG, b'\0'))
-        records.extend(payload.ljust(np * PG, b'\0'))
+        records.extend(archive_record(f'apps/{app}.qa', payload))
+    records.extend(archive_record('apps/index', app_index(APPS)))
     new_head = meta.head + len(records) // PG
     check(new_head <= meta.data_end, 'insufficient DATA space; compact in QOS first')
     out = bytearray(data)
@@ -147,14 +161,15 @@ def prepare(data, archives):
         out[pos:pos + PG] = replace(meta, head=new_head, generation=gen).line().ljust(PG, b'\0')
     return out, {'old_head': meta.head, 'new_head': new_head, 'preserved_records': count,
                  'old_generation': meta.generation, 'new_generation': meta.generation + 2,
-                 'apps': list(APPS)}
+                 'old_apps': list(known_indexes[old_index]), 'apps': list(APPS)}
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('source', type=Path)
     ap.add_argument('output', type=Path)
-    ap.add_argument('bundle', type=Path, help='directory containing clock.qa, logs.qa, browser.qa, disk.qa')
+    ap.add_argument('bundle', type=Path,
+                    help='directory containing clock.qa, logs.qa, browser.qa, disk.qa, terminal.qa, editor.qa')
     args = ap.parse_args()
     try:
         check(args.source.resolve() != args.output.resolve(), 'source and output must differ')

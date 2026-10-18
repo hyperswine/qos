@@ -1,0 +1,105 @@
+#!/bin/sh
+# Native Editor compiler. Persistent archive, disposable bounded RAM workspace.
+set -eu
+if [ -r "${FPRD_CONFIG:-/etc/default/fprd}" ]; then
+    . "${FPRD_CONFIG:-/etc/default/fprd}"
+fi
+SDK_RAM=${FPRD_SDK_RAM:-/run/fpr-sdk}
+export FPRD_SDK_ROOT=${FPRD_SDK_ROOT:-$SDK_RAM/root}
+export FPRD_WORK=${FPRD_WORK:-/run/fpr-sdk-work}
+export FPRD_SOCK=${FPRD_SOCK:-/tmp/fprd.sock}
+ARCHIVE=${FPRD_ARCHIVE:-/usr/share/qosp/compiler-sdk.tar.gz}
+# Reuse the same guarded ownership, process groups, bounded shutdown, finite
+# crash restarts, and explicit readiness protocol as the appliance service.
+# These paths are separate from Main's supervisor and storage ownership.
+export QOSP_CONFIG=/dev/null
+export QOSP_RUN_DIR=${FPRD_RUN_DIR:-/run/fprd}
+export QOSP_READY_FILE=$QOSP_RUN_DIR/ready
+export QOSP_SESSION=${FPRD_SESSION:-/usr/libexec/fprd-sdk-session}
+export QOSP_LOG=${FPRD_LOG:-/var/log/fprd.log}
+export QOSP_TTY=/dev/null
+export QOSP_READY_TIMEOUT_SEC=25
+export QOSP_STOP_TIMEOUT_SEC=5
+export QOSP_KILL_TIMEOUT_SEC=2
+export QOSP_RESTART_MAX=3
+export QOSP_RESTART_DELAY_SEC=1
+export QOSP_RESTART_DELAY_MAX_SEC=4
+# The preparation guard also sets this standard flag. The nested appliance
+# wrapper must acquire its separate control lock rather than inherit it.
+export QOSP_SERVICE_GUARDED=
+CONTROL=${FPRD_CONTROL:-/etc/init.d/S99qosp}
+GUARD=${QOSP_SERVICE_GUARD:-/usr/bin/qosp-service-guard}
+
+ram_mount() {
+    path=$1
+    size=$2
+    case $path in /run/*|/tmp/*) ;; *) echo "fprd: RAM path must be under /run or /tmp" >&2; return 1 ;; esac
+    mkdir -p "$path"
+    if awk -v path="$path" '$2 == path && $3 == "tmpfs" { found=1 } END {exit !found}' /proc/mounts; then
+        return 0
+    fi
+    # Never silently spill extracted binaries or compiler caches onto the SD.
+    mount -t tmpfs -o "size=$size,nodev,nosuid,mode=0755" tmpfs "$path"
+}
+
+prepare() {
+    [ -r "$ARCHIVE" ] && [ -r "$ARCHIVE.sha256" ] || {
+        echo "fprd: missing native compiler archive/checksum: $ARCHIVE" >&2; return 1;
+    }
+    (cd "$(dirname "$ARCHIVE")" && sha256sum -c "$(basename "$ARCHIVE.sha256")") || return 1
+    ram_mount "$SDK_RAM" "${FPRD_SDK_SIZE:-192m}"
+    ram_mount "$FPRD_WORK" "${FPRD_WORK_SIZE:-128m}"
+    digest=$(sha256sum "$ARCHIVE")
+    digest=${digest%% *}
+    if [ -x "$FPRD_SDK_ROOT/bin/qos-fprd" ] &&
+       [ "$(cat "$FPRD_SDK_ROOT/archive.sha256" 2>/dev/null || :)" = "$digest" ]; then
+        return 0
+    fi
+    pending=$SDK_RAM/pending.$$
+    unpacked=$SDK_RAM/archive.$$.tar
+    mkdir "$pending"
+    # This appliance's BusyBox tar has no -z. Keep decompression separate so
+    # a truncated/over-quota gzip cannot be hidden by a successful tar exit.
+    if ! gzip -dc "$ARCHIVE" > "$unpacked"; then
+        rm -f "$unpacked"
+        rm -rf "$pending"
+        return 1
+    fi
+    if ! tar xf "$unpacked" -C "$pending"; then
+        rm -f "$unpacked"
+        rm -rf "$pending"
+        return 1
+    fi
+    rm -f "$unpacked"
+    printf '%s\n' "$digest" > "$pending/archive.sha256"
+    [ -x "$pending/bin/qos-fprd" ] && [ -f "$pending/sdk.json" ] || {
+        rm -rf "$pending"; echo "fprd: incomplete compiler archive" >&2; return 1;
+    }
+    rm -rf "$FPRD_SDK_ROOT"
+    mv "$pending" "$FPRD_SDK_ROOT"
+}
+
+case ${1:-} in
+    start|restart|reload)
+        mkdir -p "$QOSP_RUN_DIR"
+        if [ "${FPRD_PREPARE_GUARDED:-}" != 1 ]; then
+            export FPRD_PREPARE_GUARDED=1
+            exec "$GUARD" "$QOSP_RUN_DIR/prepare.lock" sh "$0" "$@"
+        fi
+        if [ "$1" != start ] && ! "$CONTROL" stop; then
+            # Reset an exhausted but fully dead compiler. A failed stop with
+            # a live or uncertain child must retain its SDK and ownership.
+            . "${QOSP_SERVICE_LIB:-/usr/lib/qosp-service.sh}"
+            qosp_config
+            if qosp_recorded supervisor || qosp_recorded child || qosp_child_uncertain; then
+                echo "fprd: compiler ownership remains after failed stop" >&2
+                exit 1
+            fi
+        fi
+        if "$CONTROL" status >/dev/null 2>&1; then exit 0; fi
+        prepare
+        exec "$CONTROL" start
+        ;;
+    stop|status) exec "$CONTROL" "$1" ;;
+    *) echo "usage: $0 {start|stop|restart|status}" >&2; exit 1 ;;
+esac

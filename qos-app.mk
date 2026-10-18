@@ -133,7 +133,9 @@ plugin-qa-x64: fprc $(FPRISC_ROOT)/core/prelude.fpr tools/mkimports.py tools/mkq
 	  --relocatable --imports --check-moved $(BUILD)/plug-$(PLUGID).moved.elf --delta 0x10000000
 	@echo "$(PLUG_OUT) built (relocatable) -- install: make -C ../qos disk-seed QAS=..."
 
-PLUG_A64_LINK = clang --target=aarch64-none-elf -fuse-ld=lld \
+# Native Pi SDKs assemble and link these freestanding units with GNU tools;
+# a caller may select that driver without carrying LLVM onto the device.
+PLUG_A64_LINK ?= clang --target=aarch64-none-elf -fuse-ld=lld \
 	  -nostdlib -nostartfiles \
 	  -T $(QOS)/appside/link-qosplug.ld -Wl,--emit-relocs
 

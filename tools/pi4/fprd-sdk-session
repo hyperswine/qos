@@ -1,0 +1,8 @@
+#!/bin/sh
+# Child of the standard QOS process-group supervisor, with its own identity.
+set -eu
+SDK=${FPRD_SDK_ROOT:-/run/fpr-sdk/root}
+umask 077
+ulimit -c 0
+exec "$SDK/bin/qos-fprd" daemon --socket "${FPRD_SOCK:-/tmp/fprd.sock}" \
+    --work "${FPRD_WORK:-/run/fpr-sdk-work}"

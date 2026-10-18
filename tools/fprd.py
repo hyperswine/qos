@@ -211,6 +211,7 @@ def package_version(plugid, source):
 
 def package_version_locked(plugid, source, work):
     """Checked source version -> frozen blob -> complete QA, no QOS writes."""
+    prefer_shipped_dependencies(work)
     scratch = work / (plugid + ".fpr")
     scratch.write_bytes(source)
     env = dict(os.environ, LC_ALL="C.UTF-8")
@@ -244,6 +245,32 @@ def package_version_locked(plugid, source, work):
         finally:
             temporary.unlink(missing_ok=True)
     return b"ok\n" + f"{name}\t{version}\t{identity}\n".encode() + image.read_bytes()
+
+
+def prefer_shipped_dependencies(work):
+    """Retain canonical trust when Commit previously copied a shipped blob.
+
+    Commit closes a publication's source tree by copying pinned dependencies.
+    On a later check the local copy shadows the shipped store, but platform
+    library approval is intentionally tied to canonical source paths. Remove
+    only byte-identical dependency copies so resolution uses the same shipped
+    source again. Publication roots stay private; changed/local blobs stay
+    untrusted. No symlink or compiler write can reach the shared SDK store.
+    """
+    database = work / ".fpr/versions.db"
+    roots = set()
+    if database.is_file():
+        roots = {row[2] for line in database.read_text().splitlines()
+                 if len(row := line.split()) == 3}
+    local = work / ".fpr/store"
+    for parent in (Path(os.environ["FPR_HOME"]), Path(FPRISC_ROOT)):
+        for shipped in (parent / ".fpr/store").glob("*.fpr"):
+            if shipped.stem in roots or not re.fullmatch(r"[0-9a-f]{16}", shipped.stem):
+                continue
+            candidate = local / shipped.name
+            if (candidate.is_file() and not candidate.is_symlink()
+                    and candidate.read_bytes() == shipped.read_bytes()):
+                candidate.unlink()
 
 
 def watch_version(name, known):

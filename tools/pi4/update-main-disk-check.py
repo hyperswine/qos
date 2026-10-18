@@ -19,9 +19,12 @@ def record(tag, key, payload):
     return line.ljust(up.PG, b'\0') + payload.ljust(n * up.PG, b'\0')
 
 
-def fixture():
-    body = record('QREC', 'apps/index', b'clock\nlogs\nbrowser\ndisk\n')
+def fixture(apps=up.LEGACY_APPS):
+    body = record('QREC', 'apps/index', up.app_index(apps))
+    for app in apps:
+        body += record('QREC', f'apps/{app}.qa', (app + '-old').encode())
     body += record('QREC', 'user/note', b'keep this\0binary\xff')
+    body += record('QREC', 'apps/user-note', b'keep app-side user data')
     body += record('QREC', 'deleted', b'old') + record('QDEL', 'deleted', b'')
     body += record('QBLK', '2', b'3 user/chunk\none4 user/other\ntwo!')
     data = bytearray(64 * up.PG)
@@ -46,13 +49,39 @@ class Upgrade(unittest.TestCase):
         for page in (result[:up.PG], result[-up.PG:]):
             meta = up.parse_seal(page, len(result) // up.PG)
             new, _ = up.scan(result, meta.head)
+            replaced = {b'apps/index'} | {f'apps/{app}.qa'.encode() for app in up.APPS}
             for key, value in old.items():
-                self.assertEqual(new[key], value)
+                if key not in replaced:
+                    self.assertEqual(new[key], value)
+            self.assertEqual(new[b'apps/index'], up.app_index(up.APPS))
             self.assertNotIn(b'deleted', new)
             for a, payload in self.archives.items():
                 self.assertEqual(new[f'apps/{a}.qa'.encode()], payload)
-        self.assertEqual(report['preserved_records'], 5)
+        self.assertEqual(report['preserved_records'], 10)
         self.assertEqual(report['new_generation'], 11)
+        self.assertEqual(report['old_apps'], list(up.LEGACY_APPS))
+        self.assertEqual(report['apps'], list(up.APPS))
+        self.assertEqual(report['new_head'] - report['old_head'], 14)
+
+    def test_current_six_app_index_and_repeated_upgrade(self):
+        data, meta = fixture(up.APPS)
+        for _ in range(2):
+            original = bytes(data)
+            result, report = up.prepare(data, self.archives)
+            self.assertEqual(result[up.PG:meta.head * up.PG], original[up.PG:meta.head * up.PG])
+            self.assertEqual(report['old_apps'], list(up.APPS))
+            for page in (result[:up.PG], result[-up.PG:]):
+                fallback = up.parse_seal(page, len(result) // up.PG)
+                latest, _ = up.scan(result, fallback.head)
+                self.assertEqual(latest[b'apps/index'], up.app_index(up.APPS))
+                self.assertEqual(latest[b'user/note'], b'keep this\0binary\xff')
+                self.assertEqual(latest[b'apps/user-note'], b'keep app-side user data')
+                self.assertEqual(latest[b'user/chunk'], b'one')
+                self.assertEqual(latest[b'user/other'], b'two!')
+                self.assertNotIn(b'deleted', latest)
+                for app, payload in self.archives.items():
+                    self.assertEqual(latest[f'apps/{app}.qa'.encode()], payload)
+            data, meta = result, fallback
 
     def refuses(self, data, message):
         original = bytes(data)
@@ -62,6 +91,10 @@ class Upgrade(unittest.TestCase):
 
     def test_corrupt_superblock(self):
         self.data[10] ^= 1
+        self.refuses(self.data, 'superblock')
+
+    def test_corrupt_fallback_superblock(self):
+        self.data[-up.PG + 10] ^= 1
         self.refuses(self.data, 'superblock')
 
     def test_pending_operation(self):
@@ -91,11 +124,43 @@ class Upgrade(unittest.TestCase):
         self.archives['clock'] = b'x' * (56 * up.PG)
         self.refuses(self.data, 'insufficient')
 
+    def test_capacity_includes_new_index(self):
+        # The six archives fit exactly; the required index must fit too.
+        bound = self.meta.head + 2 * len(up.APPS)
+        for generation in (8, 9):
+            pos = 0 if generation % 2 == 0 else len(self.data) - up.PG
+            self.data[pos:pos + up.PG] = up.replace(
+                self.meta, data_end=bound, swap=bound, generation=generation).line().ljust(up.PG, b'\0')
+        self.refuses(self.data, 'insufficient')
+
+    def test_generation_exhaustion(self):
+        self.data[-up.PG:] = up.replace(self.meta, generation=1000000000).line().ljust(up.PG, b'\0')
+        self.refuses(self.data, 'generation exhausted')
+
     def test_custom_index(self):
-        # Valid checksum and bounds, but a fifth app needs its own ABI upgrade.
-        payload = b'clock\nlogs\nbrowser\ndisk\ncustom\n'
-        self.data[up.PG:3 * up.PG] = record('QREC', 'apps/index', payload)
-        self.refuses(self.data, 'custom/missing')
+        # Only the exact known indexes are admitted, not a custom archive set.
+        for payload in (b'clock\nlogs\nbrowser\ndisk\ncustom\n',
+                        b'clock\nlogs\nbrowser\ndisk\nterminal\n',
+                        b'logs\nclock\nbrowser\ndisk\n',
+                        b'clock\nlogs\nbrowser\ndisk\ndisk\n',
+                        up.app_index(up.APPS).rstrip(b'\n'), b''):
+            with self.subTest(index=payload):
+                self.data[up.PG:3 * up.PG] = record('QREC', 'apps/index', payload).ljust(2 * up.PG, b'\0')
+                if not payload:
+                    # Keep two-page framing while the missing index is tested.
+                    self.data[up.PG:3 * up.PG] = record('QDEL', 'apps/index', b'') + record('QDEL', 'unused', b'')
+                self.refuses(self.data, 'custom/missing')
+
+    def test_requires_all_six_archives_and_no_extra(self):
+        del self.archives['editor']
+        self.refuses(self.data, 'exactly the six')
+        self.archives['editor'] = b'editor-new'
+        self.archives['custom'] = b'custom-new'
+        self.refuses(self.data, 'exactly the six')
+
+    def test_empty_archive(self):
+        self.archives['terminal'] = b''
+        self.refuses(self.data, 'empty terminal')
 
     def test_cli_preserves_source_and_refuses_existing_output(self):
         with tempfile.TemporaryDirectory() as tmp:

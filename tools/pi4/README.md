@@ -3,6 +3,10 @@
 These test QOS Portable on the running Buildroot/Linux Pi, and AArch64
 FP-RISC Base executables. They do not boot QOS Native on ARM.
 
+The [Main v22 deployment record](../../docs/2026-10-17-PI-MAIN-V22-DEPLOYMENT.md)
+covers the current six-app shell, on-device disk migration and
+[native Editor compiler service](compiler-sdk.md).
+
 Build inside the existing ARM64 Linux VM, using the Pi image's Buildroot
 toolchain rather than the VM's newer glibc:
 
@@ -144,7 +148,8 @@ installed host path. Neither option installs an executable.
 
 ## Updating an installed Main disk
 
-Rebuild `programs/main.fpr`, all four `apps/{clock,logs,browser,disk}.fpr`
+Rebuild `programs/main.fpr`, all six
+`apps/{clock,logs,browser,disk,terminal,editor}.fpr`
 archives and the Portable ES host from matching QOS/FP-RISC revisions. Use
 the normal entry and omit diagnostic `QOS_BLK_TEST`/`QOS_STORE_TEST` flags.
 Changing a shared wire type requires replacing the shell and every onboard
@@ -160,14 +165,18 @@ python3 tools/pi4/update-main-disk-check.py
 python3 tools/pi4/update-main-disk.py stopped.disk updated.disk production/
 ```
 
-`production/` contains the matching four `.qa` files. The tool requires two
+`production/` contains the matching six `.qa` files. The tool requires two
 valid stable v3 superblocks, verifies the complete committed record stream,
-and appends four new archive records. It preserves the original committed
-record bytes, app index and user history; both fallback superblocks publish
-the matching bundle. It refuses legacy/pending/corrupt disks, insufficient
-space, generation exhaustion and a custom index. Recover or compact through
-QOS first; rebuild additional indexed apps before adapting an upgrade for a
-custom profile. The source and any pre-existing output are never overwritten.
+and appends six new archive records and the standard six-app index. It accepts
+the exact previous four-app index or the current six-app index, so the upgrade
+adds Terminal and Editor to an older installed Main disk. It preserves every
+original committed record byte and user value; both fallback superblocks
+publish the complete matching bundle and expanded index. It refuses
+legacy/pending/corrupt disks, insufficient space, generation exhaustion and
+any other index, including custom apps, reordered entries or a partial
+five-app upgrade. Recover or compact through QOS first; rebuild additional
+indexed apps before adapting an upgrade for a custom profile. The source and
+any pre-existing output are never overwritten.
 
 Keep rollback copies of `/usr/bin/qosp`, `/usr/share/qosp/app.qa`, the seed
 disk, and the stopped writable disk. Install the new host, shell, seed and

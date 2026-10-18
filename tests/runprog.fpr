@@ -12,6 +12,7 @@ unsafe program.
 RP = use "../programs/mods/runprog".
 PG = use "std/hosted".
 Sys.killPid : (pid : Int | pid > 0) -> String -> Int .
+Sys.alive : Int -> Bool .
 CP = use "std/compile".
 AC = use "std/actor#201a0e9bf98a5154".
 
@@ -42,6 +43,22 @@ drain me proc n acc = if n <= 0 then (strcat acc (RP.stop proc), "still running"
   case RP.poll me proc of
     (text, said, RP.Running more) -> _ = Sys.sleepUs 5000; drain me more (n - 1) (strcat acc text)
   | (text, said, RP.Ended how) -> (strcat acc text, how).
+
+# Deliberately withhold takes until the root ends. The capture limit applies
+# between takes, so a consumer that drains a slower producer every 5 ms can
+# correctly collect the whole flood without losing any bytes. Waiting for
+# death makes overflow independent of machine speed and hart scheduling.
+runUndrained me src n = case package src of
+    Err why -> ("", "compile failed: {why}")
+  | Ok qa -> case RP.start qa (64 * 1048576) 1 of
+      Err why -> ("", "start failed: {why}")
+    | Ok proc ->
+        RP.Proc root pid = proc;
+        ended = waitEnded root n;
+        drain me (RP.Proc root pid) (if ended then 1 else 0) "".
+waitEnded root n = if not (Sys.alive root) then True
+  else if n <= 0 then False
+  else _ = Sys.sleepUs 5000; waitEnded root (n - 1).
 
 # run a program to its end, then ask its pid to end again: how many were left
 startedPid me src n = case package src of
@@ -112,9 +129,14 @@ main =
   _ = check "first without one" (RP.wrap "main = 1." == "{RP.entry}\nmain = 1.");
   (out4, how4) = runToEnd me "unsafe program.\nspin : unsafe Int -> Int .\nspin n = spin (n + 1).\nmain = _ = print \"spinning\"; spin 0." 20;
   _ = check "a spinning program is stopped: [{out4}] {how4}" (out4 == "spinning\n" and how4 == "still running");
-  (out5, how5) = runToEnd me "unsafe program.\nsay : unsafe Int -> Unit .\nsay n = if n <= 0 then Unit else _ = print \"0123456789012345678901234567890123456789\"; say (n - 1).\nmain = say 5000." 2000;
-  _ = check "a flood keeps its last 64 KiB and says what it lost: {how5}"
-    (how5 == "finished" and strIndexOf "earlier bytes not kept]" out5 >= 0 and strlen out5 < 70000);
+  (out5, how5) = runUndrained me "unsafe program.\nsay : unsafe Int -> Unit .\nsay n = if n <= 0 then Unit else _ = print \"0123456789012345678901234567890123456789\"; say (n - 1).\nmain = say 5000." 2000;
+  # 5,000 lines of 40 bytes plus newline, followed by the entry's "()\n".
+  lost = 5000 * 41 + 3 - 65536;
+  notice = "[{lost} earlier bytes not kept]\n";
+  _ = check "an undrained flood keeps its last 64 KiB and says what it lost: {how5}, {strlen out5} bytes"
+    (how5 == "finished" and RP.startsWith notice out5 and strlen out5 == 65536 + strlen notice
+     and substr out5 (strlen notice) 15 == "67890123456789\n"
+     and substr out5 (strlen out5 - 3) 3 == "()\n");
   # confinement: what would have stopped the machine ends the program, with its reason
   (o6, how6) = runWithin me "unsafe program.\ndeep : unsafe Int -> Int .\ndeep n = 1 + deep (n + 1).\nmain = deep 0." (16 * 1048576) 2000;
   _ = check "a runaway recursion ends the program: {how6}" (strIndexOf "budget of 16 MiB is used up" how6 >= 0 and strIndexOf "stack" how6 >= 0);
