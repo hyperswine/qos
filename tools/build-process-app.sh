@@ -43,7 +43,7 @@ make -s -f "$MACHINE/virt/virt.mk" FPRC="$FPRISC_ROOT/fpr" BUILD=build VIRT_MACH
 make -s -f hal/virt/qos-virt.mk FPRC="$FPRISC_ROOT/fpr" BUILD=build QOS_HAL=hal build/qos-plic.s build/qos-virtio.s build/qos-blockpolicy.s build/qos-netpolicy.s
 VIRT_FPR="build/virt-clint.s $MACHINE/virt/rawunit.c build/qos-plic.s build/qos-virtio.s build/qos-blockpolicy.s build/qos-netpolicy.s hal/virt/plic.c hal/virt/net.c hal/net_actor_bridge.c hal/virt/blk.c hal/virt/pins.c hal/virt/devices.c hal/core/lifecycle.c"
 
-RT="$VIRT_FPR $QOS/native/proc_entry.c $MACHINE/virt/ctx.S $MACHINE/virt/ctx_fab.c $RUNTIME/runtime.c $MACHINE/virt/hal.c $MACHINE/virt/memshim.c $RUNTIME/actors.c $RUNTIME/buddy.c $RUNTIME/mod.c $RUNTIME/bits.c $RUNTIME/vec.c $RUNTIME/sstr.c"
+RT="$VIRT_FPR $QOS/native/proc_entry.c $MACHINE/virt/ctx.S $MACHINE/virt/ctx_fab.c $RUNTIME/runtime.c $RUNTIME/i32.c $MACHINE/virt/hal.c $MACHINE/virt/memshim.c $RUNTIME/actors.c $RUNTIME/buddy.c $RUNTIME/mod.c $RUNTIME/bits.c $RUNTIME/vec.c $RUNTIME/sstr.c"
 link() { # link <base> <out.elf>
   riscv64-unknown-elf-gcc $ARCHFLAGS -DFPR_NHARTS=1 -ffreestanding -nostdlib -nostartfiles -O2 \
     -Wl,--defsym=PROC_IMAGE_BASE=$1 -Wl,--emit-relocs -Wl,--no-relax -Wl,--no-warn-rwx-segments \

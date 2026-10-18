@@ -18,7 +18,7 @@ QOS_BASE_FLAG  = -DQOS_ARENA_BASE=$(QOS_SLOT_BASE)ul
 # the host's (found as random corruption past ~220 sessions): docs/2026-09-19-BOUNDS.md
 QOSHARTS ?= 8
 QOSAPP_RT_COMMON = $(QOS)/appside/entry.c $(QOS)/appside/hal.c $(QOS)/appside/support.c \
-				   $(FRUNTIME)/runtime.c $(FRUNTIME)/actors.c $(FRUNTIME)/bits.c \
+				   $(FRUNTIME)/runtime.c $(FRUNTIME)/i32.c $(FRUNTIME)/actors.c $(FRUNTIME)/bits.c \
 				   $(FRUNTIME)/vec.c $(FRUNTIME)/sstr.c $(FRUNTIME)/mod.c \
 				   $(FRUNTIME)/buddy.c loader/qaimg.c $(QOS)/portable/sha256.c
 QOSAPP_RT = $(QOSAPP_RT_COMMON) $(FMACHINE)/unix/ctx_x64.S
