@@ -159,6 +159,8 @@ std/actor v3.0 201a0e9bf98a5154 tests/gfxshare.fpr
 std/actor v3.0 201a0e9bf98a5154 tests/guishell.fpr
 ../programs/mods/ep v3.0 c66ad65e68dd97f5 tests/kbdread.fpr
 std/actor v3.0 201a0e9bf98a5154 tests/kbdread.fpr
+std/fs v5.0 84826bc9e8ddb4b5 tests/kvlargenative.fpr
+../programs/mods/svc v5.0 75479fb6d5f34670 tests/kvlargenative.fpr
 std/fs v5.0 84826bc9e8ddb4b5 tests/livereload.fpr
 std/fs v5.0 84826bc9e8ddb4b5 tests/loaderfail.fpr
 ../programs/mods/svc v5.0 75479fb6d5f34670 tests/loaderfail.fpr

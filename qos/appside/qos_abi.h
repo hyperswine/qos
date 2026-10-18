@@ -63,7 +63,10 @@
  * the app-side Sys.sleepUs backend -- weak/strong linking cannot
  * cross the image boundary, so the sleep goes through the channel
  * every other host service already uses), 7 compile (RETIRED in v21:
- * the compile_* table entries below replace it) */
+ * the compile_* table entries below replace it).  Results and size
+ * limits of tags 2/3/5 (incl. -6, "the reply needs N bytes", which lets a
+ * replay outgrow the app's fixed buffer) are qos/store_abi.h, shared with
+ * the native trampoline. */
 #define QOS_SYS_LOADQA 4
 /* tag 4's payload (v16).  The APP interprets the plugin's archive -- with
  * mods/qar.fpr and mods/manifest.fpr, the code the kernel and the host

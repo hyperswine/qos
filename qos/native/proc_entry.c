@@ -19,6 +19,8 @@
  *     System.qa's buddy allocator, not from our own link
  */
 #include "fpr.h"
+#define QOS_STORE_ABI_RUNTIME
+#include "../store_abi.h"
 
 /* the granted capability blob (System.qa serializes "appid\nurl mode\n"
  * lines).  Stashed at entry; the FPRISC side reads it via Sys.caps and
@@ -41,12 +43,18 @@ static V h_sys_store_req(V tagv, V payv) {
   if (ISINT(payv) || ((hdr_t *)payv)->tid != T_STR) fpr_cpanic("Sys.storeReq: payload must be a String");
   if (!g_syscall) return fpr_mkresult(1, "no syscall channel (standalone run)");
   str_t *s = (str_t *)payv;
-  g_sysout[0] = 0;
-  sw r = g_syscall((uw)UNTAG(tagv), (const char *)s->bytes, s->len, g_sysout, sizeof g_sysout);
-  if (r == -2) return fpr_mkresult(1, "no disk");
-  if (r == -3) return fpr_mkresult(1, "storage: unknown request tag");
-  if (r < 0) return fpr_mkresult(1, g_sysout[0] ? g_sysout : "storage error"); /* the reason, as the kernel wrote it */
-  return fpr_mkresultn(0, g_sysout, (uw)r);
+  /* a reply larger than g_sysout comes back as -6 + its size and lands in
+   * a String that large (store_abi.h); it used to be truncated silently */
+  str_t *big;
+  sw r = qos_store_call_grow(g_syscall, (uw)UNTAG(tagv), (const char *)s->bytes, s->len,
+                             g_sysout, sizeof g_sysout, &big);
+  if (r >= 0) return big ? qos_store_ok_str(big) : fpr_mkresultn(0, g_sysout, (uw)r);
+  const char *why = big ? (const char *)big->bytes : g_sysout;
+  V res = r == -2 ? fpr_mkresult(1, "no disk")
+        : r == -3 ? fpr_mkresult(1, "storage: unknown request tag")
+        : fpr_mkresult(1, why[0] ? why : "storage error"); /* the reason, as the kernel wrote it */
+  if (big) fpr_free((V)big);
+  return res;
 }
 FPR_FN(fpr_g_Sys_x2estoreReq, h_sys_store_req, 2);
 

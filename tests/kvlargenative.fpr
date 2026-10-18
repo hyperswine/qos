@@ -1,0 +1,21 @@
+unsafe program.
+# Test kernel: tests/kvlarge.fpr as a relocatable native process against
+# the real disk-backed storage actor; its replays pass the old 256 KiB
+# reply buffer, which the kernel trampoline used to truncate silently.
+# tools/kv-large-check.py builds and boots it.
+FS = use "std/fs#84826bc9e8ddb4b5".
+S = use "../programs/mods/svc#75479fb6d5f34670".
+NI = use "nativeimage".
+Sys.bindStore : Int -> S.Rpc -> Unit .
+Sys.bindApp : String -> Unit .
+main =
+  me = myself 0;
+  fs = FS.serve (device "blk");
+  qa = case FS.readLatest me fs "apps/CkSlow.qa" of Ok s -> s | Err e -> error e;
+  _ = Sys.bindApp "CkSlow";
+  _ = Sys.bindStore fs (S.TimedRpc fs 0 0 0 "" "");
+  (ok, why, root) = NI.place qa;
+  _ = case ok == 2 of True -> Unit | False -> error "placement: {why}";
+  r = NI.result me root;
+  verdict = if r == "kvlarge: 200000:True 262144:True 300000:True" then "HOLDS" else "FAILED";
+  "kvlargenative: [{r}] {verdict}".

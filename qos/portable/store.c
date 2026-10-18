@@ -33,6 +33,7 @@ void qosp_store_bind(const char *app_id) {
 #include <errno.h>
 #include <time.h>
 #include "qos_abi.h" /* tag 4 carries a qos_plugin_t */
+#include "../store_abi.h" /* -6 / size limits, shared with native */
 static pthread_mutex_t store_mu = PTHREAD_MUTEX_INITIALIZER;
 static int64_t store_call_locked(uint64_t tag, const char *pay,
                                  uint64_t plen, char *out, uint64_t outcap);
@@ -89,7 +90,7 @@ int64_t qosp_store_call(uint64_t tag, const char *pay, uint64_t plen,
  * headers/delimiters and EOF-truncated tails; it cannot detect arbitrary payload
  * bit rot. Only a trailing record interrupted at EOF may be removed. */
 #define STORE_OFF_MAX ((uint64_t)(sizeof(off_t) >= 8 ? INT64_MAX : INT32_MAX))
-typedef struct { uint64_t end, bytes; int torn; } store_scan;
+typedef struct { uint64_t end, bytes, need; int torn; } store_scan;
 static int64_t store_error(char *out, uint64_t cap, int unknown, const char *why) {
   if (out && cap) snprintf(out, (size_t)cap, "storage%s: %s", unknown ? " outcome unknown" : "", why);
   return unknown ? -5 : -1;
@@ -109,7 +110,7 @@ static int scan_store(int fd, uint64_t tag, char *out, uint64_t cap, store_scan 
   if (fstat(fd, &st) < 0 || !S_ISREG(st.st_mode) || st.st_size < 0) return -1;
   uint64_t size = (uint64_t)st.st_size, pos = 0, seq = 0, n = 0;
   int full = 0;
-  *scan = (store_scan){0, 0, 0};
+  *scan = (store_scan){0, 0, 0, 0};
   while (pos < size) {
     uint64_t start = pos, len = 0;
     unsigned digits = 0;
@@ -131,18 +132,22 @@ static int scan_store(int fd, uint64_t tag, char *out, uint64_t cap, store_scan 
     }
     char delimiter;
     if (read_at(fd, &delimiter, 1, pos + len) < 0 || delimiter != '\n') return -1;
-    if (!full && tag == 3) {
-      if (len > cap - n) full = 1;
-      else { if (len && read_at(fd, out + n, len, pos) < 0) return -1; n += len; }
+    if (tag == 3) {
+      /* need: the whole replay's size, counted past a full buffer so the
+       * caller can be told how much to bring (-6, store_abi.h) */
+      scan->need = len > UINT64_MAX - scan->need ? UINT64_MAX : scan->need + len;
+      if (!full && len > cap - n) full = 1;
+      else if (!full) { if (len && read_at(fd, out + n, len, pos) < 0) return -1; n += len; }
     }
-    if (!full && tag == 5) {
+    if (tag == 5) {
       char record[96];
       int count = snprintf(record, sizeof record, "%llu %llu %llu\n",
                            (unsigned long long)seq, (unsigned long long)pos,
                            (unsigned long long)len);
       if (count < 0 || (size_t)count >= sizeof record) return -1;
-      if ((uint64_t)count > cap - n) full = 1;
-      else { memcpy(out + n, record, (size_t)count); n += (uint64_t)count; }
+      scan->need += (uint64_t)count;
+      if (!full && (uint64_t)count > cap - n) full = 1;
+      else if (!full) { memcpy(out + n, record, (size_t)count); n += (uint64_t)count; }
     }
     pos += len + 1; seq++;
     scan->end = pos;
@@ -204,6 +209,7 @@ static int store_close(int fd) {
 }
 static int64_t append_store(const char *pay, uint64_t plen, char *out, uint64_t cap) {
   if ((plen && !pay) || plen > SIZE_MAX || plen > STORE_OFF_MAX) return store_error(out, cap, 0, "invalid payload length");
+  if (plen > QOS_KV_PAYLOAD_MAX) return store_error(out, cap, 0, "payload too large"); /* the native limit too */
   int parent = -1, dir = -1, fd = -1, bad = 1, malformed = 0;
   const char *why = "cannot open store directories";
   parent = open(".", O_RDONLY | O_DIRECTORY);
@@ -251,7 +257,12 @@ static int64_t store_call_locked(uint64_t tag, const char *pay, uint64_t plen, c
     store_scan scan;
     int bad = scan_store(fd, tag, out, outcap, &scan);
     if (store_close(fd) < 0) bad = -1;
-    if (bad == -2) return store_error(out, outcap, 0, "output capacity exceeded");
+    if (bad == -2) {
+      if (scan.need > QOS_KV_REPLY_MAX)
+        return store_error(out, outcap, 0, "reply exceeds the " QOS_KV_REPLY_LIMIT_TEXT " limit");
+      int64_t a = qos_store_answer_need((unsigned long)scan.need, out, (unsigned long)outcap);
+      return a == QOS_SYS_ENEED ? a : store_error(out, outcap, 0, "output capacity exceeded");
+    }
     return bad < 0 ? store_error(out, outcap, 0, "malformed record or read/close failure") : (int64_t)scan.bytes;
   }
   return -3;
