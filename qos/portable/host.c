@@ -266,8 +266,20 @@ int64_t qosp_load_plugin(const qos_plugin_t *pl, char *err, uint64_t errcap) {
     snprintf(err, errcap, "plugin %.*s: placed off a page boundary", idn, id);
     return -1;
   }
+  /* the r-x span is the code's pages: the code lies inside the image bytes
+   * the app copied (native check_image: execsz <= IMAGE <= memsz), and its
+   * last page ends inside the image -- past it is the app's heap (the block
+   * is not page-padded), which must not turn read-only under its owner */
+  if (pl->execsz == 0 || pl->execsz > pl->img.n || pl->img.n > pl->memsz) {
+    snprintf(err, errcap, "plugin %.*s: LOAD spans inconsistent (code outside its image)", idn, id);
+    return -1;
+  }
   uintptr_t xend = (lo + pl->execsz + pg - 1) & ~(pg - 1);
-  if (pl->execsz == 0 || pl->entry >= pl->memsz || (pl->rwoff < pl->memsz && lo + pl->rwoff < xend)) {
+  if (xend < lo || xend > hi || xend > ahi) {
+    snprintf(err, errcap, "plugin %.*s: its code pages run past the image", idn, id);
+    return -1;
+  }
+  if (pl->entry >= pl->memsz || (pl->rwoff < pl->memsz && lo + pl->rwoff < xend)) {
     snprintf(err, errcap, "plugin %.*s: its code and writable data share a page", idn, id);
     return -1;
   }
@@ -549,9 +561,17 @@ static V h_load_image(V pathv, V shav, V imgv, V numsv, V relv) {
    * runs on EVERY host: a plain rw mapping is not executable on Linux
    * either.  The icache clear is needed on any arm64 host. */
   uintptr_t pg = (uintptr_t)getpagesize();
+  /* the same spans the native loader checks (loader/process.c check_image):
+   * code inside the image bytes, the entry inside the code -- and the r-x
+   * pages end inside the image and the arena, so no heap page past the
+   * image (nor anything past the arena) changes protection */
+  if (n[2] == 0 || n[2] > img->len || n[1] >= n[2])
+    return res_err("image LOAD spans inconsistent (code outside the image, or entry outside the code)");
   uintptr_t xend = ((uintptr_t)ld.exec_end + pg - 1) & ~(pg - 1);
   if (xend <= dst || ld.exec_end == 0)
     return res_err("image has no executable segment");
+  if (xend > (uintptr_t)ld.image_end || xend > g_arena_base + g_arena_size)
+    return res_err("the image's code pages run past the image -- relink with page-separated segments");
   if ((uintptr_t)ld.rw_start < xend)
     return res_err("executable pages would capture writable image data -- relink "
                    "with page-separated segments");
