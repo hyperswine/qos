@@ -1,0 +1,47 @@
+# Test kernel (built with -DQOS_PROCESS_TEST): placement holds its image
+# until it is out of the entry.  Sys.testPlaceDelay makes the launcher
+# wait after the image's entry has spawned the root, so the root runs and
+# ENDS first; its quiet must not free the block (the launcher still reads
+# the record, and the entry's epilogue is image code).  A freed record is
+# poisoned in test builds, so a read after the free returns garbage.
+# tools/placement-uaf-check.py builds and boots it.
+FS = use "std/fs#84826bc9e8ddb4b5".
+QAR = use "../programs/mods/qar".
+QI = use "../programs/mods/qaimg".
+Sys.placeImageAt : String -> List Int -> List Int -> String -> Int -> (String,String) -> (Int,String,Int).
+Sys.images : Int -> Int.
+Sys.testPlaceDelay : Int -> Unit.
+
+prepare qa =
+  Ok load = QAR.sectionBytes qa "LOAD";
+  Ok m = QI.parse load;
+  Ok image = QAR.extent qa "IMAGE";
+  Ok reloc = QAR.extent qa "RELOC";
+  Ok import = QAR.optionalExtent qa "IMPORT";
+  (i,n) = image; (r,rn) = reloc; (b,bn) = import;
+  (i :: n :: r :: rn :: b :: bn :: Nil, QI.nativeNums m load, QI.sha m, QI.relsha m).
+result me root = case receiveFromRes me root of Ok m -> kept m | Err e -> "failed: {e}".
+kept : _ -> String .
+kept m = r = keep (case m of Ok s -> s | Err e -> "failed: {e}"); _ = drop m; r.
+settle : unsafe Int -> Bool.
+settle n | Sys.images 0 == 0 = True.
+settle n | n <= 0 = False.
+settle n = Sys.sleepUs 20000 >> settle (n - 1).
+want = "vectorproc: generic=2.5 nested=3.5,4.5,7 fold=91".
+placeOnce : unsafe Int -> String -> Int -> Bool .
+placeOnce me qa k =
+  (exts,nums,sha,relsha) = prepare qa;
+  (ok,msg,root) = Sys.placeImageAt qa exts nums "CkVector\n" 0 (sha,relsha);
+  reply = case ok == 2 of True -> result me root | False -> "refused: {msg}";
+  ended = settle 400;
+  _ = print "placeuaf: round {k} ok={ok} [{reply}] ended={ended}";
+  ok == 2 and reply == want and ended.
+rounds : unsafe Int -> String -> Int -> Int -> Bool -> Bool .
+rounds me qa k n acc = if k == n then acc else rounds me qa (k + 1) n (acc and placeOnce me qa k).
+main =
+  me = myself 0; fs = FS.serve (device "blk");
+  Ok qa = FS.readLatest me fs "apps/CkVector.qa";
+  _ = Sys.testPlaceDelay 300000;
+  good = rounds me qa 0 3 True;
+  verdict = if good then "HOLDS" else "FAILED";
+  "placeuaf: delayed placement x3, images={Sys.images 0} {verdict}".

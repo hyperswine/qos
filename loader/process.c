@@ -106,6 +106,9 @@ typedef struct {
   shared_boot_t sb;
   void *block;        /* what buddy_alloc returned */
   int ending;         /* taken by the one teardown */
+  int placing;        /* the launcher is still inside placement: the entry
+                       * (image code) is running and the record is being
+                       * read, so the block may not go home yet */
   uw idlen;
   char id[];          /* the app id (Sys.bindApp) */
 } proc_image_t;
@@ -131,11 +134,16 @@ static proc_image_t *image_of_pid(uw pid) {
 static void image_quiet(uw pid) {
   fpr_lock(&g_img_lock);
   proc_image_t *pi = image_of_pid(pid);
-  if (!pi || pi->ending || fpr_pid_live(pid)) { fpr_unlock(&g_img_lock); return; }
+  if (!pi || pi->ending || pi->placing || fpr_pid_live(pid)) { fpr_unlock(&g_img_lock); return; }
   pi->ending = 1;
   fpr_image_remove(&pi->im);
   fpr_unlock(&g_img_lock);
-  buddy_free(pi->block);
+  void *blk = pi->block;
+#ifdef QOS_PROCESS_TEST
+  /* a freed record reads as garbage, so a read after the free is seen */
+  for (uw i = 0; i < sizeof(proc_image_t); i++) ((volatile unsigned char *)pi)[i] = 0xA5;
+#endif
+  buddy_free(blk);
 }
 
 extern V fpr_g_Sys_x2enextId_call1(V);
@@ -318,6 +326,9 @@ FPR_FN(fpr_g_Sys_x2echeckImage, g_sys_check_image, 5);
 
 #ifdef QOS_PROCESS_TEST
 static uw test_image_allocs;
+static uw g_test_place_delay_us; /* placement waits this long after the entry */
+static V g_test_place_delay(V us) { g_test_place_delay_us = (uw)UNTAG(us); return (V)&fpr_unit; }
+FPR_FN(fpr_g_Sys_x2etestPlaceDelay, g_test_place_delay, 1);
 static V g_test_image_allocs(V unit) { (void)unit; return TAG(test_image_allocs); }
 FPR_FN(fpr_g_Sys_x2etestImageAllocs, g_test_image_allocs, 1);
 #endif
@@ -373,6 +384,7 @@ static V g_sys_place_image_at(V qastr, V extv, V numsv, V capsv, V pidv, V diges
   pi->im.owner = pi;
   pi->block = blk;
   pi->ending = 0;
+  pi->placing = 1; /* until the launcher is out of the entry and the record */
   pi->idlen = idlen;
   for (uw i = 0; i < idlen; i++) pi->id[i] = (char)g_app_id->bytes[i];
   pi->sb.actors = &g_kernel_actors;
@@ -399,14 +411,27 @@ static V g_sys_place_image_at(V qastr, V extv, V numsv, V capsv, V pidv, V diges
       (V (*)(void *, uw, fpr_grant_t (*)(uw), const unsigned char *, uw,
              sw (*)(uw, const char *, uw, char *, uw), void *))r.entry;
   entry(r.image_end, 0, loader_grow_memory, cs->bytes, cs->len, qos_store_call, &pi->sb);
-  /* the root actor, read before the record can go: a process that started
-   * nothing, or has already ended, is freed by the next line */
+#ifdef QOS_PROCESS_TEST
+  /* tools/placement-uaf-check.py: let the root run and end first */
+  if (g_test_place_delay_us) fpr_actor_sleep_us(g_test_place_delay_us);
+#endif
+  /* The entry spawned the root, and on another hart the root may already
+   * have run and ended: its last actor's quiet (image_quiet) does NOT free
+   * the block while `placing` is set, so the entry's own epilogue (image
+   * code), these reads, and the refusal text (which may live in the
+   * image) are all still the image's.  Then unpin and let the quiet check
+   * run here: a process that started nothing, or has already ended, is
+   * freed by it. */
   V root = pi->sb.root ? (V)pi->sb.root : TAG(0);
   const char *refused = pi->sb.refused;
+  V refusal = refused ? refuse(refused) : 0; /* copied out before the image can go */
+  fpr_lock(&g_img_lock);
+  pi->placing = 0;
+  fpr_unlock(&g_img_lock);
   image_quiet(pid);
   /* the entry declined a plane table version: nothing was spawned and the
    * image is already gone; the refusal is the answer */
-  if (refused) return refuse(refused);
+  if (refusal) return refusal;
 
   char pm[32];
   uw pn = 0;
