@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Fresh-process compatibility store framing, repair and ACK-failure tests."""
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -60,6 +61,21 @@ for tag, cap in [(3, 7), (3, 0), (5, len(first_index)), (5, 0), (5, len(want) - 
     assert rc == -1, (tag, cap, rc, why)
 assert (fresh / 'qos-store/probe.kv').read_bytes() == b''.join(map(record, payloads))
 print('store: fresh-process binary/empty append, replay/index overflow refusal and file/store-dir/parent flush order: PASS')
+
+# The id is a path component (qos/app_id.h): a bad one binds no store at
+# all (-2), so nothing is written anywhere; a good one binds qos-store/<id>.kv.
+for bad in ['../escaped', 'a/b', '..', '.hidden', 'x' * 65, '']:
+    folder = ROOT / 'bind-bad'
+    shutil.rmtree(folder, ignore_errors=True)
+    (folder / 'work').mkdir(parents=True)
+    p = subprocess.run([str(EXE), 'bind', bad], cwd=folder / 'work', capture_output=True, text=True, timeout=5)
+    assert p.returncode == 0 and p.stdout == '-2\n', (bad, p.stdout, p.stderr)
+    assert not [q for q in folder.rglob('*') if q.is_file()], bad
+folder = ROOT / 'bind-good'
+folder.mkdir()
+p = subprocess.run([str(EXE), 'bind', 'Com.Example-app_1'], cwd=folder, capture_output=True, text=True, timeout=5)
+assert p.stdout == '0\n' and (folder / 'qos-store/Com.Example-app_1.kv').read_bytes() == b'1\nx\n', p.stdout
+print('store: an invalid app id ("../escaped", "a/b", "..", over 64 bytes, empty) binds no store: PASS')
 
 base = record(b'old')
 for number, tail in enumerate([b'1', b'10\npar', b'3\nnew', b'0\n']):
