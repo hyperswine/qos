@@ -1,4 +1,11 @@
-/* main.c (portable) -- qosp: the QOS Portable host for linux-x86-64.
+/* host.c (portable) -- qosp's C half: the QOS Portable host (Linux and
+ * macOS; x86-64, arm64, riscv64).  The launch policy -- reading the .qa,
+ * the manifest and the permission gate -- is FP-RISC now
+ * (portable/qosp.fpr, mods/qar, mods/manifest, mods/qaimg); this file
+ * places the QAR2 flat image, publishes its code and runs it.  The
+ * stage outline below predates that split: where it says "parse the
+ * manifest, run the permission gate" and "elfload", read qosp.fpr and
+ * "place the QAR2 image" (Host.loadImage).
  *
  *     qosp [--yes] [--trace] <app.qa>
  *
@@ -202,7 +209,7 @@ int qosp_ready(void) {
 /* ---- publishing a plugin's code (syscall tag 4, qos_abi.h) ------------
  * The APP places a plugin: it takes a block from its own buddy, copies the
  * image in, moves its address words and completes its imports by name from
- * its own export table (qos/appside/plugimg.c,
+ * its own export table (qos/appside/entry.c h_sys_attach_image,
  * docs/2026-10-01-IMPORT-TABLE.md).  What only the host can do is make the
  * code executable: the arena is one rw mapping, and a page is never
  * writable and executable at once.  So the host checks what it is asked to

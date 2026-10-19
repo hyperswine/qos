@@ -446,12 +446,9 @@ static V g_sys_place_image_at(V qastr, V extv, V numsv, V capsv, V pidv, V diges
 
 FPR_FN(fpr_g_Sys_x2eplaceImageAt, g_sys_place_image_at, 6);
 
-/* Sys.init : Unit -> Unit -- must be called once, before the first
- * Sys.loadElf, by whichever image owns the process arena (System.qa's
- * boot path). Not folded into fpr_rt_init: plenty of images link
- * runtime.c without ever linking buddy.c/process.c (every demo that
- * isn't System.qa), so this stays an opt-in call, not a hook everyone
- * pays for. */
+/* Sys.init : Unit -> Unit -- a no-op kept in the boot protocol (see
+ * fpr_proc_arena_init above): the buddy is initialised for every image
+ * by fpr_rt_init, so there is nothing left to set up here. */
 static V g_sys_init(V d) { (void)d; fpr_proc_arena_init(); return (V)&fpr_unit; }
 FPR_FN(fpr_g_Sys_x2einit, g_sys_init, 1);
 

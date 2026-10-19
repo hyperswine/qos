@@ -37,7 +37,6 @@ qos/qos-native.elf
 /build/beta.s*
 /image.elf
 qos/qos-store/*.kv
-!qos/qos-store/qsys.kv
 /build/tp.*
 /build/tpar.*
 /build/ck-par.*
@@ -61,3 +60,6 @@ fprisc.path
 
 NOTES.txt
 *.kv
+
+# run-time stores (panic records and kv logs a run leaves behind)
+/qos-store/

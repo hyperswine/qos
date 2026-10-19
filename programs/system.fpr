@@ -654,9 +654,8 @@ keepGranted perms bs =
 
 # runEntry: the load seam. loadMode="process" -> QAR2 flat-image
 # loading (Sys.placeImageAt, loader/qaimg.c) -- one copy, one
-# zero-fill, no header walking. Anything else keeps the co-compiled
-# name-dispatch path (Apps.entry/Apps.run), which is what every app
-# shipped as rodata in this build actually uses.
+# zero-fill, no header walking. Anything else is the launcher itself
+# (runBuiltin below): name-dispatch (Apps.entry/Apps.run) is gone.
 #
 # CAPS THROUGH THE PROCESS ABI (the launch-path blocker, now closed):
 # the granted set is serialized as "appid\nurl mode\n..." and rides
