@@ -16,7 +16,7 @@ with tempfile.TemporaryDirectory(prefix='qos-storage-reliability-') as tmp:
     host = out/'qosp'
     run(['make', '-s', '-C', 'qos', 'portable', f'QOSP_OUT={host}',
          'FPRBUILD_EXTRA=--cflag -DQOS_BLK_TEST'], ROOT, env)
-    for name in ('storagedeadlines', 'storagebudgets', 'storerpc', 'qsysfail'):
+    for name in ('storagedeadlines', 'storagebudgets', 'storerpc', 'qsysfail', 'filesreclaim', 'filepolicy'):
         app = out/(name+'.qa')
         run(['make', '-s', 'qos-app', f'PROG=tests/{name}.fpr',
              f'QA_OUT={app}', f'BUILD={out/name}'], ROOT, env)

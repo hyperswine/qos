@@ -219,3 +219,56 @@ sender (an fprisc/IPC change), not a qsys change. A forged idle note or
 retire request can at most retire an actor that holds no lease. The
 manager's 2 s deadline against the actor's 1 s margin leaves a
 documented window in which a refused retire is reported as such.
+
+## Implemented 2026-10-19: bounded reclamation and sweep verdicts
+
+The file manager's capacity-reclamation pass now shares one two-second
+deadline across all candidates and stops after retiring one live actor,
+which is sufficient to admit one new open. Previously every candidate
+received a fresh two seconds, so stalled actors multiplied the manager's
+blocking time. Dead entries are cleared without mistaking them for newly
+released live capacity. A timed-out request retains its owner, and the
+existing one-second retirement margin uses the original shared deadline.
+This bounds waits within the pass; it is not a real-time scheduling guarantee
+or recovery of an app worker's uncertain open.
+
+`tests/filesreclaim.fpr` exercises two stalled actors, early stopping,
+dead-entry skipping, a held lease that remains usable, and a slow refusal
+that leaves too little time for the next actor to retire safely. The
+pre-change stalled-pair run failed its bound at 4,000,059 us. With the change,
+the same test passed at 2,000,049 us on one Portable worker and 2,000,010 us
+on four. The test is part of `tools/storage-reliability-check.py`, which
+passed all five programs (`storagedeadlines`, `storagebudgets`, `storerpc`,
+`qsysfail`, `filesreclaim`) with both worker counts. Existing lease limits,
+dead-client reclamation and concurrent open/read/close tests still pass.
+
+The accompanying `check-all.sh` repair makes the float-literal, typed-hole,
+transaction-abort and JIT-parity legs propagate failure. Bash disables
+`errexit` inside a leg tested by `||`, so required steps are explicitly
+chained and an error message cannot become a successful verdict. Expected
+compiler/runtime refusals require status 1 and their diagnostic; JIT
+producers must finish successfully as well as agree. The transaction
+fixture now writes to the private path that its assertion checks.
+`tests/test_check_all.py` runs the actual leg text and final sweep verdict
+against 17 controlled scenarios, including crashes after expected output,
+missing output, mismatches, timeouts, partial writes and legal refusals.
+It runs in both unittest discovery and the full sweep.
+
+Validation used QOS `94d1b81` plus these changes and the local FP-RISC
+checkout `3206b8469b2de187553750afc5d960f3dd6d53e1`, with a matching
+temporary Portable host. All ten Python test methods and the four changed
+legs with the real compiler/runtime passed. The regenerated `fpr.lock`
+contains 252 resolvable pins; the toolchain pin itself is unchanged.
+Evidence is in `.qos/validation/high-value-20261019/`.
+
+A direct Native build of the new test did not link: importing `qsys`
+also brings graphics/plugin host references including `glInit` and
+`Sys.attachImage` that this Native link does not supply. There is no Native
+execution result for this batch. The complete sweep and physical boards
+were not run, and no deployment was made.
+
+## 2026-10-20 follow-up
+
+[Runtime policy and explicit state types](2026-10-20-RUNTIME-POLICY.md) records
+the configurable-policy roadmap and begins with live, revisioned file-service
+policy. It builds on the shared reclamation deadline above.

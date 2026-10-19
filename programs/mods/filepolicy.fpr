@@ -1,0 +1,65 @@
+# Live file-service policy. Wire text is confined to this module; service
+# decisions use Policy/Update, and validation happens before any mutation.
+Wire = use "std/storage#a8f7ee14e1efae76".
+Policy = Type (Policy Int Int Int Int).
+Update = Type (Update Int Policy).
+PolicyError = Type (Invalid String | Stale Int | InUse Int | RevisionExhausted).
+
+defaults = Policy 64 1024 2000 1000.
+maxLive (Policy live path budget margin) = live.
+maxPath (Policy live path budget margin) = path.
+reclaimMs (Policy live path budget margin) = budget.
+marginMs (Policy live path budget margin) = margin.
+url = "/services/file-policy".
+schemaUrl = "/services/file-policy/schema".
+# This ceiling belongs to the pinned storage wire, not an arbitrary UI limit.
+pathCeiling = Wire.maxKeyBytes.
+validate p = case p of Policy live path budget margin ->
+  if live < 1 then Err (Invalid "maxLiveFiles must be positive")
+  else if path < 1 or path > pathCeiling then Err (Invalid "maxPathBytes must be 1..{pathCeiling} (storage wire ceiling)")
+  else if budget < 1 or budget > intMax Unit / 1000 then Err (Invalid "reclaimMs cannot be represented in microseconds")
+  else if margin < 1 or margin >= budget then Err (Invalid "retireMarginMs must be positive and less than reclaimMs")
+  else Ok p.
+apply revision live (Update expected p) =
+  if expected != revision then Err (Stale revision)
+  else if revision == intMax Unit then Err RevisionExhausted
+  else case validate p of
+    Err why -> Err why
+  | Ok valid -> if maxLive valid < live then Err (InUse live) else Ok valid.
+message (Invalid why) = "file policy: {why}".
+message (Stale revision) = "file policy: stale revision; current revision={revision}".
+message (InUse live) = "file policy: maxLiveFiles is below current use ({live}); close files first".
+message RevisionExhausted = "file policy: revision exhausted".
+encode revision (Policy live path budget margin) =
+  "revision={revision} maxLiveFiles={live} maxPathBytes={path} reclaimMs={budget} retireMarginMs={margin}".
+snapshot revision policy live = "{encode revision policy}\nliveFiles={live}\npersistence=until-restart\n".
+schema = "type=FilesPolicy version=1\ndefaults={encode 0 defaults}\nfields=revision,maxLiveFiles,maxPathBytes,reclaimMs,retireMarginMs\nwrite=all-fields-in-listed-order decimal-integers expected-revision\nmaxLiveFiles=positive; cannot fall below liveFiles\nmaxPathBytes=1..{pathCeiling}; applies to new names; existing names remain usable\nreclaimMs=positive representable microseconds; next reclamation pass\nretireMarginMs=positive and less than reclaimMs; next retirement request including existing actors\nupdate=atomic; system-process-only; effective on next manager request\npersistence=until-restart\n".
+
+# Strict bounded decimal parsing: no parseInt prefix acceptance or overflow.
+number s = if strlen s == 0 then Err (Invalid "empty number") else digits s 0 0.
+digits s i n = if i >= strlen s then Ok n else
+  c = charAt s i - 48;
+  if c < 0 or c > 9 then Err (Invalid "expected unsigned decimal integer")
+  else if n > (intMax Unit - c) / 10 then Err (Invalid "integer overflow")
+  else digits s (i + 1) (n * 10 + c).
+field key text = n = strlen key;
+  if strlen text <= n or substr text 0 n != key then Err (Invalid "expected {key}")
+  else number (substr text n (strlen text - n)).
+space c = c == 32 or c == 9 or c == 10 or c == 13.
+tokens s i = if i >= strlen s then Nil
+  else if space (charAt s i) then tokens s (i + 1) else token s i i.
+token s start i = if i >= strlen s then [substr s start (i - start)]
+  else if space (charAt s i) then substr s start (i - start) :: tokens s (i + 1)
+  else token s start (i + 1).
+parse text = if strlen text > 512 then Err (Invalid "update exceeds 512 bytes") else
+  case tokens text 0 of
+    [r, l, p, b, m] -> parseFields (field "revision=" r) (field "maxLiveFiles=" l) (field "maxPathBytes=" p) (field "reclaimMs=" b) (field "retireMarginMs=" m)
+  | other -> Err (Invalid "expected revision, maxLiveFiles, maxPathBytes, reclaimMs, retireMarginMs").
+parseFields (Err why) l p b m = Err why.
+parseFields (Ok r) (Err why) p b m = Err why.
+parseFields (Ok r) (Ok l) (Err why) b m = Err why.
+parseFields (Ok r) (Ok l) (Ok p) (Err why) m = Err why.
+parseFields (Ok r) (Ok l) (Ok p) (Ok b) (Err why) = Err why.
+parseFields (Ok r) (Ok l) (Ok p) (Ok b) (Ok m) = case validate (Policy l p b m) of
+    Err why -> Err why
+  | Ok policy -> Ok (Update r policy).

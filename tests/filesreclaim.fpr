@@ -1,0 +1,54 @@
+# One reclamation pass shares its deadline and stops after freeing a live slot.
+#: expect filesreclaim: HOLDS
+unsafe program.
+QS = use "../programs/mods/qsys".
+EP = use "../programs/mods/ep#c66ad65e68dd97f5".
+AC = use "std/actor#201a0e9bf98a5154".
+check tag True = Unit.
+check tag False = error "filesreclaim: {tag}".
+stalled me = _ = Sys.sleepUs 10000000; Unit.
+gone me = Unit.
+file manager path hs me = QS.fileServe manager 0 path me (Ok "body") 2 hs.
+waitDead actor n = if not (Sys.alive actor) then True else
+  if n <= 0 then False else _ = Sys.sleepUs 5000; waitDead actor (n - 1).
+# A busy actor consumes some of the pass's budget before refusing retirement.
+slowBusy me =
+  (from, id, q) = receive me;
+  _ = Sys.sleepUs 1200000;
+  _ = AC.reply (from, id) (Ok 0);
+  _ = Sys.sleepUs 10000000; Unit.
+main =
+  me = myself 0;
+  a = spawn stalled;
+  b = spawn stalled;
+  entries = [("/a", a), ("/b", b)];
+  start = AC.nowUs Unit;
+  kept = QS.filesReclaim me entries;
+  elapsed = AC.nowUs Unit - start;
+  _ = print "filesreclaim: stalled pair {elapsed} us";
+  _ = check "one shared wait budget" (elapsed >= 1500000 and elapsed < 3000000);
+  _ = check "timeouts retain owners" (kept == entries and Sys.alive a and Sys.alive b);
+  _ = kill a; _ = kill b;
+
+  # Dead entries already cost no live slot; skip them and find a live idle one.
+  dead = spawn gone;
+  _ = check "dead fixture" (waitDead dead 200);
+  busy = spawn (file me "/busy" [(1, me)]);
+  first = spawn (file me "/first" Nil);
+  spare = spawn (file me "/spare" Nil);
+  released = QS.filesReclaim me [("/known", 0), ("/dead", dead), ("/busy", busy), ("/first", first), ("/spare", spare)];
+  _ = check "stop after one live slot" (released == [("/known", 0), ("/dead", 0), ("/busy", busy), ("/first", 0), ("/spare", spare)]);
+  _ = check "idle actor retired" (waitDead first 200);
+  _ = check "later actor untouched" (Sys.alive spare);
+  read = AC.callWithin 200 me busy (EP.Read 1 0);
+  _ = check "live lease still works" (case read of Ok (Ok (EP.IStr text)) -> text == "body" | other -> False);
+  _ = kill busy; _ = kill spare;
+
+  # Do not renew the deadline after a refusal. The real idle actor must keep
+  # the existing one-second retirement margin when the pass is nearly spent.
+  slow = spawn slowBusy;
+  idle = spawn (file me "/idle" Nil);
+  late = QS.filesReclaim me [("/slow", slow), ("/idle", idle)];
+  _ = check "retirement margin uses original deadline" (late == [("/slow", slow), ("/idle", idle)] and Sys.alive idle);
+  _ = kill slow; _ = kill idle;
+  "filesreclaim: HOLDS".

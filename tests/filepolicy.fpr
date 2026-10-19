@@ -1,0 +1,124 @@
+# Live namespace policy: atomic edits, admission, deadline and codec boundaries.
+#: expect filepolicy: HOLDS
+unsafe program.
+QS = use "../programs/mods/qsys".
+FP = use "../programs/mods/filepolicy".
+EP = use "../programs/mods/ep#c66ad65e68dd97f5".
+Endpoint = use "../programs/mods/epservice#e8bce05a1ddf73db".
+AC = use "std/actor#201a0e9bf98a5154".
+AJ = use "../programs/mods/appjobs".
+AW = use "../programs/mods/appwire".
+SVC = use "../programs/mods/svc#75479fb6d5f34670".
+check tag True = Unit.
+check tag False = error "filepolicy: {tag}".
+get tag (Ok value) = value.
+get tag (Err why) = error "filepolicy: {tag}: {why}".
+rejected (Err why) = True.
+rejected other = False.
+privateManager st ns admin me = QS.filesServe (QS.FilesCtx st ns FP.defaults 0 admin) me Nil.
+stalled me = _ = Sys.sleepUs 5000000; Unit.
+store me =
+  (ret, _) = SVC.requestFields (receive me);
+  _ = SVC.reply ret (Ok "body"); store me.
+waitPolicy me ns n = case EP.readOnce me ns FP.url of
+    Ok value -> value
+  | Err why -> if n <= 0 then error "filepolicy: startup: {why}"
+      else _ = Sys.sleepUs 1000; waitPolicy me ns (n - 1).
+text (EP.IStr s) = s.
+text other = error "filepolicy: expected text".
+snap me ep = text (get "snapshot" (EP.read me ep 0)).
+update me ep revision p = EP.write me ep (EP.IStr (FP.encode revision p)).
+waitDead a n = if not (Sys.alive a) then True else if n <= 0 then False
+  else _ = Sys.sleepUs 1000; waitDead a (n - 1).
+# Each contender opens its own lease and sends only its outcome to the parent.
+contend parent ns p me =
+  result = EP.writeOnce me ns FP.url (EP.IStr (FP.encode 3 p));
+  send parent (if rejected result then 0 else 1).
+main =
+  _ = check "defaults round trip" (FP.parse (FP.encode 0 FP.defaults) == Ok (FP.Update 0 FP.defaults));
+  _ = check "trailing whitespace" (FP.parse "revision=0 maxLiveFiles=2 maxPathBytes=32 reclaimMs=200 retireMarginMs=50\n" == Ok (FP.Update 0 (FP.Policy 2 32 200 50)));
+  _ = check "negative" (rejected (FP.number "-1"));
+  _ = check "partial integer" (rejected (FP.number "1oops"));
+  _ = check "overflow" (rejected (FP.number "999999999999999999999999999999999999"));
+  _ = check "missing fields" (rejected (FP.parse "revision=0 maxLiveFiles=2"));
+  _ = check "duplicate field" (rejected (FP.parse "revision=0 maxLiveFiles=2 maxLiveFiles=32 reclaimMs=200 retireMarginMs=50"));
+  _ = check "extra field" (rejected (FP.parse "{FP.encode 0 FP.defaults} unknown=1"));
+  _ = check "wire ceiling" (rejected (FP.validate (FP.Policy 2 1025 200 50)));
+  _ = check "margin relation" (rejected (FP.validate (FP.Policy 2 32 200 200)));
+  _ = check "zero cap" (rejected (FP.validate (FP.Policy 0 32 200 50)));
+  _ = check "revision overflow" (rejected (FP.apply (intMax Unit) 0 (FP.Update (intMax Unit) FP.defaults)));
+  me = myself 0;
+  ns = spawn Endpoint.namespace;
+  st = spawn store;
+  mgr = spawn (QS.filesManaged st ns ["/home/existing-long-name"]);
+  _ = waitPolicy me ns 200;
+  _ = get "claim home" (EP.register me ns "/home" mgr);
+  ep = get "policy open" (EP.open me ns FP.url "rw");
+  initial = snap me ep;
+  _ = check "defaults introspected" (strIndexOf (FP.encode 0 FP.defaults) initial >= 0);
+  schema = text (get "schema" (EP.readOnce me ns FP.schemaUrl));
+  _ = check "schema explains change boundary" (strIndexOf "existing actors" schema >= 0);
+  _ = check "schema read only" (rejected (EP.writeOnce me ns FP.schemaUrl (EP.IStr "oops")));
+  p = FP.Policy 2 32 200 50;
+  _ = get "first update" (update me ep 0 p);
+  a = get "first file" (EP.open me ns "/home/a" "write");
+  b = get "second file" (EP.open me ns "/home/b" "write");
+  before = snap me ep;
+  _ = check "usage introspected" (strIndexOf "liveFiles=2" before >= 0);
+  _ = check "admission changed live" (rejected (EP.open me ns "/home/c" "write"));
+  _ = check "shrink below usage" (rejected (update me ep 1 (FP.Policy 1 8 100 25)));
+  _ = check "stale update" (rejected (update me ep 0 FP.defaults));
+  _ = check "malformed update" (rejected (EP.write me ep (EP.IStr "garbage")));
+  _ = check "wrong payload" (rejected (EP.write me ep (EP.IInt 12)));
+  _ = check "rejected edits leave state" (snap me ep == before);
+  # Expired updates cannot mutate, even if valid and carrying current revision.
+  (owner, h) = ep;
+  expired = AC.callWithin 200 me owner (EP.Timed (AC.nowUs Unit - 1) (EP.Write h (EP.IStr (FP.encode 1 FP.defaults))));
+  _ = check "expired update refused" (case expired of Ok (Err why) -> True | other -> False);
+  _ = check "expiry leaves revision" (snap me ep == before);
+  # Deadline admission is enforced again by the owner, not only its adapter.
+  private = spawn (privateManager st ns me);
+  denied = AC.callWithin 200 me private (EP.Timed (AC.nowUs Unit - 1) (EP.Write me (EP.IStr (FP.encode 0 p))));
+  _ = check "owner rejects expired update" (case denied of Ok (Err why) -> True | other -> False);
+  unchanged = EP.flat (AC.callWithin 200 me private (EP.Read me 0));
+  _ = check "owner revision unchanged" (strIndexOf "revision=0 " (text (get "owner snapshot" unchanged)) == 0);
+  _ = kill private;
+  (aActor, ah) = a;
+  wrongValue = EP.flat (AC.callWithin 200 me aActor (EP.Timed (AC.nowUs Unit + 200000) (EP.Write ah (EP.IInt 1))));
+  _ = check "integer file writes still refused" (rejected wrongValue);
+  _ = check "existing lease preserved" (text (get "read" (EP.read me a 0)) == "body");
+  _ = get "increase and restrict new paths" (update me ep 1 (FP.Policy 3 8 200 50));
+  _ = check "new long path denied" (rejected (EP.open me ns "/home/new-long-name" "write"));
+  old = get "existing long path remains usable" (EP.open me ns "/home/existing-long-name" "read");
+  (oldActor, oldHandle) = old;
+  _ = get "close old" (EP.close me old);
+  _ = check "new margin reaches existing actors" (waitDead oldActor 200);
+  (bActor, bh) = b;
+  _ = get "close second" (EP.close me b);
+  _ = check "pre-update actor uses live timing" (waitDead bActor 200);
+  _ = get "safe shrink" (update me ep 2 (FP.Policy 1 8 200 50));
+  # Two editors submitting the same revision: exactly one wins.
+  c1 = spawn (contend me ns (FP.Policy 2 8 200 50));
+  c2 = spawn (contend me ns (FP.Policy 3 8 200 50));
+  x = receive me; y = receive me;
+  _ = check "concurrent edits cannot overwrite" (x + y == 1);
+  final = snap me ep;
+  _ = check "one revision advance" (strIndexOf "revision=4 " final == 0);
+  # Exercise Terminal's actual worker path: replace-mode open and bounded
+  # write/read/close, not just the unrestricted endpoint conveniences above.
+  (written, clean) = AJ.execute me ns st (AW.WritePath FP.url "{FP.encode 4 FP.defaults}\n") {held = (0, 0), uncertain = ""};
+  _ = get "Terminal write path" written;
+  (readback, clean2) = AJ.execute me ns st (AW.ReadPath FP.url) clean;
+  _ = check "Terminal read path" (case readback of Ok (AW.Text s) -> strIndexOf "revision=5 " s == 0 | other -> False);
+  _ = check "Terminal cleanup" (clean2.held == (0, 0) and clean2.uncertain == "");
+  slow1 = spawn stalled; slow2 = spawn stalled;
+  entries = [("/slow1", slow1), ("/slow2", slow2)];
+  started = AC.nowUs Unit;
+  kept = QS.filesReclaimWith p (QS.filesDeadline p) me entries;
+  elapsed = AC.nowUs Unit - started;
+  _ = check "configured shared reclamation budget" (elapsed >= 150000 and elapsed < 1000000 and kept == entries);
+  _ = kill slow1; _ = kill slow2;
+  _ = get "close first" (EP.close me a);
+  _ = get "close policy" (EP.close me ep);
+  _ = kill mgr; _ = kill owner; _ = kill st; _ = kill ns;
+  "filepolicy: HOLDS".

@@ -136,3 +136,4 @@ Source-adjacent READMEs under `tools/` stay beside the tools they explain.
 | 2026-10-18 | [RECENT-ADDITIONS-AUDIT.md](2026-10-18-RECENT-ADDITIONS-AUDIT.md) | Focused Main/Editor/Pi SDK audit: reproduced subscription retention, retained file actors, entry heuristics and remaining native-library migration |
 | 2026-10-18 | [QOS-DESIGN-ALIGNMENT.md](2026-10-18-QOS-DESIGN-ALIGNMENT.md) | Design/style work queue and first implementation: linear hosted timer ownership, refinement contracts, checked arithmetic bounds and lifecycle tests |
 | 2026-10-18 | [FREEBSD-PORTABLE.md](2026-10-18-FREEBSD-PORTABLE.md) | Portable v22 on FreeBSD QEMU, networking-header fixes, storage/lifecycle/network checks and measured native-server concurrency limit |
+| 2026-10-20 | [RUNTIME-POLICY.md](2026-10-20-RUNTIME-POLICY.md) | Typed policy roadmap and live, revisioned file-service configuration |

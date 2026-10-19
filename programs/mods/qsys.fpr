@@ -57,6 +57,7 @@ AC = use "std/actor#201a0e9bf98a5154".
 GX = use "graphics".
 GL = use "glsvc".
 Wire = use "std/storage#a8f7ee14e1efae76".
+FP = use "filepolicy".
 
 glHas : Int -> Int .
 
@@ -266,7 +267,8 @@ fileRetire : unsafe Int -> Int -> String -> Int -> Result String String -> Int -
 fileRetire mgr st path me body next hs = case hs of
     Nil -> (if mgr > 0 then fileIdle mgr me >> fileServe mgr st path me body next hs else Unit)
   | h :: rest -> fileServe mgr st path me body next hs.
-# the manager's request (Close with a negative handle, under Timed): retire
+# Private retirement: Timed Write -1 (IInt marginMs); legacy Timed Close -1
+# uses the default margin. Retire
 # if no lease is held.  It ends only when the request is well inside its
 # deadline, so the manager is still waiting for the answer and has
 # forwarded nothing since; anything else answers "busy" (Ok 0).  A forged
@@ -274,8 +276,10 @@ fileRetire mgr st path me body next hs = case hs of
 # see filesMgr).
 fileRetireAsk : unsafe Int -> Int -> String -> Int -> Result String String -> Int -> List (Int, Int) -> (Int, Int) -> Int -> Int -> Unit .
 fileRetireAsk mgr st path me body next hs ret sender until =
+  fileRetireWith (FP.marginMs FP.defaults) mgr st path me body next hs ret sender until.
+fileRetireWith margin mgr st path me body next hs ret sender until =
   idle = case hs of Nil -> True | h :: rest -> False;
-  if mgr > 0 and sender == mgr and idle and AC.nowUs Unit + 1000000 < until
+  if mgr > 0 and sender == mgr and idle and margin > 0 and margin <= intMax Unit / 1000 and until - AC.nowUs Unit > margin * 1000
   then AC.reply ret (Ok 1) >> Unit
   else AC.reply ret (Ok 0) >> fileServe mgr st path me body next hs.
 # not loaded yet (storage was unreachable): try again on this request
@@ -304,7 +308,9 @@ fileTimed : unsafe Int -> Int -> Int -> String -> Int -> Result String String ->
 fileTimed mgr until st path me body next hs ret sender q =
   if AC.nowUs Unit >= until then AC.reply ret (Err "endpoint: deadline exceeded before execution") >> fileServe mgr st path me body next hs else
   case q of
-      Read h n -> if hOwner hs h != sender then AC.reply ret (Err "no such handle") >> fileRetire mgr st path me body next hs
+      Write h (IInt margin) -> if h == 0 - 1 then fileRetireWith margin mgr st path me body next hs ret sender until
+        else fileMsg mgr st path me body next hs ret sender (Write h (IInt margin))
+    | Read h n -> if hOwner hs h != sender then AC.reply ret (Err "no such handle") >> fileRetire mgr st path me body next hs
         else loaded = fileLoadedUntil until st path me body; AC.reply ret (fileText path loaded) >> fileServe mgr st path me loaded next hs
     | Write h (IStr text) -> if hOwner hs h != sender then AC.reply ret (Err "no such handle") >> fileRetire mgr st path me body next hs
         else loaded = fileLoadedUntil until st path me body; (case loaded of
@@ -345,8 +351,8 @@ fileWr2 mgr st path me b next hs ret text r = case r of
 #
 # File actors are retired by the manager, never on their own: one that
 # holds no lease says so (fileIdle) and the manager asks it to retire while
-# no Open can be in flight (filesRetireAsk).  At the 64-actor budget the
-# manager first retires every actor whose clients have all closed or ended.
+# no Open can be in flight (filesRetireAsk). At the configured actor budget
+# the manager tries to release one idle live actor under one shared deadline.
 # A file's path is registered in the namespace with the MANAGER as its
 # owner, so an open comes here and the manager hands it to the file's
 # actor -- spawned on the first open: a known file costs one namespace
@@ -361,7 +367,44 @@ fileWr2 mgr st path me b next hs ret text r = case r of
 # it.  (docs/2026-10-16-EDITOR.md)
 filesIndex = "sys/files".
 filesMgr : unsafe Int -> Int -> List String -> Int -> a .
-filesMgr st ns known me = filesServe st ns me (filesEntries known).
+# Compatibility entry for callers constructing a private namespace manager.
+filesMgr st ns known me = filesServe (FilesCtx st ns FP.defaults 0 0) me (filesEntries known).
+FilesCtx = Type (FilesCtx Int Int FP.Policy Int Int).
+# The normal boot entry exposes a leased endpoint; the manager owns the only
+# policy copy and revision. The adapter carries the original deadline/client.
+filesManaged st ns known me =
+  admin = Wire.spawn 8 Wire.inboxBytes (Endpoint.simpleUntil (filesPolicyRead me) (filesPolicyWrite me));
+  _ = claim me ns FP.url admin;
+  _ = claim me ns FP.schemaUrl admin;
+  filesServe (FilesCtx st ns FP.defaults 0 admin) me (filesEntries known).
+filesPolicyRead mgr until me client url =
+  if strEq url FP.schemaUrl then Ok (IStr FP.schema)
+  else if strEq url FP.url then filesPolicyCall until me mgr (Read client 0)
+  else Err "no such file-policy endpoint".
+filesPolicyWrite mgr until me client url value =
+  if not (strEq url FP.url) then Err "file-policy schema is read-only"
+  else if Sys.pidOf client != 0 then Err "file policy: updates are system-only"
+  else filesPolicyCall until me mgr (Write client value).
+filesPolicyCall until me mgr command = case AC.callUntil until me mgr (EP.Timed until command) of
+    Ok result -> result
+  | Err why -> Err "file policy: {why}; read current revision before retrying".
+filesConfigure until ctx me act ret client value =
+  FilesCtx st ns policy revision admin = ctx;
+  if Sys.pidOf client != 0 then AC.reply ret (Err "file policy: updates are system-only") >> filesServe ctx me act
+  else case value of
+    IStr text -> (case FP.parse text of
+        Err why -> AC.reply ret (Err (FP.message why)) >> filesServe ctx me act
+      | Ok update -> (case FP.apply revision (filesLive act) update of
+          Err why -> AC.reply ret (Err (FP.message why)) >> filesServe ctx me act
+        | Ok next -> filesCommit until ctx me act ret next))
+  | other -> AC.reply ret (Err "file policy: update wants IStr") >> filesServe ctx me act.
+filesCommit until ctx me act ret next =
+  FilesCtx st ns policy revision admin = ctx;
+  case AC.deadlineAfter (FP.reclaimMs next) of
+    Err why -> AC.reply ret (Err "file policy: reclaim deadline would overflow") >> filesServe ctx me act
+  | Ok deadline -> if AC.nowUs Unit >= until then AC.reply ret (Err "file policy: deadline exceeded before update") >> filesServe ctx me act
+      else _ = AC.reply ret (Ok (IStr (FP.snapshot (revision + 1) next (filesLive act))));
+        filesServe (FilesCtx st ns next (revision + 1) admin) me act.
 filesEntries Nil = Nil.
 filesEntries (p :: rest) = (p, 0) :: filesEntries rest.
 # boot: the files the record names (and the seeded two), registered for mgr
@@ -391,25 +434,31 @@ filesNote st me change = case rpc me st 2 filesIndex "{change}\n" of
     Ok u -> Unit
   | Err why -> Sys.logAt 1 "system: file index not updated ({change}: {why})".
 
-filesServe : unsafe Int -> Int -> Int -> List (String, Int) -> a .
-filesServe st ns me act =
+filesServe : unsafe FilesCtx -> Int -> List (String, Int) -> a .
+filesServe ctx me act =
   m = receive me;
   case m of
-      (from, id, q) -> filesMsg st ns me act (from, id) from q
-    | stale -> filesServe st ns me act.   # e.g. a retire answer that came after its deadline
-filesMsg : unsafe Int -> Int -> Int -> List (String, Int) -> (Int, Int) -> Int -> EP.Ep -> a .
-filesMsg st ns me act ret from q = case q of
-    EP.Timed until command -> if AC.nowUs Unit >= until then AC.reply ret (Err "endpoint: deadline exceeded before execution") >> filesServe st ns me act else filesMsg st ns me act ret from command
-  | Open url mode -> filesOpen st ns me act ret from url mode
-  | Read h n -> AC.reply ret (Err "a file namespace: open a path under it") >> filesServe st ns me act
-  | Write h v -> AC.reply ret (Err "a file namespace: open a path under it") >> filesServe st ns me act
-  | Close h -> if h < 0 then filesIdle st ns me act from else AC.reply ret (Ok 0) >> filesServe st ns me act.
+      (from, id, q) -> filesMsg (intMax Unit) ctx me act (from, id) from q
+    | stale -> filesServe ctx me act.   # e.g. a retire answer that came after its deadline
+filesMsg : unsafe Int -> FilesCtx -> Int -> List (String, Int) -> (Int, Int) -> Int -> EP.Ep -> a .
+filesMsg deadline ctx me act ret from q =
+  FilesCtx st ns policy revision admin = ctx;
+  case q of
+    EP.Timed until command -> if AC.nowUs Unit >= until then AC.reply ret (Err "endpoint: deadline exceeded before execution") >> filesServe ctx me act else filesMsg (if until < deadline then until else deadline) ctx me act ret from command
+  | Open url mode -> filesOpen ctx me act ret from url mode
+  | Read h n -> if from == admin and admin > 0 then AC.reply ret (Ok (IStr (FP.snapshot revision policy (filesLive act)))) >> filesServe ctx me act
+      else AC.reply ret (Err "a file namespace: open a path under it") >> filesServe ctx me act
+  | Write h v -> if from == admin and admin > 0 then filesConfigure deadline ctx me act ret h v
+      else AC.reply ret (Err "a file namespace: open a path under it") >> filesServe ctx me act
+  | Close h -> if h < 0 then filesIdle ctx me act from else AC.reply ret (Ok 0) >> filesServe ctx me act.
 # a file actor says it holds no lease (fileIdle).  Only a hint: the
 # manager asks the actor itself, and retires it only on its own yes.
-filesIdle : unsafe Int -> Int -> Int -> List (String, Int) -> Int -> a .
-filesIdle st ns me act a = case filesUrlOf act a of
-    Nil -> filesServe st ns me act
-  | url :: none -> filesServe st ns me (if filesRetireAsk me a then filesSet act url 0 else act).
+filesIdle : unsafe FilesCtx -> Int -> List (String, Int) -> Int -> a .
+filesIdle ctx me act a =
+  FilesCtx st ns policy revision admin = ctx;
+  case filesUrlOf act a of
+    Nil -> filesServe ctx me act
+  | url :: none -> filesServe ctx me (if filesRetireWith policy (filesDeadline policy) me a then filesSet act url 0 else act).
 filesUrlOf : unsafe List (String, Int) -> Int -> List String .
 filesUrlOf act a = case act of
     Nil -> Nil
@@ -419,18 +468,32 @@ filesUrlOf act a = case act of
 # ahead of this request in its mailbox (it then holds a lease and says
 # no).  True: it has ended (or had already).  A late or missing answer is
 # "no": the actor is kept, and asked again when it is next idle.
+# A clock near exhaustion cannot start another pass. Never wrap a deadline.
+filesDeadline policy = case AC.deadlineAfter (FP.reclaimMs policy) of Ok until -> until | Err why -> AC.nowUs Unit.
 filesRetireAsk : unsafe Int -> Int -> Bool .
-filesRetireAsk me a = if not (Sys.alive a) then True else
-  until = AC.nowUs Unit + 2000000;
-  case AC.callUntil until me a (EP.Timed until (Close (0 - 1))) of
+filesRetireAsk me a = filesRetireWith FP.defaults (filesDeadline FP.defaults) me a.
+filesRetireAskUntil : unsafe Int -> Int -> Int -> Bool .
+filesRetireAskUntil until me a = filesRetireWith FP.defaults until me a.
+filesRetireWith policy until me a = if not (Sys.alive a) then True else
+  case AC.callUntil until me a (EP.Timed until (Write (0 - 1) (IInt (FP.marginMs policy)))) of
       Ok answer -> (case answer of Ok n -> n == 1 | Err why -> False)
     | Err why -> not (Sys.alive a).
-# at the budget: every live file actor whose clients have all ended or
-# closed is retired, then the open is admitted if a slot came free
+# At the budget, one new Open needs one live slot. Share the configured
+# deadline across the entire pass, rather than renewing it for each actor.
+# A timeout retains the owner; the existing retirement margin still applies.
+# Dead entries already cost no live slot, so clearing one must not stop the
+# search for a live actor that can release capacity.
 filesReclaim : unsafe Int -> List (String, Int) -> List (String, Int) .
-filesReclaim me act = case act of
+filesReclaim me act = filesReclaimWith FP.defaults (filesDeadline FP.defaults) me act.
+filesReclaimUntil : unsafe Int -> Int -> List (String, Int) -> List (String, Int) .
+filesReclaimUntil until me act = filesReclaimWith FP.defaults until me act.
+filesReclaimWith policy until me act = if AC.nowUs Unit >= until then act else case act of
     Nil -> Nil
-  | (p, a) :: rest -> (if a > 0 and filesRetireAsk me a then (p, 0) else (p, a)) :: filesReclaim me rest.
+  | (p, a) :: rest ->
+      if a <= 0 then (p, a) :: filesReclaimWith policy until me rest
+      else if not (Sys.alive a) then (p, 0) :: filesReclaimWith policy until me rest
+      else if filesRetireWith policy until me a then (p, 0) :: rest
+      else (p, a) :: filesReclaimWith policy until me rest.
 # the entry for a path: -1 unknown, 0 known with no actor, else its actor
 filesEntry : unsafe List (String, Int) -> String -> Int .
 filesEntry act url = case act of
@@ -444,24 +507,25 @@ filesDrop : unsafe List (String, Int) -> String -> List (String, Int) .
 filesDrop act url = case act of
     Nil -> Nil
   | (p, b) :: rest -> if strEq p url then rest else (p, b) :: filesDrop rest url.
-filesOpen : unsafe Int -> Int -> Int -> List (String, Int) -> (Int, Int) -> Int -> String -> String -> a .
-filesOpen st ns me act ret from url mode =
+filesOpen : unsafe FilesCtx -> Int -> List (String, Int) -> (Int, Int) -> Int -> String -> String -> a .
+filesOpen ctx me act ret from url mode =
+  FilesCtx st ns policy revision admin = ctx;
   a0 = filesEntry act url;
   reading = strEq mode "read";
   deleting = strEq mode "delete";
   if a0 > 0 and Sys.alive a0 then
-    (if deleting then filesDelete st ns me act ret url a0 else filesHand st ns me act ret from url mode a0)
+    (if deleting then filesDelete ctx me act ret url a0 else filesHand ctx me act ret from url mode a0)
   else if a0 >= 0 then
-    (if deleting then filesDelete st ns me act ret url 0 else filesSpawn st ns me act ret from url mode)
-  else if not reading and not deleting then filesMake st ns me act ret from url mode
+    (if deleting then filesDelete ctx me act ret url 0 else filesSpawn ctx me act ret from url mode)
+  else if not reading and not deleting then filesMake ctx me act ret from url mode
   else if filesStored st me url then
     # a file older than the record: adopt it, then serve this open
     _ = Sys.logAt 0 "system: adopting {url}";
     _ = EP.register me ns url 0;
     _ = filesNote st me "+{url}";
     next = filesSet act url 0;
-    (if deleting then filesDelete st ns me next ret url 0 else filesSpawn st ns me next ret from url mode)
-  else AC.reply ret (Refused "no such file: {url}") >> filesServe st ns me act.
+    (if deleting then filesDelete ctx me next ret url 0 else filesSpawn ctx me next ret from url mode)
+  else AC.reply ret (Refused "no such file: {url}") >> filesServe ctx me act.
 # does storage hold records for the path? (stats: "... url-records=N ...")
 filesStored : unsafe Int -> Int -> String -> Bool .
 filesStored st me url = case rpc me st 5 url "" of
@@ -471,8 +535,9 @@ filesRecords text = at = strIndexOf "url-records=" text;
   if at < 0 then 0 else parseInt (substr text (at + 12) (strlen text - at - 12)).
 # delete: the file's actor ends, its path leaves the namespace and the
 # record, its records leave the log
-filesDelete : unsafe Int -> Int -> Int -> List (String, Int) -> (Int, Int) -> String -> Int -> a .
-filesDelete st ns me act ret url a =
+filesDelete : unsafe FilesCtx -> Int -> List (String, Int) -> (Int, Int) -> String -> Int -> a .
+filesDelete ctx me act ret url a =
+  FilesCtx st ns policy revision admin = ctx;
   # the actor may already have retired on its last close: only kill it live
   _ = (if a > 0 and Sys.alive a then kill a else Unit);
   _ = EP.unregister me ns url;
@@ -480,37 +545,39 @@ filesDelete st ns me act ret url a =
   _ = (if filesTransient url then Unit else filesNote st me "-{url}");
   _ = (if filesTransient url then Unit else Sys.logAt 0 "system: deleted {url}");
   case deleted of
-    Ok u -> AC.reply ret (Opened 0) >> filesServe st ns me (filesDrop act url)
-  | Err why -> AC.reply ret (Refused "delete {url}: {why}") >> filesServe st ns me (filesDrop act url).
+    Ok u -> AC.reply ret (Opened 0) >> filesServe ctx me (filesDrop act url)
+  | Err why -> AC.reply ret (Refused "delete {url}: {why}") >> filesServe ctx me (filesDrop act url).
 # a new path: registered, recorded, then served like a known one
-filesMake : unsafe Int -> Int -> Int -> List (String, Int) -> (Int, Int) -> Int -> String -> String -> a .
-filesMake st ns me act ret from url mode =
-  if strlen url > 1024 then AC.reply ret (Refused "path longer than 1024 bytes") >> filesServe st ns me act else
+filesMake : unsafe FilesCtx -> Int -> List (String, Int) -> (Int, Int) -> Int -> String -> String -> a .
+filesMake ctx me act ret from url mode =
+  FilesCtx st ns policy revision admin = ctx;
+  if strlen url > FP.maxPath policy then AC.reply ret (Refused "path longer than {FP.maxPath policy} bytes") >> filesServe ctx me act else
   _ = (if filesTransient url then Unit else Sys.logAt 0 "system: creating {url}");
   _ = EP.register me ns url 0;
   _ = (if filesTransient url then Unit else filesNote st me "+{url}");
-  filesSpawn st ns me (filesSet act url 0) ret from url mode.
+  filesSpawn ctx me (filesSet act url 0) ret from url mode.
 # an editor's safety copy lives only for one save: never in the record
 filesTransient url = strlen url > 6 and strEq (substr url (strlen url - 6) 6) ".~save".
 # a known path's actor, on its first open (live actors are bounded: each
 # caches its file's text; known files cost only their namespace entry)
-filesSpawn : unsafe Int -> Int -> Int -> List (String, Int) -> (Int, Int) -> Int -> String -> String -> a .
-filesSpawn st ns me act ret from url mode =
-  act2 = if filesLive act >= 64 then filesReclaim me act else act;
-  if filesLive act2 >= 64 then AC.reply ret (Refused "file actor budget exhausted (64 live files)") >> filesServe st ns me act2 else
+filesSpawn : unsafe FilesCtx -> Int -> List (String, Int) -> (Int, Int) -> Int -> String -> String -> a .
+filesSpawn ctx me act ret from url mode =
+  FilesCtx st ns policy revision admin = ctx;
+  act2 = if filesLive act >= FP.maxLive policy then filesReclaimWith policy (filesDeadline policy) me act else act;
+  if filesLive act2 >= FP.maxLive policy then AC.reply ret (Refused "file actor budget exhausted ({FP.maxLive policy} live files)") >> filesServe ctx me act2 else
   p2 = strcat url "";      # OWN COPY: curried into the actor + the set
   a = Wire.spawn 8 Wire.inboxBytes (fileActorOf me st p2);
-  filesHand st ns me (filesSet act2 p2 a) ret from url mode a.
+  filesHand ctx me (filesSet act2 p2 a) ret from url mode a.
 filesLive Nil = 0.
 filesLive ((p, a) :: rest) = (if a > 0 and Sys.alive a then 1 else 0) + filesLive rest.
 # forward the client's own envelope to the file and point the client at it
-filesHand : unsafe Int -> Int -> Int -> List (String, Int) -> (Int, Int) -> Int -> String -> String -> Int -> a .
-filesHand st ns me act ret from url mode a =
+filesHand : unsafe FilesCtx -> Int -> List (String, Int) -> (Int, Int) -> Int -> String -> String -> Int -> a .
+filesHand ctx me act ret from url mode a =
   (f, id) = ret;
   _ = case send a (from, id, Open url mode) of
       Ok u -> AC.reply ret (Redirect a)
     | Err e -> AC.reply ret (Refused "{url}: its file actor {e}");
-  filesServe st ns me act.
+  filesServe ctx me act.
 
 # ---- apps: /apps/<id> names a loaded table, /apps/<id>.qa is its image -------
 # the image bytes are the disk's record; without a disk there are none
@@ -647,7 +714,7 @@ bootDiskUrls : unsafe Int -> Int -> Int -> Unit .
 bootDiskUrls me ns st =
   _ = claim me ns "/services/storage" (Wire.spawn 8 Wire.inboxBytes (Endpoint.simple (stR st) (stW st)));
   known = filesKnownAtBoot me st;
-  mgr = Wire.spawn 8 Wire.inboxBytes (filesMgr st ns known);
+  mgr = Wire.spawn 8 Wire.inboxBytes (filesManaged st ns known);
   _ = claim me ns "/tmp" mgr;
   _ = claim me ns "/home" mgr;
   # every file a previous boot made (and the two seeded ones), owned by the

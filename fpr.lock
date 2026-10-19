@@ -23,6 +23,7 @@ ep v3.0 c66ad65e68dd97f5 programs/mods/epdeadline.fpr
 std/actor v3.0 201a0e9bf98a5154 programs/mods/epdeadline.fpr
 ep v3.0 c66ad65e68dd97f5 programs/mods/epservice.fpr
 std/actor v3.0 201a0e9bf98a5154 programs/mods/epservice.fpr
+std/storage v1.1 a8f7ee14e1efae76 programs/mods/filepolicy.fpr
 epservice v3.0 e8bce05a1ddf73db programs/mods/files.fpr
 ep v3.0 c66ad65e68dd97f5 programs/mods/files.fpr
 std/fs v5.0 84826bc9e8ddb4b5 programs/mods/files.fpr
@@ -144,6 +145,12 @@ ep v3.0 c66ad65e68dd97f5 tests/epmemory.fpr
 std/actor v3.0 201a0e9bf98a5154 tests/epmemory.fpr
 ../programs/mods/ep v3.0 c66ad65e68dd97f5 tests/epproc.fpr
 std/fs v5.0 84826bc9e8ddb4b5 tests/errornative.fpr
+../programs/mods/ep v3.0 c66ad65e68dd97f5 tests/filepolicy.fpr
+../programs/mods/epservice v3.0 e8bce05a1ddf73db tests/filepolicy.fpr
+std/actor v3.0 201a0e9bf98a5154 tests/filepolicy.fpr
+../programs/mods/svc v5.0 75479fb6d5f34670 tests/filepolicy.fpr
+../programs/mods/ep v3.0 c66ad65e68dd97f5 tests/filesreclaim.fpr
+std/actor v3.0 201a0e9bf98a5154 tests/filesreclaim.fpr
 ../std/fs v5.0 84826bc9e8ddb4b5 tests/filesshutdown.fpr
 ../std/blockio v6.0 8b4ffa1467ca03a5 tests/filesshutdown.fpr
 ../std/fs v5.0 84826bc9e8ddb4b5 tests/filesshutdownactive.fpr
