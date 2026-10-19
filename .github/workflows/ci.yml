@@ -6,9 +6,15 @@
 # in fprisc.lock.json and cached by that revision.
 #
 # Not covered here: the full check-all.sh sweep (GL/GLFW hosts, Sol/compiler
-# legs, Pi 4/STAR64 hardware) and the portable legs whose apps need the X64
-# backend to lower more than six arguments (fprisc's Tup7/Tup8 builtins);
-# run `./qos.py test --all` locally for those.
+# legs, Pi 4/STAR64 hardware); run `./qos.py test --all` locally for it.
+#
+# x86-64 portable legs (job portable-x64) build with FPR_NO_REGISTERS=1:
+# the pinned fprisc's X64 backend cannot lower a promoted 7th/8th
+# parameter (`mv sN, a6`, "X64: a6 -- arity <= 6"), which blocks most
+# apps.  Register promotion off removes that shape.  fprisc#7 fixes the
+# backend and fprisc#8 a typed-vector fallback crash on x64; once both
+# are merged, bump fprisc.lock.json to the merged sha and drop the
+# variable.
 name: ci
 
 on:
@@ -145,5 +151,49 @@ jobs:
                    tools/failure-injections-check.py tools/diagnostics-check.py; do
             echo "::group::$t"
             case "$t" in *.py) python3 "$t" ;; *) sh "$t" ;; esac
+            echo "::endgroup::"
+          done
+
+  portable-x64:
+    name: portable legs on x86-64
+    needs: fprisc
+    runs-on: ubuntu-latest
+    container: debian:trixie
+    timeout-minutes: 90
+    env:
+      # interim, see the header: drop with the fprisc pin bump
+      FPR_NO_REGISTERS: "1"
+    steps:
+      - name: tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git ca-certificates python3 zstd \
+            make gcc libc6-dev pkg-config libgit2-1.9 libarchive13t64 libegl1 libgl1 \
+            libgmp10 libffi8 libnuma1 libegl-dev libgl-dev curl \
+            gcc-riscv64-unknown-elf picolibc-riscv64-unknown-elf qemu-system-misc
+      - uses: actions/checkout@v4
+      - uses: actions/cache/restore@v4
+        with:
+          path: fprisc
+          key: fprisc-trixie-${{ needs.fprisc.outputs.rev }}
+          fail-on-cache-miss: true
+      # in a container job ${{ github.workspace }} is the HOST's path;
+      # $GITHUB_WORKSPACE is the one the container sees
+      - run: echo "FPRISC_ROOT=$GITHUB_WORKSPACE/fprisc" >> "$GITHUB_ENV"
+      - name: smoke set (qosp legs) + LiveView multi-client
+        run: |
+          make -C qos portable
+          ./qos.py test hello epecho filessvc gfxshare guishell mvutick tuiframes \
+            qdisk2 dtree bigfree eq dungeon web
+      # several of these also boot the same scenario on QOS Native (virt)
+      - name: services, storage and shutdown legs
+        run: |
+          set -e
+          for t in files-service-check.py files-shutdown-check.py kv-large-check.py \
+                   hosted-timers-check.py portable-durable-check.py portable-shutdown-check.py \
+                   qsys-check.sh qlog-routing-check.py block-lifecycle-check.py \
+                   storage-reliability-check.py baseline-compile-check.py; do
+            echo "::group::$t"
+            case "$t" in *.py) python3 "tools/$t" ;; *) sh "tools/$t" ;; esac
             echo "::endgroup::"
           done
