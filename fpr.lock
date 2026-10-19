@@ -195,6 +195,7 @@ std/actor v3.0 201a0e9bf98a5154 tests/netactorstart.fpr
 ../programs/mods/ep v3.0 c66ad65e68dd97f5 tests/panemvu.fpr
 std/actor v3.0 201a0e9bf98a5154 tests/panemvu.fpr
 std/fs v5.0 84826bc9e8ddb4b5 tests/pathnotes.fpr
+std/fs v5.0 84826bc9e8ddb4b5 tests/placeuaf.fpr
 ../programs/mods/qlog v10.0 7022992c8e4a9fba tests/plugimports.fpr
 ../programs/mods/qlog v10.0 7022992c8e4a9fba tests/portabledurable.fpr
 std/blockio v6.0 8b4ffa1467ca03a5 tests/portabledurable.fpr
