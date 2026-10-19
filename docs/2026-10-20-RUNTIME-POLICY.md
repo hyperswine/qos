@@ -8,18 +8,18 @@ QOS policy should be ordinary typed FP-RISC state owned by a live service. A use
 should be able to discover its effective values, constraints, usage and revision,
 then change it without rebuilding or restarting the system wherever the resource
 contract permits. Moving literals into a constants file alone does not achieve
-this. The first implemented slice is the file manager policy below; the remaining
-rows are work to do.
+this. The file manager policy and endpoint ownership slices are implemented
+below. Other rows remain work to do.
 
 ## Work queue
 
-| Current source and behavior | Proposed type | Runtime change boundary | Status |
+| Original source and behavior | Proposed type | Runtime change boundary | Status |
 |---|---|---|---|
-| `programs/mods/qsys.fpr`: 64 live file actors, 1024-byte new paths, 2000 ms reclamation, 1000 ms retirement margin | `FilesPolicy` (module `filepolicy`, constructor `Policy`) | Atomic manager update; next admission or retirement request, including existing actors | Implemented in this working tree |
+| `programs/mods/qsys.fpr`: 64 live file actors, 1024-byte new paths, 2000 ms reclamation, 1000 ms retirement margin | `FilesPolicy` (module `filepolicy`, constructor `Policy`) | Atomic manager update; next admission or retirement request, including existing actors | Pushed in `67a9c21` |
 | `programs/mods/appjobs.fpr`: read 500 ms, write 2000 ms, delete 1000 ms, cleanup 150 ms; `programs/mods/appclient.fpr` recovery cap of 3 attempts | `AppIoPolicy`, `RecoveryPolicy` | Snapshot at operation/recovery start; keep original in-flight deadline and cleanup obligation | Planned |
 | `programs/mods/editapp.fpr`: child memory = physical RAM / 4, fallback 1 GiB | `RunPolicy` | New launches first; changing a running process requires resource-account support and cannot revoke outstanding allocations silently | Planned |
 | `programs/mods/editapp.fpr`: `/home/` access, `.editor/` exclusion and path checks | `FileAccessPolicy`, validated path type | Revalidate new requests after a policy update; define explicit revocation semantics for already-issued capabilities | Planned |
-| `programs/mods/appjobs.fpr`: `{held=(0,0), uncertain=""}` | Owned endpoint state, e.g. `Vacant`, `Held`, `Uncertain` | Explicit transitions preserving handle ownership and uncertain outcomes; inspect state, never overwrite it with arbitrary settings | Planned next |
+| `programs/mods/appjobs.fpr`: `{held=(0,0), uncertain=""}` | Linear `endpointstate.State`: `Vacant`, `Held`, `Uncertain` | Explicit transitions preserving handle ownership and uncertain outcomes; inspect state, never overwrite it with arbitrary settings | Implemented in the continuation below |
 | `programs/mods/editapp.fpr`: numeric job and prompt modes | `JobKind`, `PromptMode` | Typed events and transitions; expose current state through app inspection | Planned |
 | Storage RPC integer operation tags and string-matched errors | `StorageOp`, `StorageError` | Typed facade plus a versioned wire codec; preserve existing clients during migration | Planned |
 | Editor undo 200, output 400, recovery path; Terminal input 240, output 400 | `EditorPreferences`, `TerminalPreferences` | Live updates with an explicit retained-history policy; recovery-path changes migrate or finish current recovery work first | Planned |
@@ -125,3 +125,54 @@ Validated on 2026-10-20 with sibling FP-RISC
 Detailed local logs are in `.qos/validation/live-policy-20261020/`.
 These are Portable host checks. Native and physical Pi/STAR64 acceptance and
 deployment have not been performed for this slice.
+
+
+## Endpoint ownership continuation
+
+Started from `67a9c21` after committing and pushing the file-policy slice.
+`programs/mods/endpointstate.fpr` replaces the worker's combined sentinel record
+with a linear `State`: `Vacant`, `Held actor handle`, or `Uncertain reason`.
+The worker moves this owner through each job and cleanup operation. These are
+resource states, not writable configuration values: editing a flag cannot prove
+that a close succeeded or resolve an unknown open outcome.
+
+`cleanup` consumes the owner and returns both the result and its successor.
+Confirmed close produces `Vacant`; failed close retains `Held` for retry.
+`Uncertain` refuses further opens while preserving the reason. A separate
+`OpenFailure` type distinguishes a confirmed `Refused` response from an
+`Unconfirmed` transport outcome, replacing the previous Boolean distinction.
+Read, write, append, delete and safe-save jobs all carry the same successor state.
+
+`AW.Inspect` retains its existing diagnostic record shape (`held`, `uncertain`).
+The snapshot helper returns that ordinary data plus the successor owner, so
+inspection does not copy or discard the linear state. The app wire is unchanged.
+Non-endpoint jobs such as Clock remain usable while endpoint cleanup is blocked.
+
+On Stop or parent death, the worker attempts cleanup and returns from its loop.
+Its explicit terminal `ended` transition consumes any remaining local owner;
+it does not claim that a failed close succeeded. Stop still reports that failure,
+and endpoint services can sweep leases belonging to the now-dead worker. Raw
+actor/handle IDs remain cooperative IPC data, not unforgeable capabilities.
+
+The follow-up test runner, `tools/endpoint-state-check.py`, checks six compiler
+refusals for duplicated, discarded or reused owners, then runs `appjobs`,
+`appsession`, `appsessionmemory` and `filepolicy` on one and four workers. It is
+registered in `check-all.sh` and the CI service checks. Worker tests now cover
+failed-close retention, retries before admitting another open, successful cleanup
+followed by an open refusal, inspection compatibility, and an uncertain open
+blocking subsequent read/write/delete requests without sending another open.
+
+The I/O timeouts and recovery cap remain the next configurable-policy slice.
+Their updates should affect subsequent operations without changing deadlines or
+ownership obligations of work already in flight.
+
+
+Continuation validation on 2026-10-20: all six ownership misuse programs were
+refused, and all eight Portable runs passed (four programs on one and four
+workers). The 3000-operation memory regression remained within its existing
+8-root / 2 MiB bounds. Main check-only, the four check-all verdict unit tests,
+`bash -n check-all.sh`, Python compilation, `git diff --check`, and the 258-pin
+lock check passed. Logs are under
+`.qos/validation/endpoint-state-20261020/`. This continuation uses the same local
+compiler revision as the file-policy validation above; physical-board and native
+runtime acceptance remain untested.

@@ -45,6 +45,58 @@ adopt parent ns busy me =
   _ = if busy then send worker (me, Sys.nextId Unit, AW.Read 1 (AW.ReadPath "/slow")) else Ok Unit;
   _ = send parent worker;
   _ = receive me; Unit.
+# First two Close attempts fail; the third confirms release. Subsequent
+# opens are refused so a successful cleanup followed by refusal stays Vacant.
+flaky me = _ = Sys.loop (0, 0) (flakyStep me); Unit.
+flakyStep me state =
+  (opens, closes) = state;
+  (from, id, request) = receive me;
+  case request of
+    EP.Open path mode ->
+      _ = AC.reply (from, id) (if opens == 0 then EP.Opened 7 else EP.Refused "no new lease");
+      (True, (opens + 1, closes))
+  | EP.Timed until (EP.Read h n) -> _ = AC.reply (from, id) (Ok (EP.IStr "body")); (True, state)
+  | EP.Timed until (EP.Close h) ->
+      _ = check (h == 7);
+      _ = AC.reply (from, id) (if closes < 2 then Err "try close again" else Ok 0);
+      (True, (opens, closes + 1))
+  | other -> _ = AC.reply (from, id) state; (True, state).
+# Consume opens without replying. A count query proves an uncertain worker
+# never sends another open while its original outcome is unknown.
+unanswered me = _ = Sys.loop 0 (unansweredStep me); Unit.
+unansweredStep me count =
+  (from, id, request) = receive me;
+  case request of
+    EP.NsOpen path mode -> (True, count + 1)
+  | other -> _ = AC.reply (from, id) count; (True, count).
+retained me worker actor = case AC.callWithin 200 me worker AW.Inspect of
+    Ok state -> state.held == (actor, 7) and state.uncertain == ""
+  | other -> False.
+stateTransitions me =
+  ep = spawn flaky;
+  ns = spawn (namespace ep);
+  worker = spawn (AJ.run me ns 0);
+  _ = check (case fetch me worker (AW.ReadPath "/held") of Err why -> True | other -> False);
+  _ = check (retained me worker ep);
+  _ = check (case fetch me worker (AW.WritePath "/held" "new") of Err why -> True | other -> False);
+  _ = check (retained me worker ep);
+  _ = check (case AC.callWithin 200 me ep (EP.Close 0) of Ok counts -> counts == (1, 2) | other -> False);
+  _ = check (case fetch me worker (AW.ReadPath "/refused") of Err why -> why == "no new lease" | other -> False);
+  _ = check (case AC.callWithin 200 me worker AW.Inspect of Ok state -> state.held == (0, 0) and state.uncertain == "" | other -> False);
+  _ = check (case AC.callWithin 1500 me worker AW.Stop of Ok (AW.Stopped (Ok u)) -> True | other -> False);
+  _ = check (case AC.callWithin 200 me ep (EP.Close 0) of Ok counts -> counts == (2, 3) | other -> False);
+  _ = kill ep; _ = kill ns;
+  missing = spawn unanswered;
+  blocked = spawn (AJ.run me missing 0);
+  _ = check (case fetch me blocked (AW.ReadPath "/unknown") of Err why -> True | other -> False);
+  _ = check (case AC.callWithin 200 me blocked AW.Inspect of Ok state -> state.held == (0, 0) and state.uncertain != "" | other -> False);
+  _ = check (case fetch me blocked (AW.ReadPath "/again") of Err why -> True | other -> False);
+  _ = check (case fetch me blocked (AW.WritePath "/again" "text") of Err why -> True | other -> False);
+  _ = check (case fetch me blocked (AW.DeletePath "/again") of Err why -> True | other -> False);
+  _ = check (case fetch me blocked AW.Clock of Ok (AW.Time n) -> True | other -> False);
+  _ = check (case AC.callWithin 200 me missing (EP.NsList "/") of Ok count -> count == 1 | other -> False);
+  _ = check (case AC.callWithin 1500 me blocked AW.Stop of Ok (AW.Stopped (Err why)) -> True | other -> False);
+  kill missing.
 main =
   me = myself 0;
   ep = spawn endpoint;
@@ -87,4 +139,5 @@ main =
   _ = Sys.sleepUs 800000;
   _ = check (not (Sys.alive busyWorker));
   _ = kill slow2;
+  _ = stateTransitions me;
   "appjobs: HOLDS".

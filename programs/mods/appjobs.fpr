@@ -1,27 +1,29 @@
-# One persistent, read-only worker owned by one app model actor. Endpoint
+# One persistent I/O worker owned by one app model actor. Endpoint
 # cleanup has its own budget; uncertain opens block further endpoint reads.
 unsafe module.
 AW = use "appwire".
 EP = use "ep#c66ad65e68dd97f5".
 ED = use "epdeadline".
+ES = use "endpointstate".
 AC = use "std/actor#201a0e9bf98a5154".
 FS = use "std/fs#84826bc9e8ddb4b5".
 AK = use "appkit".
 run owner ns storage me =
-  _ = Sys.loop {held = (0, 0), uncertain = ""} (step owner ns storage me); Unit.
+  final = Sys.loop ES.Vacant (step owner ns storage me); ES.ended final.
 step owner ns storage me state = case receiveFromRes me owner of
-    Err why -> _ = cleanup me state; (False, state)
+    Err why -> (closed, next) = ES.cleanup me state; (False, next)
   | Ok borrowed ->
       request = keep borrowed;
       _ = drop borrowed;
       (from, token, command) = request;
       case command of
-        AW.Inspect -> _ = AC.reply (from, token) state; (True, state)
-      | AW.Stop -> _ = AC.reply (from, token) (AW.Stopped (cleanup me state)); (False, state)
+        AW.Inspect -> (snapshot, next) = ES.inspect state; _ = AC.reply (from, token) snapshot; (True, next)
+      | AW.Stop -> (closed, next) = ES.cleanup me state; _ = AC.reply (from, token) (AW.Stopped closed); (False, next)
       | AW.Read tag job ->
           (result, next) = execute me ns storage job state;
           _ = AC.reply (from, token) (AW.Completed tag result);
           (True, next).
+execute : unsafe Int -> Int -> Int -> AW.Job -> ES.State -> (Result AW.Snapshot String, ES.State) .
 execute me ns storage AW.Clock state = (Ok (AW.Time (Sys.mtime Unit / 10000000)), state).
 execute me ns storage (AW.Logs sev) state =
   (Ok (AW.Lines (Sys.logSnap sev) "{Sys.logSeq sev} TOTAL"), state).
@@ -60,21 +62,16 @@ execute me ns storage (AW.DeletePath path) state =
     (Err why, next) -> (Err why, next)
   | (Ok u, next) -> (Ok (AW.Done "deleted {path}"), next).
 execute me ns storage (AW.ReadPath path) state =
-  case cleanup me state of
-    Err why -> (Err why, state)
-  | Ok u -> case AC.deadlineAfter 500 of
-      Err why -> (Err why, state)
+  (cleaned, ready) = ES.cleanup me state;
+  case cleaned of
+    Err why -> (Err why, ready)
+  | Ok u -> ES.Vacant = ready; case AC.deadlineAfter 500 of
+      Err why -> (Err why, ES.Vacant)
     | Ok deadline -> case openTracked deadline me ns path "read" of
-        Err (why, unknown) ->
-          # A queued Open has no cancellation/lease acknowledgement in v1.
-          # Do not claim cleanup or admit more opens with an unknown handle.
-          next = {state | held = (0, 0), uncertain = (if unknown then "open cleanup unconfirmed: {why}" else "")};
-          (Err (if unknown then next.uncertain else why), next)
+        Err failure -> ES.failed failure
       | Ok ep ->
           result = ED.readUntil deadline me ep 0;
-          pending = {state | held = ep};
-          closed = cleanup me pending;
-          next = case closed of Ok u -> {state | held = (0, 0)} | Err why -> pending;
+          (closed, next) = ES.cleanup me (ES.acquired ep);
           (case closed of
               Err why -> Err "{readError result}; {why}"
             | Ok u -> case result of
@@ -84,19 +81,16 @@ execute me ns storage (AW.ReadPath path) state =
 readError (Ok value) = "read completed".
 readError (Err why) = why.
 writePath me ns path mode text state =
-  case cleanup me state of
-    Err why -> (Err why, state)
-  | Ok u -> case AC.deadlineAfter 2000 of
-      Err why -> (Err why, state)
+  (cleaned, ready) = ES.cleanup me state;
+  case cleaned of
+    Err why -> (Err why, ready)
+  | Ok u -> ES.Vacant = ready; case AC.deadlineAfter 2000 of
+      Err why -> (Err why, ES.Vacant)
     | Ok deadline -> case openTracked deadline me ns path mode of
-        Err (why, unknown) ->
-          next = {state | held = (0, 0), uncertain = (if unknown then "open cleanup unconfirmed: {why}" else "")};
-          (Err (if unknown then next.uncertain else why), next)
+        Err failure -> ES.failed failure
       | Ok ep ->
           result = ED.writeUntil deadline me ep (EP.IStr text);
-          pending = {state | held = ep};
-          closed = cleanup me pending;
-          next = case closed of Ok u -> {state | held = (0, 0)} | Err why -> pending;
+          (closed, next) = ES.cleanup me (ES.acquired ep);
           (case closed of
               Err why -> Err "{readError result}; {why}"
             | Ok u -> case result of
@@ -104,36 +98,22 @@ writePath me ns path mode text state =
               | Ok (EP.IInt n) -> Ok (AW.Done "wrote {n} bytes to {path}")
               | Ok other -> Ok (AW.Done "wrote to {path}"), next).
 deletePath me ns path state =
-  case cleanup me state of
-    Err why -> (Err why, state)
-  | Ok u -> case AC.deadlineAfter 1000 of
-      Err why -> (Err why, state)
+  (cleaned, ready) = ES.cleanup me state;
+  case cleaned of
+    Err why -> (Err why, ready)
+  | Ok u -> ES.Vacant = ready; case AC.deadlineAfter 1000 of
+      Err why -> (Err why, ES.Vacant)
     | Ok deadline -> case openTracked deadline me ns path "delete" of
-        Err (why, unknown) ->
-          next = {state | held = (0, 0), uncertain = (if unknown then "open cleanup unconfirmed: {why}" else "")};
-          (Err (if unknown then next.uncertain else why), next)
+        Err failure -> ES.failed failure
       | Ok ep ->
-          pending = {state | held = ep};
-          (case cleanup me pending of
-              Err why -> (Err why, pending)
-            | Ok u -> (Ok Unit, {state | held = (0, 0)})).
-cleanup me state = case state.uncertain != "" of
-    True -> Err state.uncertain
-  | False -> case state.held of
-      (0, 0) -> Ok Unit
-    | ep -> case AC.deadlineAfter 150 of
-        Err why -> Err why
-      | Ok deadline -> case ED.closeUntil deadline me ep of
-          Ok value -> Ok Unit
-        | Err why -> Err "endpoint close unconfirmed: {why}".
-
+          ES.cleanup me (ES.acquired ep).
 # Explicit refusals prove no handle was granted. Transport timeouts cannot.
 openTracked deadline me ns path mode = case AC.callUntil deadline me ns (EP.NsOpen path mode) of
-    Err why -> Err ("namespace: {why}", True)
-  | Ok (Err why) -> Err (why, False)
+    Err why -> Err (ES.Unconfirmed "namespace: {why}")
+  | Ok (Err why) -> Err (ES.Refused why)
   | Ok (Ok (owner, id)) -> awaitTracked deadline me owner id.
 awaitTracked deadline me owner id = case AC.awaitReplyUntil deadline me owner id of
-    Err why -> Err (why, True)
-  | Ok (EP.Refused why) -> Err (why, False)
+    Err why -> Err (ES.Unconfirmed why)
+  | Ok (EP.Refused why) -> Err (ES.Refused why)
   | Ok (EP.Opened handle) -> Ok (owner, handle)
   | Ok (EP.Redirect other) -> awaitTracked deadline me other id.

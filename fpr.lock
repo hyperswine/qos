@@ -18,6 +18,7 @@ std/actor v3.0 201a0e9bf98a5154 programs/mods/browserapp.fpr
 std/actor v3.0 201a0e9bf98a5154 programs/mods/clockapp.fpr
 std/actor v3.0 201a0e9bf98a5154 programs/mods/diskapp.fpr
 std/actor v3.0 201a0e9bf98a5154 programs/mods/editapp.fpr
+std/actor v3.0 201a0e9bf98a5154 programs/mods/endpointstate.fpr
 std/actor v3.0 201a0e9bf98a5154 programs/mods/ep.fpr
 ep v3.0 c66ad65e68dd97f5 programs/mods/epdeadline.fpr
 std/actor v3.0 201a0e9bf98a5154 programs/mods/epdeadline.fpr

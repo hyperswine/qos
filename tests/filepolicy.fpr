@@ -7,6 +7,7 @@ EP = use "../programs/mods/ep#c66ad65e68dd97f5".
 Endpoint = use "../programs/mods/epservice#e8bce05a1ddf73db".
 AC = use "std/actor#201a0e9bf98a5154".
 AJ = use "../programs/mods/appjobs".
+ES = use "../programs/mods/endpointstate".
 AW = use "../programs/mods/appwire".
 SVC = use "../programs/mods/svc#75479fb6d5f34670".
 check tag True = Unit.
@@ -106,11 +107,13 @@ main =
   _ = check "one revision advance" (strIndexOf "revision=4 " final == 0);
   # Exercise Terminal's actual worker path: replace-mode open and bounded
   # write/read/close, not just the unrestricted endpoint conveniences above.
-  (written, clean) = AJ.execute me ns st (AW.WritePath FP.url "{FP.encode 4 FP.defaults}\n") {held = (0, 0), uncertain = ""};
+  (written, clean) = AJ.execute me ns st (AW.WritePath FP.url "{FP.encode 4 FP.defaults}\n") ES.Vacant;
   _ = get "Terminal write path" written;
   (readback, clean2) = AJ.execute me ns st (AW.ReadPath FP.url) clean;
   _ = check "Terminal read path" (case readback of Ok (AW.Text s) -> strIndexOf "revision=5 " s == 0 | other -> False);
-  _ = check "Terminal cleanup" (clean2.held == (0, 0) and clean2.uncertain == "");
+  (cleanupSnapshot, done) = ES.inspect clean2;
+  _ = check "Terminal cleanup" (cleanupSnapshot.held == (0, 0) and cleanupSnapshot.uncertain == "");
+  _ = ES.ended done;
   slow1 = spawn stalled; slow2 = spawn stalled;
   entries = [("/slow1", slow1), ("/slow2", slow2)];
   started = AC.nowUs Unit;

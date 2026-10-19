@@ -1,0 +1,39 @@
+# Worker-owned endpoint state. Inspection returns data plus the successor
+# owner; it never copies ownership. Raw IPC actor/handle ids remain cooperative.
+AC = use "std/actor#201a0e9bf98a5154".
+ED = use "epdeadline".
+State 1 = Type (Vacant | Held Int Int | Uncertain String).
+OpenFailure = Type (Refused String | Unconfirmed String).
+
+# Refusal proves no lease was acquired; an unconfirmed open cannot be cleared
+# by another ordinary read/write. There is no silent reset transition.
+failed : OpenFailure -> (Result a String, State) .
+failed (Refused why) = (Err why, Vacant).
+failed (Unconfirmed why) = message = "open cleanup unconfirmed: {why}";
+  (Err message, Uncertain message).
+acquired : (Int, Int) -> State .
+acquired (actor, handle) = Held actor handle.
+
+cleanup : unsafe Int -> State -> (Result Unit String, State) .
+cleanup me state = case state of
+    Vacant -> (Ok Unit, Vacant)
+  | Uncertain why -> (Err why, Uncertain why)
+  | Held actor handle -> case AC.deadlineAfter 150 of
+      Err why -> (Err why, Held actor handle)
+    | Ok deadline -> case ED.closeUntil deadline me (actor, handle) of
+        Ok value -> (Ok Unit, Vacant)
+      | Err why -> (Err "endpoint close unconfirmed: {why}", Held actor handle).
+
+# Compatibility snapshot for AW.Inspect. The record is diagnostics only;
+# internal transitions use the nominal State, never sentinel fields.
+inspect : State -> ({held : (Int, Int), uncertain : String}, State) .
+inspect state = case state of
+    Vacant -> ({held = (0, 0), uncertain = ""}, Vacant)
+  | Held actor handle -> ({held = (actor, handle), uncertain = ""}, Held actor handle)
+  | Uncertain why -> ({held = (0, 0), uncertain = why}, Uncertain why).
+
+# Terminal transition only: the worker is returning, so endpoint owners can
+# sweep its dead-client leases. A failed final cleanup was already reported
+# by Stop (or its caller is dead). This does not claim a successful Close.
+ended : State -> Unit .
+ended state = case state of Vacant -> Unit | Held actor handle -> Unit | Uncertain why -> Unit.
