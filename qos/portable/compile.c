@@ -9,7 +9,9 @@
  * QOS keeps the policy: what to compile, when, and where the returned
  * assembly or plugin is stored or attached.
  *
- *   socket   $FPRD_SOCK, else /tmp/fprd.sock
+ *   socket   $FPRD_SOCK, else /tmp/fprd.sock; the server must run as
+ *            this user (checked by peer credentials): a socket another
+ *            user bound first is refused, never trusted with a compile
  *   frame    4-byte LE length + payload, both directions
  *   request  "<profile>\n<source>" (passed through verbatim; the
  *            daemon whitelists the profile token)
@@ -35,6 +37,9 @@
  * the app's 256 KiB syscall buffer).  What bounds a request is the
  * daemon's (4 MiB of source); what bounds the wait is QOSP_COMPILE_WAIT_S
  * below, derived from the daemon's own deadlines. */
+#if defined(__linux__) && !defined(_GNU_SOURCE)
+#define _GNU_SOURCE /* struct ucred (SO_PEERCRED) */
+#endif
 #include <errno.h>
 #include <pthread.h>
 #include <stdint.h>
@@ -99,6 +104,22 @@ static int64_t exchange(const char *pay, uint64_t plen, char **reply) {
   if (connect(fd, (struct sockaddr *)&sa, sizeof sa)) {
     close(fd);
     return -2; /* no compiler server: the app-side shim names it */
+  }
+  /* the server must be this user's: a shared path like /tmp/fprd.sock can
+   * be bound first by anyone, and the reply is code we would run */
+  {
+    int ours = 0;
+#if defined(__linux__)
+    struct ucred cr;
+    socklen_t crl = sizeof cr;
+    ours = !getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &cr, &crl) && cr.uid == getuid();
+#elif defined(__APPLE__) || defined(__FreeBSD__)
+    uid_t pu; gid_t pg;
+    ours = !getpeereid(fd, &pu, &pg) && pu == getuid();
+#else
+    ours = 1; /* no peer-credential call here: trust the path */
+#endif
+    if (!ours) { close(fd); return -1; }
   }
   struct timeval tv = { QOSP_COMPILE_WAIT_S, 0 };
   setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);

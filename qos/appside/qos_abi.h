@@ -1,7 +1,7 @@
 /* qos_abi.h -- the QOS Portable host <-> app ABI (docs/QOS-PORTABLE.md).
  *
- * Shared by runtime/portable (the qosp host, hosted C with libc) and
- * runtime/qosapp (the app-side runtime, freestanding).  This is the
+ * Shared by qos/portable (the qosp host, hosted C with libc) and
+ * qos/appside (the app-side runtime, freestanding).  This is the
  * bootstrap design's HAL contract realized on a host OS: "the HAL is a
  * table delivered as a C pointer, called like regular C functions" --
  * the app image contains NO libc and NO syscalls; every effect it can
@@ -121,7 +121,7 @@ typedef struct {
   void (*wfi)(void);          /* idle pacing for the app's hart loop */
 
   /* the register tier: uart/clint pseudo-bus, same addresses as the
-   * posix HAL's model (runtime/portable/haltab.c holds the dispatch) */
+   * posix HAL's model (qos/portable/haltab.c holds the dispatch) */
   uint64_t (*mmio_read)(uint64_t addr, uint32_t width);
   void (*mmio_write)(uint64_t addr, uint64_t v, uint32_t width);
 

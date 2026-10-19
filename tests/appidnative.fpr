@@ -1,0 +1,37 @@
+unsafe program.
+# Test kernel: an app id is one safe path component (qos/app_id.h,
+# programs/mods/manifest.fpr validId).  The manifest parser every launcher
+# uses refuses a bad id by name; below it, the kernel refuses to place a
+# process under one, and a 64-byte id gets its own whole store url (it
+# used to be cut at 100/120 bytes, so long ids sharing a prefix shared a
+# store).  tools/app-id-check.py builds and boots it.
+FS = use "std/fs#84826bc9e8ddb4b5".
+S = use "../programs/mods/svc#75479fb6d5f34670".
+M = use "../programs/mods/manifest".
+NI = use "nativeimage".
+Sys.bindStore : Int -> S.Rpc -> Unit .
+Sys.bindApp : String -> Unit .
+refusedId qa = case M.parseQa qa of Err e -> e | Ok m -> "accepted {M.id m}".
+placed qa = (ok, why, root) = NI.place qa; ok == 2.
+refusal qa = (ok, why, root) = NI.place qa; case ok == 2 of True -> "placed" | False -> why.
+runAs me qa appId =
+  _ = Sys.bindApp appId;
+  (ok, why, root) = NI.place qa;
+  case ok == 2 of True -> NI.result me root | False -> "refused: {why}".
+main =
+  me = myself 0;
+  fs = FS.serve (device "blk");
+  good = case FS.readLatest me fs "apps/CkSlow.qa" of Ok s -> s | Err e -> error e;
+  bad = case FS.readLatest me fs "apps/CkBad.qa" of Ok s -> s | Err e -> error e;
+  _ = Sys.bindStore fs (S.TimedRpc fs 0 0 0 "" "");
+  parsed = refusedId bad;
+  goodParsed = refusedId good;
+  escaped = runAs me good "../escaped";
+  slash = runAs me good "a/b";
+  long1 = runAs me good "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaX";
+  max1 = runAs me good "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb1";
+  max2 = runAs me good "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb2";
+  max1b = runAs me good "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb1";
+  freed = NI.settle 0 400;
+  verdict = if parsed == "manifest: app id \"../escaped\" may not start with '.' or '-'" and goodParsed == "accepted CkSlow" and escaped == "refused: app id: may not start with '.' or '-'" and slash == "refused: app id: may use only A-Z a-z 0-9 _ - ." and long1 == "refused: app id: longer than 64 bytes" and max1 == "appidproc: ok 1" and max2 == "appidproc: ok 1" and max1b == "appidproc: ok 2" and freed then "HOLDS" else "FAILED";
+  "appidnative: parsed=[{parsed}] good=[{goodParsed}] escaped=[{escaped}] slash=[{slash}] long=[{long1}] max1=[{max1}] max2=[{max2}] max1again=[{max1b}] freed={freed} {verdict}".

@@ -20,6 +20,11 @@
 #  10. 70 sequential open/close pairs succeed (closed files free the
 #      manager's 64-live-actor budget)
 #  11. 64 files held open bound the 65th; closing them admits it again
+#  12. 64 clients that open a file each and END without Close do not keep
+#      the budget: the 65th open is admitted (their actors are reclaimed)
+#  13. open/read/close cycles from 4 clients on one file while its actor
+#      keeps going idle: every read answers (no Open forwarded to an actor
+#      that is retiring), and the actor is retired once they are done
 #
 #   ./qos.py run tests/qsysfail.fpr
 #: expect qsysfail: HOLDS
@@ -122,6 +127,35 @@ mkPaths pre n = mpGo pre 1 n.
 mpGo : unsafe String -> Int -> Int -> List String .
 mpGo pre i n = if i > n then Nil else "{pre}{i}" :: mpGo pre (i + 1) n.
 
+# opens a file and ends without closing it
+holder ns path boss me = _ = EP.open me ns path "read"; send boss 1.
+# n open/read/close cycles; reports how many reads did not answer "abc"
+cycler ns path n boss me = send boss (cycles me ns path n 0).
+cycles : unsafe Int -> Int -> String -> Int -> Int -> Int .
+cycles me ns path n bad = if n <= 0 then bad else
+  cycles me ns path (n - 1) (if QS.strEq (AK.vfsRead me ns path) "abc" then bad else bad + 1).
+spawnHolders : unsafe Int -> List String -> Int -> Unit .
+spawnHolders ns paths boss = case paths of
+    Nil -> Unit
+  | p :: rest -> _ = spawn (holder ns p boss); spawnHolders ns rest boss.
+collectN : unsafe Int -> Int -> Int -> Int .
+collectN me k acc = if k <= 0 then acc else collectN me (k - 1) (acc + receive me).
+spawnCyclers : unsafe Int -> String -> Int -> Int -> Int -> Unit .
+spawnCyclers ns path k n boss = if k <= 0 then Unit else
+  _ = spawn (cycler ns path n boss); spawnCyclers ns path (k - 1) n boss.
+# a namespace with one manager over /tmp and the given files
+mgrNs : unsafe Int -> Int -> List String -> (Int, Int) .
+mgrNs me st known =
+  ns = AC.spawnWith (AC.Dynamic 64) EP.namespace;
+  mgr = spawn (QS.filesMgr st ns known);
+  _ = (case EP.register me ns "/tmp" mgr of Ok n -> Unit | Err e -> error "qsysfail: claim /tmp: {e}");
+  _ = QS.filesRegister me ns mgr known;
+  (ns, mgr).
+liveOwner : unsafe Int -> Int -> String -> Int .
+liveOwner me ns path = case EP.open me ns path "read" of
+    Err why -> 0
+  | Ok ep -> (o, h) = ep; _ = EP.close me ep; o.
+
 main =
   me = myself 0;
   ns = AC.spawnWith (AC.Dynamic 64) EP.namespace;
@@ -207,6 +241,25 @@ main =
   extra2 = EP.open me ns "/tmp/m65" "read";
   ok11b = case extra2 of Ok ep -> _ = EP.close me ep; True | Err why -> False;
   ok11 = QS.lenL held == 64 and ok11a and ok11b;
-  case ok1 and ok2 and ok3 and ok4 and ok5 and ok6 and ok7 and ok8 and ok9 and ok10 and ok11 of
+  # 12. clients that die holding a lease
+  st12 = spawn (store "abc" (Ok "1"));
+  known12 = mkPaths "/tmp/z" 65;
+  (ns12, mgr12) = mgrNs me st12 known12;
+  _ = spawnHolders ns12 (takeN known12 64) me;
+  held12 = collectN me 64 0;
+  _ = Sys.sleepUs 20000;
+  extra12 = EP.open me ns12 "/tmp/z65" "read";
+  ok12 = held12 == 64 and (case extra12 of Ok ep -> _ = EP.close me ep; True
+    | Err why -> _ = print "qsysfail: 65th open after 64 dead holders: {why}"; False);
+  # 13. concurrent open/close cycles on one file under one manager
+  st13 = spawn (store "abc" (Ok "1"));
+  (ns13, mgr13) = mgrNs me st13 ["/tmp/race"];
+  _ = spawnCyclers ns13 "/tmp/race" 4 50 me;
+  bad13 = collectN me 4 0;
+  owner13 = liveOwner me ns13 "/tmp/race";
+  ok13 = bad13 == 0 and owner13 > 0 and waitDead owner13 400;
+  _ = (if bad13 == 0 then Unit else print "qsysfail: 13. {bad13} of 200 cycled reads did not answer");
+  _ = print "qsysfail: 12={ok12} 13={ok13}";
+  case ok1 and ok2 and ok3 and ok4 and ok5 and ok6 and ok7 and ok8 and ok9 and ok10 and ok11 and ok12 and ok13 of
     True -> "qsysfail: HOLDS"
   | False -> "qsysfail: FAILED".

@@ -147,12 +147,45 @@ finish top req opt =
 parse : unsafe String -> Man .
 parse text = go text 0 (strlen text) 0 (Top "" "" "" "" "" "" "") Nil Nil.
 
-# a whole .qa archive -> Man, or QAR's reason it is not one
+# a whole .qa archive -> Man, or QAR's reason it is not one, or the
+# reason its id cannot name an app (validId)
 parseQa : unsafe String -> Result Man String .
 parseQa qa =
   case QAR.manifestOf qa of
     Err e -> Err e
-  | Ok text -> Ok (parse text).
+  | Ok text -> withValidId (parse text).
+withValidId : unsafe Man -> Result Man String .
+withValidId m = case validId (id m) of Ok _ -> Ok m | Err e -> Err e.
+
+# ---- the app id ---------------------------------------------------------------
+# The id names the app's store (qos-store/<id>.kv on portable,
+# apps/<id>/<id>.kv natively) and its grant (/services/storage/kv/<id>), so
+# it must be ONE safe path component: 1..64 bytes of A-Z a-z 0-9 _ - ., not
+# starting with '.' or '-', with no "..".  Every launcher parses with
+# parseQa, so a bad id is refused here, by name, before anything is placed;
+# qos/app_id.h is the same rule again in C (the portable host, the kernel).
+idMax = 64.
+idByte c = or2 (and2 (c >= 65) (c <= 90)) (or2 (and2 (c >= 97) (c <= 122))
+  (or2 (and2 (c >= 48) (c <= 57)) (or2 (c == 95) (or2 (c == 45) (c == 46))))).
+# the index of the first byte that may not be in an id (or starts ".."), or -1
+idBad : unsafe String -> Int -> Int .
+idBad s i =
+  case i >= strlen s of
+    True -> 0 - 1
+  | False -> case and2 (idByte (charAt s i)) (or2 (charAt s i != 46) (byteAt s (i + 1) != 46)) of
+      True -> idBad s (i + 1)
+    | False -> i.
+validId : unsafe String -> Result String String .
+validId s =
+  case strlen s == 0 of
+    True -> Err "manifest: the app id is missing"
+  | False -> case strlen s > idMax of
+      True -> Err "manifest: the app id is longer than 64 bytes"
+    | False -> case or2 (charAt s 0 == 46) (charAt s 0 == 45) of
+        True -> Err "manifest: app id \"{s}\" may not start with '.' or '-'"
+      | False -> case idBad s 0 >= 0 of
+          True -> Err "manifest: app id \"{s}\" may use only A-Z a-z 0-9 _ - . and no \"..\""
+        | False -> Ok s.
 
 name (Man a _ _ _ _ _ _ _ _) = a.
 id (Man _ a _ _ _ _ _ _ _) = a.

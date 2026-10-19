@@ -12,7 +12,9 @@ tools/main-profile.py --run starts it beside qosp.
 
     cd fp-risc && python3 tools/fprd.py [sock-path]
 
-  socket   argv[1], else $FPRD_SOCK, else /tmp/fprd.sock
+  socket   argv[1], else $FPRD_SOCK, else /tmp/fprd.sock -- made 0600;
+           a path that is not a socket, or is another user's, is
+           refused rather than replaced (qosp checks the server's uid)
   frame    4-byte LE length + payload, both directions
   request  "<profile>\n<source bytes>" -- profile is a WHITELISTED
            token (never argv passthrough): qos-portable | bare-metal
@@ -52,6 +54,7 @@ import os
 import platform
 import re
 import socket
+import stat
 import struct
 import subprocess
 import sys
@@ -75,6 +78,7 @@ WATCH_RE = re.compile(r"^watch:([a-z][a-z0-9_]{0,15}):([0-9a-f]{16}|-)$")
 WATCHES = {}
 WATCH_CACHE = {}
 MAX_REQ = 4 << 20  # a 4 MiB source bound: honest refusal, not an OOM
+CONN_TIMEOUT_S = float(os.environ.get("FPRD_CONN_TIMEOUT_S", "30"))  # per connection; the compile has its own
 
 
 def recv_exact(c, n):
@@ -289,7 +293,8 @@ def watch_version(name, known):
         reply = cached[1]
     if reply.startswith(b"ok\n"):
         header = reply[3:].split(b"\n", 1)[0]
-        if header.split(b"\t")[2].decode() == known:
+        fields = header.split(b"\t")
+        if len(fields) > 2 and fields[2].decode("utf-8", "replace") == known:
             return b"ok\nsame\n"
     return reply
 
@@ -332,15 +337,28 @@ def serve(path):
     if not os.path.exists(COMPILER):
         sys.exit("fprd: build the compiler at FPRISC_ROOT first")
     try:
-        os.unlink(path)
+        st = os.lstat(path)
     except FileNotFoundError:
-        pass
+        st = None
+    if st is not None:
+        # only ever replace our own stale socket: never a file, a link, or
+        # a socket someone else bound
+        if not stat.S_ISSOCK(st.st_mode) or st.st_uid != os.getuid():
+            sys.exit(f"fprd: {path} exists and is not this user's socket; refusing to replace it")
+        os.unlink(path)
     srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    srv.bind(path)
+    old = os.umask(0o177)  # the socket is created 0600: this user only
+    try:
+        srv.bind(path)
+    finally:
+        os.umask(old)
+    os.chmod(path, 0o600)
     srv.listen(4)
     print(f"fprd: serving fpr on {path} pid={os.getpid()}", flush=True)
     while True:
         c, _ = srv.accept()
+        # a client that stalls mid-frame must not wedge every compile
+        c.settimeout(CONN_TIMEOUT_S)
         try:
             (n,) = struct.unpack("<I", recv_exact(c, 4))
             if n > MAX_REQ:
@@ -356,6 +374,9 @@ def serve(path):
                     reply = b"err\ncompile timed out"
                 except (OSError, ValueError) as e:
                     reply = ("err\ncompiler service: " + str(e)).encode()
+                except Exception as e:  # never let one request end the service
+                    print(f"fprd: request failed: {e!r}", flush=True)
+                    reply = ("err\ncompiler service: internal error: " + type(e).__name__).encode()
             c.sendall(struct.pack("<I", len(reply)) + reply)
         except (ConnectionError, OSError) as e:
             print(f"fprd: connection dropped: {e}", flush=True)

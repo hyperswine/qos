@@ -57,6 +57,12 @@ static int hex_digit(char c) {
 }
 int main(int argc, char **argv) {
   if (argc < 2) return 2;
+  if (!strcmp(argv[1], "bind") && argc > 2) { /* an id below the manifest parser */
+    char out[256] = {0};
+    qosp_store_bind(argv[2]);
+    printf("%lld\n", (long long)qosp_store_call(2, "x", 1, out, sizeof out));
+    return 0;
+  }
   qosp_store_bind("probe");
   if (!strcmp(argv[1], "lock")) {
     char out[256];

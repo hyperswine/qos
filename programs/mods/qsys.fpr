@@ -221,15 +221,31 @@ stOn st me url pay tag =
 # body is re-read from storage on the next open -- so closed files free
 # the manager's 64-live-actor budget instead of holding it until reboot.
 
-fileActor st path me = fileServe st path me (rpc me st 3 path "") 1 Nil.
-fileServe : unsafe Int -> String -> Int -> Result String String -> Int -> List (Int, Int) -> a .
-fileServe st path me body next hs =
+fileActor st path me = fileActorOf 0 st path me.
+# a file actor its manager (filesMgr) spawned: it does not end on its own
+# when its last handle goes (see fileRetire), the manager retires it
+fileActorOf mgr st path me = fileServe mgr st path me (rpc me st 3 path "") 1 Nil.
+fileServe : unsafe Int -> Int -> String -> Int -> Result String String -> Int -> List (Int, Int) -> a .
+fileServe mgr st path me body next hs =
   borrowed = receive me;
   m = keep borrowed;
   _ = drop borrowed;
   case m of
-    (replyTo, id, q) -> fileMsg st path me body next (sweepDead hs) (replyTo, id) replyTo q
-  | stale -> fileServe st path me body next (sweepDead hs).
+    (replyTo, id, q) -> fileMsg mgr st path me body next (fileSwept mgr me hs) (replyTo, id) replyTo q
+  | stale -> fileServe mgr st path me body next (fileSwept mgr me hs).
+# the leases of clients that have ended go; when that empties the list, the
+# manager hears this actor is idle (so a client that died without Close
+# does not hold the file's slot for ever)
+fileSwept : unsafe Int -> Int -> List (Int, Int) -> List (Int, Int) .
+fileSwept mgr me hs = live = sweepDead hs;
+  _ = (case hs of Nil -> Unit | h :: rest -> (case live of Nil -> fileIdle mgr me | k :: more -> Unit));
+  live.
+fileIdle : unsafe Int -> Int -> Unit .
+fileIdle mgr me = if mgr > 0 then _ = spawn (fileIdleNote mgr me); Unit else Unit.
+# sent from an actor of its own: the manager may be waiting on a reply
+# from the file actor itself (filesRetireAsk), and a note from the same
+# sender would be read as that reply
+fileIdleNote mgr file me = case send mgr (file, 0, Close (0 - 1)) of Ok u -> Unit | Err e -> Unit.
 hOwner hs h = case hs of
     Nil -> 0
   | (k, c) :: rest -> if k == h then c else hOwner rest h.
@@ -240,69 +256,97 @@ sweepDead : unsafe List (Int, Int) -> List (Int, Int) .
 sweepDead hs = case hs of
     Nil -> Nil
   | (k, c) :: rest -> if Sys.alive c then (k, c) :: sweepDead rest else sweepDead rest.
-# no live handles left: end and free the budget slot; else keep serving
-fileRetire : unsafe Int -> String -> Int -> Result String String -> Int -> List (Int, Int) -> Unit .
-fileRetire st path me body next hs = case hs of
-    Nil -> Unit
-  | h :: rest -> fileServe st path me body next hs.
-fileClosed : unsafe Int -> String -> Int -> Result String String -> Int -> List (Int, Int) -> Unit .
-fileClosed st path me body next hs = case hs of
-    Nil -> Unit
-  | h :: rest -> fileServe st path me body next hs.
+# no live handles left.  A file actor of its own (mgr 0) ends here and
+# frees its slot.  One a manager spawned must NOT end on its own: the
+# manager may already have handed it the next Open, which would then never
+# be answered.  It tells the manager it is idle and keeps serving; the
+# manager, which forwards every Open, asks it to retire (fileRetireAsk)
+# while no Open can be in flight.
+fileRetire : unsafe Int -> Int -> String -> Int -> Result String String -> Int -> List (Int, Int) -> Unit .
+fileRetire mgr st path me body next hs = case hs of
+    Nil -> (if mgr > 0 then fileIdle mgr me >> fileServe mgr st path me body next hs else Unit)
+  | h :: rest -> fileServe mgr st path me body next hs.
+# the manager's request (Close with a negative handle, under Timed): retire
+# if no lease is held.  It ends only when the request is well inside its
+# deadline, so the manager is still waiting for the answer and has
+# forwarded nothing since; anything else answers "busy" (Ok 0).  A forged
+# request can at most retire an idle actor (clients are not authenticated:
+# see filesMgr).
+fileRetireAsk : unsafe Int -> Int -> String -> Int -> Result String String -> Int -> List (Int, Int) -> (Int, Int) -> Int -> Int -> Unit .
+fileRetireAsk mgr st path me body next hs ret sender until =
+  idle = case hs of Nil -> True | h :: rest -> False;
+  if mgr > 0 and sender == mgr and idle and AC.nowUs Unit + 1000000 < until
+  then AC.reply ret (Ok 1) >> Unit
+  else AC.reply ret (Ok 0) >> fileServe mgr st path me body next hs.
 # not loaded yet (storage was unreachable): try again on this request
 fileLoaded : unsafe Int -> String -> Int -> Result String String -> Result String String .
 fileLoaded st path me body = case body of
     Ok b -> body
   | Err e -> rpc me st 3 path "".
-fileMsg : unsafe Int -> String -> Int -> Result String String -> Int -> List (Int, Int) -> (Int, Int) -> Int -> EP.Ep -> a .
-fileMsg st path me body next hs ret sender q = case q of
-    EP.Timed until command -> fileTimed until st path me body next hs ret sender command
-  | Open url mode -> if strEq mode "replace" then fileTruncate st path me body next hs ret sender
-      else _ = AC.reply ret (Opened next); fileServe st path me body (next + 1) ((next, sender) :: hs)
-  | Read h n -> if hOwner hs h != sender then AC.reply ret (Err "no such handle") >> fileRetire st path me body next hs
-      else loaded = fileLoaded st path me body; AC.reply ret (fileText path loaded) >> fileServe st path me loaded next hs
-  | Write h v -> if hOwner hs h != sender then AC.reply ret (Err "no such handle") >> fileRetire st path me body next hs
-      else fileWr st path me (fileLoaded st path me body) next hs ret sender v
-  | Close h -> _ = AC.reply ret (Ok 0); fileClosed st path me body next (hDrop2 hs h sender).
+fileMsg : unsafe Int -> Int -> String -> Int -> Result String String -> Int -> List (Int, Int) -> (Int, Int) -> Int -> EP.Ep -> a .
+fileMsg mgr st path me body next hs ret sender q = case q of
+    EP.Timed until command -> fileTimed mgr until st path me body next hs ret sender command
+  | Open url mode -> if strEq mode "replace" then fileTruncate mgr st path me body next hs ret sender
+      else _ = AC.reply ret (Opened next); fileServe mgr st path me body (next + 1) ((next, sender) :: hs)
+  | Read h n -> if hOwner hs h != sender then AC.reply ret (Err "no such handle") >> fileRetire mgr st path me body next hs
+      else loaded = fileLoaded st path me body; AC.reply ret (fileText path loaded) >> fileServe mgr st path me loaded next hs
+  | Write h v -> if hOwner hs h != sender then AC.reply ret (Err "no such handle") >> fileRetire mgr st path me body next hs
+      else fileWr mgr st path me (fileLoaded st path me body) next hs ret sender v
+  | Close h -> if h < 0 then AC.reply ret (Ok 0) >> fileServe mgr st path me body next hs
+      else _ = AC.reply ret (Ok 0); fileRetire mgr st path me body next (hDrop2 hs h sender).
 # open "replace": the file is emptied now (its records tombstoned), and what
 # the handle writes is its whole text -- open(2)'s O_TRUNC
-fileTruncate : unsafe Int -> String -> Int -> Result String String -> Int -> List (Int, Int) -> (Int, Int) -> Int -> a .
-fileTruncate st path me body next hs ret sender = case rpc me st 4 path "" of
-    Ok u -> AC.reply ret (Opened next) >> fileServe st path me (Ok "") (next + 1) ((next, sender) :: hs)
-  | Err why -> AC.reply ret (Refused "replace {path}: {why}") >> fileServe st path me body next hs.
-fileTimed : unsafe Int -> Int -> String -> Int -> Result String String -> Int -> List (Int, Int) -> (Int, Int) -> Int -> EP.Ep -> a .
-fileTimed until st path me body next hs ret sender q =
-  if AC.nowUs Unit >= until then AC.reply ret (Err "endpoint: deadline exceeded before execution") >> fileServe st path me body next hs else
+fileTruncate : unsafe Int -> Int -> String -> Int -> Result String String -> Int -> List (Int, Int) -> (Int, Int) -> Int -> a .
+fileTruncate mgr st path me body next hs ret sender = case rpc me st 4 path "" of
+    Ok u -> AC.reply ret (Opened next) >> fileServe mgr st path me (Ok "") (next + 1) ((next, sender) :: hs)
+  | Err why -> AC.reply ret (Refused "replace {path}: {why}") >> fileServe mgr st path me body next hs.
+fileTimed : unsafe Int -> Int -> Int -> String -> Int -> Result String String -> Int -> List (Int, Int) -> (Int, Int) -> Int -> EP.Ep -> a .
+fileTimed mgr until st path me body next hs ret sender q =
+  if AC.nowUs Unit >= until then AC.reply ret (Err "endpoint: deadline exceeded before execution") >> fileServe mgr st path me body next hs else
   case q of
-      Read h n -> if hOwner hs h != sender then AC.reply ret (Err "no such handle") >> fileRetire st path me body next hs
-        else loaded = fileLoadedUntil until st path me body; AC.reply ret (fileText path loaded) >> fileServe st path me loaded next hs
-    | Write h (IStr text) -> if hOwner hs h != sender then AC.reply ret (Err "no such handle") >> fileRetire st path me body next hs
+      Read h n -> if hOwner hs h != sender then AC.reply ret (Err "no such handle") >> fileRetire mgr st path me body next hs
+        else loaded = fileLoadedUntil until st path me body; AC.reply ret (fileText path loaded) >> fileServe mgr st path me loaded next hs
+    | Write h (IStr text) -> if hOwner hs h != sender then AC.reply ret (Err "no such handle") >> fileRetire mgr st path me body next hs
         else loaded = fileLoadedUntil until st path me body; (case loaded of
-        Err why -> AC.reply ret (Err "write failed: {path} could not be read ({why})") >> fileServe st path me loaded next hs
-      | Ok bytes -> fileWr2 st path me bytes next hs ret text (FS.rpcUntil until me st 2 path text))
-    | Close h -> _ = AC.reply ret (Ok 0); fileClosed st path me body next (hDrop2 hs h sender)
-    | EP.Timed other command -> fileTimed (if other < until then other else until) st path me body next hs ret sender command
-    | command -> fileMsg st path me body next hs ret sender command.
+        Err why -> AC.reply ret (Err "write failed: {path} could not be read ({why})") >> fileServe mgr st path me loaded next hs
+      | Ok bytes -> fileWr2 mgr st path me bytes next hs ret text (FS.rpcUntil until me st 2 path text))
+    | Close h -> if h < 0 then fileRetireAsk mgr st path me body next hs ret sender until
+        else _ = AC.reply ret (Ok 0); fileRetire mgr st path me body next (hDrop2 hs h sender)
+    | EP.Timed other command -> fileTimed mgr (if other < until then other else until) st path me body next hs ret sender command
+    | command -> fileMsg mgr st path me body next hs ret sender command.
 fileLoadedUntil until st path me body = case body of Ok bytes -> body | Err why -> FS.rpcUntil until me st 3 path "".
 fileText : unsafe String -> Result String String -> Result EP.IoV String .
 fileText path body = case body of
     Ok b -> Ok (IStr b)          # an empty file reads as "", like any other text
   | Err e -> Err "read failed: {path} ({e})".
-fileWr : unsafe Int -> String -> Int -> Result String String -> Int -> List (Int, Int) -> (Int, Int) -> Int -> EP.IoV -> Unit .
-fileWr st path me body next hs ret sender v = case v of
-    IStr text -> fileWr1 st path me body next hs ret text
-  | o -> AC.reply ret (Err "write failed: {path} wants IStr") >> fileServe st path me body next hs.
-fileWr1 : unsafe Int -> String -> Int -> Result String String -> Int -> List (Int, Int) -> (Int, Int) -> String -> Unit .
-fileWr1 st path me body next hs ret text = case body of
-    Err e -> AC.reply ret (Err "write failed: {path} could not be read ({e})") >> fileServe st path me body next hs
-  | Ok b -> fileWr2 st path me b next hs ret text (rpc me st 2 path text).
-fileWr2 : unsafe Int -> String -> Int -> String -> Int -> List (Int, Int) -> (Int, Int) -> String -> Result String String -> Unit .
-fileWr2 st path me b next hs ret text r = case r of
-    Ok u -> AC.reply ret (Ok (IInt (strlen text))) >> fileServe st path me (Ok (strcat b text)) next hs
-  | Err e -> AC.reply ret (Err "write failed: {e}") >> fileServe st path me
+fileWr : unsafe Int -> Int -> String -> Int -> Result String String -> Int -> List (Int, Int) -> (Int, Int) -> Int -> EP.IoV -> Unit .
+fileWr mgr st path me body next hs ret sender v = case v of
+    IStr text -> fileWr1 mgr st path me body next hs ret text
+  | o -> AC.reply ret (Err "write failed: {path} wants IStr") >> fileServe mgr st path me body next hs.
+fileWr1 : unsafe Int -> Int -> String -> Int -> Result String String -> Int -> List (Int, Int) -> (Int, Int) -> String -> Unit .
+fileWr1 mgr st path me body next hs ret text = case body of
+    Err e -> AC.reply ret (Err "write failed: {path} could not be read ({e})") >> fileServe mgr st path me body next hs
+  | Ok b -> fileWr2 mgr st path me b next hs ret text (rpc me st 2 path text).
+fileWr2 : unsafe Int -> Int -> String -> Int -> String -> Int -> List (Int, Int) -> (Int, Int) -> String -> Result String String -> Unit .
+fileWr2 mgr st path me b next hs ret text r = case r of
+    Ok u -> AC.reply ret (Ok (IInt (strlen text))) >> fileServe mgr st path me (Ok (strcat b text)) next hs
+  | Err e -> AC.reply ret (Err "write failed: {e}") >> fileServe mgr st path me
       (if strIndexOf "outcome unknown" e >= 0 then Err "write outcome unknown: {e}" else Ok b) next hs.
 
 # the manager owns the file NAMESPACES (/tmp, /home) and every file in them.
+#
+# Leases and identity: a lease is (handle, client), where the client is
+# the replyTo the request names.  The actor IPC does not tell a receiver
+# who sent a message, so that name is the client's own claim: a client
+# that learns another's handle and actor id can use its lease.  Binding
+# leases to an authenticated sender needs the runtime to report the
+# sender of a receive (and the manager to vouch for it when it forwards
+# an Open) -- an IPC change, not one this module can make.
+#
+# File actors are retired by the manager, never on their own: one that
+# holds no lease says so (fileIdle) and the manager asks it to retire while
+# no Open can be in flight (filesRetireAsk).  At the 64-actor budget the
+# manager first retires every actor whose clients have all closed or ended.
 # A file's path is registered in the namespace with the MANAGER as its
 # owner, so an open comes here and the manager hands it to the file's
 # actor -- spawned on the first open: a known file costs one namespace
@@ -350,15 +394,43 @@ filesNote st me change = case rpc me st 2 filesIndex "{change}\n" of
 filesServe : unsafe Int -> Int -> Int -> List (String, Int) -> a .
 filesServe st ns me act =
   m = receive me;
-  (from, id, q) = m;
-  filesMsg st ns me act (from, id) from q.
+  case m of
+      (from, id, q) -> filesMsg st ns me act (from, id) from q
+    | stale -> filesServe st ns me act.   # e.g. a retire answer that came after its deadline
 filesMsg : unsafe Int -> Int -> Int -> List (String, Int) -> (Int, Int) -> Int -> EP.Ep -> a .
 filesMsg st ns me act ret from q = case q of
     EP.Timed until command -> if AC.nowUs Unit >= until then AC.reply ret (Err "endpoint: deadline exceeded before execution") >> filesServe st ns me act else filesMsg st ns me act ret from command
   | Open url mode -> filesOpen st ns me act ret from url mode
   | Read h n -> AC.reply ret (Err "a file namespace: open a path under it") >> filesServe st ns me act
   | Write h v -> AC.reply ret (Err "a file namespace: open a path under it") >> filesServe st ns me act
-  | Close h -> AC.reply ret (Ok 0) >> filesServe st ns me act.
+  | Close h -> if h < 0 then filesIdle st ns me act from else AC.reply ret (Ok 0) >> filesServe st ns me act.
+# a file actor says it holds no lease (fileIdle).  Only a hint: the
+# manager asks the actor itself, and retires it only on its own yes.
+filesIdle : unsafe Int -> Int -> Int -> List (String, Int) -> Int -> a .
+filesIdle st ns me act a = case filesUrlOf act a of
+    Nil -> filesServe st ns me act
+  | url :: none -> filesServe st ns me (if filesRetireAsk me a then filesSet act url 0 else act).
+filesUrlOf : unsafe List (String, Int) -> Int -> List String .
+filesUrlOf act a = case act of
+    Nil -> Nil
+  | (p, b) :: rest -> if b == a and a > 0 then [p] else filesUrlOf rest a.
+# ask one file actor to retire; the manager waits for the answer, so no
+# Open is forwarded to it meanwhile, and one forwarded before is already
+# ahead of this request in its mailbox (it then holds a lease and says
+# no).  True: it has ended (or had already).  A late or missing answer is
+# "no": the actor is kept, and asked again when it is next idle.
+filesRetireAsk : unsafe Int -> Int -> Bool .
+filesRetireAsk me a = if not (Sys.alive a) then True else
+  until = AC.nowUs Unit + 2000000;
+  case AC.callUntil until me a (EP.Timed until (Close (0 - 1))) of
+      Ok answer -> (case answer of Ok n -> n == 1 | Err why -> False)
+    | Err why -> not (Sys.alive a).
+# at the budget: every live file actor whose clients have all ended or
+# closed is retired, then the open is admitted if a slot came free
+filesReclaim : unsafe Int -> List (String, Int) -> List (String, Int) .
+filesReclaim me act = case act of
+    Nil -> Nil
+  | (p, a) :: rest -> (if a > 0 and filesRetireAsk me a then (p, 0) else (p, a)) :: filesReclaim me rest.
 # the entry for a path: -1 unknown, 0 known with no actor, else its actor
 filesEntry : unsafe List (String, Int) -> String -> Int .
 filesEntry act url = case act of
@@ -424,10 +496,11 @@ filesTransient url = strlen url > 6 and strEq (substr url (strlen url - 6) 6) ".
 # caches its file's text; known files cost only their namespace entry)
 filesSpawn : unsafe Int -> Int -> Int -> List (String, Int) -> (Int, Int) -> Int -> String -> String -> a .
 filesSpawn st ns me act ret from url mode =
-  if filesLive act >= 64 then AC.reply ret (Refused "file actor budget exhausted (64 live files)") >> filesServe st ns me act else
+  act2 = if filesLive act >= 64 then filesReclaim me act else act;
+  if filesLive act2 >= 64 then AC.reply ret (Refused "file actor budget exhausted (64 live files)") >> filesServe st ns me act2 else
   p2 = strcat url "";      # OWN COPY: curried into the actor + the set
-  a = Wire.spawn 8 Wire.inboxBytes (fileActor st p2);
-  filesHand st ns me (filesSet act p2 a) ret from url mode a.
+  a = Wire.spawn 8 Wire.inboxBytes (fileActorOf me st p2);
+  filesHand st ns me (filesSet act2 p2 a) ret from url mode a.
 filesLive Nil = 0.
 filesLive ((p, a) :: rest) = (if a > 0 and Sys.alive a then 1 else 0) + filesLive rest.
 # forward the client's own envelope to the file and point the client at it

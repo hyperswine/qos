@@ -1,4 +1,11 @@
-/* main.c (portable) -- qosp: the QOS Portable host for linux-x86-64.
+/* host.c (portable) -- qosp's C half: the QOS Portable host (Linux and
+ * macOS; x86-64, arm64, riscv64).  The launch policy -- reading the .qa,
+ * the manifest and the permission gate -- is FP-RISC now
+ * (portable/qosp.fpr, mods/qar, mods/manifest, mods/qaimg); this file
+ * places the QAR2 flat image, publishes its code and runs it.  The
+ * stage outline below predates that split: where it says "parse the
+ * manifest, run the permission gate" and "elfload", read qosp.fpr and
+ * "place the QAR2 image" (Host.loadImage).
  *
  *     qosp [--yes] [--trace] <app.qa>
  *
@@ -29,6 +36,7 @@
  *     Memory.qa analogue, the syscall trampoline the System.qa one.
  */
 #include "qos_abi.h"
+#include "../app_id.h" /* the id is a path component */
 #include "park.h"
 #include "snd_raw.h"
 
@@ -201,7 +209,7 @@ int qosp_ready(void) {
 /* ---- publishing a plugin's code (syscall tag 4, qos_abi.h) ------------
  * The APP places a plugin: it takes a block from its own buddy, copies the
  * image in, moves its address words and completes its imports by name from
- * its own export table (qos/appside/plugimg.c,
+ * its own export table (qos/appside/entry.c h_sys_attach_image,
  * docs/2026-10-01-IMPORT-TABLE.md).  What only the host can do is make the
  * code executable: the arena is one rw mapping, and a page is never
  * writable and executable at once.  So the host checks what it is asked to
@@ -266,8 +274,20 @@ int64_t qosp_load_plugin(const qos_plugin_t *pl, char *err, uint64_t errcap) {
     snprintf(err, errcap, "plugin %.*s: placed off a page boundary", idn, id);
     return -1;
   }
+  /* the r-x span is the code's pages: the code lies inside the image bytes
+   * the app copied (native check_image: execsz <= IMAGE <= memsz), and its
+   * last page ends inside the image -- past it is the app's heap (the block
+   * is not page-padded), which must not turn read-only under its owner */
+  if (pl->execsz == 0 || pl->execsz > pl->img.n || pl->img.n > pl->memsz) {
+    snprintf(err, errcap, "plugin %.*s: LOAD spans inconsistent (code outside its image)", idn, id);
+    return -1;
+  }
   uintptr_t xend = (lo + pl->execsz + pg - 1) & ~(pg - 1);
-  if (pl->execsz == 0 || pl->entry >= pl->memsz || (pl->rwoff < pl->memsz && lo + pl->rwoff < xend)) {
+  if (xend < lo || xend > hi || xend > ahi) {
+    snprintf(err, errcap, "plugin %.*s: its code pages run past the image", idn, id);
+    return -1;
+  }
+  if (pl->entry >= pl->memsz || (pl->rwoff < pl->memsz && lo + pl->rwoff < xend)) {
     snprintf(err, errcap, "plugin %.*s: its code and writable data share a page", idn, id);
     return -1;
   }
@@ -549,9 +569,17 @@ static V h_load_image(V pathv, V shav, V imgv, V numsv, V relv) {
    * runs on EVERY host: a plain rw mapping is not executable on Linux
    * either.  The icache clear is needed on any arm64 host. */
   uintptr_t pg = (uintptr_t)getpagesize();
+  /* the same spans the native loader checks (loader/process.c check_image):
+   * code inside the image bytes, the entry inside the code -- and the r-x
+   * pages end inside the image and the arena, so no heap page past the
+   * image (nor anything past the arena) changes protection */
+  if (n[2] == 0 || n[2] > img->len || n[1] >= n[2])
+    return res_err("image LOAD spans inconsistent (code outside the image, or entry outside the code)");
   uintptr_t xend = ((uintptr_t)ld.exec_end + pg - 1) & ~(pg - 1);
   if (xend <= dst || ld.exec_end == 0)
     return res_err("image has no executable segment");
+  if (xend > (uintptr_t)ld.image_end || xend > g_arena_base + g_arena_size)
+    return res_err("the image's code pages run past the image -- relink with page-separated segments");
   if ((uintptr_t)ld.rw_start < xend)
     return res_err("executable pages would capture writable image data -- relink "
                    "with page-separated segments");
@@ -588,6 +616,10 @@ static V h_run(V idv, V namev, V capsv) {
   const str_t *name = arg_str(namev, "Host.run: name must be a String");
   const str_t *capss = arg_str(capsv, "Host.run: caps must be a String");
   if (!g_ld.ok) return res_err("Host.run before Host.loadImage");
+  /* the id names qos-store/<id>.kv: one safe path component (qos/app_id.h;
+   * the manifest parser refuses a bad one first, this is the same rule) */
+  const char *badid = qos_app_id_invalid(id->bytes, id->len);
+  if (badid) return res_err(badid);
   /* the app reads these for as long as it runs: out of this runtime's heap */
   char *cid = malloc(id->len + 1), *caps = malloc(capss->len + 1);
   if (!cid || !caps) return res_err("out of memory");
