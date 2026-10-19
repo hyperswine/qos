@@ -1,0 +1,14 @@
+# plugbounds.fpr -- attach the plugin its kv store holds (tools/loader-bounds-check.py
+# seeds qos-store/plugbounds.kv with one record: a plugin .qa) and call it.
+# A plugin whose LOAD would put r-x pages past its image is refused by the
+# host (qos/portable/host.c qosp_load_plugin); a good one answers 40+2=42.
+Plug = use "../programs/mods/plug".
+main = case Sys.storeReq 3 "" of
+    Err e -> "plugbounds: no plugin in the store ({e})"
+  | Ok qa -> attached (Mod.plugs 0) (Plug.attach qa).
+attached n0 r = case r of
+    Err e -> "plugbounds: refused: {e}"
+  | Ok _ -> (f, add) = Mod.findAt n0 "plugAdd";
+      case f == 1 of
+        False -> "plugbounds: attached but plugAdd not exported"
+      | True -> "plugbounds: attached; 40+2={add 40 2}".

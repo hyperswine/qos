@@ -35,6 +35,7 @@ void fpr_proc_arena_init(void) {
  * rewrites to apps/<id>/<id>.kv from the id System.qa bound at launch.
  * Tags: 2 append, 3 replay (the kv event-sourcing pair). */
 static V g_store_actor;   /* Sys.bindStore, at boot (0 = diskless) */
+#include "../qos/app_id.h" /* what an id may be: placement refuses the rest */
 static str_t *g_app_id;   /* Sys.bindApp, per launch */
 static V g_ns;            /* Sys.bindNs, at boot: the namespace a process reaches with Sys.ns */
 
@@ -149,19 +150,25 @@ sw qos_store_call(uw tag, const char *pay, uw plen, char *out, uw outcap) {
   /* apps/<id>/<id>.kv, where <id> is the CALLING process's own app id */
   fpr_lock(&g_img_lock);
   proc_image_t *pi = image_of_pid(fpr_current_pid());
-  char url[128];
+  /* placement refused any id over QOS_APP_ID_MAX, so the url always fits
+   * whole: it used to be cut at 100/120 bytes, and two long ids sharing a
+   * prefix shared a store */
+  char url[5 + QOS_APP_ID_MAX + 1 + QOS_APP_ID_MAX + 3 + 1];
   uw n = 0;
-  if (pi) {
+  int toolong = 0;
+  if (pi && pi->idlen > QOS_APP_ID_MAX) toolong = 1;
+  else if (pi) {
     const char *pre = "apps/";
     for (const char *q = pre; *q; q++) url[n++] = *q;
-    for (uw i = 0; i < pi->idlen && n < 100; i++) url[n++] = pi->id[i];
+    for (uw i = 0; i < pi->idlen; i++) url[n++] = pi->id[i];
     url[n++] = '/';
-    for (uw i = 0; i < pi->idlen && n < 120; i++) url[n++] = pi->id[i];
+    for (uw i = 0; i < pi->idlen; i++) url[n++] = pi->id[i];
     const char *suf = ".kv";
     for (const char *q = suf; *q; q++) url[n++] = *q;
   }
   fpr_unlock(&g_img_lock);
   if (!pi) return -2; /* not a loaded process: no app bound */
+  if (toolong) return store_refused("storage: app id longer than 64 bytes", out, outcap);
 
   V urlv = (V)fpr_mkstr((const uint8_t *)url, n);
   V payv = (V)fpr_mkstr((const uint8_t *)pay, plen);
@@ -349,8 +356,12 @@ static V g_sys_place_image_at(V qastr, V extv, V numsv, V capsv, V pidv, V diges
   uw ioff = ext[0], ilen = ext[1], roff = ext[2], rlen = ext[3];
   uw memsz = nums[4];
   uw idlen = g_app_id ? g_app_id->len : 0;
-  if (idlen > ~(uw)0 - sizeof(proc_image_t) - 15)
-    return refuse("native image identifier size out of range");
+  /* the id becomes apps/<id>/<id>.kv: one safe path component, never
+   * truncated (qos/app_id.h).  An unbound id (0) stays a storeless process. */
+  if (idlen) {
+    const char *bad = qos_app_id_invalid(g_app_id->bytes, idlen);
+    if (bad) return refuse(bad);
+  }
   uw head = (sizeof(proc_image_t) + idlen + 15) & ~(uw)15;
   if (head > ~(uw)0 - 4096 || memsz > ~(uw)0 - head - 4096)
     return refuse("native image memory size out of range");
@@ -435,12 +446,9 @@ static V g_sys_place_image_at(V qastr, V extv, V numsv, V capsv, V pidv, V diges
 
 FPR_FN(fpr_g_Sys_x2eplaceImageAt, g_sys_place_image_at, 6);
 
-/* Sys.init : Unit -> Unit -- must be called once, before the first
- * Sys.loadElf, by whichever image owns the process arena (System.qa's
- * boot path). Not folded into fpr_rt_init: plenty of images link
- * runtime.c without ever linking buddy.c/process.c (every demo that
- * isn't System.qa), so this stays an opt-in call, not a hook everyone
- * pays for. */
+/* Sys.init : Unit -> Unit -- a no-op kept in the boot protocol (see
+ * fpr_proc_arena_init above): the buddy is initialised for every image
+ * by fpr_rt_init, so there is nothing left to set up here. */
 static V g_sys_init(V d) { (void)d; fpr_proc_arena_init(); return (V)&fpr_unit; }
 FPR_FN(fpr_g_Sys_x2einit, g_sys_init, 1);
 
