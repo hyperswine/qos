@@ -37,23 +37,29 @@ FPR_FN(fpr_g_Sys_x2ecaps, h_sys_caps, 1);
 /* the storage syscall (System.qa's trampoline): tag 2 = kv append,
  * tag 3 = kv replay.  The FPRISC surface is Sys.storeReq. */
 static sw (*g_syscall)(uw, const char *, uw, char *, uw);
-static char g_sysout[256 * 1024];
+/* No shared reply buffer: a static 256 KiB one used to be every call's,
+ * and the kernel trampoline does not serialize a process's calls, so two
+ * of its actors on different harts could read each other's reply.  Each
+ * call now brings its own (from its own heap) and grows past it. */
+#define QOS_STORE_SCRATCH (64u * 1024)
 static V h_sys_store_req(V tagv, V payv) {
   if (!ISINT(tagv)) fpr_cpanic("Sys.storeReq: tag must be an Int");
   if (ISINT(payv) || ((hdr_t *)payv)->tid != T_STR) fpr_cpanic("Sys.storeReq: payload must be a String");
   if (!g_syscall) return fpr_mkresult(1, "no syscall channel (standalone run)");
   str_t *s = (str_t *)payv;
-  /* a reply larger than g_sysout comes back as -6 + its size and lands in
+  /* a reply larger than the scratch comes back as -6 + its size and lands in
    * a String that large (store_abi.h); it used to be truncated silently */
   str_t *big;
+  char *out = (char *)fpr_alloc((V)QOS_STORE_SCRATCH); /* this call's own */
   sw r = qos_store_call_grow(g_syscall, (uw)UNTAG(tagv), (const char *)s->bytes, s->len,
-                             g_sysout, sizeof g_sysout, &big);
-  if (r >= 0) return big ? qos_store_ok_str(big) : fpr_mkresultn(0, g_sysout, (uw)r);
-  const char *why = big ? (const char *)big->bytes : g_sysout;
-  V res = r == -2 ? fpr_mkresult(1, "no disk")
+                             out, QOS_STORE_SCRATCH, &big);
+  const char *why = big ? (const char *)big->bytes : out;
+  V res = r >= 0 ? (big ? qos_store_ok_str(big) : fpr_mkresultn(0, out, (uw)r))
+        : r == -2 ? fpr_mkresult(1, "no disk")
         : r == -3 ? fpr_mkresult(1, "storage: unknown request tag")
         : fpr_mkresult(1, why[0] ? why : "storage error"); /* the reason, as the kernel wrote it */
-  if (big) fpr_free((V)big);
+  if (big && r < 0) fpr_free((V)big);
+  fpr_free((V)out);
   return res;
 }
 FPR_FN(fpr_g_Sys_x2estoreReq, h_sys_store_req, 2);

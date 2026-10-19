@@ -1,0 +1,39 @@
+unsafe program.
+# Many actors of ONE app calling its kv store at once, on several harts:
+# most replay the store (tag 3), two send a write too large to accept
+# (tag 2, 4 MiB + 1: refused with a reason, nothing stored).  Each reply
+# must be its own request's: with the old shared 256 KiB reply buffer one
+# actor could read another's (qos/appside/entry.c, qos/native/proc_entry.c;
+# tools/store-race-check.py runs it on Portable and Native).
+# Messages carry only Ints: each worker builds its own request and its own
+# expectation, and main checks the expectations once more on its own.
+answer tag pay = case Sys.storeReq tag pay of Ok b -> b | Err e -> e.
+rep s n = if n == 0 then s else rep (strcat s s) (n - 1).
+record u = rep "abcdefghij" 11.
+tooBig u = strcat (rep "x" 22) "!".
+refusal big = case Sys.storeReq 2 big of Ok _ -> error "a 4 MiB + 1 write was accepted" | Err e -> e.
+countBad tag pay expect n bad = if n == 0 then bad else
+  countBad tag pay expect (n - 1) (if answer tag pay == expect then bad else bad + 1).
+work replyTo tag n = case tag == 3 of
+    True -> send replyTo (countBad 3 "" (record 0) n 0)
+  | False -> big = tooBig 0; send replyTo (countBad 2 big (refusal big) n 0).
+worker me =
+  m = receive me;
+  case m of (replyTo, tag, n) -> work replyTo tag n.
+spawnAll me k rounds = if k == 0 then Unit else
+  w = spawn worker;
+  _ = send w (me, (if k <= 2 then 2 else 3), rounds); # two refused writers: each holds 4 MiB
+  spawnAll me (k - 1) rounds.
+collect me k acc = if k == 0 then acc else collect me (k - 1) (acc + receive me).
+race workers rounds =
+  me = myself 0;
+  rec = record 0;
+  _ = case Sys.storeReq 3 "" of
+      Ok b -> (if strlen b == 0 then (case Sys.storeReq 2 rec of Ok _ -> Unit | Err e -> error e) else Unit)
+    | Err e -> error e;
+  _ = case Sys.storeReq 3 "" of Ok b -> (if b == rec then Unit else error "the store holds {strlen b} B, not the one record") | Err e -> error e;
+  why = refusal (tooBig 0);
+  _ = spawnAll me workers rounds;
+  bad = collect me workers 0;
+  "storerace: mismatches={bad} of {workers * rounds} replies (replay {strlen rec} B, refusal [{why}])".
+main = race 16 100.

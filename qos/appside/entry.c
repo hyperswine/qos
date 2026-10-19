@@ -107,7 +107,13 @@ int fpr_hal_sleep_us(uintptr_t us) {
   g_syscall(6, buf, (uint64_t)n, 0, 0);
   return 1;
 }
-static char g_sysout[256 * 1024];
+/* No shared reply buffer: one used to be a static 256 KiB buffer, written
+ * by the host after it released store_mu and read back by the caller, so
+ * two actors of one app on different harts could read each other's reply
+ * (tools/store-race-check.py reproduced it: mismatched replies under load).
+ * Each call now brings its own buffer (QOS_STORE_SCRATCH, from its own heap)
+ * and grows past it (qos/store_abi.h -6). */
+#define QOS_STORE_SCRATCH (64u * 1024)
 
 /* ---- plugins: relocatable images completed by name ---------------------
  * (docs/2026-10-01-IMPORT-TABLE.md)  A plugin is linked at 0.  The app
@@ -292,7 +298,9 @@ static V h_sys_attach_image(V idv, V abiv, V shav, V relshav, V numsv, V secsv) 
   fpr_qaimg_t q = {(uw)base, n[1], n[2], n[3], memsz};
   fpr_elf_load_t ld = fpr_qaimg_place(&q, img.p, img.n, base, memsz);
   const char *bad = ld.ok ? fpr_qaimg_relocate(base, img.n, rel.p, rel.n) : ld.err;
-  if (!bad) bad = complete_imports(base, memsz, imp, g_sysout, sizeof g_sysout);
+  char why[512]; /* this call's own: no shared buffer (see QOS_STORE_SCRATCH) */
+  why[0] = 0;
+  if (!bad) bad = complete_imports(base, memsz, imp, why, sizeof why);
   if (bad) {
     buddy_free(blk);
     return fpr_mkresult(1, bad);
@@ -304,11 +312,11 @@ static V h_sys_attach_image(V idv, V abiv, V shav, V relshav, V numsv, V secsv) 
       img, (uint64_t)(uintptr_t)base, n[1], n[2], n[3], memsz,
       span_of(relshav, "Sys.attachImage: relsha must be a String"), rel, imp,
   };
-  g_sysout[0] = 0;
-  int64_t r = g_syscall(QOS_SYS_LOADQA, (const char *)&pl, sizeof pl, g_sysout, sizeof g_sysout);
+  why[0] = 0;
+  int64_t r = g_syscall(QOS_SYS_LOADQA, (const char *)&pl, sizeof pl, why, sizeof why);
   if (r <= 0) {
     buddy_free(blk); /* refused before any page changed protection */
-    return fpr_mkresult(1, g_sysout[0] ? g_sysout : "plugin load failed");
+    return fpr_mkresult(1, why[0] ? why : "plugin load failed");
   }
   /* the block's cells are statics now, owned by no process until a launch
    * adopts the image (pid 0) */
@@ -382,19 +390,21 @@ static V h_sys_store_req(V tagv, V payv) {
     fpr_cpanic("Sys.storeReq: payload must be a String");
   if (!g_syscall) return fpr_mkresult(1, "no syscall channel (standalone run)");
   str_t *s = (str_t *)payv;
-  /* a reply larger than g_sysout comes back as -6 + its size, and lands
+  /* a reply larger than the scratch comes back as -6 + its size, and lands
    * in a String that large (store_abi.h): a big replay is data, not an
    * "output capacity exceeded" error */
   str_t *big;
+  char *out = (char *)fpr_alloc((V)QOS_STORE_SCRATCH); /* this call's own */
   sw r = qos_store_call_grow((sw (*)(uw, const char *, uw, char *, uw))g_syscall,
                              (uw)UNTAG(tagv), (const char *)s->bytes, s->len,
-                             g_sysout, sizeof g_sysout, &big);
-  if (r >= 0) return big ? qos_store_ok_str(big) : fpr_mkresultn(0, g_sysout, (uw)r);
-  const char *why = big ? (const char *)big->bytes : g_sysout;
-  V res = r == -2 ? fpr_mkresult(1, "no disk")
+                             out, QOS_STORE_SCRATCH, &big);
+  const char *why = big ? (const char *)big->bytes : out;
+  V res = r >= 0 ? (big ? qos_store_ok_str(big) : fpr_mkresultn(0, out, (uw)r))
+        : r == -2 ? fpr_mkresult(1, "no disk")
         : r == -5 ? fpr_mkresult(1, "storage outcome unknown")
         : fpr_mkresult(1, why[0] ? why : "storage error"); /* the host's reason, as on native */
-  if (big) fpr_free((V)big);
+  if (big && r < 0) fpr_free((V)big);
+  fpr_free((V)out);
   return res;
 }
 FPR_FN(fpr_g_Sys_x2estoreReq, h_sys_store_req, 2);
