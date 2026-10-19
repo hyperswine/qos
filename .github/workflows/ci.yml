@@ -169,7 +169,8 @@ jobs:
           apt-get update
           apt-get install -y --no-install-recommends git ca-certificates python3 zstd \
             make gcc libc6-dev pkg-config libgit2-1.9 libarchive13t64 libegl1 libgl1 \
-            libgmp10 libffi8 libnuma1 libegl-dev libgl-dev curl
+            libgmp10 libffi8 libnuma1 libegl-dev libgl-dev curl \
+            gcc-riscv64-unknown-elf picolibc-riscv64-unknown-elf qemu-system-misc
       - uses: actions/checkout@v4
       - uses: actions/cache/restore@v4
         with:
@@ -184,6 +185,7 @@ jobs:
           make -C qos portable
           ./qos.py test hello epecho filessvc gfxshare guishell mvutick tuiframes \
             qdisk2 dtree bigfree eq dungeon web
+      # several of these also boot the same scenario on QOS Native (virt)
       - name: services, storage and shutdown legs
         run: |
           set -e
