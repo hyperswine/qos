@@ -1351,7 +1351,7 @@ INSTALL_TREE = [
     "qos.py", "dependency.mk", "release.toml", "README.md", "docs", "fprisc.lock.json",
     "Makefile", "qos-app.mk", "std", "programs", "tools", "models", "targets",
     "apps", "profiles", "tests", ".fpr", "fpr.lock", "hal", "loader", "core",
-    "qos/Makefile", "qos/native", "qos/appside", "qos/portable", "qos/tests-host", "qos/qosp", "qos/qosp-gl",
+    "qos/Makefile", "qos/store_abi.h", "qos/native", "qos/appside", "qos/portable", "qos/tests-host", "qos/qosp", "qos/qosp-gl",
 ]
 INSTALL_SKIP = shutil.ignore_patterns("*.o", "*.hi", "*.qa", "*.disk", "*.img", "build", "dist-newstyle",
                                       "qos-store", "__pycache__", ".DS_Store", "*.s", "*.units", "*.elf")
