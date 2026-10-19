@@ -88,6 +88,10 @@ QOS = ROOT / "qos"
 # marker: its fpr / qosp are shipped, never rebuilt, and nothing below
 # ROOT is written -- every artifact goes to the workspace
 INSTALLED = (ROOT / ".installed").is_file()
+if INSTALLED:
+    # tools/mkimports.py and mkexports.py import mkqa; without this the
+    # first build would leave tools/__pycache__/ inside the installed tree
+    os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 
 
 # ---- the fprisc checkout ------------------------------------------------------
