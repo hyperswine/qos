@@ -19,6 +19,9 @@
 unsafe module.
 AW = use "appwire".
 AS = use "appsession".
+Prefs = use "terminalpreferences".
+History = use "preferencehistory".
+PC = use "preferencecontrol".
 AV = use "appview".
 L = use "shelllayout".
 ST = use "scrolltext".
@@ -26,10 +29,8 @@ AK = use "appkit".
 AC = use "std/actor#201a0e9bf98a5154".
 
 promptRows = 1.
-maxInput = 240.
-maxOut = 400.
 
-init = ({input = "", out = ["qsh -- a small shell over the namespace; `help` lists the words", ""], hist = Nil, histAt = 0 - 1, draft = "",
+init = ({preferences = Prefs.defaults, preferenceRevision = 0, preferenceAdapter = 0, input = "", out = ["qsh -- a small shell over the namespace; `help` lists the words", ""], hist = Nil, histAt = 0 - 1, draft = "",
          cwd = "/home", vars = Nil, queue = Nil, stages = Nil, acc = Nil, target = "", running = False,
          token = 1, busy = False, phase = AW.Ready, w = 960, h = 530, full = 530, focused = True, down = False, capture = 0 - 1,
          wheel = 0, scroll = 0, dragY = 0, dragScroll = 0, dragged = False, follow = True}, Nil).
@@ -52,7 +53,7 @@ update (AW.Key 107) m = (bottom {m | follow = True}, Nil).
 update (AW.Key 4038) m = ({m | out = Nil, scroll = 0}, Nil).          # ctrl-L
 update (AW.Key 4022) m = ({m | input = ""}, Nil).                      # ctrl-U
 update (AW.Key k) m = c = AK.keyChar k;
-  if strlen c == 0 or strlen m.input >= maxInput then (m, Nil) else ({m | input = strcat m.input c}, Nil).
+  if strlen c == 0 or strlen c > Prefs.inputBytes m.preferences - strlen m.input then (m, Nil) else ({m | input = strcat m.input c}, Nil).
 update (AW.Arrived token result) m = if token != m.token or not m.busy then (m, Nil) else
   arrived result {m | busy = False}.
 update other m = (m, Nil).
@@ -76,7 +77,7 @@ submit line m | strlen (trim line) == 0 = (m, Nil).
 submit line m | m.running = (say ["(busy: a command is still running)"] m, Nil).
 submit line m =
   cmds = split ";" line;
-  next = say ["$ {line}"] {m | hist = take 50 (line :: m.hist), queue = cmds};
+  next = say ["$ {line}"] {m | hist = take (Prefs.historyEntries m.preferences) (line :: m.hist), queue = cmds};
   startNext next.
 startNext m = case m.queue of
     Nil -> ({m | running = False}, Nil)
@@ -215,7 +216,7 @@ startsWith p u = strlen p <= strlen u and substr u 0 (strlen p) == p.
 
 # ---- the model's output and the view --------------------------------------------
 say lines m = kept = append m.out lines; n = count kept;
-  trimmed = if n > maxOut then drop (n - maxOut) kept else kept;
+  trimmed = if n > Prefs.outputLines m.preferences then drop (n - Prefs.outputLines m.preferences) kept else kept;
   m2 = {m | out = trimmed};
   if m.follow then bottom m2 else m2.
 view vp m =
@@ -277,12 +278,15 @@ run me = case AS.start me of
   | Ok ctx ->
       (initial, commands) = init;
       (model, ignored) = update (AW.Resize ctx.w ctx.h) initial;
-      _ = AS.issue me ctx commands;
-      _ = Sys.loop (ctx, model) (step me); Unit.
+      case PC.start me ctx.ns (PC.url "terminal" ctx.session) Prefs.schema of
+        Err why -> _ = AS.abandon me ctx; _ = Sys.logAt 2 why; Unit
+      | Ok adapter ->
+          _ = AS.issue me ctx commands;
+          _ = Sys.loop (ctx, {model | preferenceAdapter = adapter}) (step me); Unit.
 step me state =
   (ctx, model) = state;
   case AS.next me ctx of
-    AS.Idle -> _ = Sys.sleepUs 1000; (True, state)
+    AS.Idle -> preferencesStep me ctx model
   | AS.Gone -> _ = AS.abandon me ctx; (False, state)
   | AS.JobResult token result ->
       (fresh, commands) = update (AW.Arrived token result) model;
@@ -300,3 +304,32 @@ step me state =
           (tree, vals) = view (next.w, next.h) fresh;
           _ = AC.reply ret (AW.Frame next.session next.revision tree vals (AW.status fresh.phase));
           (True, (next, fresh)).
+
+preferenceText m = "{Prefs.encode m.preferenceRevision m.preferences}\ninputUsed={strlen m.input} draftUsed={strlen m.draft} outputUsed={count m.out} historyUsed={count m.hist} historyMaxBytes={longest m.hist}\n".
+longest Nil = 0.
+longest (line :: rest) = n = longest rest; if strlen line > n then strlen line else n.
+applyPreferences p m = case Prefs.validate p of Err why -> Err why
+  | Ok valid ->
+      retained = take (Prefs.historyEntries p) m.hist;
+      if not (History.fits (Prefs.retention p) (Prefs.historyEntries p) (count m.hist) and History.fits (Prefs.retention p) (Prefs.outputLines p) (count m.out)) then Err "history=preserve refuses a limit below retained history"
+      else if strlen m.input > Prefs.inputBytes p or strlen m.draft > Prefs.inputBytes p or longest retained > Prefs.inputBytes p then Err "inputBytes is below current input, draft or retained command history"
+      else output = if count m.out > Prefs.outputLines p then drop (count m.out - Prefs.outputLines p) m.out else m.out;
+        fresh = {m | preferences = valid, hist = retained, histAt = (if m.histAt < count retained then m.histAt else 0 - 1), out = output};
+        Ok (AV.seek (rows fresh) fresh.scroll fresh).
+configurePreferences until client text m = case Prefs.parse text of Err why -> Err why
+  | Ok (Prefs.Snapshot expected p) -> case PC.check until client expected m.preferenceRevision of Err why -> Err why
+    | Ok u -> case applyPreferences p m of Err why -> Err why
+      | Ok fresh -> if AC.nowUs Unit >= until then Err "preference update expired" else Ok {fresh | preferenceRevision = expected + 1}.
+preferencesStep me ctx m = if m.preferenceAdapter == 0 then _ = Sys.sleepUs 1000; (True, (ctx, m)) else
+  case receiveFromNow me m.preferenceAdapter of
+    Err why -> _ = Sys.sleepUs 1000; (True, (ctx, m))
+  | Ok borrowed ->
+      (from, id, request) = PC.owned borrowed;
+      case request of
+        PC.Inspect until ->
+          _ = AC.reply (from, id) (if AC.nowUs Unit >= until then Err "preference read expired" else Ok (preferenceText m));
+          (True, (ctx, m))
+      | PC.Change until client text -> case configurePreferences until client text m of
+          Err why -> _ = AC.reply (from, id) (Err why); (True, (ctx, m))
+        | Ok fresh -> _ = AC.reply (from, id) (Ok (preferenceText fresh));
+            (True, (AS.advance ctx ctx.sequence, fresh)).

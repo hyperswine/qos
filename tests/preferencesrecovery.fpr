@@ -1,0 +1,45 @@
+# Real disk-backed recovery switch. Old copy remains; new jobs use the new path.
+unsafe program.
+ED = use "../programs/mods/editapp".
+P = use "../programs/mods/editorpreferences".
+H = use "../programs/mods/preferencehistory".
+PC = use "../programs/mods/preferencecontrol".
+AW = use "../programs/mods/appwire".
+QS = use "../programs/mods/qsys".
+FS = use "std/fs#84826bc9e8ddb4b5".
+B = use "std/blockio#8b4ffa1467ca03a5".
+EP = use "../programs/mods/ep#c66ad65e68dd97f5".
+AC = use "std/actor#201a0e9bf98a5154".
+get (Ok value) = value.
+get (Err why) = error "preferencesrecovery: {why}".
+check yes why = if yes then Unit else error "preferencesrecovery: {why}".
+ready until me ns path = case EP.readOnce me ns path of
+    Ok (EP.IStr text) -> if strIndexOf "recoveryBusy=False" text >= 0 then text else again until me ns path
+  | other -> again until me ns path.
+again until me ns path = if AC.nowUs Unit >= until then error "recovery did not settle" else
+  _ = Sys.sleepUs 1000; ready until me ns path.
+main =
+  me = myself 0;
+  block = B.serve me (device "blk");
+  fs = get (FS.startBlock me block);
+  oldPath = P.recoveryPath P.defaults;
+  original = "qed1\n/home/restored.txt\n1\nunsaved work";
+  _ = get (FS.append me fs oldPath original);
+  QS.Qsys ns _ _ _ _ = QS.bootWire me fs Nil;
+  editor = spawn ED.run;
+  _ = get (AC.callWithin 500 me editor (AW.magic, AW, (31, (800, 480), (ns, fs, 0))));
+  path = PC.url "editor" 31;
+  _ = ready (AC.nowUs Unit + 2000000) me ns path;
+  _ = get (AC.callWithin 500 me editor (AW.Event 31 1 (AW.Key 30)));
+  nextPath = "/home/.editor/recovery-next";
+  policy = P.Preferences 20 50 nextPath H.KeepNewest;
+  _ = get (EP.writeOnce me ns path (EP.IStr (P.encode 0 policy)));
+  _ = get (AC.callWithin 500 me editor (AW.Event 31 2 AW.Tick));
+  _ = ready (AC.nowUs Unit + 3000000) me ns path;
+  saved = get (FS.replay me fs nextPath);
+  _ = check (strIndexOf "unsaved work" saved >= 0 and saved != original) "new path did not capture current unsaved edits";
+  _ = check (get (FS.replay me fs oldPath) == original) "old recovery copy changed";
+  _ = get (AC.callWithin 1500 me editor (AW.Close 31));
+  _ = check (get (FS.replay me fs oldPath) == original) "close wrote the old path";
+  _ = get (FS.shutdown me fs block);
+  "preferencesrecovery: HOLDS".

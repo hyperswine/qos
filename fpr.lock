@@ -47,6 +47,9 @@ std/net v3.0 464ca3ee0d89bc64 programs/mods/liveview.fpr
 std/actor v3.0 201a0e9bf98a5154 programs/mods/logsapp.fpr
 ep v3.0 c66ad65e68dd97f5 programs/mods/panejobs.fpr
 std/actor v3.0 201a0e9bf98a5154 programs/mods/panejobs.fpr
+ep v3.0 c66ad65e68dd97f5 programs/mods/preferencecontrol.fpr
+epservice v3.0 e8bce05a1ddf73db programs/mods/preferencecontrol.fpr
+std/actor v3.0 201a0e9bf98a5154 programs/mods/preferencecontrol.fpr
 svc v5.0 75479fb6d5f34670 programs/mods/qlog.fpr
 coreutil v1.1 00b87d7442c69e95 programs/mods/qlog.fpr
 std/storage v1.1 a8f7ee14e1efae76 programs/mods/qlog.fpr
@@ -233,6 +236,13 @@ std/fs v5.0 84826bc9e8ddb4b5 tests/portableshutdown.fpr
 std/fs v5.0 84826bc9e8ddb4b5 tests/pos.fpr
 std/lifecycle v6.0 6e7bea28db71815a tests/powercut.fpr
 std/fs v5.0 84826bc9e8ddb4b5 tests/powercut.fpr
+../programs/mods/ep v3.0 c66ad65e68dd97f5 tests/preferences.fpr
+../programs/mods/epservice v3.0 e8bce05a1ddf73db tests/preferences.fpr
+std/actor v3.0 201a0e9bf98a5154 tests/preferences.fpr
+std/fs v5.0 84826bc9e8ddb4b5 tests/preferencesrecovery.fpr
+std/blockio v6.0 8b4ffa1467ca03a5 tests/preferencesrecovery.fpr
+../programs/mods/ep v3.0 c66ad65e68dd97f5 tests/preferencesrecovery.fpr
+std/actor v3.0 201a0e9bf98a5154 tests/preferencesrecovery.fpr
 ../programs/mods/qlog v10.0 7022992c8e4a9fba tests/qdisk.fpr
 ../programs/mods/qlog v10.0 7022992c8e4a9fba tests/qdisk2.fpr
 ../programs/mods/qlog v10.0 7022992c8e4a9fba tests/qload.fpr

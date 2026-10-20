@@ -10,7 +10,8 @@ then change it without rebuilding or restarting the system wherever the resource
 contract permits. Moving literals into a constants file alone does not achieve
 this. The file manager policy, endpoint ownership, and runtime app I/O and
 recovery, run admission, hosted-program file access, Editor state, and typed
-storage protocol slices are implemented below. Other rows remain work to do.
+storage protocol and preference slices are implemented below. The initial queue
+is complete; the follow-up inventory below remains open.
 
 ## Work queue
 
@@ -21,9 +22,9 @@ storage protocol slices are implemented below. Other rows remain work to do.
 | `programs/mods/editapp.fpr`: child memory = physical RAM / 4, fallback 1 GiB | `runpolicy.RunPolicy` | Snapshot after build, before spawn; existing processes retain their admitted budget | Pushed in `dfda671` |
 | `programs/mods/editapp.fpr`: `/home/` access, `.editor/` exclusion and path checks | `fileaccesspolicy.FileAccessPolicy`, `Path`, `Grant` | Each new hosted-program request; retain the captured grant for pending replies | Pushed in `dfda671` |
 | `programs/mods/appjobs.fpr`: `{held=(0,0), uncertain=""}` | Linear `endpointstate.State`: `Vacant`, `Held`, `Uncertain` | Explicit transitions preserving handle ownership and uncertain outcomes; inspect state, never overwrite it with arbitrary settings | Pushed in `120a7b9` |
-| `programs/mods/editapp.fpr`: numeric job and prompt modes | `editorstate.JobKind`, `PromptMode`, `Confirmation`, `EditKind` | Inspect live state and apply revision-checked prompt transitions; pending job kinds remain bound to admitted work | Implemented in the Editor state continuation below |
-| Storage RPC integer operation tags and string-matched errors | `StorageOp`, `StorageError` | Typed facade plus a versioned wire codec; preserve existing clients during migration | Implemented in the storage protocol continuation below |
-| Editor undo 200, output 400, recovery path; Terminal input 240, output 400 | `EditorPreferences`, `TerminalPreferences` | Live updates with an explicit retained-history policy; recovery-path changes migrate or finish current recovery work first | Planned |
+| `programs/mods/editapp.fpr`: numeric job and prompt modes | `editorstate.JobKind`, `PromptMode`, `Confirmation`, `EditKind` | Inspect live state and apply revision-checked prompt transitions; pending job kinds remain bound to admitted work | Pushed in `a6f990b` |
+| Storage RPC integer operation tags and string-matched errors | `StorageOp`, `StorageError` | Typed facade plus a versioned wire codec; preserve existing clients during migration | Pushed in `a6f990b` |
+| Editor undo 200, output 400, recovery path; Terminal input 240, output 400 | `EditorPreferences`, `TerminalPreferences` | Live updates with an explicit retained-history policy; recovery-path changes migrate or finish current recovery work first | Implemented in the preferences continuation below |
 
 Follow-up inventory should include the endpoint adapter's lease lifetime and
 handle budget, worker mailbox capacities, timer limits and other service defaults.
@@ -559,7 +560,7 @@ existing absolute deadline to `requestUntil`. App statistics retain the live
 `IoPolicy` read budget. ABI tags and hard admission ceilings cannot be changed by
 a schema write; doing so needs negotiated migration. There is no new global
 storage-policy owner or automatic retry policy in this slice. Editor/Terminal
-preferences remain the next queued types.
+preferences are implemented in the next continuation.
 
 Validation against sibling FP-RISC `e732971`:
 
@@ -587,3 +588,99 @@ this slice. Logs are under `.qos/validation/storage-types-20261020/`.
 
 `tools/storage-types-check.py` is included in `check-all.sh` and the Portable CI
 job.
+
+
+## Editor and Terminal preferences continuation (2026-10-20)
+
+`editorpreferences.EditorPreferences` and `terminalpreferences.TerminalPreferences`
+are ordinary model values. Each running app owns its settings and a separate
+preference revision; updates serialize with ordinary events and worker replies.
+A successful preference update also advances the app's frame revision. Reads
+show effective values and current usage. Strict text parsers reject malformed,
+missing, repeated, reordered and unknown fields, signed numbers and overflow.
+Updates are atomic and require the expected preference revision and a system
+process caller. Namespace grants still apply; caller identity remains the
+existing cooperative IPC contract.
+
+Endpoints, where `SESSION` is the live app session ID:
+
+```text
+cat /apps/editor/SESSION/preferences
+cat /apps/editor/SESSION/preferences/schema
+write /apps/editor/SESSION/preferences revision=0 undoDepth=300 outputLines=600 recoveryPath=/home/.editor/session history=preserve
+cat /apps/terminal/SESSION/preferences
+cat /apps/terminal/SESSION/preferences/schema
+write /apps/terminal/SESSION/preferences revision=0 inputBytes=512 outputLines=800 historyEntries=100 history=preserve
+```
+
+Use the current revision from the read, rather than assuming zero. Schemas are
+read-only and expose defaults, constraints, effect boundaries and persistence.
+Endpoints disappear on normal app exit or owner death. Failed partial
+registration withdraws the app's own endpoints without removing another owner's
+registration. Explicit namespace zero retains standalone defaults.
+
+| Setting | Default | Live behavior |
+|---|---:|---|
+| Editor `undoDepth` | 200 | Nonnegative; bounds both undo and redo. Zero disables history. Current document, caret, version, dirty marker and pending jobs remain intact. A preference update ends the current coalescing group. |
+| Editor `outputLines` | 400 | Positive; applies to all subsequent build, diagnostic and process output. Reductions retain newest complete lines and clamp the output viewport when requested. Partial process output is separate; this is not a byte quota. |
+| Editor `recoveryPath` | `/home/.editor/session` | Canonical file below `/home/.editor/`, at most 1024 bytes; no whitespace or `.~save` suffix. Refuse the current document path and refuse a path change while restore, document-save or recovery-copy jobs are pending. |
+| Terminal `inputBytes` | 240 | Positive UTF-8 byte limit. Refuse a reduction below current input, saved draft or any retained command-history entry. A new input character must fit entirely. Never truncate a command. |
+| Terminal `outputLines` | 400 | Positive; bounds complete output lines, including future async completions; viewport is clamped after an update. |
+| Terminal `historyEntries` | 50 | Nonnegative; zero disables command recall history. Preserve current input/draft, reset the recall cursor only if its entry is removed. Running pipelines and queued commands retain their admitted work. |
+
+Both types include `preferencehistory.Retention`: `history=preserve` refuses a
+reduction below current retained use, while `history=keep-newest` explicitly
+allows immediate removal of the oldest undo/redo/output/command-history entries.
+Terminal checks input compatibility against the retained history *after* the
+requested history reduction, without applying any partial change on rejection.
+This policy governs preference updates; normal ongoing output/history remains a
+bounded rolling history under either setting. Counts may range up to the machine
+integer maximum, but raising them does not reserve memory or guarantee capacity.
+
+Recovery-path changes wait for the existing work to finish by refusing the
+update while it is pending. A successful change keeps the previous on-disk
+recovery file, invalidates the recorded marker and schedules a fresh copy at the
+new path on the next eligible Editor tick. Existing job payloads keep their
+original paths. Failed copy writes clear the marker, display the failure and
+allow a later tick to retry. The update acknowledgement confirms model settings,
+not a completed disk write. The previous file is never deleted by this switch.
+
+Preferences are **session-local and volatile** in this slice. New sessions use
+defaults, including the default recovery path; they do not automatically restore
+from a custom path selected in a previous session. A durable preference store
+and discovery of custom recovery files remain separate work. The recovery path
+is constrained to the existing reserved directory rather than silently changing
+hosted-program file-access grants.
+
+`preferencecontrol.fpr` is the shared leased endpoint adapter. It exchanges text
+requests with the owning app and never owns or overwrites the app model. Its
+registrar and parked death watcher use the same mailbox/lifecycle separation as
+the existing Editor state adapter. Preference requests are handled when the app
+has no queued parent/worker event; normal endpoint deadlines bound the caller's
+wait. An expired queued update is refused. After a timeout, inspect the revision
+before retrying because an update may have committed before its reply arrived.
+
+Validation against sibling FP-RISC `e732971`:
+
+- Five type-refusal probes reject integer preferences, crossed Editor/Terminal
+  types, and string/boolean substitutes for the retention type.
+- `preferences` passes with 1 and 4 workers: strict parsing, bounds, safe history
+  reduction, zero undo, current-input/draft/recall protection, captured recovery
+  jobs, failed-write retry, live endpoint revisions, usage, system-only writes,
+  schema refusal, stale/expired updates, revision exhaustion and normal/death/
+  partial-registration cleanup. After warming up, 500 writes plus 500 reads
+  retain at most 8 additional roots and less than 2 MiB.
+- `preferencesrecovery` passes with 1 and 4 workers against a real Portable
+  disk image. It restores unsaved work, edits it, switches paths, verifies the
+  current copy at the new path, verifies the old file is unchanged, and confirms
+  close continues using the new path.
+- Existing `editorstate`, `appsession` and 3000-operation `appsessionmemory`
+  regressions pass with 1 and 4 workers. Main passes Portable check-only.
+- All 294 pins resolve; four sweep-verdict unit tests, shell/Python syntax and
+  `git diff --check` pass. `tools/preferences-check.py` is wired into the sweep
+  and Portable CI job.
+
+Evidence is under `.qos/validation/preferences-20261020/`. This validates source
+and Portable execution, not a graphical session, physical device, native target
+or full sweep. Rebuild and launch the app bundles to acquire the new endpoints;
+subsequent preference edits apply to those running sessions without rebuilding.

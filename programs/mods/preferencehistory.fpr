@@ -1,0 +1,9 @@
+# Explicit retention at a live preference update. No silent history loss.
+Retention = Type (Preserve | KeepNewest).
+name Preserve = "preserve".
+name KeepNewest = "keep-newest".
+parse "history=preserve" = Ok Preserve.
+parse "history=keep-newest" = Ok KeepNewest.
+parse other = Err "history must be preserve or keep-newest".
+fits Preserve limit used = used <= limit.
+fits KeepNewest limit used = True.

@@ -1,0 +1,147 @@
+unsafe program.
+ED = use "../programs/mods/editapp".
+TM = use "../programs/mods/termapp".
+E = use "../programs/mods/editbuf".
+State = use "../programs/mods/editorstate".
+P = use "../programs/mods/editorpreferences".
+T = use "../programs/mods/terminalpreferences".
+H = use "../programs/mods/preferencehistory".
+PC = use "../programs/mods/preferencecontrol".
+AW = use "../programs/mods/appwire".
+AJ = use "../programs/mods/appjobs".
+Lease = use "../programs/mods/endpointstate".
+EP = use "../programs/mods/ep#c66ad65e68dd97f5".
+Endpoint = use "../programs/mods/epservice#e8bce05a1ddf73db".
+AC = use "std/actor#201a0e9bf98a5154".
+buffer m = E.toText m.buf.
+output m = m.out.
+check what yes = if yes then Unit else error "preferences: {what}".
+get (Ok value) = value.
+get (Err why) = error "preferences: {why}".
+failed (Err _) = True.
+failed other = False.
+text (EP.IStr s) = s.
+text other = error "expected preference text".
+readPrefs me ns path = text (get (EP.readOnce me ns path)).
+ready until me ns path = case EP.readOnce me ns path of
+    Ok (EP.IStr s) -> if strIndexOf "recoveryBusy=True" s < 0 then s else again until me ns path
+  | other -> again until me ns path.
+again until me ns path = if AC.nowUs Unit >= until then error "preference startup timeout" else
+  _ = Sys.sleepUs 1000; ready until me ns path.
+removed until me ns path =
+  names = get (EP.flat (AC.callWithin 250 me ns (EP.NsList path)));
+  if names == "" then Unit else if AC.nowUs Unit >= until then error "preference endpoints leaked" else
+    _ = Sys.sleepUs 1000; removed until me ns path.
+ended until actor = if not (Sys.alive actor) then Unit else if AC.nowUs Unit >= until then error "failed app remained alive" else
+  _ = Sys.sleepUs 1000; ended until actor.
+boot me app sid ns = check "app bootstrap" (case AC.callWithin 500 me app (AW.magic, AW, (sid, (800, 480), (ns, 0, 0))) of Ok (magic, schema, id) -> id == sid | other -> False).
+unprivileged parent ns path me =
+  _ = receive me;
+  answer = EP.writeOnce me ns path (EP.IStr (T.encode 1 T.defaults));
+  _ = send parent (case answer of Err why -> strIndexOf "system-only" why >= 0 | other -> False); Unit.
+memoryUsed u = case Sys.memInfo 0 of arena :: free :: rest -> arena - free | other -> error "missing memory ledger".
+updates me ns path start end = Sys.loop start (updateOne me ns path end).
+updateOne me ns path end revision = if revision >= end then (False, revision) else
+  changed = EP.writeOnce me ns path (EP.IStr (T.encode revision (T.Preferences 300 3 2 H.KeepNewest)));
+  _ = get changed;
+  observed = readPrefs me ns path;
+  _ = check "repeated preference revision" (strIndexOf "revision={revision + 1} " observed == 0);
+  (True, revision + 1).
+main =
+  me = myself 0;
+  _ = check "typed defaults and codecs" (P.parse (P.encode 7 P.defaults) == Ok (P.Snapshot 7 P.defaults) and T.parse (T.encode 9 T.defaults) == Ok (T.Snapshot 9 T.defaults));
+  _ = check "strict fields" (failed (T.parse "revision=0 inputBytes=2x outputLines=1 historyEntries=0 history=keep-newest") and failed (T.parse "revision=0 inputBytes=-1 outputLines=1 historyEntries=0 history=keep-newest") and failed (T.parse "revision=999999999999999999999 inputBytes=1 outputLines=1 historyEntries=0 history=keep-newest") and failed (T.parse "revision=0 inputBytes=1 outputLines=0 historyEntries=0 history=keep-newest"));
+  _ = check "extra and malformed history" (failed (T.parse (T.encode 0 T.defaults + " extra=1")) and failed (T.parse "revision=0 inputBytes=1 outputLines=1 historyEntries=0 history=discard"));
+  _ = check "path boundaries" (failed (P.validate (P.Preferences 1 1 "/home/user.txt" H.KeepNewest)) and failed (P.validate (P.Preferences 1 1 "/home/.editor/../file" H.KeepNewest)) and failed (P.validate (P.Preferences 1 1 "/home/.editor/a b" H.KeepNewest)) and failed (P.validate (P.Preferences 1 1 "/home/.editor/a.~save" H.KeepNewest)));
+  _ = check "bounded updates" (failed (P.parse (E.spaces 1537)) and failed (T.parse (E.spaces 513)));
+  (initial, _) = ED.init;
+  custom = P.Preferences 2 2 "/home/.editor/alternate" H.KeepNewest;
+  _ = check "restore pins recovery path" (failed (ED.applyPreferences custom initial));
+  (clean, _) = ED.arrived 1 (Err "no recovery") initial;
+  a = ED.edit State.Structural (E.insert "a" clean.buf) clean;
+  b = ED.edit State.Structural (E.insert "b" a.buf) a;
+  c = ED.edit State.Structural (E.insert "c" b.buf) b;
+  rich = {c | out = ["old", "middle", "new"], outBack = 100};
+  _ = check "preserve refuses trimming" (failed (ED.applyPreferences (P.Preferences 2 2 (P.recoveryPath P.defaults) H.Preserve) rich));
+  shrunk = get (ED.applyPreferences custom rich);
+  _ = check "keep newest and protect document" (E.count shrunk.undo == 2 and shrunk.out == ["middle", "new"] and E.toText shrunk.buf == "abc" and shrunk.savedVersion == rich.savedVersion and shrunk.pending == rich.pending and shrunk.outBack <= 1);
+  _ = check "undo redo after reduction" (buffer (ED.undo shrunk) == "ab" and buffer (ED.redo (ED.undo shrunk)) == "abc");
+  disabled = get (ED.applyPreferences (P.Preferences 0 2 (P.recoveryPath custom) H.KeepNewest) (ED.undo shrunk));
+  nextEdit = ED.edit State.Structural (E.insert "x" disabled.buf) disabled;
+  _ = check "zero disables both stacks" (disabled.undo == Nil and disabled.redo == Nil and nextEdit.undo == Nil);
+  _ = check "future Editor output bounded" (ED.sayWith custom shrunk.out ["four", "five"] == ["four", "five"]);
+  (saving, commands) = ED.keepSession False shrunk;
+  _ = check "new recovery job captures new path" (case commands of [AW.Fetch token (AW.WritePath path bytes)] -> path == P.recoveryPath custom and strIndexOf "abc" bytes >= 0 | other -> False);
+  _ = check "pending recovery cannot move" (failed (ED.applyPreferences P.defaults saving));
+  (failedSave, _) = ED.arrived saving.token (Err "offline") saving;
+  (retry, retryJobs) = ED.keepSession False failedSave;
+  _ = check "failed recovery is visible and retried" (failedSave.warn and failedSave.recorded == "" and retryJobs != Nil);
+  (settled, _) = ED.arrived retry.token (Ok (AW.Done "saved")) retry;
+  _ = check "settled recovery permits switch" (not (failed (ED.applyPreferences P.defaults settled)));
+  _ = check "cannot overwrite open recovery document" (failed (ED.applyPreferences custom {clean | path = P.recoveryPath custom}));
+  (saveDoc, _) = ED.save {rich | path = "/home/document"};
+  _ = check "document save pins preference switch" (failed (ED.applyPreferences custom saveDoc));
+  (terminal, _) = TM.init;
+  filled = {terminal | input = "hi", draft = "draft", hist = ["hi", "a long old command"], histAt = 1, out = ["old", "middle", "new"], running = True, queue = ["echo queued"], stages = [["cat", "/home/file"]]};
+  tp = T.Preferences 5 2 1 H.KeepNewest;
+  short = get (TM.applyPreferences tp filled);
+  _ = check "Terminal retains newest and admitted work" (short.hist == ["hi"] and short.out == ["middle", "new"] and short.input == "hi" and short.draft == "draft" and short.histAt == (0 - 1) and short.queue == filled.queue and short.stages == filled.stages and short.running);
+  _ = check "input reductions cannot truncate" (failed (TM.applyPreferences (T.Preferences 1 2 0 H.KeepNewest) filled) and failed (TM.applyPreferences (T.Preferences 2 2 1 H.KeepNewest) filled) and failed (TM.applyPreferences (T.Preferences 5 2 2 H.KeepNewest) filled));
+  _ = check "Terminal preserve refuses drop" (failed (TM.applyPreferences (T.Preferences 50 2 1 H.Preserve) filled));
+  (blocked, _) = TM.update (AW.Key 30) {short | input = "12345"};
+  (accepted, _) = TM.update (AW.Key 30) {short | input = "1234"};
+  _ = check "new input bound" (blocked.input == "12345" and accepted.input == "1234a");
+  _ = check "new output bound" (output (TM.say ["four", "five"] short) == ["four", "five"]);
+  (commanded, _) = TM.submit "echo" {short | running = False, queue = Nil, stages = Nil};
+  _ = check "new history cap" (commanded.hist == ["echo"]);
+  _ = check "stale and expired preference revisions" (failed (ED.configurePreferences (AC.nowUs Unit + 1000000) me (P.encode 1 P.defaults) clean) and failed (TM.configurePreferences (AC.nowUs Unit - 1) me (T.encode 0 T.defaults) terminal));
+  _ = check "revision exhaustion" (failed (TM.configurePreferences (AC.nowUs Unit + 1000000) me (T.encode (intMax Unit) T.defaults) {terminal | preferenceRevision = intMax Unit}));
+  ns = spawn Endpoint.namespace;
+  editor = spawn ED.run;
+  term = spawn TM.run;
+  _ = boot me editor 91 ns; _ = boot me term 92 ns;
+  ep = PC.url "editor" 91; tpUrl = PC.url "terminal" 92;
+  first = ready (AC.nowUs Unit + 1000000) me ns ep;
+  _ = ready (AC.nowUs Unit + 1000000) me ns tpUrl;
+  _ = check "defaults visible" (strIndexOf (P.encode 0 P.defaults) first == 0);
+  _ = check "schemas discoverable" (strIndexOf "type=EditorPreferences" (readPrefs me ns (PC.schemaUrl ep)) >= 0 and strIndexOf "type=TerminalPreferences" (readPrefs me ns (PC.schemaUrl tpUrl)) >= 0);
+  _ = check "schema read-only" (failed (EP.writeOnce me ns (PC.schemaUrl ep) (EP.IStr "x")));
+  changed = text (get (EP.writeOnce me ns ep (EP.IStr (P.encode 0 custom))));
+  _ = check "live Editor revision" (strIndexOf (P.encode 1 custom) changed == 0);
+  _ = check "stale live update" (failed (EP.writeOnce me ns ep (EP.IStr (P.encode 0 P.defaults))));
+  _ = check "malformed live update atomic" (failed (EP.writeOnce me ns ep (EP.IInt 0)) and readPrefs me ns ep == changed);
+  (written, lease) = AJ.execute me ns 0 (AW.WritePath tpUrl (T.encode 0 (T.Preferences 300 3 2 H.KeepNewest) + "\n")) Lease.Vacant;
+  _ = get written;
+  (snapshot, done) = Lease.inspect lease; _ = Lease.ended done;
+  _ = check "Terminal worker writes and releases lease" (snapshot.held == (0, 0) and strIndexOf "revision=1 inputBytes=300 outputLines=3 historyEntries=2" (readPrefs me ns tpUrl) == 0);
+  event = AC.callWithin 500 me term (AW.Event 92 1 (AW.Key 30));
+  _ = check "ordinary event sees preference revision" (case event of Ok (AW.Frame sid rev tree vals status) -> rev == 3 | other -> False);
+  _ = check "usage introspection" (strIndexOf "inputUsed=1" (readPrefs me ns tpUrl) >= 0);
+  _ = check "input reduction refused live" (failed (EP.writeOnce me ns tpUrl (EP.IStr "revision=1 inputBytes=0 outputLines=2 historyEntries=0 history=keep-newest")));
+  child = Sys.spawnApp (unprivileged me ns tpUrl);
+  _ = get (EP.grant me ns (Sys.pidOf child) [(tpUrl, "rw")]);
+  _ = send child Unit;
+  _ = check "application writes refused" (get (receiveFromRes me child));
+  _ = updates me ns tpUrl 1 51;
+  _ = Sys.sleepUs 10000;
+  roots = arcLive 0; memory = memoryUsed Unit;
+  _ = updates me ns tpUrl 51 551;
+  _ = Sys.sleepUs 10000;
+  _ = check "preference endpoint retention" (arcLive 0 <= roots + 8 and memoryUsed Unit < memory + 2048);
+  _ = AC.callWithin 1500 me editor (AW.Close 91);
+  _ = AC.callWithin 1500 me term (AW.Close 92);
+  _ = removed (AC.nowUs Unit + 1000000) me ns ep;
+  _ = removed (AC.nowUs Unit + 1000000) me ns tpUrl;
+  orphan = spawn TM.run; _ = boot me orphan 93 ns;
+  _ = ready (AC.nowUs Unit + 1000000) me ns (PC.url "terminal" 93);
+  _ = kill orphan;
+  _ = removed (AC.nowUs Unit + 1000000) me ns (PC.url "terminal" 93);
+  # A failed second registration must remove only this adapter's first path.
+  reserved = PC.url "terminal" 94;
+  _ = get (EP.register me ns (PC.schemaUrl reserved) me);
+  collision = spawn TM.run; _ = boot me collision 94 ns;
+  _ = ended (AC.nowUs Unit + 1000000) collision;
+  names = get (EP.flat (AC.callWithin 250 me ns (EP.NsList reserved)));
+  _ = check "partial registration cleanup" (strIndexOf (PC.schemaUrl reserved) names >= 0 and strIndexOf "{reserved}\n" names < 0);
+  _ = kill ns;
+  "preferences: HOLDS".

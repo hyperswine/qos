@@ -1,0 +1,21 @@
+Text = use "policytext".
+History = use "preferencehistory".
+TerminalPreferences = Type (Preferences Int Int Int History.Retention).
+Snapshot = Type (Snapshot Int TerminalPreferences).
+defaults = Preferences 240 400 50 History.KeepNewest.
+inputBytes (Preferences n _ _ _) = n.
+outputLines (Preferences _ n _ _) = n.
+historyEntries (Preferences _ _ n _) = n.
+retention (Preferences _ _ _ r) = r.
+revision (Snapshot r _) = r.
+preferences (Snapshot _ p) = p.
+validate p = if inputBytes p <= 0 or outputLines p <= 0 or historyEntries p < 0 then Err "inputBytes and outputLines must be positive; historyEntries must be nonnegative" else Ok p.
+encode rev p = "revision={rev} inputBytes={inputBytes p} outputLines={outputLines p} historyEntries={historyEntries p} history={History.name (retention p)}".
+render (Snapshot rev p) = encode rev p.
+checked rev p = case validate p of Err why -> Err why | Ok valid -> Ok (Snapshot rev valid).
+parse text = if strlen text > 512 then Err "update exceeds 512 bytes" else case Text.tokens text 0 of
+    [r, i, o, n, h] -> (case (Text.field "revision=" r, Text.field "inputBytes=" i, Text.field "outputLines=" o, Text.field "historyEntries=" n) of
+        (Ok rev, Ok input, Ok out, Ok entries) -> (case History.parse h of Err why -> Err why | Ok retention -> checked rev (Preferences input out entries retention))
+      | other -> Err "expected revision, inputBytes, outputLines and historyEntries as unsigned decimals")
+  | other -> Err "expected revision inputBytes outputLines historyEntries history in that order".
+schema = "type=TerminalPreferences version=1\ndefaults={encode 0 defaults}\nwrite=complete listed fields; expected preference revision; atomic; system-process-only\ninputBytes=1..IntMax UTF-8 bytes; refuse below current input, draft or any retained history entry; never truncate a command\noutputLines=1..IntMax complete lines (not a byte quota); historyEntries=0..IntMax\nhistory=preserve refuses reductions below live use; keep-newest immediately drops oldest output/history entries\nrecall=retain input and draft; reset cursor only if its history entry was removed\nboundary=next input or output; already queued commands and in-flight jobs finish unchanged\npersistence=session-only; new sessions use defaults\n".

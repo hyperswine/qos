@@ -40,6 +40,9 @@ AK = use "appkit".
 E = use "editbuf".
 State = use "editorstate".
 Control = use "editorcontrol".
+Prefs = use "editorpreferences".
+History = use "preferencehistory".
+PC = use "preferencecontrol".
 Fm = use "fontm".
 S2 = use "scene2d".
 AC = use "std/actor#201a0e9bf98a5154".
@@ -49,11 +52,9 @@ FA = use "fileaccesspolicy".
 Policies = use "editorpolicy".
 PG = use "std/hosted".
 
-sessionPath = "/home/.editor/session".
-undoDepth = 200.
-outKeep = 400.
+sessionPath = Prefs.recoveryPath Prefs.defaults.
 # Pending jobs retain their typed kind until the matching reply arrives.
-init = ({policyNamespace = 0, runAdmission = RunPolicy.Unadmitted, buf = E.empty, path = "", version = 0, savedVersion = 0, nextStamp = 1, recorded = "", idle = 0,
+init = ({preferences = Prefs.defaults, preferenceRevision = 0, preferenceAdapter = 0, policyNamespace = 0, runAdmission = RunPolicy.Unadmitted, buf = E.empty, path = "", version = 0, savedVersion = 0, nextStamp = 1, recorded = "", idle = 0,
          top = 0, left = 0, undo = Nil, redo = Nil, lastKind = State.NoEdit, clip = "",
          mode = State.Editing, query = "", files = Nil, listed = False, pick = 0, findText = "", msg = "", warn = False,
          out = Nil, outOpen = False, confirm = State.NoConfirmation, pending = [{token = 1, kind = State.RestoreSession, version = 0, path = sessionPath, wrapped = False, grant = FA.NoGrant}],
@@ -162,16 +163,16 @@ tab b = if E.hasSelection b then E.indent b else E.insert (E.spaces (2 - b.col %
 # an edit: one undo step per run of typing (or of deleting), one per other edit
 edit kind b m =
   coalesce = kind == m.lastKind and State.coalesces kind and m.undo != Nil;
-  undos = (if coalesce then m.undo else E.take undoDepth ((m.buf, m.version) :: m.undo));
+  undos = (if coalesce then m.undo else E.take (Prefs.undoDepth m.preferences) ((m.buf, m.version) :: m.undo));
   follow {m | buf = b, version = m.nextStamp, nextStamp = m.nextStamp + 1, undo = undos, redo = Nil,
               lastKind = kind, idle = 0, confirm = State.NoConfirmation, warn = False}.
 moved b m = follow {m | buf = b, lastKind = State.NoEdit, confirm = State.NoConfirmation}.
 undo m = case m.undo of
     Nil -> {m | msg = "Nothing to undo", warn = False}
-  | (b, v) :: rest -> follow {m | buf = b, version = v, undo = rest, redo = (m.buf, m.version) :: m.redo, lastKind = State.NoEdit, idle = 0}.
+  | (b, v) :: rest -> follow {m | buf = b, version = v, undo = rest, redo = E.take (Prefs.undoDepth m.preferences) ((m.buf, m.version) :: m.redo), lastKind = State.NoEdit, idle = 0}.
 redo m = case m.redo of
     Nil -> {m | msg = "Nothing to redo", warn = False}
-  | (b, v) :: rest -> follow {m | buf = b, version = v, redo = rest, undo = (m.buf, m.version) :: m.undo, lastKind = State.NoEdit, idle = 0}.
+  | (b, v) :: rest -> follow {m | buf = b, version = v, redo = rest, undo = E.take (Prefs.undoDepth m.preferences) ((m.buf, m.version) :: m.undo), lastKind = State.NoEdit, idle = 0}.
 copy m = if E.hasSelection m.buf then {m | clip = E.selected m.buf, msg = "Copied", warn = False}
   else {m | clip = E.lineText m.buf, msg = "Copied the line", warn = False}.
 cut m = if E.hasSelection m.buf then edit State.Clipboard (E.deleteSelection m.buf) {m | clip = E.selected m.buf, msg = "Cut", warn = False}
@@ -247,7 +248,7 @@ build m = if m.building then ({m | msg = "Already building", warn = False}, Nil)
   else if not (colored m) then ({m | msg = "Only FP-RISC (.fpr) files build", warn = True}, Nil) else
   (wrapped, src) = package m;
   issueAs wrapped State.BuildSource m.version m.path (AW.Compile (if wrapped then runProfile else buildProfile) src)
-    {m | building = True, checker = True, outOpen = True, outBack = 0, out = say m.out ["", "build {name m}: compiling..."], msg = "Building {name m}", warn = False}.
+    {m | building = True, checker = True, outOpen = True, outBack = 0, out = sayWith m.preferences m.out ["", "build {name m}: compiling..."], msg = "Building {name m}", warn = False}.
 # a program is built as Run packages it -- so ^R after ^B is the daemon's
 # cached package -- and a module as it is
 package m = src = E.toText m.buf;
@@ -261,10 +262,12 @@ runIt m = if m.building then ({m | msg = "Already building", warn = False}, Nil)
   (wrapped, src) = package m;
   issueAs True State.RunSource m.version m.path (AW.Compile runProfile src)
     {m | building = True, checker = True, outOpen = True, outBack = 0, partial = "", appRun = RP.hasApp m.buf.lines, progView = Nil, progFocus = False,
-         out = say m.out ["", "run {name m}: compiling..."], msg = "Starting {name m}", warn = False}.
+         out = sayWith m.preferences m.out ["", "run {name m}: compiling..."], msg = "Starting {name m}", warn = False}.
 halt m = (ended (stopProgram m) "stopped" m, Nil).
 
-say out lines = kept = E.append out lines; n = E.count kept; if n > outKeep then E.dropN (n - outKeep) kept else kept.
+say out lines = sayWith Prefs.defaults out lines.
+sayWith preferences out lines = kept = E.append out lines; trimOutput (Prefs.outputLines preferences) kept.
+trimOutput limit lines = n = E.count lines; if n > limit then E.dropN (n - limit) lines else lines.
 # the compiler names the daemon's copy of the source: show the buffer's name
 # and, for a run, the line as the buffer numbers it (the Run entry is one
 # line the compiler saw and the buffer does not have: mods/runprog.fpr)
@@ -315,7 +318,7 @@ settle p result m = case p.kind of
   | State.OpenDocument -> opened p result m
   | State.ListDocuments -> listed result m
   | State.SaveDocument -> saved p result m
-  | State.KeepSession -> (case result of Ok r -> (m, Nil) | Err why -> ({m | msg = "Could not keep the recovery copy: {why}", warn = True}, Nil))
+  | State.KeepSession -> (case result of Ok r -> (m, Nil) | Err why -> ({m | recorded = "", msg = "Could not keep the recovery copy: {why}", warn = True}, Nil))
   | State.BuildSource -> built p result m
   | State.RunSource -> started p result m
   | State.CheckSource -> (checked p result m, Nil)
@@ -350,7 +353,7 @@ saved p result m = case result of
   | other -> ({m | msg = "Save answered oddly", warn = True}, Nil).
 built p result m = case result of
     Ok (AW.Text qa) -> _ = print "editor: build {name m}: ok";
-      ({m | building = False, out = say m.out ["build {name m}: ok (a {strlen qa / 1024} KiB package)"],
+      ({m | building = False, out = sayWith m.preferences m.out ["build {name m}: ok (a {strlen qa / 1024} KiB package)"],
       diags = (if p.version == m.version then Nil else m.diags), msg = "Built {name m}: no errors", warn = False}, Nil)
   | Err why -> failedBuild "build" p why m
   | other -> ({m | building = False, msg = "Build answered oddly", warn = True}, Nil).
@@ -366,7 +369,7 @@ failedBuild what p why m =
   jumped = (if line > 0 then moved (E.gotoPos line column m.buf) m else m);
   _ = print "editor: {what} {name m}: failed{(if line > 0 then " at line {line}" else "")}";
   ({jumped | building = False, appRun = (if what == "run" then False else m.appRun),
-    out = say m.out (E.append (tidyLines (name m) at False lines) ["{what} {name m}: failed"]), outOpen = True,
+    out = sayWith m.preferences m.out (E.append (tidyLines (name m) at False lines) ["{what} {name m}: failed"]), outOpen = True,
     outBack = E.count lines + 1, diags = (if p.version == m.version then diagnose p.wrapped src m.buf.lines lines else m.diags),
     msg = (if line > 0 then "{(if what == "run" then "Run" else "Build")} failed at line {line} -- ^J shows the output" else "{(if what == "run" then "Run" else "Build")} failed -- ^J shows the output"), warn = True}, Nil).
 started p result m = case result of
@@ -393,12 +396,12 @@ launchAdmitted qa admission m = budget = RunPolicy.bytes admission;
       _ = print "editor: run {name m}: started";
       {m | building = False, running = True, proc = actor, partial = "", progFocus = m.appRun,
       runAdmission = admission,
-      out = say m.out ["run {name m}: started as process {pid}, with {budget} bytes (run policy revision {RunPolicy.admittedRevision admission}) -- ^R stops it"],
+      out = sayWith m.preferences m.out ["run {name m}: started as process {pid}, with {budget} bytes (run policy revision {RunPolicy.admittedRevision admission}) -- ^R stops it"],
       msg = "Running {name m} -- ^R stops it", warn = False}.
 # Standalone compatibility helper. Production launch reads the live policy.
 runBudget total = RunPolicy.budget RunPolicy.defaults total.
 failRun why m = _ = print "editor: run {name m}: {why}";
-  {m | building = False, appRun = False, outBack = 0, out = say m.out ["run {name m}: {why}"], outOpen = True, msg = "Run failed: {why}", warn = True}.
+  {m | building = False, appRun = False, outBack = 0, out = sayWith m.preferences m.out ["run {name m}: {why}"], outOpen = True, msg = "Run failed: {why}", warn = True}.
 # a tick: what it printed since, what an app sent (its frames, its asks),
 # and whether it has ended
 poll m = if not m.running then (m, Nil) else
@@ -447,7 +450,7 @@ stopProgram m = if not m.running then "" else RP.stopActor (myself 0) m.proc.
 # whole lines into the panel; a line still being written waits for its end
 printed text m = if strlen text == 0 then m else
   lines = E.splitLines (strcat m.partial text);
-  {m | out = say m.out (E.take (E.count lines - 1) lines), partial = lastOf lines, outBack = 0}.
+  {m | out = sayWith m.preferences m.out (E.take (E.count lines - 1) lines), partial = lastOf lines, outBack = 0}.
 ended text how m =
   _ = print "editor: run {name m}: {how}";
   lines = E.splitLines (strcat m.partial text);
@@ -459,7 +462,7 @@ ended text how m =
   # must never reach the next one
   {m | running = False, proc = 0, partial = "", outOpen = True, outBack = 0, appRun = False, progView = Nil, progFocus = False,
     pending = filterS (fn p -> p.kind != State.ProgramRequest) m.pending,
-    out = say m.out (E.append kept ["run {name m}: {how}"]),
+    out = sayWith m.preferences m.out (E.append kept ["run {name m}: {how}"]),
     msg = (if how == "finished" or how == "stopped" then "{name m}: {how}" else "{name m} failed: {how}"),
     warn = not (how == "finished" or how == "stopped")}.
 # a main of type Unit prints as "()": not output anyone wrote
@@ -535,7 +538,8 @@ keepSession now m =
   key = "{m.path}|{m.version}|{m.savedVersion}";
   if (now or m.idle >= 5) and key != m.recorded and (now or not (pendingKind State.KeepSession m.pending)) then
     record = "qed1\n{m.path}\n{(if dirty m then "1\n" else "0\n")}{(if dirty m then E.toText m.buf else "")}";
-    issue State.KeepSession m.version sessionPath (AW.WritePath sessionPath record) {m | recorded = key}
+    path = Prefs.recoveryPath m.preferences;
+    issue State.KeepSession m.version path (AW.WritePath path record) {m | recorded = key}
   else (m, Nil).
 pendingKind k Nil = False.
 pendingKind k (p :: rest) = p.kind == k or pendingKind k rest.
@@ -781,16 +785,18 @@ run me = case AS.start me of
       (model, ignored) = update (AW.Resize ctx.w ctx.h) {initial | policyNamespace = ctx.ns};
       case Control.start me ctx.ns ctx.session of
         Err why -> _ = AS.abandon me ctx; _ = Sys.logAt 2 why; Unit
-      | Ok adapter ->
+      | Ok adapter -> case PC.start me ctx.ns (PC.url "editor" ctx.session) Prefs.schema of
+          Err why -> _ = AS.abandon me ctx; _ = Sys.logAt 2 why; Unit
+        | Ok preferences ->
           _ = AS.issue me ctx commands;
-          _ = Sys.loop (ctx, model, adapter) (step me);
+          _ = Sys.loop (ctx, {model | preferenceAdapter = preferences}, adapter) (step me);
           # Returning wakes the adapter's parked owner watcher on normal close
           # as well as failure, without mixing shutdown commands with replies.
           Unit.
 step me state =
   (ctx, model, adapter) = state;
   case AS.next me ctx of
-    AS.Idle -> controlStep me ctx model adapter
+    AS.Idle -> preferencesStep me ctx model adapter
   | AS.Gone -> _ = stopProgram model; _ = AS.abandon me ctx; (False, state)
   | AS.JobResult token result ->
       (fresh2, commands) = update (AW.Arrived token result) model;
@@ -816,3 +822,34 @@ step me state =
           (tree, vals) = view (next.w, next.h) fresh2;
           _ = AC.reply ret (AW.Frame next.session next.revision tree vals (AW.status fresh2.phase));
           (True, (next, fresh2, adapter)).
+
+# Preferences belong to the model; endpoint writes serialize with app events.
+preferenceText m = "{Prefs.encode m.preferenceRevision m.preferences}\nundoUsed={E.count m.undo} redoUsed={E.count m.redo} outputUsed={E.count m.out}\nrecoveryBusy={recoveryBusy m}\n".
+recoveryBusy m = pendingKind State.RestoreSession m.pending or pendingKind State.KeepSession m.pending or pendingKind State.SaveDocument m.pending.
+applyPreferences p m = case Prefs.validate p of Err why -> Err why
+  | Ok valid ->
+      changedPath = Prefs.recoveryPath p != Prefs.recoveryPath m.preferences;
+      if changedPath and recoveryBusy m then Err "finish pending restore/save/recovery work before changing recoveryPath"
+      else if Prefs.recoveryPath p == m.path then Err "recoveryPath cannot overwrite the open document"
+      else if not (History.fits (Prefs.retention p) (Prefs.undoDepth p) (E.count m.undo) and History.fits (Prefs.retention p) (Prefs.undoDepth p) (E.count m.redo) and History.fits (Prefs.retention p) (Prefs.outputLines p) (E.count m.out)) then Err "history=preserve refuses a limit below retained history"
+      else output = trimOutput (Prefs.outputLines p) m.out;
+        Ok {m | preferences = valid, undo = E.take (Prefs.undoDepth p) m.undo, redo = E.take (Prefs.undoDepth p) m.redo,
+          out = output, outBack = E.imin m.outBack (E.imax 0 (E.count output - 1)), lastKind = State.NoEdit,
+          recorded = (if changedPath then "" else m.recorded), idle = (if changedPath then 5 else m.idle)}.
+configurePreferences until client text m = case Prefs.parse text of Err why -> Err why
+  | Ok (Prefs.Snapshot expected p) -> case PC.check until client expected m.preferenceRevision of Err why -> Err why
+    | Ok u -> case applyPreferences p m of Err why -> Err why
+      | Ok fresh -> if AC.nowUs Unit >= until then Err "preference update expired" else Ok {fresh | preferenceRevision = expected + 1}.
+preferencesStep me ctx m adapter = if m.preferenceAdapter == 0 then controlStep me ctx m adapter else
+  case receiveFromNow me m.preferenceAdapter of
+    Err why -> controlStep me ctx m adapter
+  | Ok borrowed ->
+      (from, id, request) = keep borrowed; _ = drop borrowed;
+      case request of
+        PC.Inspect until ->
+          _ = AC.reply (from, id) (if AC.nowUs Unit >= until then Err "preference read expired" else Ok (preferenceText m));
+          (True, (ctx, m, adapter))
+      | PC.Change until client text -> case configurePreferences until client text m of
+          Err why -> _ = AC.reply (from, id) (Err why); (True, (ctx, m, adapter))
+        | Ok fresh -> _ = AC.reply (from, id) (Ok (preferenceText fresh));
+            (True, (AS.advance ctx ctx.sequence, fresh, adapter)).

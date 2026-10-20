@@ -1,0 +1,83 @@
+# Session-local preferences, over ordinary leased
+# endpoints. A parked watcher removes the endpoints if the owning app dies.
+unsafe module.
+
+EP = use "ep#c66ad65e68dd97f5".
+Endpoint = use "epservice#e8bce05a1ddf73db".
+AC = use "std/actor#201a0e9bf98a5154".
+Request = Type (Inspect Int | Change Int Int String).
+controlMs = 250.
+url app session = "/apps/{app}/{session}/preferences".
+schemaUrl path = "{path}/schema".
+start me ns path schema = if ns == 0 then Ok 0 else
+  actor = spawn (serve me ns path schema);
+  case receiveFromRes me actor of
+    Ok borrowed -> answer = keep borrowed; _ = drop borrowed; answer
+  | Err why -> Err "preference registration: {why}".
+# Private shutdown uses a reserved handle outside the positive lease range.
+# Only the watcher may send it, keeping the owning app's reply channel homogeneous.
+stopHandle = 0 - 1.
+stop me adapter = if adapter == 0 then Unit else _ = send adapter (me, 0, EP.Close stopHandle); Unit.
+watch owner adapter me = _ = receiveFromRes me owner; stop me adapter.
+register until me ns path owner = EP.flat (AC.callUntil until me ns (EP.NsReg path owner)).
+# Registration replies and forwarded opens both come FROM the namespace.
+# A separate registrar keeps its correlated replies off the endpoint mailbox.
+claim owner ns path me =
+  until = AC.nowUs Unit + controlMs * 1000;
+  result = case register until me ns path owner of Err why -> Err why
+    | Ok u -> register until me ns (schemaUrl path) owner;
+  _ = send owner result; Unit.
+withdraw me ns path =
+  until = AC.nowUs Unit + controlMs * 1000;
+  # Queue withdrawals before exit. No synchronous reply wait on this mixed
+  # namespace channel: pending opens may precede the acknowledgements.
+  _ = report (AC.sendSureUntil until me ns (me, Sys.nextId Unit, EP.NsUnreg path));
+  report (AC.sendSureUntil until me ns (me, Sys.nextId Unit, EP.NsUnreg (schemaUrl path))).
+report (Ok u) = Unit.
+report (Err why) = _ = Sys.logAt 2 "Preference endpoint withdrawal failed: {why}"; Unit.
+serve owner ns path schema me =
+  registrar = spawn (claim me ns path);
+  registered = case receiveFromRes me registrar of
+    Ok borrowed -> answer = keep borrowed; _ = drop borrowed; answer
+  | Err why -> Err why;
+  case registered of
+    Err why -> _ = withdraw me ns path; _ = send owner (Err "preference registration: {why}"); Unit
+  | Ok u ->
+      watcher = spawn (watch owner me);
+      _ = send owner (Ok me);
+      _ = Sys.loop (Nil, 1) (step owner watcher path schema me);
+      _ = kill watcher;
+      withdraw me ns path.
+step owner watcher path schema me state =
+  (handles, next) = state;
+  message = receive me;
+  result = case message of
+    (from, id, command) ->
+      stopping = case command of EP.Close h -> h == stopHandle and from == watcher | other -> False;
+      if stopping then (False, state) else
+        live = Endpoint.liveLeases (AC.nowUs Unit) handles;
+        changed = Endpoint.untilDispatch (read owner path schema) (write owner path) me live next (from, id) from command;
+        (True, changed)
+  | stale -> (True, state);
+  _ = drop message;
+  result.
+read owner base schema until me client path =
+  if path == schemaUrl base then Ok (EP.IStr "{schema}controlMs={controlMs}; registration and removal transport bound\n")
+  else if path == base then answer (AC.callUntil until me owner (Inspect until))
+  else Err "no such preference endpoint".
+write owner base until me client path value =
+  if path != base then Err "preference schema is read-only" else
+  case value of
+    EP.IStr text -> if strlen text > 1536 then Err "preference update exceeds 1536 bytes" else answer (AC.callUntil until me owner (Change until client text))
+  | other -> Err "preference update wants IStr".
+answer (Err why) = Err "preferences: {why}; inspect the revision before retrying".
+answer (Ok (Err why)) = Err why.
+answer (Ok (Ok text)) = Ok (EP.IStr text).
+
+check until client expected current =
+  if Sys.pidOf client != 0 then Err "preferences are system-only"
+  else if expected != current then Err "stale preference revision; current revision={current}"
+  else if current == intMax Unit then Err "preference revision exhausted"
+  else if AC.nowUs Unit >= until then Err "preference update expired" else Ok Unit.
+
+owned borrowed = value = keep borrowed; _ = drop borrowed; value.
