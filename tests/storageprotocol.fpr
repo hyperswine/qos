@@ -1,0 +1,100 @@
+# New typed clients and old Rpc/TimedRpc clients share the unchanged owner.
+unsafe program.
+P = use "std/storageprotocol".
+List = use "std/list".
+Str = use "std/string".
+C = use "std/storageclient".
+FS = use "std/fs#84826bc9e8ddb4b5".
+B = use "std/blockio#8b4ffa1467ca03a5".
+S = use "../programs/mods/svc#75479fb6d5f34670".
+AC = use "std/actor#201a0e9bf98a5154".
+EP = use "../programs/mods/ep#c66ad65e68dd97f5".
+Endpoint = use "../programs/mods/epservice#e8bce05a1ddf73db".
+Files = use "../programs/mods/files".
+QS = use "../programs/mods/qsys".
+check yes why = if yes then Unit else error "storageprotocol: {why}".
+ok (Ok value) = value.
+ok (Err why) = error "unexpected legacy failure: {why}".
+value (Ok text) = text.
+value (Err why) = error "unexpected typed failure: {P.message why}".
+failed (Err _) = True.
+failed _ = False.
+errorKind (Err why) = P.kind why.
+errorKind _ = error "expected typed error".
+unknown (Err why) = P.uncertain why.
+unknown _ = False.
+roundtrip wire target op =
+  (tag, key, bytes) = case P.encode wire target op of Ok fields -> fields | Err why -> error (P.message why);
+  case P.decode (P.version wire) target tag key bytes of Ok actual -> actual == op | Err why -> False.
+codec wire target =
+  ops = [P.ReadLatest "k", P.Append "k" "a\0b", P.Replay "k", P.Delete "k", P.Stats "k", P.Compact];
+  List.all (roundtrip wire target) ops.
+legacyError text = P.message (P.fromLegacy text) == text.
+gone me = Unit.
+hung me = _ = receive me; _ = Sys.sleepUs 3000000; hung me.
+noise target me = send target "unrelated".
+late first me =
+  (ret, _) = S.requestFields (receive me);
+  _ = if first then Sys.sleepUs 60000 else Unit;
+  _ = S.reply ret (Ok (if first then "old" else "fresh"));
+  late False me.
+echo me =
+  (ret, (until, (tag, key, bytes))) = S.requestFields (receive me);
+  _ = S.reply ret (Ok "tag={tag} key={key} bytes={bytes}"); Unit.
+main =
+  me = myself 0;
+  _ = check (List.all (codec P.LegacyV1) [P.FilesOwner, P.Qlog, P.FilesAdapter] and List.all (codec P.DeadlineV2) [P.FilesOwner, P.Qlog, P.FilesAdapter]) "wire round trips";
+  _ = check (roundtrip P.LegacyV1 P.Qlog (P.AppendBulk "bulk") and roundtrip P.DeadlineV2 P.FilesOwner P.Quiesce and roundtrip P.DeadlineV2 P.FilesOwner P.Verify) "target specific round trips";
+  _ = check (failed (P.encode P.DeadlineV2 P.FilesOwner (P.AppendBulk "bulk")) and failed (P.encode P.DeadlineV2 P.Qlog P.Quiesce) and failed (P.encode P.DeadlineV2 P.FilesAdapter P.Verify)) "tag 7 confusion";
+  _ = check (failed (P.decode 3 P.FilesOwner 1 "k" "") and failed (P.decode 2 P.FilesOwner 99 "" "") and failed (P.decode 2 P.FilesOwner 1 "k" "ignored") and failed (P.decode 2 P.FilesOwner 7 "" "bulk")) "malformed codec accepted";
+  errors = ["no such file", "no disk", "storage service: mailbox full", "storage service: dead actor", "storage service: deadline exceeded (outcome unknown)", "storage offline: shutdown", "future diagnostic", "prefix no such file suffix"];
+  _ = check (List.all legacyError errors) "error text not lossless";
+  _ = check (value (P.optional (P.decodeResult (Err "no such file"))) == "" and failed (P.optional (P.decodeResult (Err "no disk"))) and failed (P.optional (P.decodeResult (Err "prefix no such file suffix")))) "missing-only fallback";
+  _ = check (errorKind (C.request me (C.Owner 0) (P.ReadLatest "k")) == P.DiskAbsent) "disk absence";
+  _ = check (errorKind (C.within (-1) me (C.Owner 0) (P.ReadLatest "k")) == P.BadDuration) "negative budget";
+  _ = check (errorKind (P.encode P.DeadlineV2 P.FilesOwner (P.ReadLatest (Str.repeat 1025 "k"))) == P.KeyLimit) "typed key limit";
+  _ = check (errorKind (P.encode P.DeadlineV2 P.FilesOwner (P.Append "k" (Str.repeat 4194305 "x"))) == P.PayloadLimit) "typed payload limit";
+  spy = spawn echo;
+  _ = check (errorKind (C.request me (C.Owner spy) (P.AppendBulk "bulk")) == P.Unsupported) "bulk sent to owner";
+  _ = check (value (C.request me (C.Log spy) (P.AppendBulk "bulk")) == "tag=7 key= bytes=bulk") "wrong bulk envelope";
+  dead = spawn gone;
+  _ = Sys.sleepUs 20000;
+  _ = check (errorKind (C.request me (C.Owner dead) (P.ReadLatest "k")) == P.DeadActor) "actor death";
+  stuck = spawn hung;
+  _ = check (unknown (C.within 20 me (C.Owner stuck) (P.Append "k" "unconfirmed"))) "mutation uncertainty lost";
+  _ = kill stuck;
+  later = spawn (late True);
+  event = spawn (noise me);
+  _ = check (failed (C.within 10 me (C.Owner later) (P.ReadLatest "k"))) "late reply admitted";
+  _ = check (value (C.within 250 me (C.Owner later) (P.ReadLatest "k")) == "fresh" and receiveFrom me event == "unrelated") "correlation or unrelated traffic";
+  _ = kill later;
+  block = B.serve me (device "blk");
+  fs = ok (FS.startBlock me block);
+  _ = check (errorKind (C.request me (C.Owner fs) (P.ReadLatest "absent")) == P.MissingRecord) "real missing record";
+  _ = value (C.request me (C.Owner fs) (P.Append "typed/value" "a\0b"));
+  _ = check (ok (FS.readLatest me fs "typed/value") == "a\0b") "old timed client cannot read typed write";
+  _ = send fs (S.Rpc me 2 "typed/value" "legacy");
+  _ = ok (receiveFrom me fs);
+  _ = check (value (C.request me (C.Owner fs) (P.Replay "typed/value")) == "a\0blegacy") "legacy v1 append compatibility";
+  _ = value (C.request me (C.Owner fs) P.Verify);
+  ns = spawn Endpoint.namespace;
+  service = spawn (Files.serve fs);
+  _ = ok (EP.register me ns "/services/files" service);
+  schema = ok (EP.readOnce me ns "/services/files/schema");
+  _ = check (case schema of EP.IStr text -> text == P.schema P.FilesAdapter | _ -> False) "live schema";
+  _ = check (failed (EP.writeOnce me ns "/services/files/schema" (EP.IStr "version=3"))) "mutable ABI";
+  adapter = FS.connect me ns;
+  _ = value (C.request me (C.Adapter adapter) (P.Append "typed/value" "adapter"));
+  _ = check (value (C.request me (C.Adapter adapter) (P.ReadLatest "typed/value")) == "adapter") "typed namespace adapter";
+  _ = check (errorKind (C.request me (C.Adapter adapter) P.Quiesce) == P.Unsupported) "adapter quiesce";
+  _ = value (C.request me (C.Owner fs) (P.Delete "typed/value"));
+  _ = check (errorKind (C.request me (C.Owner fs) (P.ReadLatest "typed/value")) == P.MissingRecord) "delete";
+  _ = value (C.request me (C.Owner fs) P.Compact);
+  # Main's independent composition exposes the owner schema even diskless.
+  q = QS.bootNoDisk me;
+  QS.Qsys qns _ _ _ _ = q;
+  _ = check (case ok (EP.readOnce me qns "/services/storage-schema") of EP.IStr text -> text == P.schema P.FilesOwner | _ -> False) "Main schema";
+  _ = value (C.request me (C.Owner fs) P.Quiesce);
+  _ = check (errorKind (C.request me (C.Owner fs) (P.Stats "")) == P.Offline) "quiesced owner restarted";
+  _ = ok (FS.shutdown me fs block);
+  "storageprotocol: HOLDS".

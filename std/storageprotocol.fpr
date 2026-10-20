@@ -1,0 +1,111 @@
+# Typed interpretation of the existing storage ABI. Never renumber these tags:
+# separately compiled clients still send Svc.Rpc and Svc.TimedRpc.
+Wire = use "std/storage#a8f7ee14e1efae76".
+StorageOp = Type (ReadLatest String | Append String String | Replay String | Delete String | Stats String | Compact | Quiesce | AppendBulk String | Verify).
+TargetKind = Type (FilesOwner | Qlog | FilesAdapter).
+WireVersion = Type (LegacyV1 | DeadlineV2).
+ErrorKind = Type (MissingRecord | DiskAbsent | KeyLimit | PayloadLimit | BadDuration | Deadline | DeadActor | MailboxFull | Offline | InvalidWire | Unsupported | Other).
+Outcome = Type (NotStarted | Unknown | Reported).
+# Preserve original diagnostics, including future errors from old/new servers.
+StorageError = Type (StorageError ErrorKind Outcome String).
+kind (StorageError k _ _) = k.
+outcome (StorageError _ o _) = o.
+message (StorageError _ _ text) = text.
+missing (StorageError MissingRecord _ _) = True.
+missing other = False.
+uncertain (StorageError _ Unknown _) = True.
+uncertain other = False.
+failure k text = Err (StorageError k NotStarted text).
+fromLegacy "no such file" = StorageError MissingRecord Reported "no such file".
+fromLegacy "no disk" = StorageError DiskAbsent NotStarted "no disk".
+fromLegacy "storage: key too large" = StorageError KeyLimit NotStarted "storage: key too large".
+fromLegacy "storage: payload too large" = StorageError PayloadLimit NotStarted "storage: payload too large".
+fromLegacy "invalid deadline duration" = StorageError BadDuration NotStarted "invalid deadline duration".
+fromLegacy "storage service: deadline exceeded before admission" = StorageError Deadline NotStarted "storage service: deadline exceeded before admission".
+fromLegacy "storage: deadline exceeded before execution" = StorageError Deadline NotStarted "storage: deadline exceeded before execution".
+fromLegacy "storage service: mailbox full" = StorageError MailboxFull NotStarted "storage service: mailbox full".
+fromLegacy "storage service: dead actor" = StorageError DeadActor Unknown "storage service: dead actor".
+fromLegacy "storage service: dead actor (outcome unknown)" = StorageError DeadActor Unknown "storage service: dead actor (outcome unknown)".
+fromLegacy "storage service: deadline exceeded (outcome unknown)" = StorageError Deadline Unknown "storage service: deadline exceeded (outcome unknown)".
+fromLegacy text =
+  k = if prefix "storage offline: " text then Offline else Other;
+  o = if strIndexOf "outcome unknown" text >= 0 then Unknown else Reported;
+  StorageError k o text.
+prefix p text = strlen text >= strlen p and substr text 0 (strlen p) == p.
+decodeResult (Ok value) = Ok value.
+decodeResult (Err text) = Err (fromLegacy text).
+legacyResult (Ok value) = Ok value.
+legacyResult (Err why) = Err (message why).
+optional (Ok value) = Ok value.
+optional (Err why) = if missing why then Ok "" else Err why.
+
+version LegacyV1 = 1.
+version DeadlineV2 = 2.
+decodeVersion 1 = Ok LegacyV1.
+decodeVersion 2 = Ok DeadlineV2.
+decodeVersion n = failure InvalidWire "unsupported storage wire version: {n}".
+targetName FilesOwner = "files-owner".
+targetName Qlog = "qlog".
+targetName FilesAdapter = "files-adapter".
+name (ReadLatest _) = "read-latest".
+name (Append _ _) = "append".
+name (Replay _) = "replay".
+name (Delete _) = "delete".
+name (Stats _) = "stats".
+name Compact = "compact".
+name Quiesce = "quiesce".
+name (AppendBulk _) = "append-bulk".
+name Verify = "verify".
+mutates (Append _ _) = True.
+mutates (Delete _) = True.
+mutates Compact = True.
+mutates Quiesce = True.
+mutates (AppendBulk _) = True.
+mutates other = False.
+supported FilesOwner (AppendBulk _) = False.
+supported Qlog Quiesce = False.
+supported FilesAdapter Quiesce = False.
+supported FilesAdapter (AppendBulk _) = False.
+supported FilesAdapter Verify = False.
+supported target op = True.
+fields (ReadLatest key) = (1, key, "").
+fields (Append key bytes) = (2, key, bytes).
+fields (Replay key) = (3, key, "").
+fields (Delete key) = (4, key, "").
+fields (Stats key) = (5, key, "").
+fields Compact = (6, "", "").
+fields Quiesce = (7, "", "").
+fields (AppendBulk bytes) = (7, "", bytes).
+fields Verify = (8, "", "").
+# v1/v2 share operation fields; the envelope supplies correlation/deadline in
+# v2. The target is essential: v1 and v2 both overload tag 7.
+encode : WireVersion -> TargetKind -> StorageOp -> Result (Int, String, String) StorageError .
+encode wire target op =
+  if not (supported target op) then failure Unsupported "{name op} is unsupported by {targetName target}" else
+  (tag, key, bytes) = fields op;
+  case decodeResult (Wire.validate key bytes) of
+    Err why -> Err why
+  | Ok u -> Ok (tag, key, bytes).
+decode : Int -> TargetKind -> Int -> String -> String -> Result StorageOp StorageError .
+decode v target tag key bytes = case decodeVersion v of
+    Err why -> Err why
+  | Ok wire -> case operation target tag key bytes of
+      Err why -> Err why
+    | Ok op -> case encode wire target op of
+        Err why -> Err why
+      | Ok canonical -> if canonical == (tag, key, bytes) then Ok op
+          else failure InvalidWire "noncanonical storage operation fields".
+operation target 1 key bytes = Ok (ReadLatest key).
+operation target 2 key bytes = Ok (Append key bytes).
+operation target 3 key bytes = Ok (Replay key).
+operation target 4 key bytes = Ok (Delete key).
+operation target 5 key bytes = Ok (Stats key).
+operation target 6 key bytes = Ok Compact.
+operation FilesOwner 7 key bytes = Ok Quiesce.
+operation Qlog 7 key bytes = Ok (AppendBulk bytes).
+operation target 8 key bytes = Ok Verify.
+operation target tag key bytes = failure InvalidWire "unknown storage operation tag: {tag}".
+schema target = "type=StorageOp,StorageError version=1\nwire=1 Rpc; 2 TimedRpc (correlation and absolute deadline)\nclientWire=2\ntarget={targetName target}\noperations=1 read-latest; 2 append; 3 replay; 4 delete; 5 stats; 6 compact\n{extra target}\nmaxKeyBytes={Wire.maxKeyBytes}\nmaxPayloadBytes={Wire.maxPayloadBytes}\ndefaultMs={Wire.defaultMs}\nerrors=missing-record,disk-absent,key-limit,payload-limit,bad-duration,deadline,dead-actor,mailbox-full,offline,invalid-wire,unsupported,other\noutcomes=not-started,unknown,reported; reported retains server diagnostic without inferring commit status\nmissing=only exact no such file permits an empty/default value\nmutability=wire tags and target capabilities are read-only ABI constraints; change requires a versioned migration\ndeadline=caller selects budget per new operation; never renew an in-flight deadline or replay an uncertain mutation\n".
+extra FilesOwner = "operationsExtra=7 quiesce (creator only); 8 verify".
+extra Qlog = "operationsExtra=7 append-bulk; 8 verify".
+extra FilesAdapter = "operationsExtra=none; quiesce,append-bulk,verify unsupported".

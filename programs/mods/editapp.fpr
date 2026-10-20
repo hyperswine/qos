@@ -38,6 +38,8 @@ AV = use "appview".
 L = use "shelllayout".
 AK = use "appkit".
 E = use "editbuf".
+State = use "editorstate".
+Control = use "editorcontrol".
 Fm = use "fontm".
 S2 = use "scene2d".
 AC = use "std/actor#201a0e9bf98a5154".
@@ -50,13 +52,11 @@ PG = use "std/hosted".
 sessionPath = "/home/.editor/session".
 undoDepth = 200.
 outKeep = 400.
-# the kinds of job in flight (a list: the worker serves them in order)
-kOpen = 1. kList = 2. kSave = 3. kSession = 4. kBuild = 5. kRun = 6. kRestore = 7. kCheck = 8. kAsk = 10.
-
+# Pending jobs retain their typed kind until the matching reply arrives.
 init = ({policyNamespace = 0, runAdmission = RunPolicy.Unadmitted, buf = E.empty, path = "", version = 0, savedVersion = 0, nextStamp = 1, recorded = "", idle = 0,
-         top = 0, left = 0, undo = Nil, redo = Nil, lastKind = 0, clip = "",
-         mode = 0, query = "", files = Nil, listed = False, pick = 0, findText = "", msg = "", warn = False,
-         out = Nil, outOpen = False, confirm = 0, pending = [{token = 1, kind = kRestore, version = 0, path = sessionPath, wrapped = False, grant = FA.NoGrant}],
+         top = 0, left = 0, undo = Nil, redo = Nil, lastKind = State.NoEdit, clip = "",
+         mode = State.Editing, query = "", files = Nil, listed = False, pick = 0, findText = "", msg = "", warn = False,
+         out = Nil, outOpen = False, confirm = State.NoConfirmation, pending = [{token = 1, kind = State.RestoreSession, version = 0, path = sessionPath, wrapped = False, grant = FA.NoGrant}],
          diags = Nil, checking = False, checker = True, checkedVersion = 0 - 1,
          outBack = 0, token = 1, building = False, running = False, proc = 0, partial = "", appRun = False, progView = Nil, progFocus = False, busy = False, phase = AW.Ready, w = 960, h = 530, focused = True,
          down = False, capture = 0 - 1, wheel = 0, scroll = 0, dragY = 0, dragScroll = 0, dragged = False},
@@ -71,7 +71,7 @@ update AW.Tick m = tick m.
 update (AW.Wheel dy dx) m = (wheelBy dy m, Nil).
 update (AW.Pointer x y buttons) m = (pointer x y buttons m, Nil).
 update (AW.Key k) m = if appKeys m and k != 4019 and k != 4036 then (tellProg (PG.KeyIn k) m, Nil)
-  else if m.mode == 0 then editKey k m else promptKey k m.
+  else if m.mode == State.Editing then editKey k m else promptKey k m.
 update (AW.Arrived token result) m = arrived token result m.
 update other m = (m, Nil).
 
@@ -84,7 +84,7 @@ geo m =
   headH = 30 * s / 1000;
   gap = 8 * s / 1000;
   barH = 34 * s / 1000;
-  panelRows = (if m.mode == 1 then 8 else if appShown m then 12 else if m.outOpen then 7 else 0);
+  panelRows = (if m.mode == State.OpenPrompt then 8 else if appShown m then 12 else if m.outOpen then 7 else 0);
   panelH = (if panelRows == 0 then 0 else panelRows * pitch + 2 * gap + 18 * s / 1000);
   textY = a.margin + headH + gap;
   textH = E.imax pitch (m.h - 2 * a.margin - headH - barH - 2 * gap - panelH - (if panelH > 0 then gap else 0));
@@ -112,11 +112,11 @@ follow m =
 # ---- keys ---------------------------------------------------------------------
 # keycodes are the input tier's: shift +1000, ctrl +4000, alt +8000
 editKey 4031 m = save m.
-editKey 5031 m = (prompt 2 (if m.path == "" then "/home/" else m.path) m, Nil).
+editKey 5031 m = (prompt State.SaveAsPrompt (if m.path == "" then "/home/" else m.path) m, Nil).
 editKey 4024 m = openPicker m.
 editKey 4049 m = (newFile m, Nil).
-editKey 4033 m = (prompt 3 (findSeed m) m, Nil).
-editKey 4034 m = (prompt 4 "" m, Nil).
+editKey 4033 m = (prompt State.FindPrompt (findSeed m) m, Nil).
+editKey 4034 m = (prompt State.GotoPrompt "" m, Nil).
 editKey 4036 m = if m.running and m.appRun then ({m | progFocus = not m.progFocus}, Nil) else ({m | outOpen = not m.outOpen}, Nil).
 editKey 4048 m = build m.
 editKey 4019 m = if m.running then halt m else runIt m.
@@ -127,20 +127,20 @@ editKey 4030 m = (moved (E.selectAll m.buf) m, Nil).
 editKey 4046 m = (copy m, Nil).
 editKey 4045 m = (cut m, Nil).
 editKey 4047 m = (paste m, Nil).
-editKey 4032 m = (edit 4 (E.duplicateLine m.buf) m, Nil).
-editKey 4037 m = (edit 4 (E.deleteLines m.buf) m, Nil).
-editKey 4027 m = (edit 4 (E.indent m.buf) m, Nil).
-editKey 4026 m = (edit 4 (E.outdent m.buf) m, Nil).
-editKey 8103 m = (edit 4 (E.moveLines (0 - 1) m.buf) m, Nil).
-editKey 8108 m = (edit 4 (E.moveLines 1 m.buf) m, Nil).
-editKey 15 m = (edit 4 (tab m.buf) m, Nil).
-editKey 28 m = (edit 2 (E.newline m.buf) m, Nil).
-editKey 14 m = (edit 5 (E.backspace m.buf) m, Nil).
-editKey 111 m = (edit 5 (E.deleteForward m.buf) m, Nil).
+editKey 4032 m = (edit State.Structural (E.duplicateLine m.buf) m, Nil).
+editKey 4037 m = (edit State.Structural (E.deleteLines m.buf) m, Nil).
+editKey 4027 m = (edit State.Structural (E.indent m.buf) m, Nil).
+editKey 4026 m = (edit State.Structural (E.outdent m.buf) m, Nil).
+editKey 8103 m = (edit State.Structural (E.moveLines (0 - 1) m.buf) m, Nil).
+editKey 8108 m = (edit State.Structural (E.moveLines 1 m.buf) m, Nil).
+editKey 15 m = (edit State.Structural (tab m.buf) m, Nil).
+editKey 28 m = (edit State.LineBreak (E.newline m.buf) m, Nil).
+editKey 14 m = (edit State.Deleting (E.backspace m.buf) m, Nil).
+editKey 111 m = (edit State.Deleting (E.deleteForward m.buf) m, Nil).
 editKey k m = case navigate k m of
     (True, b) -> (moved b m, Nil)
   | (False, b) -> c = AK.keyChar k;
-      if strlen c == 0 then (m, Nil) else (edit 1 (E.insert c m.buf) m, Nil).
+      if strlen c == 0 then (m, Nil) else (edit State.Typing (E.insert c m.buf) m, Nil).
 # a navigation key: (True, the buffer with the caret moved); others (False, _)
 navigate k m = g = geo m; b = m.buf; case k of
     105 -> (True, E.left False b)          | 1105 -> (True, E.left True b)
@@ -161,52 +161,53 @@ tab b = if E.hasSelection b then E.indent b else E.insert (E.spaces (2 - b.col %
 
 # an edit: one undo step per run of typing (or of deleting), one per other edit
 edit kind b m =
-  coalesce = kind == m.lastKind and (kind == 1 or kind == 5) and m.undo != Nil;
+  coalesce = kind == m.lastKind and State.coalesces kind and m.undo != Nil;
   undos = (if coalesce then m.undo else E.take undoDepth ((m.buf, m.version) :: m.undo));
   follow {m | buf = b, version = m.nextStamp, nextStamp = m.nextStamp + 1, undo = undos, redo = Nil,
-              lastKind = kind, idle = 0, confirm = 0, warn = False}.
-moved b m = follow {m | buf = b, lastKind = 0, confirm = 0}.
+              lastKind = kind, idle = 0, confirm = State.NoConfirmation, warn = False}.
+moved b m = follow {m | buf = b, lastKind = State.NoEdit, confirm = State.NoConfirmation}.
 undo m = case m.undo of
     Nil -> {m | msg = "Nothing to undo", warn = False}
-  | (b, v) :: rest -> follow {m | buf = b, version = v, undo = rest, redo = (m.buf, m.version) :: m.redo, lastKind = 0, idle = 0}.
+  | (b, v) :: rest -> follow {m | buf = b, version = v, undo = rest, redo = (m.buf, m.version) :: m.redo, lastKind = State.NoEdit, idle = 0}.
 redo m = case m.redo of
     Nil -> {m | msg = "Nothing to redo", warn = False}
-  | (b, v) :: rest -> follow {m | buf = b, version = v, redo = rest, undo = (m.buf, m.version) :: m.undo, lastKind = 0, idle = 0}.
+  | (b, v) :: rest -> follow {m | buf = b, version = v, redo = rest, undo = (m.buf, m.version) :: m.undo, lastKind = State.NoEdit, idle = 0}.
 copy m = if E.hasSelection m.buf then {m | clip = E.selected m.buf, msg = "Copied", warn = False}
   else {m | clip = E.lineText m.buf, msg = "Copied the line", warn = False}.
-cut m = if E.hasSelection m.buf then edit 3 (E.deleteSelection m.buf) {m | clip = E.selected m.buf, msg = "Cut", warn = False}
-  else edit 4 (E.deleteLines m.buf) {m | clip = E.lineText m.buf, msg = "Cut the line", warn = False}.
+cut m = if E.hasSelection m.buf then edit State.Clipboard (E.deleteSelection m.buf) {m | clip = E.selected m.buf, msg = "Cut", warn = False}
+  else edit State.Structural (E.deleteLines m.buf) {m | clip = E.lineText m.buf, msg = "Cut the line", warn = False}.
 # a whole line (copied without a selection) goes in above the caret's line
 paste m = if strlen m.clip == 0 then {m | msg = "Nothing to paste", warn = False}
   else if E.endsWith "\n" m.clip and not (E.hasSelection m.buf) then
-    b = m.buf; edit 3 (E.at (b.row + E.count (E.splitLines m.clip) - 1) b.col (E.insert m.clip (E.at b.row 0 b))) m
-  else edit 3 (E.insert m.clip m.buf) m.
+    b = m.buf; edit State.Clipboard (E.at (b.row + E.count (E.splitLines m.clip) - 1) b.col (E.insert m.clip (E.at b.row 0 b))) m
+  else edit State.Clipboard (E.insert m.clip m.buf) m.
 dirty m = m.version != m.savedVersion.
 
 # ---- the prompt: open, save as, find, go to line ------------------------------
-prompt mode seed m = {m | mode = mode, query = seed, pick = 0, confirm = 0}.
+cancelPrompt m = {m | mode = State.Editing, confirm = State.NoConfirmation}.
+prompt mode seed m = {m | mode = mode, query = seed, pick = 0, confirm = State.NoConfirmation}.
 findSeed m = s = E.selected m.buf; if strlen s > 0 and strIndexOf "\n" s < 0 then s else m.findText.
 promptKey 28 m = submit m.
-promptKey 14 m = if strlen m.query == 0 then ({m | mode = 0}, Nil) else ({m | query = E.before m.query (E.prevB m.query (strlen m.query)), pick = 0, confirm = 0}, Nil).
-promptKey 103 m = ({m | pick = E.imax 0 (m.pick - 1), confirm = 0}, Nil).
-promptKey 108 m = ({m | pick = E.imin (E.imax 0 (E.count (pickList m) - 1)) (m.pick + 1), confirm = 0}, Nil).
-promptKey k m = if k == ownKey m.mode then ({m | mode = 0}, Nil) else
+promptKey 14 m = if strlen m.query == 0 then (cancelPrompt m, Nil) else ({m | query = E.before m.query (E.prevB m.query (strlen m.query)), pick = 0, confirm = State.NoConfirmation}, Nil).
+promptKey 103 m = ({m | pick = E.imax 0 (m.pick - 1), confirm = State.NoConfirmation}, Nil).
+promptKey 108 m = ({m | pick = E.imin (E.imax 0 (E.count (pickList m) - 1)) (m.pick + 1), confirm = State.NoConfirmation}, Nil).
+promptKey k m = if k == ownKey m.mode then (cancelPrompt m, Nil) else
   c = AK.keyChar k;
-  if strlen c == 0 then (m, Nil) else ({m | query = strcat m.query c, pick = 0, confirm = 0}, Nil).
-ownKey 1 = 4024. ownKey 2 = 5031. ownKey 3 = 4033. ownKey 4 = 4034. ownKey other = 0 - 1.
+  if strlen c == 0 then (m, Nil) else ({m | query = strcat m.query c, pick = 0, confirm = State.NoConfirmation}, Nil).
+ownKey State.OpenPrompt = 4024. ownKey State.SaveAsPrompt = 5031. ownKey State.FindPrompt = 4033. ownKey State.GotoPrompt = 4034. ownKey State.Editing = 0 - 1.
 submit m = case m.mode of
-    1 -> pickOpen m
-  | 2 -> saveAs m.query m
-  | 3 -> (find m, Nil)
-  | 4 -> (gotoLine m, Nil)
-  | other -> ({m | mode = 0}, Nil).
-find m = if strlen m.query == 0 then {m | mode = 0} else
+    State.OpenPrompt -> pickOpen m
+  | State.SaveAsPrompt -> saveAs m.query m
+  | State.FindPrompt -> (find m, Nil)
+  | State.GotoPrompt -> (gotoLine m, Nil)
+  | State.Editing -> (cancelPrompt m, Nil).
+find m = if strlen m.query == 0 then {m | mode = State.Editing} else
   b = E.findNext m.query m.buf;
   n = E.occurrences m.query m.buf;
   if n == 0 then {m | findText = m.query, msg = "No match for {m.query}", warn = True}
   else moved b {m | findText = m.query, msg = "{n} match{(if n == 1 then "" else "es")} -- Enter for the next, ^F closes", warn = False}.
 gotoLine m = n = parseInt m.query;
-  if n <= 0 then {m | mode = 0} else moved (E.gotoLine n m.buf) {m | mode = 0, msg = "Line {n}", warn = False}.
+  if n <= 0 then {m | mode = State.Editing} else moved (E.gotoLine n m.buf) {m | mode = State.Editing, msg = "Line {n}", warn = False}.
 
 # ---- files --------------------------------------------------------------------
 issue kind version path job m = issueAs False kind version path job m.
@@ -216,7 +217,7 @@ issueAs wrapped kind version path job m = issueGranted FA.NoGrant wrapped kind v
 issueGranted grant wrapped kind version path job m =
   t = m.token + 1;
   ({m | token = t, pending = {token = t, kind = kind, version = version, path = path, wrapped = wrapped, grant = grant} :: m.pending}, [AW.Fetch t job]).
-openPicker m = issue kList 0 "" AW.ListRoot {m | mode = 1, query = "", pick = 0, listed = False, confirm = 0}.
+openPicker m = issue State.ListDocuments 0 "" AW.ListRoot {m | mode = State.OpenPrompt, query = "", pick = 0, listed = False, confirm = State.NoConfirmation}.
 pickList m = filterS (fn u -> matches m.query u) m.files.
 matches q u = strlen q == 0 or strIndexOf (lower q) (lower u) >= 0.
 pickOpen m =
@@ -225,18 +226,18 @@ pickOpen m =
   if strlen path == 0 or charAt path 0 != 47 then ({m | msg = "Type a path (/home/name.fpr) or pick a file", warn = True}, Nil)
   else openPath path m.
 # unsaved work is not thrown away by a second open without being asked
-openPath path m = if dirty m and m.confirm != 1 then
-    ({m | confirm = 1, msg = "Unsaved changes in {name m}: Enter again to discard them, ^S to save", warn = True}, Nil)
-  else issue kOpen 0 path (AW.ReadPath path) {m | mode = 0, confirm = 0, msg = "Opening {path}", warn = False}.
-newFile m = if dirty m and m.confirm != 2 then {m | confirm = 2, msg = "Unsaved changes in {name m}: ^N again to discard them, ^S to save", warn = True}
+openPath path m = if dirty m and m.confirm != State.DiscardForOpen path then
+    ({m | confirm = State.DiscardForOpen path, msg = "Unsaved changes in {name m}: Enter again to discard them, ^S to save", warn = True}, Nil)
+  else issue State.OpenDocument 0 path (AW.ReadPath path) {m | mode = State.Editing, confirm = State.NoConfirmation, msg = "Opening {path}", warn = False}.
+newFile m = if dirty m and m.confirm != State.DiscardForNew then {m | confirm = State.DiscardForNew, msg = "Unsaved changes in {name m}: ^N again to discard them, ^S to save", warn = True}
   else fresh "" E.empty {m | msg = "New file -- ^S saves it", warn = False}.
 fresh path b m = follow {m | buf = b, path = path, version = m.nextStamp, savedVersion = m.nextStamp, nextStamp = m.nextStamp + 1,
-  undo = Nil, redo = Nil, top = 0, left = 0, lastKind = 0, confirm = 0, mode = 0, diags = Nil}.
-save m = if m.path == "" then (prompt 2 "/home/" m, Nil) else
-  issue kSave m.version m.path (AW.SaveFile m.path (E.toText m.buf)) {m | msg = "Saving {m.path}", warn = False}.
+  undo = Nil, redo = Nil, top = 0, left = 0, lastKind = State.NoEdit, confirm = State.NoConfirmation, mode = State.Editing, diags = Nil}.
+save m = if m.path == "" then (prompt State.SaveAsPrompt "/home/" m, Nil) else
+  issue State.SaveDocument m.version m.path (AW.SaveFile m.path (E.toText m.buf)) {m | msg = "Saving {m.path}", warn = False}.
 saveAs path m =
   if not (E.startsWith "/home/" path or E.startsWith "/tmp/" path) or E.endsWith "/" path then ({m | msg = "Files live under /home/ and /tmp/", warn = True}, Nil)
-  else save {m | path = path, mode = 0}.
+  else save {m | path = path, mode = State.Editing}.
 name m = if m.path == "" then "untitled" else baseName m.path.
 
 # ---- the compiler ---------------------------------------------------------------
@@ -245,7 +246,7 @@ name m = if m.path == "" then "untitled" else baseName m.path.
 build m = if m.building then ({m | msg = "Already building", warn = False}, Nil)
   else if not (colored m) then ({m | msg = "Only FP-RISC (.fpr) files build", warn = True}, Nil) else
   (wrapped, src) = package m;
-  issueAs wrapped kBuild m.version m.path (AW.Compile (if wrapped then runProfile else buildProfile) src)
+  issueAs wrapped State.BuildSource m.version m.path (AW.Compile (if wrapped then runProfile else buildProfile) src)
     {m | building = True, checker = True, outOpen = True, outBack = 0, out = say m.out ["", "build {name m}: compiling..."], msg = "Building {name m}", warn = False}.
 # a program is built as Run packages it -- so ^R after ^B is the daemon's
 # cached package -- and a module as it is
@@ -258,7 +259,7 @@ runIt m = if m.building then ({m | msg = "Already building", warn = False}, Nil)
   else if not (colored m) then ({m | msg = "Only FP-RISC (.fpr) files run", warn = True}, Nil)
   else if not (RP.hasMain m.buf.lines or RP.hasApp m.buf.lines) then ({m | msg = "Nothing to run: {name m} has no main and no app", warn = True}, Nil) else
   (wrapped, src) = package m;
-  issueAs True kRun m.version m.path (AW.Compile runProfile src)
+  issueAs True State.RunSource m.version m.path (AW.Compile runProfile src)
     {m | building = True, checker = True, outOpen = True, outBack = 0, partial = "", appRun = RP.hasApp m.buf.lines, progView = Nil, progFocus = False,
          out = say m.out ["", "run {name m}: compiling..."], msg = "Starting {name m}", warn = False}.
 halt m = (ended (stopProgram m) "stopped" m, Nil).
@@ -310,16 +311,15 @@ findJob token (p :: rest) = if p.token == token then [p] else findJob token rest
 withoutJob token Nil = Nil.
 withoutJob token (p :: rest) = if p.token == token then rest else p :: withoutJob token rest.
 settle p result m = case p.kind of
-    7 -> restore result m
-  | 1 -> opened p result m
-  | 2 -> listed result m
-  | 3 -> saved p result m
-  | 4 -> (case result of Ok r -> (m, Nil) | Err why -> ({m | msg = "Could not keep the recovery copy: {why}", warn = True}, Nil))
-  | 5 -> built p result m
-  | 6 -> started p result m
-  | 8 -> (checked p result m, Nil)
-  | 10 -> (answered p result m, Nil)
-  | other -> (m, Nil).
+    State.RestoreSession -> restore result m
+  | State.OpenDocument -> opened p result m
+  | State.ListDocuments -> listed result m
+  | State.SaveDocument -> saved p result m
+  | State.KeepSession -> (case result of Ok r -> (m, Nil) | Err why -> ({m | msg = "Could not keep the recovery copy: {why}", warn = True}, Nil))
+  | State.BuildSource -> built p result m
+  | State.RunSource -> started p result m
+  | State.CheckSource -> (checked p result m, Nil)
+  | State.ProgramRequest -> (answered p result m, Nil).
 # the session record: "qed1", the path, 1 when the text that follows is
 # unsaved work, then that text
 restore result m = case result of
@@ -423,12 +423,12 @@ askedWith snapshot token req m = case req of
   | PG.ListReq prefix -> forProgramWith snapshot FA.List token prefix AW.ListRoot m.
 forProgramWith snapshot operation token path job m = case FA.admit snapshot operation path of
     Err why -> refuseAsk token why m
-  | Ok grant -> issueGranted grant False kAsk token path job m.
+  | Ok grant -> issueGranted grant False State.ProgramRequest token path job m.
 refuseAsk token why m = (tellProg (PG.Answer token (PG.Failed why)) m, Nil).
 # Pure default-policy probes used by standalone clients and existing tests.
 allowedPath p = case FA.admit (FA.Snapshot 0 FA.defaults) FA.Read p of Ok g -> True | Err why -> False.
 allowedPrefix p = case FA.admit (FA.Snapshot 0 FA.defaults) FA.List p of Ok g -> True | Err why -> False.
-# the worker's answer, as the program's: Arrived for a kAsk
+# the worker's answer, as the program's: Arrived for a State.ProgramRequest
 answered p result m = if not m.running then m else
   reply = (case result of
       Ok (AW.Text t) -> PG.Text t
@@ -438,7 +438,7 @@ answered p result m = if not m.running then m else
     | Err why -> PG.Failed why);
   tellProg (PG.Answer p.version reply) m.
 tellProg x m = if not m.running then m else _ = RP.tellActor m.proc x; m.
-appKeys m = m.running and m.appRun and m.progFocus and m.mode == 0.
+appKeys m = m.running and m.appRun and m.progFocus and m.mode == State.Editing.
 appShown m = m.appRun and (m.running or m.building).
 # the panel an app draws in, in characters (the font's average width)
 progCols m = g = geo m; E.imax 10 ((g.contentW - 2 * g.gap) * 10 / (E.imax 1 (g.em * 6))).
@@ -458,7 +458,7 @@ ended text how m =
   # its asks still with the worker are forgotten: an answer for this program
   # must never reach the next one
   {m | running = False, proc = 0, partial = "", outOpen = True, outBack = 0, appRun = False, progView = Nil, progFocus = False,
-    pending = filterS (fn p -> p.kind != kAsk) m.pending,
+    pending = filterS (fn p -> p.kind != State.ProgramRequest) m.pending,
     out = say m.out (E.append kept ["run {name m}: {how}"]),
     msg = (if how == "finished" or how == "stopped" then "{name m}: {how}" else "{name m} failed: {how}"),
     warn = not (how == "finished" or how == "stopped")}.
@@ -474,7 +474,7 @@ dropUnit lines = case E.reverse lines of
 # stop and say so once.
 liveCheck m = if not m.checker or m.checking or m.idle < 3 or m.version == m.checkedVersion or not (colored m) then (m, Nil) else
   (wrapped, src) = package m;
-  issueAs wrapped kCheck m.version m.path (AW.Compile "check" src) {m | checking = True, checkedVersion = m.version}.
+  issueAs wrapped State.CheckSource m.version m.path (AW.Compile "check" src) {m | checking = True, checkedVersion = m.version}.
 checked p result m = if p.version != m.version then {m | checking = False} else case result of
     Ok r -> {m | checking = False, diags = Nil}
   | Err why -> if strIndexOf "no compiler server" why >= 0 then
@@ -533,9 +533,9 @@ tick m0 = (m, c0) = poll m0; if not m.focused then (m, c0) else
 # worker serves it before the stop that follows (appsession's finish)
 keepSession now m =
   key = "{m.path}|{m.version}|{m.savedVersion}";
-  if (now or m.idle >= 5) and key != m.recorded and (now or not (pendingKind kSession m.pending)) then
+  if (now or m.idle >= 5) and key != m.recorded and (now or not (pendingKind State.KeepSession m.pending)) then
     record = "qed1\n{m.path}\n{(if dirty m then "1\n" else "0\n")}{(if dirty m then E.toText m.buf else "")}";
-    issue kSession m.version sessionPath (AW.WritePath sessionPath record) {m | recorded = key}
+    issue State.KeepSession m.version sessionPath (AW.WritePath sessionPath record) {m | recorded = key}
   else (m, Nil).
 pendingKind k Nil = False.
 pendingKind k (p :: rest) = p.kind == k or pendingKind k rest.
@@ -546,7 +546,7 @@ pointer x y buttons m =
   inText = y >= g.textY and y < g.textY + g.rows * g.pitch and x >= g.margin and x < m.w - g.margin;
   if buttons == 1 then
     if not m.down then
-      (if inText then place False x y g {m | down = True, capture = 1, mode = 0} else {m | down = True, capture = 0 - 1})
+      (if inText then place False x y g {m | down = True, capture = 1, mode = State.Editing} else {m | down = True, capture = 0 - 1})
     else if m.capture == 1 then place True x y g m else m
   else {m | down = False, capture = 0 - 1}.
 place extend x y g m =
@@ -600,7 +600,7 @@ rowNode m g r l span color =
     [S2.Box [S2.W mark, S2.H (g.em * 13 / 10), S2.Bg (if marked then warmC else (if isCur then curLineBg else bg))] Nil,
      S2.Box [S2.W (E.imax 0 (g.gutterW - numW - mark - 14 * g.s / 1000))] Nil,
      S2.Lbl [S2.Fs g.em, S2.Fg (if marked then warmC else if isCur then gutterCur else gutterC)] num];
-  cur = (if isCur and m.mode == 0 then m.buf.col else 0 - 1);
+  cur = (if isCur and m.mode == State.Editing then m.buf.col else 0 - 1);
   segs = segments g l (selOn r span (strlen l)) cur (if color then syntax l else [(0, strlen l, 0)]);
   attrs = [S2.Row, S2.W g.contentW, S2.H g.pitch, S2.Mid];
   S2.Box (if isCur then S2.Bg curLineBg :: attrs else attrs)
@@ -649,7 +649,7 @@ wordEnd l i n = if i < n and E.isWord (charAt l i) then wordEnd l (i + 1) n else
 keyword w = memberS w ["case", "of", "if", "then", "else", "fn", "use", "unsafe", "profile", "module", "program",
   "Type", "True", "False", "Nil", "Unit", "and", "or", "not"].
 
-panel m g = if g.panelH == 0 then Nil else [gapBox g.gap, (if m.mode == 1 then picker m g else if appShown m then programPanel m g else outputPanel m g)].
+panel m g = if g.panelH == 0 then Nil else [gapBox g.gap, (if m.mode == State.OpenPrompt then picker m g else if appShown m then programPanel m g else outputPanel m g)].
 # a running app's view, a line each, under a title that says whose the keys are
 programPanel m g =
   title = (if m.building then "PROGRAM   starting..." else if m.progFocus then "PROGRAM   {name m} has the keys -- ^J gives them back to the text, ^R stops it"
@@ -682,7 +682,7 @@ pickRows m g (u :: rest) i =
   S2.Box (if i == m.pick then S2.Bg selBg :: attrs else attrs) [lbl g 15 ink (baseName u), lbl g 12 dim (dirOf u)]
     :: pickRows m g rest (i + 1).
 
-bottom m g = if m.mode != 0 then promptBar m g else statusBar m g.
+bottom m g = if m.mode != State.Editing then promptBar m g else statusBar m g.
 statusBar m g =
   hints = (if m.running and m.appRun then "^J keys   ^R stop" else if m.running then "^R stop   ^J output   ^S save" else "^S save   ^O open   ^N new   ^F find   ^B build   ^R run   ^J output");
   hintsW = Fm.width hints * (12 * g.s / 1000) / 1000;
@@ -695,17 +695,17 @@ status m g width = here = problemAt m;
 promptBar m g =
   S2.Box [S2.Row, S2.W g.contentW, S2.H g.barH, S2.Pad (8 * g.s / 1000), S2.Round (8 * g.s / 1000), S2.Bg (28, 44, 84), S2.Mid, S2.Gap (10 * g.s / 1000)]
     [lbl g 13 accent (promptLabel m.mode), lbl g 15 ink m.query, caret g, S2.Box [S2.Grow] Nil, lbl g 12 dim (promptHint m)].
-promptLabel 1 = "Open".
-promptLabel 2 = "Save as".
-promptLabel 3 = "Find".
-promptLabel 4 = "Go to line".
-promptLabel other = "".
+promptLabel State.OpenPrompt = "Open".
+promptLabel State.SaveAsPrompt = "Save as".
+promptLabel State.FindPrompt = "Find".
+promptLabel State.GotoPrompt = "Go to line".
+promptLabel State.Editing = "".
 promptHint m = case m.mode of
-    1 -> "type to filter   ENTER opens   ^O closes"
-  | 2 -> "ENTER saves   ^shift-S closes"
-  | 3 -> "ENTER next match   ^F closes"
-  | 4 -> "ENTER goes   ^G closes"
-  | other -> "".
+    State.OpenPrompt -> "type to filter   ENTER opens   ^O closes"
+  | State.SaveAsPrompt -> "ENTER saves   ^shift-S closes"
+  | State.FindPrompt -> "ENTER next match   ^F closes"
+  | State.GotoPrompt -> "ENTER goes   ^G closes"
+  | State.Editing -> "".
 
 # ---- small helpers ------------------------------------------------------------------
 baseName p = i = lastSlash p (strlen p - 1); substr p (i + 1) (strlen p - i - 1).
@@ -736,23 +736,66 @@ lastOf (x :: Nil) = x.
 lastOf (x :: rest) = lastOf rest.
 lastOf Nil = "".
 
+# Typed snapshots do not retain editable job payloads or the document buffer.
+inspect revision m = State.Snapshot revision m.mode m.query m.confirm m.lastKind (dirty m) m.runAdmission (inspectJobs m.pending).
+inspectJobs Nil = Nil.
+inspectJobs (p :: rest) = State.PendingJob p.token p.kind p.version :: inspectJobs rest.
+transition State.ShowOpen m = openPicker m.
+transition (State.ShowSaveAs query) m = (prompt State.SaveAsPrompt query m, Nil).
+transition (State.ShowFind query) m = (prompt State.FindPrompt query m, Nil).
+transition (State.ShowGoto query) m = (prompt State.GotoPrompt query m, Nil).
+transition State.CancelPrompt m = (cancelPrompt m, Nil).
+# Changes are model transitions, never raw writes to job routing or ownership.
+controlled until client expected action revision m =
+  if Sys.pidOf client != 0 then Err "Editor control is system-only"
+  else if expected != revision then Err "stale Editor revision; current revision={revision}"
+  else if revision == intMax Unit then Err "Editor revision exhausted"
+  else if AC.nowUs Unit >= until then Err "Editor command expired"
+  else Ok (transition action m).
+controlStep me ctx model adapter = if adapter == 0 then
+    _ = Sys.sleepUs 1000; (True, (ctx, model, adapter))
+  else case receiveFromNow me adapter of
+    Err why -> _ = Sys.sleepUs 1000; (True, (ctx, model, adapter))
+  | Ok borrowed ->
+      owned = keep borrowed;
+      _ = drop borrowed;
+      (from, id, request) = owned;
+      case request of
+        Control.Inspect until ->
+          _ = AC.reply (from, id) (if AC.nowUs Unit >= until then Err "Editor inspection expired" else Ok (inspect ctx.revision model));
+          (True, (ctx, model, adapter))
+      | Control.Change until client expected action ->
+          (case controlled until client expected action ctx.revision model of
+            Err why -> _ = AC.reply (from, id) (Err why); (True, (ctx, model, adapter))
+          | Ok (fresh, commands) ->
+              next = AS.advance ctx ctx.sequence;
+              _ = AS.issue me next commands;
+              _ = AC.reply (from, id) (Ok (inspect next.revision fresh));
+              (True, (next, fresh, adapter))).
+
 # This actor owns the child model. Transport and effects exchange data only.
 run me = case AS.start me of
     Err why -> Unit
   | Ok ctx ->
       (initial, commands) = init;
       (model, ignored) = update (AW.Resize ctx.w ctx.h) {initial | policyNamespace = ctx.ns};
-      _ = AS.issue me ctx commands;
-      _ = Sys.loop (ctx, model) (step me); Unit.
+      case Control.start me ctx.ns ctx.session of
+        Err why -> _ = AS.abandon me ctx; _ = Sys.logAt 2 why; Unit
+      | Ok adapter ->
+          _ = AS.issue me ctx commands;
+          _ = Sys.loop (ctx, model, adapter) (step me);
+          # Returning wakes the adapter's parked owner watcher on normal close
+          # as well as failure, without mixing shutdown commands with replies.
+          Unit.
 step me state =
-  (ctx, model) = state;
+  (ctx, model, adapter) = state;
   case AS.next me ctx of
-    AS.Idle -> _ = Sys.sleepUs 1000; (True, state)
+    AS.Idle -> controlStep me ctx model adapter
   | AS.Gone -> _ = stopProgram model; _ = AS.abandon me ctx; (False, state)
   | AS.JobResult token result ->
       (fresh2, commands) = update (AW.Arrived token result) model;
       _ = AS.issue me ctx commands;
-      (True, (AS.advance ctx ctx.sequence, fresh2))
+      (True, (AS.advance ctx ctx.sequence, fresh2, adapter))
   | AS.Message ret request -> case request of
       AW.CloseWith session until stopMs -> if session != ctx.session then (AS.closeWithin until stopMs me ctx ret session, state) else
         _ = stopProgram model;
@@ -772,4 +815,4 @@ step me state =
           _ = AS.issue me next commands;
           (tree, vals) = view (next.w, next.h) fresh2;
           _ = AC.reply ret (AW.Frame next.session next.revision tree vals (AW.status fresh2.phase));
-          (True, (next, fresh2)).
+          (True, (next, fresh2, adapter)).

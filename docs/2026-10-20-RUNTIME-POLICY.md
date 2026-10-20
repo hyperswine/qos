@@ -9,7 +9,8 @@ should be able to discover its effective values, constraints, usage and revision
 then change it without rebuilding or restarting the system wherever the resource
 contract permits. Moving literals into a constants file alone does not achieve
 this. The file manager policy, endpoint ownership, and runtime app I/O and
-recovery, run admission, and hosted-program file access slices are implemented below. Other rows remain work to do.
+recovery, run admission, hosted-program file access, Editor state, and typed
+storage protocol slices are implemented below. Other rows remain work to do.
 
 ## Work queue
 
@@ -17,11 +18,11 @@ recovery, run admission, and hosted-program file access slices are implemented b
 |---|---|---|---|
 | `programs/mods/qsys.fpr`: 64 live file actors, 1024-byte new paths, 2000 ms reclamation, 1000 ms retirement margin | `FilesPolicy` (module `filepolicy`, constructor `Policy`) | Atomic manager update; next admission or retirement request, including existing actors | Pushed in `67a9c21` |
 | `programs/mods/appjobs.fpr`: read 500 ms, write 2000 ms, delete 1000 ms, cleanup 150 ms; `programs/mods/appclient.fpr` recovery cap of 3 attempts | `apppolicy.IoPolicy`, `RecoveryPolicy` | Snapshot at operation/recovery start; keep original in-flight deadline and cleanup obligation | Pushed in `b9d3b5b` |
-| `programs/mods/editapp.fpr`: child memory = physical RAM / 4, fallback 1 GiB | `runpolicy.RunPolicy` | Snapshot after build, before spawn; existing processes retain their admitted budget | Implemented in the Editor policy continuation below |
-| `programs/mods/editapp.fpr`: `/home/` access, `.editor/` exclusion and path checks | `fileaccesspolicy.FileAccessPolicy`, `Path`, `Grant` | Each new hosted-program request; retain the captured grant for pending replies | Implemented in the Editor policy continuation below |
-| `programs/mods/appjobs.fpr`: `{held=(0,0), uncertain=""}` | Linear `endpointstate.State`: `Vacant`, `Held`, `Uncertain` | Explicit transitions preserving handle ownership and uncertain outcomes; inspect state, never overwrite it with arbitrary settings | Implemented in the continuation below |
-| `programs/mods/editapp.fpr`: numeric job and prompt modes | `JobKind`, `PromptMode` | Typed events and transitions; expose current state through app inspection | Planned |
-| Storage RPC integer operation tags and string-matched errors | `StorageOp`, `StorageError` | Typed facade plus a versioned wire codec; preserve existing clients during migration | Planned |
+| `programs/mods/editapp.fpr`: child memory = physical RAM / 4, fallback 1 GiB | `runpolicy.RunPolicy` | Snapshot after build, before spawn; existing processes retain their admitted budget | Pushed in `dfda671` |
+| `programs/mods/editapp.fpr`: `/home/` access, `.editor/` exclusion and path checks | `fileaccesspolicy.FileAccessPolicy`, `Path`, `Grant` | Each new hosted-program request; retain the captured grant for pending replies | Pushed in `dfda671` |
+| `programs/mods/appjobs.fpr`: `{held=(0,0), uncertain=""}` | Linear `endpointstate.State`: `Vacant`, `Held`, `Uncertain` | Explicit transitions preserving handle ownership and uncertain outcomes; inspect state, never overwrite it with arbitrary settings | Pushed in `120a7b9` |
+| `programs/mods/editapp.fpr`: numeric job and prompt modes | `editorstate.JobKind`, `PromptMode`, `Confirmation`, `EditKind` | Inspect live state and apply revision-checked prompt transitions; pending job kinds remain bound to admitted work | Implemented in the Editor state continuation below |
+| Storage RPC integer operation tags and string-matched errors | `StorageOp`, `StorageError` | Typed facade plus a versioned wire codec; preserve existing clients during migration | Implemented in the storage protocol continuation below |
 | Editor undo 200, output 400, recovery path; Terminal input 240, output 400 | `EditorPreferences`, `TerminalPreferences` | Live updates with an explicit retained-history policy; recovery-path changes migrate or finish current recovery work first | Planned |
 
 Follow-up inventory should include the endpoint adapter's lease lifetime and
@@ -394,3 +395,195 @@ limit allowed the process checks to run. The compiler executable hash remains
 `858ccf88b8b52bad49625629e61fd8c3f9d486b544f60ec2a0a20dea830f199f`,
 with sibling checkout `d27f825`. This slice has no new graphical, physical-board
 or native-runtime acceptance claim.
+
+
+## Editor state and runtime prompt transitions
+
+This continuation starts after the Editor launch and file access policies were
+committed and pushed as `dfda671`. `editorstate.fpr` replaces integer tags with
+four independent types: `JobKind`, `PromptMode`, `Confirmation` and `EditKind`.
+Job completion dispatch is exhaustive. Typing and deletion still coalesce undo
+steps; navigation and structural edits retain their existing boundaries.
+Discard confirmation now records the requested open path. Switching targets
+requires fresh confirmation, and cancelling a prompt clears confirmation.
+
+Each Editor session registers two leased namespace endpoints:
+
+- `/apps/editor/SESSION/state`
+- `/apps/editor/SESSION/state/schema`
+
+The snapshot exposes the app revision, named prompt and query, confirmation,
+last edit kind, dirty flag, admitted run-policy revision and byte budget, plus
+pending job tokens, named kinds and document versions. It omits document bodies,
+job payloads and file grants. The schema lists states, transitions, authorization
+and lifetime. Endpoint registration and removal share a named 250 ms transport
+bound, also exposed in the schema. Standalone namespace-zero sessions retain
+local operation without registering endpoints.
+
+Read the current revision immediately before changing a prompt. For example,
+with session 1 and a readback revision of 12:
+
+```text
+cat /apps/editor/1/state
+cat /apps/editor/1/state/schema
+write /apps/editor/1/state revision=12 find search text
+```
+
+Supported actions are `open`, `save-as QUERY`, `find QUERY`, `goto QUERY`, and
+`cancel`. Query text after the first command separator is preserved, including
+spaces; an omitted query is empty. One optional LF or CRLF terminator is
+accepted for Terminal writes; embedded line breaks are refused. Commands are
+bounded to 2048 bytes. Unsigned
+revision parsing rejects suffixes and overflow. Stale, expired, malformed and
+unauthorized changes leave the model unchanged. Writes use the existing
+cooperative system-process authorization. The schema endpoint is read-only.
+
+Actions run the same model transitions as the Editor's input path. `open`
+admits a directory-listing job; the other actions only show or cancel a prompt.
+They do not submit it, save, open a document, or confirm discarding unsaved work.
+Pending job kinds are inspected rather than overwritten because each kind must
+remain bound to the work already admitted. Confirmation and edit categories
+change through their corresponding model transitions.
+
+The Editor actor owns the model and revision. The endpoint adapter sends typed
+requests to that actor; it does not keep a second editable model. Control writes,
+ordinary app events and completed jobs share one revision sequence. Each accepted
+control write advances the revision, including a transition to the current mode.
+Frequent app events may require a caller to reread and retry a stale command.
+The existing app-session wire remains v4; installing this slice requires a new
+Editor archive. Display updates continue through the normal app event/frame path.
+
+A parked watcher wakes when the Editor exits normally or dies, then stops the
+adapter. The adapter queues both namespace withdrawals before exiting;
+registration failure also withdraws any partially registered endpoint and ends
+the app session. A separate registrar keeps registration replies away from
+namespace-forwarded open requests. Withdrawal does not synchronously wait for
+acknowledgements on that mixed channel. If the namespace is unavailable or its
+mailbox remains full during cleanup, a withdrawal failure is logged; stale
+entries in a surviving namespace can remain until it restarts. Namespace
+dead-owner reclamation is not implemented by this slice.
+
+`tests/editorstate.fpr` exercises undo boundaries, target-specific confirmation,
+job routing, prompt parity, command parsing and refusal, and an actual Editor
+actor accessed through the namespace endpoints. It checks shared revisions,
+readback after ordinary editing, the Terminal worker write/read/lease-cleanup
+path, normal close and forced-owner-death cleanup.
+`tools/editor-state-check.py` adds six compiler refusals for primitive tags and
+cross-type substitutions, then runs Editor state, app-session, Editor-policy and
+session-memory regressions on one and four workers. It is registered in CI and
+`check-all.sh`.
+
+Validated on 2026-10-20: all six type-misuse probes were refused, and all eight
+Portable regression cases passed (four programs, each on one and four workers).
+After the final Terminal command and registration-cleanup changes, the focused
+Editor-state archive passed again on one and four workers. This includes a
+second-registration collision: the partially registered state endpoint is removed
+while the other owner's schema registration survives. The existing 3000-operation
+memory regression stayed within its 8-root / 2 MiB bounds. Main check-only, the
+four check-all verdict unit tests, shell syntax, Python parsing, `git diff --check`
+and the 278-pin lock check passed.
+
+Logs are in `.qos/validation/editor-state-20261020/`: `results.log` and `final/`
+for the full suite, and `focused-1.log` / `focused-4.log` for the final focused
+archive. Validation used the same compiler executable hash recorded above and
+sibling checkout `d27f825`. These are macOS Portable checks; no new graphical,
+physical-board or native-runtime acceptance was performed.
+
+The endpoint examples require a concurrent authorized client in the same
+namespace while the Editor session is alive. Main currently owns one active
+app session, so switching from Editor to Terminal closes that Editor. This slice
+provides the live inspection/control API; a dedicated inspector UI remains
+follow-up work.
+
+
+## Storage protocol continuation (2026-10-20)
+
+`std/storageprotocol.fpr` declares `StorageOp`, `StorageError`, `ErrorKind`,
+`Outcome`, `TargetKind` and `WireVersion`. Operations carry their own keys and
+bytes: `ReadLatest`, `Append`, `Replay`, `Delete`, `Stats`, `Compact`, `Quiesce`,
+`AppendBulk` and `Verify`. Callers no longer have to assemble a tag and two
+loosely related strings. The codec accepts the existing v1 `Rpc` and v2
+`TimedRpc` operation layouts. It refuses unknown versions/tags, noncanonical
+unused fields, over-limit keys/payloads and operations unsupported by a target.
+The typed client always sends v2, preserving correlation and the original
+absolute deadline through nested calls.
+
+An existing ABI ambiguity is now explicit: tag 7 is **quiesce** at the stable
+Files owner and **bulk append** at Qlog. `storageclient.Target` requires `Owner`,
+`Log` or `Adapter` around the actor handle. The facade rejects bulk append to an
+owner, quiesce to Qlog, and quiesce/bulk/verify through a namespace adapter before
+sending anything. The role is the composing caller's declaration, not a new
+actor authentication mechanism; it must match the actor that was actually
+created. Creator-only quiesce and namespace grants still apply at the server.
+
+`StorageError` carries a named category, outcome knowledge and the original
+message. Only the exact legacy `no such file` diagnostic becomes `MissingRecord`
+and permits an optional/default value. Disk absence, offline service, deadline,
+actor death, full mailbox, invalid duration and key/payload limits have distinct
+categories. Other diagnostics remain `Other` with their full text. `Unknown`
+preserves uncertain commit outcomes; `NotStarted` means execution has not begun;
+`Reported` retains a server report without inferring commit status. A bare
+transport death is conservatively unknown because the old string wire cannot
+prove whether admission happened. Conversion back to the old string result is
+lossless. No retry or operation replay was added.
+
+The working sources for the Files namespace service, Qsys file manager and
+storage endpoint, app storage statistics, and publication catalog/image reads
+use the facade. Qsys retains its public integer `rpc` compatibility function.
+Existing `std/fs`, `std/storage`, Svc envelopes, server tag dispatch, module-store
+snapshots, C trampoline ABI and disk format are unchanged. Old pinned clients
+continue to work. `services.fpr` now selects the working Files implementation,
+following its existing working-source composition for Graphics; the old pinned
+Files fixtures remain useful compatibility coverage. Four Qsys file-loop return
+annotations now state their actual `Unit` result rather than promising an
+arbitrary result type, as required by current compiler checking of this graph.
+
+Runtime discovery:
+
+```text
+# Main/Qsys, including a diskless boot:
+cat /services/storage-schema
+# Files namespace composition:
+cat /services/files/schema
+```
+
+Both are read-only and report supported operations, wire versions, key/payload
+ceilings, default request duration, error/outcome categories and mutability.
+The Main schema uses its own endpoint so no previously addressable storage
+record becomes a reserved schema record. The Files schema sits alongside its
+existing status/compact endpoints. Normal namespace grants control access.
+
+These are representation and protocol types, not mutable tag assignments.
+Live callers select the budget for each new operation with `within`, or pass an
+existing absolute deadline to `requestUntil`. App statistics retain the live
+`IoPolicy` read budget. ABI tags and hard admission ceilings cannot be changed by
+a schema write; doing so needs negotiated migration. There is no new global
+storage-policy owner or automatic retry policy in this slice. Editor/Terminal
+preferences remain the next queued types.
+
+Validation against sibling FP-RISC `e732971`:
+
+- Six compiler refusal probes: integer operation, integer version, integer target
+  kind, bare actor, string error and error-as-operation all fail type checking.
+- `storageprotocol` passes with 1 and 4 workers: codec round trips, binary bytes,
+  malformed/oversized requests, target-specific rejection before send, exact
+  missing-only fallback, preserved diagnostics, dead actors, uncertain mutation,
+  late replies, unrelated traffic, legacy v1/v2 coexistence, real disk operations,
+  schema discovery/refusal, adapter calls and quiesce/offline behavior.
+- `filessvc` and `appsessionmemory` pass with 1 and 4 workers. The latter retains
+  fewer than 8 roots and 2 MiB over 3000 events/owner calls/jobs/pane reads.
+- All six storage reliability fixtures pass with 1 and 4 workers: deadlines,
+  storage budgets, RPC, Qsys failures, file reclamation and live file policy.
+- Publication passes with 1 and 4 workers, two boots each, including injected
+  failures, immutable retry and owned MVU watcher shutdown.
+- Main passes Portable check-only; the lock has 284 resolvable pins. Sweep verdict
+  unit tests (4), shell syntax, Python syntax and `git diff --check` pass.
+
+The sandbox refused the file-service local socket and the publication build's
+normal cache path. File-service/memory and publication checks completed with
+host access; logs retain the initial environmental failures separately. No
+physical board, graphical session, full sweep or native execution was run for
+this slice. Logs are under `.qos/validation/storage-types-20261020/`.
+
+`tools/storage-types-check.py` is included in `check-all.sh` and the Portable CI
+job.

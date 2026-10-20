@@ -6,7 +6,6 @@ mods/ep v3.0 c66ad65e68dd97f5 programs/dungeon.fpr
 std/actor v3.0 201a0e9bf98a5154 programs/mods/appclient.fpr
 ep v3.0 c66ad65e68dd97f5 programs/mods/appjobs.fpr
 std/actor v3.0 201a0e9bf98a5154 programs/mods/appjobs.fpr
-std/fs v5.0 84826bc9e8ddb4b5 programs/mods/appjobs.fpr
 std/actor v3.0 201a0e9bf98a5154 programs/mods/appkit.fpr
 ep v3.0 c66ad65e68dd97f5 programs/mods/appkit.fpr
 std/actor v3.0 201a0e9bf98a5154 programs/mods/apppolicy.fpr
@@ -21,6 +20,9 @@ std/actor v3.0 201a0e9bf98a5154 programs/mods/browserapp.fpr
 std/actor v3.0 201a0e9bf98a5154 programs/mods/clockapp.fpr
 std/actor v3.0 201a0e9bf98a5154 programs/mods/diskapp.fpr
 std/actor v3.0 201a0e9bf98a5154 programs/mods/editapp.fpr
+ep v3.0 c66ad65e68dd97f5 programs/mods/editorcontrol.fpr
+epservice v3.0 e8bce05a1ddf73db programs/mods/editorcontrol.fpr
+std/actor v3.0 201a0e9bf98a5154 programs/mods/editorcontrol.fpr
 std/actor v3.0 201a0e9bf98a5154 programs/mods/editorpolicy.fpr
 ep v3.0 c66ad65e68dd97f5 programs/mods/editorpolicy.fpr
 epservice v3.0 e8bce05a1ddf73db programs/mods/editorpolicy.fpr
@@ -33,7 +35,6 @@ std/actor v3.0 201a0e9bf98a5154 programs/mods/epservice.fpr
 std/storage v1.1 a8f7ee14e1efae76 programs/mods/filepolicy.fpr
 epservice v3.0 e8bce05a1ddf73db programs/mods/files.fpr
 ep v3.0 c66ad65e68dd97f5 programs/mods/files.fpr
-std/fs v5.0 84826bc9e8ddb4b5 programs/mods/files.fpr
 std/actor v3.0 201a0e9bf98a5154 programs/mods/files.fpr
 std/net v3.0 464ca3ee0d89bc64 programs/mods/fprlive.fpr
 std/actor v3.0 201a0e9bf98a5154 programs/mods/fprlive.fpr
@@ -65,7 +66,6 @@ ep v3.0 c66ad65e68dd97f5 programs/mods/services.fpr
 std/actor v3.0 201a0e9bf98a5154 programs/mods/services.fpr
 std/lifecycle v6.0 6e7bea28db71815a programs/mods/services.fpr
 blockep v5.0 bd295a609815dadd programs/mods/services.fpr
-files v2.0 2b1a808ceef52eb5 programs/mods/services.fpr
 std/storage v1.1 a8f7ee14e1efae76 programs/mods/services.fpr
 ep v3.0 c66ad65e68dd97f5 programs/mods/svc.fpr
 std/storage v1.1 a8f7ee14e1efae76 programs/mods/svc.fpr
@@ -115,6 +115,9 @@ std/actor v3.0 201a0e9bf98a5154 std/net.fpr
 std/fs v5.0 84826bc9e8ddb4b5 std/qpublication.fpr
 std/actor v3.0 201a0e9bf98a5154 std/qpublication.fpr
 std/actor v3.0 201a0e9bf98a5154 std/storage.fpr
+std/storage v1.1 a8f7ee14e1efae76 std/storageclient.fpr
+../programs/mods/svc v5.0 75479fb6d5f34670 std/storageclient.fpr
+std/storage v1.1 a8f7ee14e1efae76 std/storageprotocol.fpr
 std/actor v3.0 201a0e9bf98a5154 std/timer.fpr
 std/actor v3.0 201a0e9bf98a5154 std/uart.fpr
 std/fs v5.0 84826bc9e8ddb4b5 tests/admissionnative.fpr
@@ -152,6 +155,9 @@ std/fs v5.0 84826bc9e8ddb4b5 tests/editor.fpr
 std/actor v3.0 201a0e9bf98a5154 tests/editorpolicy.fpr
 ../programs/mods/ep v3.0 c66ad65e68dd97f5 tests/editorpolicyprocess.fpr
 ../programs/mods/epservice v3.0 e8bce05a1ddf73db tests/editorpolicyprocess.fpr
+../programs/mods/ep v3.0 c66ad65e68dd97f5 tests/editorstate.fpr
+../programs/mods/epservice v3.0 e8bce05a1ddf73db tests/editorstate.fpr
+std/actor v3.0 201a0e9bf98a5154 tests/editorstate.fpr
 ../programs/mods/epservice v3.0 e8bce05a1ddf73db tests/epecho.fpr
 ../programs/mods/ep v3.0 c66ad65e68dd97f5 tests/epecho.fpr
 std/actor v3.0 201a0e9bf98a5154 tests/epecho.fpr
@@ -262,6 +268,12 @@ std/storage v1.1 a8f7ee14e1efae76 tests/storagedeadlines.fpr
 ../programs/mods/epdeadline v1.1 08a8ecf9d7c57d85 tests/storagedeadlines.fpr
 ../programs/mods/epservice v3.0 e8bce05a1ddf73db tests/storagedeadlines.fpr
 ../programs/mods/files v2.0 2b1a808ceef52eb5 tests/storagedeadlines.fpr
+std/fs v5.0 84826bc9e8ddb4b5 tests/storageprotocol.fpr
+std/blockio v6.0 8b4ffa1467ca03a5 tests/storageprotocol.fpr
+../programs/mods/svc v5.0 75479fb6d5f34670 tests/storageprotocol.fpr
+std/actor v3.0 201a0e9bf98a5154 tests/storageprotocol.fpr
+../programs/mods/ep v3.0 c66ad65e68dd97f5 tests/storageprotocol.fpr
+../programs/mods/epservice v3.0 e8bce05a1ddf73db tests/storageprotocol.fpr
 ../programs/mods/svc v5.0 75479fb6d5f34670 tests/storerpc.fpr
 ../programs/mods/svc v5.0 75479fb6d5f34670 tests/svcurl.fpr
 ../programs/mods/ep v3.0 c66ad65e68dd97f5 tests/svcurl.fpr

@@ -1,6 +1,8 @@
 # Ready .qa publication through Files/qlog. One publisher owns this journal;
 # no other actor may append its catalog or change its immutable archive keys.
 FS = use "std/fs#84826bc9e8ddb4b5".
+Storage = use "std/storageclient".
+SP = use "std/storageprotocol".
 AC = use "std/actor#201a0e9bf98a5154".
 C = use "std/reloadcatalog".
 S = use "std/string".
@@ -15,10 +17,8 @@ journal u = "sys/reload/publications".
 archive info = "live/{info.name}/{info.to}".
 imageKey info = "apps/{archive info}.qa".
 # Only a missing key is an empty catalog; storage errors are never emptiness.
-snapshot me fs = missingEmpty (FS.readLatest me fs (journal Unit)).
-missingEmpty r = case r of
-    Ok text -> Ok text
-  | Err why -> (case why == "no such file" of True -> Ok "" | False -> Err why).
+snapshot me fs = SP.legacyResult (SP.optional (Storage.request me (Storage.Owner fs) (SP.ReadLatest (journal Unit)))).
+missingEmpty r = SP.legacyResult (SP.optional (SP.decodeResult r)).
 serve me fs = case snapshot me fs of
     Err why -> Err why
   | Ok text -> case C.parse text "" 0 of
@@ -63,11 +63,11 @@ latest : unsafe List C.Candidate -> String -> String .
 latest candidates acc = case candidates of
     Nil -> acc
   | c :: rest -> info = C.identity c; latest rest info.to.
-immutable me fs info bytes = case FS.readLatest me fs (imageKey info) of
+immutable me fs info bytes = case Storage.request me (Storage.Owner fs) (SP.ReadLatest (imageKey info)) of
     Ok existing -> (case existing == bytes of True -> Ok Unit | False -> Err "publication: immutable image collision")
-  | Err why -> case why == "no such file" of
+  | Err why -> case SP.missing why of
       True -> (case FS.append me fs (imageKey info) bytes of Ok u -> Ok Unit | Err why -> Err "publication image: {why}")
-    | False -> Err "publication image read: {why}".
+    | False -> Err "publication image read: {SP.message why}".
 advertise me fs text info =
   next = "{text}{info.name}\t{info.version}\t{info.from}\t{info.to}\t{archive info}\n";
   case FS.append me fs (journal Unit) next of

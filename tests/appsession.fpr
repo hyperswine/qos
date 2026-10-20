@@ -6,6 +6,7 @@ B = use "../programs/mods/browserapp".
 D = use "../programs/mods/diskapp".
 T = use "../programs/mods/termapp".
 ED = use "../programs/mods/editapp".
+ES = use "../programs/mods/editorstate".
 E = use "../programs/mods/editbuf".
 AS = use "../programs/mods/appsession".
 AW = use "../programs/mods/appwire".
@@ -169,7 +170,7 @@ main =
   (e5, _) = ED.update (AW.Key 4021) e4;
   _ = check "editor redo" (E.toText e5.buf == "ab" and ED.dirty e5);
   (e6, cmds6) = ED.update (AW.Key 4031) e5;
-  _ = check "editor save asks where" (e6.mode == 2 and e6.query == "/home/" and cmds6 == Nil);
+  _ = check "editor save asks where" (e6.mode == ES.SaveAsPrompt and e6.query == "/home/" and cmds6 == Nil);
   e7 = typeKeys [45, 52, 33, 25, 19] e6;
   (e8, cmds8) = ED.update (AW.Key 28) e7;
   _ = check "editor save is the safe job" (case cmds8 of AW.Fetch tok (AW.SaveFile p t) :: Nil -> p == "/home/x.fpr" and t == "ab" | other -> False);
@@ -246,7 +247,7 @@ main =
   h7 = ED.ended "" "finished" h6;
   (h8, _) = ED.update (AW.Arrived h6.token (Ok (AW.Lines ["/home/x.txt"] ""))) h7;
   _ = Sys.sleepUs 20000;
-  _ = check "an ended program's answer is forgotten" (not (ED.pendingKind 10 h7.pending) and not h8.running
+  _ = check "an ended program's answer is forgotten" (not (ED.pendingKind ES.ProgramRequest h7.pending) and not h8.running
     and (case receiveFromNow me stand of Ok b -> _ = drop b; False | Err why -> why == "empty"));
   _ = kill stand;
   (q0, _) = ED.init;

@@ -43,6 +43,8 @@
 # ============================================================================
 
 FS = use "std/fs#84826bc9e8ddb4b5".
+Storage = use "std/storageclient".
+SP = use "std/storageprotocol".
 Lifecycle = use "std/lifecycle#6e7bea28db71815a".
 AK  = use "appkit".
 BlockEP = use "blockep#bd295a609815dadd".
@@ -96,6 +98,9 @@ call me a q = AC.call me a q.
 # a storage actor that has ended is an Err, like any storage failure
 rpc : unsafe Int -> Int -> Int -> String -> String -> Result String String .
 rpc me st tag url pay = FS.rpc me st tag url pay.
+# New internal calls carry operations; rpc remains the legacy public adapter.
+storage me st op = SP.legacyResult (Storage.request me (Storage.Owner st) op).
+storageUntil until me st op = SP.legacyResult (Storage.requestUntil until me (Storage.Owner st) op).
 
 hasPrefix : unsafe String -> String -> Bool .
 hasPrefix s pre = EP.startsWith pre s.
@@ -193,19 +198,21 @@ logW me client url v = case v of
 
 # ---- storage records as urls: /services/storage/<record url> ------------------
 stR : unsafe Int -> Int -> Int -> String -> Result EP.IoV String .
-stR st me client url = stOn st me url "" 1.
+stR st me client url = stOn st me url SP.ReadLatest.
 stW : unsafe Int -> Int -> Int -> String -> EP.IoV -> Result EP.IoV String .
 stW st me client url v = case v of
-    IStr pay -> stOn st me url pay 2
+    IStr pay -> stOn st me url (fn key -> SP.Append key pay)
   | o -> Err "{url} wants IStr".
-stOn : unsafe Int -> Int -> String -> String -> Int -> Result EP.IoV String .
-stOn st me url pay tag =
+stOn : unsafe Int -> Int -> String -> (String -> SP.StorageOp) -> Result EP.IoV String .
+stOn st me url make =
   rec = EP.segAfter url 18;
   case strlen rec == 0 of
     True -> Err "name a record: /services/storage/<url>"
-  | False -> (case rpc me st tag (substr url 18 (strlen url - 18)) pay of
+  | False -> (case storage me st (make (substr url 18 (strlen url - 18))) of
       Ok s -> Ok (IStr s)
     | Err e -> Err e).
+
+storageSchema me client url = if strEq url "/services/storage-schema" then Ok (IStr (SP.schema SP.FilesOwner)) else Err "unknown storage schema endpoint".
 
 # ---- files: one actor per real file, url-native over the qlog ---------------
 # The file IS the replay of its url's records; a write is one appended
@@ -225,8 +232,8 @@ stOn st me url pay tag =
 fileActor st path me = fileActorOf 0 st path me.
 # a file actor its manager (filesMgr) spawned: it does not end on its own
 # when its last handle goes (see fileRetire), the manager retires it
-fileActorOf mgr st path me = fileServe mgr st path me (rpc me st 3 path "") 1 Nil.
-fileServe : unsafe Int -> Int -> String -> Int -> Result String String -> Int -> List (Int, Int) -> a .
+fileActorOf mgr st path me = fileServe mgr st path me (storage me st (SP.Replay path)) 1 Nil.
+fileServe : unsafe Int -> Int -> String -> Int -> Result String String -> Int -> List (Int, Int) -> Unit .
 fileServe mgr st path me body next hs =
   borrowed = receive me;
   m = keep borrowed;
@@ -286,8 +293,8 @@ fileRetireWith margin mgr st path me body next hs ret sender until =
 fileLoaded : unsafe Int -> String -> Int -> Result String String -> Result String String .
 fileLoaded st path me body = case body of
     Ok b -> body
-  | Err e -> rpc me st 3 path "".
-fileMsg : unsafe Int -> Int -> String -> Int -> Result String String -> Int -> List (Int, Int) -> (Int, Int) -> Int -> EP.Ep -> a .
+  | Err e -> storage me st (SP.Replay path).
+fileMsg : unsafe Int -> Int -> String -> Int -> Result String String -> Int -> List (Int, Int) -> (Int, Int) -> Int -> EP.Ep -> Unit .
 fileMsg mgr st path me body next hs ret sender q = case q of
     EP.Timed until command -> fileTimed mgr until st path me body next hs ret sender command
   | Open url mode -> if strEq mode "replace" then fileTruncate mgr st path me body next hs ret sender
@@ -300,11 +307,11 @@ fileMsg mgr st path me body next hs ret sender q = case q of
       else _ = AC.reply ret (Ok 0); fileRetire mgr st path me body next (hDrop2 hs h sender).
 # open "replace": the file is emptied now (its records tombstoned), and what
 # the handle writes is its whole text -- open(2)'s O_TRUNC
-fileTruncate : unsafe Int -> Int -> String -> Int -> Result String String -> Int -> List (Int, Int) -> (Int, Int) -> Int -> a .
-fileTruncate mgr st path me body next hs ret sender = case rpc me st 4 path "" of
+fileTruncate : unsafe Int -> Int -> String -> Int -> Result String String -> Int -> List (Int, Int) -> (Int, Int) -> Int -> Unit .
+fileTruncate mgr st path me body next hs ret sender = case storage me st (SP.Delete path) of
     Ok u -> AC.reply ret (Opened next) >> fileServe mgr st path me (Ok "") (next + 1) ((next, sender) :: hs)
   | Err why -> AC.reply ret (Refused "replace {path}: {why}") >> fileServe mgr st path me body next hs.
-fileTimed : unsafe Int -> Int -> Int -> String -> Int -> Result String String -> Int -> List (Int, Int) -> (Int, Int) -> Int -> EP.Ep -> a .
+fileTimed : unsafe Int -> Int -> Int -> String -> Int -> Result String String -> Int -> List (Int, Int) -> (Int, Int) -> Int -> EP.Ep -> Unit .
 fileTimed mgr until st path me body next hs ret sender q =
   if AC.nowUs Unit >= until then AC.reply ret (Err "endpoint: deadline exceeded before execution") >> fileServe mgr st path me body next hs else
   case q of
@@ -315,12 +322,12 @@ fileTimed mgr until st path me body next hs ret sender q =
     | Write h (IStr text) -> if hOwner hs h != sender then AC.reply ret (Err "no such handle") >> fileRetire mgr st path me body next hs
         else loaded = fileLoadedUntil until st path me body; (case loaded of
         Err why -> AC.reply ret (Err "write failed: {path} could not be read ({why})") >> fileServe mgr st path me loaded next hs
-      | Ok bytes -> fileWr2 mgr st path me bytes next hs ret text (FS.rpcUntil until me st 2 path text))
+      | Ok bytes -> fileWr2 mgr st path me bytes next hs ret text (storageUntil until me st (SP.Append path text)))
     | Close h -> if h < 0 then fileRetireAsk mgr st path me body next hs ret sender until
         else _ = AC.reply ret (Ok 0); fileRetire mgr st path me body next (hDrop2 hs h sender)
     | EP.Timed other command -> fileTimed mgr (if other < until then other else until) st path me body next hs ret sender command
     | command -> fileMsg mgr st path me body next hs ret sender command.
-fileLoadedUntil until st path me body = case body of Ok bytes -> body | Err why -> FS.rpcUntil until me st 3 path "".
+fileLoadedUntil until st path me body = case body of Ok bytes -> body | Err why -> storageUntil until me st (SP.Replay path).
 fileText : unsafe String -> Result String String -> Result EP.IoV String .
 fileText path body = case body of
     Ok b -> Ok (IStr b)          # an empty file reads as "", like any other text
@@ -332,7 +339,7 @@ fileWr mgr st path me body next hs ret sender v = case v of
 fileWr1 : unsafe Int -> Int -> String -> Int -> Result String String -> Int -> List (Int, Int) -> (Int, Int) -> String -> Unit .
 fileWr1 mgr st path me body next hs ret text = case body of
     Err e -> AC.reply ret (Err "write failed: {path} could not be read ({e})") >> fileServe mgr st path me body next hs
-  | Ok b -> fileWr2 mgr st path me b next hs ret text (rpc me st 2 path text).
+  | Ok b -> fileWr2 mgr st path me b next hs ret text (storage me st (SP.Append path text)).
 fileWr2 : unsafe Int -> Int -> String -> Int -> String -> Int -> List (Int, Int) -> (Int, Int) -> String -> Result String String -> Unit .
 fileWr2 mgr st path me b next hs ret text r = case r of
     Ok u -> AC.reply ret (Ok (IInt (strlen text))) >> fileServe mgr st path me (Ok (strcat b text)) next hs
@@ -409,7 +416,7 @@ filesEntries Nil = Nil.
 filesEntries (p :: rest) = (p, 0) :: filesEntries rest.
 # boot: the files the record names (and the seeded two), registered for mgr
 filesKnownAtBoot : unsafe Int -> Int -> List String .
-filesKnownAtBoot me st = case rpc me st 3 filesIndex "" of
+filesKnownAtBoot me st = case storage me st (SP.Replay filesIndex) of
     Ok log -> filesFold (lines log) ["/home/notes.txt", "/tmp/scratch.txt"]
   | Err why -> _ = Sys.logAt 1 "system: file index unreadable ({why}); only seeded files listed"; ["/home/notes.txt", "/tmp/scratch.txt"].
 filesFold : unsafe List String -> List String -> List String .
@@ -430,7 +437,7 @@ filesRegister me ns mgr known = case known of
   | p :: rest -> _ = (case EP.register me ns p mgr of Ok u -> Unit | Err why -> Sys.logAt 1 "system: {p}: {why}"); filesRegister me ns mgr rest.
 # one change to the record; a failure is logged, the file itself is unaffected
 filesNote : unsafe Int -> Int -> String -> Unit .
-filesNote st me change = case rpc me st 2 filesIndex "{change}\n" of
+filesNote st me change = case storage me st (SP.Append filesIndex "{change}\n") of
     Ok u -> Unit
   | Err why -> Sys.logAt 1 "system: file index not updated ({change}: {why})".
 
@@ -528,7 +535,7 @@ filesOpen ctx me act ret from url mode =
   else AC.reply ret (Refused "no such file: {url}") >> filesServe ctx me act.
 # does storage hold records for the path? (stats: "... url-records=N ...")
 filesStored : unsafe Int -> Int -> String -> Bool .
-filesStored st me url = case rpc me st 5 url "" of
+filesStored st me url = case storage me st (SP.Stats url) of
     Ok text -> filesRecords text > 0
   | Err why -> False.
 filesRecords text = at = strIndexOf "url-records=" text;
@@ -541,7 +548,7 @@ filesDelete ctx me act ret url a =
   # the actor may already have retired on its last close: only kill it live
   _ = (if a > 0 and Sys.alive a then kill a else Unit);
   _ = EP.unregister me ns url;
-  deleted = rpc me st 4 url "";
+  deleted = storage me st (SP.Delete url);
   _ = (if filesTransient url then Unit else filesNote st me "-{url}");
   _ = (if filesTransient url then Unit else Sys.logAt 0 "system: deleted {url}");
   case deleted of
@@ -584,7 +591,7 @@ filesHand ctx me act ret from url mode a =
 qaFetch : unsafe Int -> Int -> String -> Result String String .
 qaFetch st me id = case st == 0 of
     True -> Err "storage offline"
-  | False -> rpc me st 1 "apps/{id}.qa" "".
+  | False -> storage me st (SP.ReadLatest "apps/{id}.qa").
 appsText : unsafe List App -> String -> String .
 appsText apps path = case apps of
     Nil -> (case strEq path "/apps" of True -> "the loaded apps: /apps/<id>" | False -> "no such app")
@@ -600,7 +607,7 @@ appsHit r path a = case a of App aid anm ati ->
 # runtime installer).  A missing or partial .qa is logged and skipped;
 # the boot continues -- absence is data.
 
-attachAll me st = attachIdx me st (rpc me st 1 "apps/index" "").
+attachAll me st = attachIdx me st (storage me st (SP.ReadLatest "apps/index")).
 attachIdx me st r = case r of
     Err e -> attachNone e
   | Ok idx -> attachIds me st (lines idx).
@@ -613,7 +620,7 @@ attachIds me st ids = case ids of
   | id :: r -> attachOne me st r id.
 attachOne : unsafe Int -> Int -> List String -> String -> List App .
 attachOne me st r id =
-  b = rpc me st 1 "apps/{id}.qa" "";
+  b = storage me st (SP.ReadLatest "apps/{id}.qa");
   case b of
     Err e -> attachMiss me st r id e
   | Ok bytes -> attachGo me st r id bytes.
@@ -683,6 +690,7 @@ bootWireSizedBlock w h me st apps block =
   ns = spawnD Endpoint.namespace;
   _ = claim me ns "/" (spawnD (Endpoint.lister ns));
   _ = case block == 0 of True -> Unit | False -> claim me ns "/services/block" (spawnD (BlockEP.serve block));
+  _ = claim me ns "/services/storage-schema" (spawnD (Endpoint.simple storageSchema EP.noWrite));
   logA = spawnD logActor;
   logs = spawnD (Endpoint.simple logR logW);
   _ = claim me ns "/services/log" logs;

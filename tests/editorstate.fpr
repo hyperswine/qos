@@ -1,0 +1,135 @@
+#: expect editorstate: HOLDS
+unsafe program.
+ES = use "../programs/mods/editorstate".
+EC = use "../programs/mods/editorcontrol".
+ED = use "../programs/mods/editapp".
+E = use "../programs/mods/editbuf".
+AW = use "../programs/mods/appwire".
+AJ = use "../programs/mods/appjobs".
+Lease = use "../programs/mods/endpointstate".
+EP = use "../programs/mods/ep#c66ad65e68dd97f5".
+Endpoint = use "../programs/mods/epservice#e8bce05a1ddf73db".
+AC = use "std/actor#201a0e9bf98a5154".
+Text = use "../programs/mods/policytext".
+check what True = Unit.
+check what False = error "editorstate: {what}".
+get what (Ok x) = x.
+get what (Err why) = error "editorstate: {what}: {why}".
+rejected (Err why) = True.
+rejected other = False.
+text (EP.IStr s) = s.
+text other = error "expected Editor state text".
+bufferText m = E.toText m.buf.
+confirmation m = m.confirm.
+revision s = get "revision" (Text.field "revision=" (E.nth (E.splitLines s) 0)).
+readState me ns sid = text (get "state read" (EP.readOnce me ns (EC.url sid))).
+writeState me ns sid rev action = EP.writeOnce me ns (EC.url sid) (EP.IStr "revision={rev} {action}").
+ready until me ns sid =
+  case EP.readOnce me ns (EC.url sid) of
+    Ok (EP.IStr s) -> if strIndexOf "job token=" s < 0 then s else again until me ns sid
+  | other -> again until me ns sid.
+again until me ns sid = if AC.nowUs Unit >= until then error "Editor did not become ready" else
+  _ = Sys.sleepUs 1000; ready until me ns sid.
+removed until me ns sid =
+  paths = get "namespace list" (EP.flat (AC.callWithin 250 me ns (EP.NsList (EC.url sid))));
+  if paths == "" then Unit else if AC.nowUs Unit >= until then error "Editor endpoints leaked" else
+  _ = Sys.sleepUs 1000; removed until me ns sid.
+ended until actor = if not (Sys.alive actor) then Unit else
+  if AC.nowUs Unit >= until then error "Editor did not end" else _ = Sys.sleepUs 1000; ended until actor.
+unprivileged parent me =
+  (initial, _) = ED.init;
+  answer = ED.controlled (AC.nowUs Unit + 1000000) me 0 ES.CancelPrompt 0 initial;
+  _ = send parent (rejected answer); Unit.
+main =
+  _ = check "query spaces preserved" (ES.parse "revision=12 find a  b" == Ok (12, ES.ShowFind "a  b"));
+  _ = check "empty prompt query" (ES.parse "revision=0 goto" == Ok (0, ES.ShowGoto ""));
+  _ = check "Terminal newline and preserved spaces" (ES.parse "revision=1 cancel\n" == Ok (1, ES.CancelPrompt) and ES.parse "revision=2 find  two spaces \r\n" == Ok (2, ES.ShowFind " two spaces "));
+  _ = check "multiline refused" (rejected (ES.parse "revision=0 find a\nb") and rejected (ES.parse "revision=0 cancel\n\n"));
+  _ = check "strict revisions and actions" (rejected (ES.parse "revision=-1 open") and rejected (ES.parse "revision=1x open") and rejected (ES.parse "revision=999999999999999999999 open") and rejected (ES.parse "revision=0 job=save") and rejected (ES.parse "revision=0 open extra"));
+  _ = check "command bound" (rejected (ES.parse ("revision=0 find " + E.spaces 2048)));
+  (initial, _) = ED.init;
+  _ = check "named restore job visible" (strIndexOf "kind=restore-session" (ES.render (ED.inspect 1 initial)) >= 0);
+  (clean, _) = ED.arrived 1 (Err "no recovery") initial;
+  typed = ED.edit ES.Typing (E.insert "a" clean.buf) clean;
+  typed2 = ED.edit ES.Typing (E.insert "b" typed.buf) typed;
+  _ = check "typing coalesces" (bufferText (ED.undo typed2) == "");
+  moved = ED.moved typed2.buf typed2;
+  typed3 = ED.edit ES.Typing (E.insert "c" moved.buf) moved;
+  _ = check "movement separates undo" (bufferText (ED.undo typed3) == "ab");
+  deleted = ED.edit ES.Deleting (E.backspace typed3.buf) typed3;
+  deleted2 = ED.edit ES.Deleting (E.backspace deleted.buf) deleted;
+  _ = check "deletion coalesces separately" (bufferText (ED.undo deleted2) == "abc");
+  structural = ED.edit ES.Structural (E.insert "x" typed2.buf) typed2;
+  structural2 = ED.edit ES.Structural (E.insert "y" structural.buf) structural;
+  _ = check "structural edits separate" (bufferText (ED.undo structural2) == "abx");
+  (openA, jobsA) = ED.openPath "/home/a" typed2;
+  (openB, jobsB) = ED.openPath "/home/b" openA;
+  _ = check "discard confirmation binds target" (jobsA == Nil and jobsB == Nil and openB.confirm == ES.DiscardForOpen "/home/b");
+  (opening, jobs) = ED.openPath "/home/b" openB;
+  _ = check "second matching confirmation opens" (case jobs of [AW.Fetch token (AW.ReadPath path)] -> path == "/home/b" and ED.pendingKind ES.OpenDocument opening.pending | other -> False);
+  _ = check "cancel clears confirmation" (confirmation (ED.cancelPrompt openB) == ES.NoConfirmation);
+  _ = check "editing clears confirmation" (confirmation (ED.edit ES.Typing (E.insert "c" openB.buf) openB) == ES.NoConfirmation);
+  freshConfirm = ED.newFile openB;
+  _ = check "new document has distinct confirmation" (freshConfirm.confirm == ES.DiscardForNew and ED.dirty freshConfirm and not (ED.dirty (ED.newFile freshConfirm)));
+  (savePrompt, saveJobs) = ED.transition (ES.ShowSaveAs "/home/new file") typed2;
+  _ = check "save prompt does not save" (savePrompt.mode == ES.SaveAsPrompt and savePrompt.path == "" and saveJobs == Nil and savePrompt.pending == typed2.pending);
+  (findPrompt, _) = ED.transition (ES.ShowFind "ab") typed2;
+  _ = check "find prompt parity" (findPrompt == ED.prompt ES.FindPrompt "ab" typed2);
+  (gotoPrompt, _) = ED.transition (ES.ShowGoto "2") typed2;
+  _ = check "goto prompt parity" (gotoPrompt == ED.prompt ES.GotoPrompt "2" typed2);
+  (picker, pickJobs) = ED.transition ES.ShowOpen typed2;
+  _ = check "open prompt admits named list job" (picker.mode == ES.OpenPrompt and ED.pendingKind ES.ListDocuments picker.pending and pickJobs != Nil);
+  (listingDone, _) = ED.arrived picker.token (Ok (AW.Lines ["/home/a"] "")) picker;
+  _ = check "typed job routes completion" (listingDone.listed and listingDone.files == ["/home/a"] and not (ED.pendingKind ES.ListDocuments listingDone.pending));
+  me = myself 0;
+  _ = check "stale and expired transitions rejected" (rejected (ED.controlled (AC.nowUs Unit + 1000000) me 0 ES.CancelPrompt 1 typed2) and rejected (ED.controlled (AC.nowUs Unit - 1) me 1 ES.CancelPrompt 1 typed2));
+  _ = check "exhausted revision rejected" (rejected (ED.controlled (AC.nowUs Unit + 1000000) me (intMax Unit) ES.CancelPrompt (intMax Unit) typed2));
+  child = Sys.spawnApp (unprivileged me);
+  _ = check "application cannot control Editor" (get "child" (receiveFromRes me child));
+  ns = spawn Endpoint.namespace;
+  app = spawn ED.run;
+  boot = AC.callWithin 500 me app (AW.magic, AW, (81, (800, 480), (ns, 0, 0)));
+  _ = check "real Editor bootstrap" (case boot of Ok (magic, schema, sid) -> magic == AW.magic and sid == 81 | other -> False);
+  start = ready (AC.nowUs Unit + 1000000) me ns 81;
+  _ = check "live initial state" (strIndexOf "prompt=editing" start >= 0);
+  schema = text (get "schema" (EP.readOnce me ns (EC.schemaUrl 81)));
+  _ = check "discoverable schema" (strIndexOf "jobs=open-document" schema >= 0 and strIndexOf "controlMs=250" schema >= 0);
+  _ = check "read-only schema" (rejected (EP.writeOnce me ns (EC.schemaUrl 81) (EP.IStr "x")));
+  changed = text (get "live find" (writeState me ns 81 (revision start) "find hello  world"));
+  _ = check "live prompt transition" (revision changed == revision start + 1 and strIndexOf "prompt=find\nquery=hello  world" changed >= 0);
+  _ = check "stale command refused" (rejected (writeState me ns 81 (revision start) "cancel"));
+  _ = check "malformed command refused" (rejected (writeState me ns 81 (revision changed) "job=save") and rejected (EP.writeOnce me ns (EC.url 81) (EP.IInt 2)));
+  _ = check "rejections preserve live state" (readState me ns 81 == changed);
+  (written, cleanLease) = AJ.execute me ns 0 (AW.WritePath (EC.url 81) "revision={revision changed} goto 2\n") Lease.Vacant;
+  _ = get "Terminal worker write" written;
+  (readback, cleanLease2) = AJ.execute me ns 0 (AW.ReadPath (EC.url 81)) cleanLease;
+  terminalState = case get "Terminal worker read" readback of AW.Text s -> s | other -> error "expected state text";
+  _ = check "Terminal goto prompt" (strIndexOf "prompt=goto\nquery=2\n" terminalState >= 0);
+  (leaseSnapshot, done) = Lease.inspect cleanLease2;
+  _ = check "Terminal closed lease" (leaseSnapshot.held == (0, 0) and leaseSnapshot.uncertain == "");
+  _ = Lease.ended done;
+  cancelled = text (get "live cancel" (writeState me ns 81 (revision terminalState) "cancel"));
+  _ = check "cancel readback" (strIndexOf "prompt=editing" cancelled >= 0 and readState me ns 81 == cancelled);
+  # The endpoint must share the same model revision as ordinary app events.
+  event = AC.callWithin 500 me app (AW.Event 81 1 (AW.Key 30));
+  _ = check "event observes shared revision" (case event of Ok (AW.Frame sid rev tree vals status) -> rev == revision cancelled + 1 | other -> False);
+  observed = readState me ns 81;
+  _ = check "ordinary edit visible" (strIndexOf "editKind=typing\ndirty=True" observed >= 0);
+  closed = AC.callWithin 1500 me app (AW.Close 81);
+  _ = check "real Editor close" (case closed of Ok (AW.Closed 81 result) -> True | other -> False);
+  _ = removed (AC.nowUs Unit + 1000000) me ns 81;
+  _ = check "closed actor ended" (not (Sys.alive app));
+  orphan = spawn ED.run;
+  _ = AC.callWithin 500 me orphan (AW.magic, AW, (82, (800, 480), (ns, 0, 0)));
+  _ = ready (AC.nowUs Unit + 1000000) me ns 82;
+  _ = kill orphan;
+  _ = removed (AC.nowUs Unit + 1000000) me ns 82;
+  # Fail the second registration: withdraw the first, preserve another owner.
+  _ = get "reserve schema" (EP.register me ns (EC.schemaUrl 83) me);
+  collision = spawn ED.run;
+  _ = AC.callWithin 500 me collision (AW.magic, AW, (83, (800, 480), (ns, 0, 0)));
+  _ = ended (AC.nowUs Unit + 1000000) collision;
+  paths = get "collision listing" (EP.flat (AC.callWithin 250 me ns (EP.NsList (EC.url 83))));
+  _ = check "partial registration withdrawn, other owner preserved" (strIndexOf (EC.schemaUrl 83) paths >= 0 and strIndexOf "{EC.url 83}\n" paths < 0);
+  _ = kill ns;
+  "editorstate: HOLDS".

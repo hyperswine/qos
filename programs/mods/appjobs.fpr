@@ -7,7 +7,8 @@ EP = use "ep#c66ad65e68dd97f5".
 ED = use "epdeadline".
 ES = use "endpointstate".
 AC = use "std/actor#201a0e9bf98a5154".
-FS = use "std/fs#84826bc9e8ddb4b5".
+Storage = use "std/storageclient".
+SP = use "std/storageprotocol".
 AK = use "appkit".
 Worker 1 = Type (Worker CP.Snapshot ES.State).
 run owner ns storage me = runWithPolicies 0 owner ns storage me.
@@ -45,7 +46,7 @@ executeWith io me ns storage AW.ListRoot state =
   result = EP.flat (AC.callWithin (CP.readMs io) me ns (EP.NsList "/"));
   (case result of Ok text -> Ok (AW.Lines (AK.lines text) "") | Err why -> Err why, state).
 executeWith io me ns storage AW.Disk state =
-  result = FS.rpcWithin (CP.readMs io) me storage 5 "" "";
+  result = SP.legacyResult (Storage.within (CP.readMs io) me (Storage.Owner storage) (SP.Stats ""));
   (case result of Ok text -> Ok (AW.Lines (AK.lines text) "STORAGE STATS") | Err why -> Err why, state).
 # the file namespaces: an append is open "write"/write/close, a replace the
 # same with the "replace" mode (the file emptied at the open), a delete an

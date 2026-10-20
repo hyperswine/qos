@@ -5,34 +5,39 @@
 unsafe module.
 Endpoint = use "epservice#e8bce05a1ddf73db".
 EP = use "ep#c66ad65e68dd97f5".
-FS = use "std/fs#84826bc9e8ddb4b5".
+Storage = use "std/storageclient".
+SP = use "std/storageprotocol".
 AC = use "std/actor#201a0e9bf98a5154".
 
 serve fs me = Endpoint.simpleUntil (readRecordUntil fs) (writeRecordUntil fs) me.
 result (Ok text) = Ok (EP.IStr text).
-result (Err why) = Err why.
+result (Err why) = Err (SP.message why).
+request me fs op = Storage.request me (Storage.Owner fs) op.
+requestUntil until me fs op = Storage.requestUntil until me (Storage.Owner fs) op.
 
 readRecord fs me client url | EP.strEq url "/services/files/status" = Ok (EP.IInt (case fs == 0 of True -> 0 | False -> 1)).
+readRecord fs me client url | EP.strEq url "/services/files/schema" = Ok (EP.IStr (SP.schema SP.FilesAdapter)).
 readRecord 0 _ _ _ = Err "no disk".
 readRecord fs me client url =
   (key, op) = recordOp url;
   readOp fs me key op.
-readOp fs me key "latest" = FS.readLatest me fs key |> result.
-readOp fs me key "replay" = FS.replay me fs key |> result.
-readOp fs me key "stats" = FS.stats me fs key |> result.
+readOp fs me key "latest" = request me fs (SP.ReadLatest key) |> result.
+readOp fs me key "replay" = request me fs (SP.Replay key) |> result.
+readOp fs me key "stats" = request me fs (SP.Stats key) |> result.
 readOp _ _ _ _ = Err "unknown file read operation".
 
+writeRecord fs me client url value | EP.strEq url "/services/files/schema" = Err "storage schema is read-only".
 writeRecord 0 _ _ _ _ = Err "no disk".
 writeRecord fs me client url value | EP.strEq url "/services/files/compact" =
   case Sys.pidOf client == 0 of
-    True -> FS.compact me fs |> result
+    True -> request me fs SP.Compact |> result
   | False -> Err "compaction is system-only".
 writeRecord fs me client url (EP.IStr text) =
   (key, op) = recordOp url;
   writeOp fs me key op text.
 writeRecord _ _ _ _ _ = Err "file writes require bytes".
-writeOp fs me key "append" text = FS.append me fs key text |> result.
-writeOp fs me key "delete" _ = FS.del me fs key |> result.
+writeOp fs me key "append" text = request me fs (SP.Append key text) |> result.
+writeOp fs me key "delete" _ = request me fs (SP.Delete key) |> result.
 writeOp _ _ _ _ _ = Err "unknown file write operation".
 
 recordOp url =
@@ -43,21 +48,23 @@ split text i | charAt text i == 47 = (substr text 0 i, substr text (i + 1) (strl
 split text i = split text (i - 1).
 
 readRecordUntil fs until me client url | EP.strEq url "/services/files/status" = Ok (EP.IInt (if fs == 0 then 0 else 1)).
+readRecordUntil fs until me client url | EP.strEq url "/services/files/schema" = Ok (EP.IStr (SP.schema SP.FilesAdapter)).
 readRecordUntil 0 _ _ _ _ = Err "no disk".
 readRecordUntil fs until me client url =
   (key, op) = recordOp url;
   case op of
-      "latest" -> result (FS.rpcUntil until me fs 1 key "")
-    | "replay" -> result (FS.rpcUntil until me fs 3 key "")
-    | "stats" -> result (FS.rpcUntil until me fs 5 key "")
+      "latest" -> result (requestUntil until me fs (SP.ReadLatest key))
+    | "replay" -> result (requestUntil until me fs (SP.Replay key))
+    | "stats" -> result (requestUntil until me fs (SP.Stats key))
     | other -> Err "unknown file read operation".
+writeRecordUntil fs until me client url value | EP.strEq url "/services/files/schema" = Err "storage schema is read-only".
 writeRecordUntil 0 _ _ _ _ _ = Err "no disk".
 writeRecordUntil fs until me client url value | EP.strEq url "/services/files/compact" =
-  if Sys.pidOf client == 0 then result (FS.rpcUntil until me fs 6 "" "") else Err "compaction is system-only".
+  if Sys.pidOf client == 0 then result (requestUntil until me fs SP.Compact) else Err "compaction is system-only".
 writeRecordUntil fs until me client url (EP.IStr text) =
   (key, op) = recordOp url;
   case op of
-      "append" -> result (FS.rpcUntil until me fs 2 key text)
-    | "delete" -> result (FS.rpcUntil until me fs 4 key "")
+      "append" -> result (requestUntil until me fs (SP.Append key text))
+    | "delete" -> result (requestUntil until me fs (SP.Delete key))
     | other -> Err "unknown file write operation".
 writeRecordUntil _ _ _ _ _ _ = Err "file writes require bytes".
