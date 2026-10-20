@@ -9,16 +9,16 @@ should be able to discover its effective values, constraints, usage and revision
 then change it without rebuilding or restarting the system wherever the resource
 contract permits. Moving literals into a constants file alone does not achieve
 this. The file manager policy, endpoint ownership, and runtime app I/O and
-recovery policy slices are implemented below. Other rows remain work to do.
+recovery, run admission, and hosted-program file access slices are implemented below. Other rows remain work to do.
 
 ## Work queue
 
 | Original source and behavior | Proposed type | Runtime change boundary | Status |
 |---|---|---|---|
 | `programs/mods/qsys.fpr`: 64 live file actors, 1024-byte new paths, 2000 ms reclamation, 1000 ms retirement margin | `FilesPolicy` (module `filepolicy`, constructor `Policy`) | Atomic manager update; next admission or retirement request, including existing actors | Pushed in `67a9c21` |
-| `programs/mods/appjobs.fpr`: read 500 ms, write 2000 ms, delete 1000 ms, cleanup 150 ms; `programs/mods/appclient.fpr` recovery cap of 3 attempts | `apppolicy.IoPolicy`, `RecoveryPolicy` | Snapshot at operation/recovery start; keep original in-flight deadline and cleanup obligation | Implemented in the runtime app-policy continuation below |
-| `programs/mods/editapp.fpr`: child memory = physical RAM / 4, fallback 1 GiB | `RunPolicy` | New launches first; changing a running process requires resource-account support and cannot revoke outstanding allocations silently | Planned |
-| `programs/mods/editapp.fpr`: `/home/` access, `.editor/` exclusion and path checks | `FileAccessPolicy`, validated path type | Revalidate new requests after a policy update; define explicit revocation semantics for already-issued capabilities | Planned |
+| `programs/mods/appjobs.fpr`: read 500 ms, write 2000 ms, delete 1000 ms, cleanup 150 ms; `programs/mods/appclient.fpr` recovery cap of 3 attempts | `apppolicy.IoPolicy`, `RecoveryPolicy` | Snapshot at operation/recovery start; keep original in-flight deadline and cleanup obligation | Pushed in `b9d3b5b` |
+| `programs/mods/editapp.fpr`: child memory = physical RAM / 4, fallback 1 GiB | `runpolicy.RunPolicy` | Snapshot after build, before spawn; existing processes retain their admitted budget | Implemented in the Editor policy continuation below |
+| `programs/mods/editapp.fpr`: `/home/` access, `.editor/` exclusion and path checks | `fileaccesspolicy.FileAccessPolicy`, `Path`, `Grant` | Each new hosted-program request; retain the captured grant for pending replies | Implemented in the Editor policy continuation below |
 | `programs/mods/appjobs.fpr`: `{held=(0,0), uncertain=""}` | Linear `endpointstate.State`: `Vacant`, `Held`, `Uncertain` | Explicit transitions preserving handle ownership and uncertain outcomes; inspect state, never overwrite it with arbitrary settings | Implemented in the continuation below |
 | `programs/mods/editapp.fpr`: numeric job and prompt modes | `JobKind`, `PromptMode` | Typed events and transitions; expose current state through app inspection | Planned |
 | Storage RPC integer operation tags and string-matched errors | `StorageOp`, `StorageError` | Typed facade plus a versioned wire codec; preserve existing clients during migration | Planned |
@@ -283,3 +283,114 @@ evidence, not a claim that the original sandbox command completed successfully.
 Logs and screenshots are under `.qos/validation/app-policy-gui-20261020/`; the
 desktop and shutdown summaries are in `app-policy-20261020/`. Physical-board
 and native runtime acceptance remain untested.
+
+
+## Editor launch and hosted-program file access policies
+
+This continuation starts after the app I/O and recovery slice was committed and
+pushed as `b9d3b5b`. `editorpolicy.fpr` owns two independently revisioned typed
+policies, exposed by a leased namespace adapter:
+
+- `/services/run-policy` and `/services/run-policy/schema`
+- `/services/file-access-policy` and `/services/file-access-policy/schema`
+
+Main starts and stops the owner and adapter with its app sessions. Editor gets
+the existing namespace address from its app-session context; these services use
+the established endpoint text protocol, so the app-session protocol remains v4.
+Rebuild Main and Editor to install this slice. Other v4 apps need no wire change.
+Policy settings last until Main restarts. A complete update must supply the
+current revision; stale, malformed, unauthorized or expired changes leave the
+policy and revision unchanged. Changing one policy does not advance the other.
+Authorization uses the same cooperative system-process convention as the prior
+policy services, not authenticated sender identity.
+
+### RunPolicy
+
+`runpolicy.RunPolicy` is either `RamShare divisor fallbackBytes` or
+`FixedBytes bytes`. The default remains a quarter of reported physical memory,
+with a 1 GiB fallback when the host cannot report a positive total. All fields
+must be positive machine integers. Division rounds down; a zero-byte result
+refuses launch. Fixed-byte mode does not depend on the host memory report.
+
+```text
+cat /services/run-policy
+cat /services/run-policy/schema
+write /services/run-policy revision=0 mode=fixed bytes=67108864
+write /services/run-policy revision=1 mode=ram-share divisor=8 fallbackBytes=268435456
+```
+
+The example assumes an initial revision of zero. Each form requires exactly its
+listed fields in that order. Extra or conflicting fields, signed values, numeric
+suffixes and overflow are refused. The schema also reports the host memory total,
+current revision and next effective byte budget (or an admission refusal).
+
+Editor reads a snapshot after a successful build and immediately before spawn.
+The typed `Admission` records that revision and byte budget. The process owner
+passes the admitted budget to the existing confinement operation before sending
+the child its start message. Editor retains the admission in its model and shows
+its revision and exact byte count in the launch output. Subsequent policy edits
+never re-confine, kill, or rewrite a running process. This is per-process
+confinement, not a reservation of physical memory or a whole-system account.
+
+### FileAccessPolicy and captured grants
+
+`fileaccesspolicy.FileAccessPolicy` carries an allowed directory root, an excluded
+directory subtree, maximum path bytes, and read/write flags. Defaults are
+`/home/`, `/home/.editor/`, 1024 bytes, and both permissions enabled. Reads and
+listings require the read flag; write, append and remove require the write flag.
+The policy applies to hosted programs' requests mediated by Editor. It does not
+change Editor's own document, build or session-recovery access.
+
+```text
+cat /services/file-access-policy
+cat /services/file-access-policy/schema
+write /services/file-access-policy revision=0 root=/tmp/ exclude=/tmp/private/ maxPathBytes=512 read=1 write=0
+```
+
+Every field is required in that order; flags are exactly 0 or 1 and path length
+is 1 through the 1024-byte storage wire ceiling. Roots and exclusions are absolute
+directory paths ending in `/`, with no whitespace. Request paths may contain
+spaces in filenames, but reject control bytes, backslashes, duplicate slashes,
+and dot or parent segments. The root itself is not admitted as a file. The
+excluded directory itself and its descendants are refused, including listings.
+
+Every new request from an already-running hosted program reads the current
+policy and produces a validated `Path` inside a typed `Grant`. A pending job
+retains that grant. Already-issued reads and writes complete under their old
+admission; edits do not cancel them or undo writes. A listing reply is filtered
+using its captured scope and exclusion, so it cannot adopt broader permissions
+from a later update. Directory boundaries are respected: listing `/home/a` does
+not expose `/home/ab`. Replies for a stopped program are still discarded by the
+existing process lifecycle logic.
+
+Both lookups share an introspected 250 ms deadline across namespace open, read,
+and lease close. An unavailable configured service refuses the launch or file
+request; it never silently restores permissive defaults. Namespace zero is an
+explicit standalone mode for isolated models and tests. These policy lookups use
+the existing leased adapter, whose expiry and handle limits are still separately
+listed follow-up work.
+
+`tests/editorpolicy.fpr` covers codecs, bounds, schema, authorization, independent
+revisions, live admission changes, pending reads/listings across revocation, and
+service failure. `tests/editorpolicyprocess.fpr` compiles a child through the host
+compiler and tests actual confinement before and after a live budget decrease.
+`tools/editor-policy-check.py` runs both plus app-session and memory regressions
+on one and four workers, and is registered in CI and `check-all.sh`.
+
+Validated on 2026-10-20 with eight successful Portable cases: `editorpolicy`,
+`editorpolicyprocess`, `appsession` and `appsessionmemory`, each on one and four
+workers. The process test observed the existing child's actual 32 MiB heap
+confinement after the policy decreased, then the next child's actual 16 MiB
+confinement. The memory regression retained its 3000-operation, 8-root / 2 MiB
+bounds. Main check-only, the four check-all verdict unit tests, shell syntax,
+Python parsing, `git diff --check`, and the 272-pin lock check passed.
+
+Final focused results are in
+`.qos/validation/editor-policy-20261020/access-results.log` and
+`process-results.log`, with detailed logs in `access-final/` and `run/`.
+The compiler service needed local socket access. Its first process-test attempt
+refused an overlong fixture package name; shortening that name to its documented
+limit allowed the process checks to run. The compiler executable hash remains
+`858ccf88b8b52bad49625629e61fd8c3f9d486b544f60ec2a0a20dea830f199f`,
+with sibling checkout `d27f825`. This slice has no new graphical, physical-board
+or native-runtime acceptance claim.

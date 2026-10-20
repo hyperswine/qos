@@ -21,6 +21,9 @@ std/actor v3.0 201a0e9bf98a5154 programs/mods/browserapp.fpr
 std/actor v3.0 201a0e9bf98a5154 programs/mods/clockapp.fpr
 std/actor v3.0 201a0e9bf98a5154 programs/mods/diskapp.fpr
 std/actor v3.0 201a0e9bf98a5154 programs/mods/editapp.fpr
+std/actor v3.0 201a0e9bf98a5154 programs/mods/editorpolicy.fpr
+ep v3.0 c66ad65e68dd97f5 programs/mods/editorpolicy.fpr
+epservice v3.0 e8bce05a1ddf73db programs/mods/editorpolicy.fpr
 std/actor v3.0 201a0e9bf98a5154 programs/mods/endpointstate.fpr
 std/actor v3.0 201a0e9bf98a5154 programs/mods/ep.fpr
 ep v3.0 c66ad65e68dd97f5 programs/mods/epdeadline.fpr
@@ -144,6 +147,11 @@ std/actor v3.0 201a0e9bf98a5154 tests/diskprogress.fpr
 std/fs v5.0 84826bc9e8ddb4b5 tests/diskstallp.fpr
 std/blockio v6.0 8b4ffa1467ca03a5 tests/diskstallp.fpr
 std/fs v5.0 84826bc9e8ddb4b5 tests/editor.fpr
+../programs/mods/ep v3.0 c66ad65e68dd97f5 tests/editorpolicy.fpr
+../programs/mods/epservice v3.0 e8bce05a1ddf73db tests/editorpolicy.fpr
+std/actor v3.0 201a0e9bf98a5154 tests/editorpolicy.fpr
+../programs/mods/ep v3.0 c66ad65e68dd97f5 tests/editorpolicyprocess.fpr
+../programs/mods/epservice v3.0 e8bce05a1ddf73db tests/editorpolicyprocess.fpr
 ../programs/mods/epservice v3.0 e8bce05a1ddf73db tests/epecho.fpr
 ../programs/mods/ep v3.0 c66ad65e68dd97f5 tests/epecho.fpr
 std/actor v3.0 201a0e9bf98a5154 tests/epecho.fpr

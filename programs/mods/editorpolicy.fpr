@@ -1,0 +1,74 @@
+# Live Editor policy owner. The public protocol is the existing endpoint text
+# boundary, so app-session bootstrap needs no additional fields or version.
+unsafe module.
+RP = use "runpolicy".
+FA = use "fileaccesspolicy".
+AC = use "std/actor#201a0e9bf98a5154".
+EP = use "ep#c66ad65e68dd97f5".
+ED = use "epdeadline".
+Endpoint = use "epservice#e8bce05a1ddf73db".
+Request = Type (GetRun Int | PutRun Int Int Int RP.RunPolicy | GetAccess Int | PutAccess Int Int Int FA.FileAccessPolicy).
+controlMs = 250.
+start me ns =
+  owner = spawn serve;
+  adapter = spawn (Endpoint.simpleUntil (readPolicy owner) (writePolicy owner));
+  _ = claim me ns RP.url adapter; _ = claim me ns RP.schemaUrl adapter;
+  _ = claim me ns FA.url adapter; _ = claim me ns FA.schemaUrl adapter;
+  (owner, adapter).
+claim me ns path adapter = case EP.register me ns path adapter of Ok u -> Unit | Err why -> error "editor policy registration: {why}".
+serve me = _ = Sys.loop {run = RP.Snapshot 0 RP.defaults, access = FA.Snapshot 0 FA.defaults} (step me); Unit.
+step me state =
+  (from, id, request) = receive me;
+  ret = (from, id);
+  case request of
+    GetRun until -> _ = AC.reply ret (if AC.nowUs Unit >= until then Err "policy read expired" else Ok state.run); (True, state)
+  | GetAccess until -> _ = AC.reply ret (if AC.nowUs Unit >= until then Err "policy read expired" else Ok state.access); (True, state)
+  | PutRun until client expected p -> (case updateRun until client expected p state.run of
+      Err why -> _ = AC.reply ret (Err why); (True, state)
+    | Ok next -> _ = AC.reply ret (Ok next); (True, {state | run = next}))
+  | PutAccess until client expected p -> (case updateAccess until client expected p state.access of
+      Err why -> _ = AC.reply ret (Err why); (True, state)
+    | Ok next -> _ = AC.reply ret (Ok next); (True, {state | access = next})).
+checkUpdate client expected revision =
+  if Sys.pidOf client != 0 then Err "updates are system-only"
+  else if expected != revision then Err "stale revision; current revision={revision}"
+  else if revision == intMax Unit then Err "revision exhausted" else Ok Unit.
+updateRun until client expected p snapshot = case checkUpdate client expected (RP.revision snapshot) of
+    Err why -> Err why
+  | Ok u -> case RP.validate p of Err why -> Err why
+    | Ok valid -> if AC.nowUs Unit >= until then Err "policy update expired" else Ok (RP.Snapshot (expected + 1) valid).
+updateAccess until client expected p snapshot = case checkUpdate client expected (FA.revision snapshot) of
+    Err why -> Err why
+  | Ok u -> case FA.validate p of Err why -> Err why
+    | Ok valid -> if AC.nowUs Unit >= until then Err "policy update expired" else Ok (FA.Snapshot (expected + 1) valid).
+readPolicy owner until me client path =
+  if path == RP.url then answer RP.render (AC.callUntil until me owner (GetRun until))
+  else if path == RP.schemaUrl then answer runSchema (AC.callUntil until me owner (GetRun until))
+  else if path == FA.url then answer FA.render (AC.callUntil until me owner (GetAccess until))
+  else if path == FA.schemaUrl then Ok (EP.IStr "{FA.schema}controlMs={controlMs}; policy lookup and lease close share this deadline\n")
+  else Err "no such editor-policy endpoint".
+runSchema snapshot = total = Sys.memTotal Unit;
+  next = case RP.admit snapshot total of Ok admission -> "{RP.bytes admission}" | Err why -> "refused: {why}";
+  "{RP.schema}currentRevision={RP.revision snapshot}\nreportedMemoryBytes={total}\nnextBudgetBytes={next}\ncontrolMs={controlMs}; policy lookup and lease close share this deadline\n".
+writePolicy owner until me client path value = case value of
+    EP.IStr text ->
+      if path == RP.url then (case RP.parse text of Err why -> Err why
+        | Ok (RP.Snapshot expected p) -> answer RP.render (AC.callUntil until me owner (PutRun until client expected p)))
+      else if path == FA.url then (case FA.parse text of Err why -> Err why
+        | Ok (FA.Snapshot expected p) -> answer FA.render (AC.callUntil until me owner (PutAccess until client expected p)))
+      else Err "policy schema is read-only"
+  | other -> Err "policy update wants IStr".
+answer render (Err why) = Err "editor policy: {why}; read revision before retrying".
+answer render (Ok (Err why)) = Err why.
+answer render (Ok (Ok snapshot)) = Ok (EP.IStr (render snapshot)).
+# Namespace zero explicitly selects standalone defaults for isolated models.
+# A configured namespace failure never falls back to a permissive policy.
+currentRun me ns = if ns == 0 then Ok (RP.Snapshot 0 RP.defaults) else
+  case readText me ns RP.url of Err why -> Err why | Ok text -> RP.parse text.
+currentAccess me ns = if ns == 0 then Ok (FA.Snapshot 0 FA.defaults) else
+  case readText me ns FA.url of Err why -> Err why | Ok text -> FA.parse text.
+readText me ns path = case AC.deadlineAfter controlMs of Err why -> Err why
+  | Ok until -> case ED.readOnceUntil until me ns path of
+      Err why -> Err "editor policy unavailable: {why}"
+    | Ok (EP.IStr text) -> Ok text
+    | Ok other -> Err "editor policy returned non-text".

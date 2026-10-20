@@ -233,7 +233,7 @@ main =
   hosting = {e9 | running = True, appRun = True, progFocus = True, proc = stand};
   (h1, hc1) = ED.heard [PG.Frame ["n 1", "ok"], PG.Ask 3 (PG.ReadReq "/home/x.txt"), PG.Ask 4 (PG.WriteReq "/home/.editor/session" "x")] hosting Nil;
   _ = check "program frame shown, a /home ask is a job" (h1.progView == ["n 1", "ok"] and (case hc1 of AW.Fetch tok (AW.ReadPath p) :: Nil -> p == "/home/x.txt" | other -> False));
-  _ = check "program refused at once" (case receiveFromRes me stand of Ok (PG.Answer 4 (PG.Failed why)) -> strIndexOf "under /home only" why >= 0 | other -> False);
+  _ = check "program refused at once" (case receiveFromRes me stand of Ok (PG.Answer 4 (PG.Failed why)) -> strIndexOf "refused by file access policy" why >= 0 | other -> False);
   (h2, _) = ED.update (AW.Arrived h1.token (Ok (AW.Text "hello"))) h1;
   _ = check "program answered under its token" (case receiveFromRes me stand of Ok (PG.Answer 3 (PG.Text t)) -> t == "hello" | other -> False);
   (h3, _) = ED.update (AW.Key 30) h2;
