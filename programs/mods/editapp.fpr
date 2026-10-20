@@ -43,6 +43,7 @@ Control = use "editorcontrol".
 Prefs = use "editorpreferences".
 History = use "preferencehistory".
 PC = use "preferencecontrol".
+PS = use "preferencestore".
 Fm = use "fontm".
 S2 = use "scene2d".
 AC = use "std/actor#201a0e9bf98a5154".
@@ -54,7 +55,12 @@ PG = use "std/hosted".
 
 sessionPath = Prefs.recoveryPath Prefs.defaults.
 # Pending jobs retain their typed kind until the matching reply arrives.
-init = ({preferences = Prefs.defaults, preferenceRevision = 0, preferenceAdapter = 0, policyNamespace = 0, runAdmission = RunPolicy.Unadmitted, buf = E.empty, path = "", version = 0, savedVersion = 0, nextStamp = 1, recorded = "", idle = 0,
+init = initWith 0 Prefs.defaults.
+persistedInit (PS.Editor (Prefs.Snapshot rev p)) = initWith rev p.
+persistedInit other = error "wrong Editor preference type".
+initWith rev p =
+  sessionPath = Prefs.recoveryPath p;
+  ({preferences = p, preferenceRevision = rev, preferenceAdapter = 0, preferencePersistence = PS.mode 0, policyNamespace = 0, runAdmission = RunPolicy.Unadmitted, buf = E.empty, path = "", version = 0, savedVersion = 0, nextStamp = 1, recorded = "", idle = 0,
          top = 0, left = 0, undo = Nil, redo = Nil, lastKind = State.NoEdit, clip = "",
          mode = State.Editing, query = "", files = Nil, listed = False, pick = 0, findText = "", msg = "", warn = False,
          out = Nil, outOpen = False, confirm = State.NoConfirmation, pending = [{token = 1, kind = State.RestoreSession, version = 0, path = sessionPath, wrapped = False, grant = FA.NoGrant}],
@@ -537,7 +543,7 @@ tick m0 = (m, c0) = poll m0; if not m.focused then (m, c0) else
 keepSession now m =
   key = "{m.path}|{m.version}|{m.savedVersion}";
   if (now or m.idle >= 5) and key != m.recorded and (now or not (pendingKind State.KeepSession m.pending)) then
-    record = "qed1\n{m.path}\n{(if dirty m then "1\n" else "0\n")}{(if dirty m then E.toText m.buf else "")}";
+    record = recoveryRecord m;
     path = Prefs.recoveryPath m.preferences;
     issue State.KeepSession m.version path (AW.WritePath path record) {m | recorded = key}
   else (m, Nil).
@@ -781,7 +787,11 @@ controlStep me ctx model adapter = if adapter == 0 then
 run me = case AS.start me of
     Err why -> Unit
   | Ok ctx ->
-      (initial, commands) = init;
+      case PS.current (AC.nowUs Unit + PC.controlMs * 1000) me ctx.ns ctx.storage "editor" of
+        Err why -> _ = AS.abandon me ctx; _ = Sys.logAt 2 why; Unit
+      | Ok snapshot -> runLoaded me ctx snapshot.
+runLoaded me ctx snapshot =
+      (initial, commands) = persistedInit snapshot;
       (model, ignored) = update (AW.Resize ctx.w ctx.h) {initial | policyNamespace = ctx.ns};
       case Control.start me ctx.ns ctx.session of
         Err why -> _ = AS.abandon me ctx; _ = Sys.logAt 2 why; Unit
@@ -789,7 +799,7 @@ run me = case AS.start me of
           Err why -> _ = AS.abandon me ctx; _ = Sys.logAt 2 why; Unit
         | Ok preferences ->
           _ = AS.issue me ctx commands;
-          _ = Sys.loop (ctx, {model | preferenceAdapter = preferences}, adapter) (step me);
+          _ = Sys.loop (ctx, {model | preferencePersistence = PS.mode ctx.storage, preferenceAdapter = preferences}, adapter) (step me);
           # Returning wakes the adapter's parked owner watcher on normal close
           # as well as failure, without mixing shutdown commands with replies.
           Unit.
@@ -824,7 +834,7 @@ step me state =
           (True, (next, fresh2, adapter)).
 
 # Preferences belong to the model; endpoint writes serialize with app events.
-preferenceText m = "{Prefs.encode m.preferenceRevision m.preferences}\nundoUsed={E.count m.undo} redoUsed={E.count m.redo} outputUsed={E.count m.out}\nrecoveryBusy={recoveryBusy m}\n".
+preferenceText m = "{Prefs.encode m.preferenceRevision m.preferences}\npersistence={m.preferencePersistence}\nundoUsed={E.count m.undo} redoUsed={E.count m.redo} outputUsed={E.count m.out}\nrecoveryBusy={recoveryBusy m}\n".
 recoveryBusy m = pendingKind State.RestoreSession m.pending or pendingKind State.KeepSession m.pending or pendingKind State.SaveDocument m.pending.
 applyPreferences p m = case Prefs.validate p of Err why -> Err why
   | Ok valid ->
@@ -851,5 +861,9 @@ preferencesStep me ctx m adapter = if m.preferenceAdapter == 0 then controlStep 
           (True, (ctx, m, adapter))
       | PC.Change until client text -> case configurePreferences until client text m of
           Err why -> _ = AC.reply (from, id) (Err why); (True, (ctx, m, adapter))
-        | Ok fresh -> _ = AC.reply (from, id) (Ok (preferenceText fresh));
-            (True, (AS.advance ctx ctx.sequence, fresh, adapter)).
+        | Ok fresh -> case PS.save until me ctx.ns ctx.storage "editor" (Prefs.encode fresh.preferenceRevision fresh.preferences) (if Prefs.recoveryPath fresh.preferences != Prefs.recoveryPath m.preferences then recoveryRecord m else "") of
+            Err why -> _ = AC.reply (from, id) (Err why); (True, (ctx, m, adapter))
+          | Ok u -> _ = AC.reply (from, id) (Ok (preferenceText fresh));
+              (True, (AS.advance ctx ctx.sequence, fresh, adapter)).
+
+recoveryRecord m = "qed1\n{m.path}\n{(if dirty m then "1\n" else "0\n")}{(if dirty m then E.toText m.buf else "")}".

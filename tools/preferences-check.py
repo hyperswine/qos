@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Live Editor/Terminal preferences, retention and recovery job boundaries."""
+"""Live and persistent Editor/Terminal preferences, including two host boots."""
 import argparse
 import importlib.util
 import os
@@ -38,7 +38,25 @@ def check(out):
         (out / (name + '.log')).write_text(log)
         assert result.returncode == 1 and 'cannot unify' in log, log
         print(f'Preferences: {name} refused', flush=True)
-    runner.check(out, ('preferences', 'preferencesrecovery', 'editorstate', 'appsession', 'appsessionmemory'))
+    for harts in (1, 4):
+        (out / f'preferencespersistent-{harts}.disk').unlink(missing_ok=True)
+    runner.check(out, ('preferences', 'preferencesrecovery', 'preferencespersistent', 'editorstate', 'appsession', 'appsessionmemory'))
+
+    # The first runner pass created each disk. Reuse it in a new host process.
+    for harts in (1, 4):
+        first = (out / f'preferencespersistent-{harts}.log').read_text()
+        assert 'preferencespersistent: first boot HOLDS' in first, first
+        boot_env = dict(os.environ, FPR_HARTS=str(harts), FPR_PORT='0',
+                        XDG_CACHE_HOME=str(out / 'cache'),
+                        FPR_DISK=str(out / f'preferencespersistent-{harts}.disk'))
+        result = subprocess.run([str(out / 'qosp'), '--yes',
+                                 str(out / 'preferencespersistent.qa')],
+                                cwd=ROOT, env=boot_env, stdin=subprocess.DEVNULL,
+                                capture_output=True, text=True, timeout=240)
+        log = result.stdout + result.stderr
+        (out / f'preferencespersistent-reboot-{harts}.log').write_text(log)
+        assert result.returncode == 0 and 'preferencespersistent: second boot HOLDS' in log and 'PANIC' not in log, log
+        print(f'preferencespersistent: {harts} worker(s), second host boot HOLDS', flush=True)
 
 
 if __name__ == '__main__':

@@ -1,0 +1,112 @@
+# Run twice on the same Portable disk: app death/relaunch, then host restart.
+unsafe program.
+ED = use "../programs/mods/editapp".
+TM = use "../programs/mods/termapp".
+P = use "../programs/mods/editorpreferences".
+T = use "../programs/mods/terminalpreferences".
+H = use "../programs/mods/preferencehistory".
+PC = use "../programs/mods/preferencecontrol".
+PS = use "../programs/mods/preferencestore".
+AW = use "../programs/mods/appwire".
+QS = use "../programs/mods/qsys".
+FS = use "std/fs#84826bc9e8ddb4b5".
+B = use "std/blockio#8b4ffa1467ca03a5".
+EP = use "../programs/mods/ep#c66ad65e68dd97f5".
+AC = use "std/actor#201a0e9bf98a5154".
+get (Ok value) = value.
+get (Err why) = error "preferencespersistent: {why}".
+check yes why = if yes then Unit else error "preferencespersistent: {why}".
+text (EP.IStr s) = s.
+text other = error "expected text".
+failed (Err _) = True.
+failed other = False.
+ready until me ns path = case EP.readOnce me ns path of
+    Ok (EP.IStr s) -> if strIndexOf "revision=" s == 0 and strIndexOf "recoveryBusy=True" s < 0 then s else again until me ns path
+  | other -> again until me ns path.
+again until me ns path = if AC.nowUs Unit >= until then error "preference startup timed out" else
+  _ = Sys.sleepUs 1000; ready until me ns path.
+boot me ns fs app sid actor =
+  _ = get (AC.callWithin 500 me actor (AW.magic, AW, (sid, (800, 480), (ns, fs, 0))));
+  ready (AC.nowUs Unit + 3000000) me ns (PC.url app sid).
+editor = P.Preferences 17 19 "/home/.editor/persistent-test" H.KeepNewest.
+original = "qed1\n/home/persistent.txt\n1\nunsaved persistent text".
+ended until actor = if not (Sys.alive actor) then Unit else if AC.nowUs Unit >= until then error "corrupt preferences did not refuse startup" else
+  _ = Sys.sleepUs 1000; ended until actor.
+close me actor sid = _ = get (AC.callWithin 1500 me actor (AW.Close sid)); Unit.
+unprivileged parent ns me =
+  _ = receive me;
+  result = EP.writeOnce me ns (PS.url "terminal") (EP.IStr (T.encode 1 T.defaults));
+  _ = send parent (case result of Err why -> strIndexOf "system-only" why >= 0 | other -> False); Unit.
+first me ns fs =
+  child = Sys.spawnApp (unprivileged me ns);
+  _ = get (EP.grant me ns (Sys.pidOf child) [(PS.url "terminal", "rw")]);
+  _ = send child Unit;
+  _ = check (get (receiveFromRes me child)) "granted application wrote shared defaults";
+  _ = get (FS.append me fs (P.recoveryPath P.defaults) original);
+  a = spawn TM.run;
+  b = spawn TM.run;
+  _ = boot me ns fs "terminal" 101 a;
+  _ = boot me ns fs "terminal" 102 b;
+  # KeepNewest permits trimming the startup banner to a single line.
+  chosen = T.Preferences 512 1 7 H.KeepNewest;
+  _ = get (EP.writeOnce me ns (PC.url "terminal" 101) (EP.IStr (T.encode 0 chosen)));
+  _ = check (failed (EP.writeOnce me ns (PS.url "terminal") (EP.IStr (T.encode 1 chosen)))) "duplicate durable revision accepted";
+  _ = check (failed (EP.writeOnce me ns (PC.url "terminal" 102) (EP.IStr (T.encode 0 T.defaults)))) "stale session overwrote newer defaults";
+  stale = text (get (EP.readOnce me ns (PC.url "terminal" 102)));
+  _ = check (strIndexOf "revision=0 " stale == 0) "failed save mutated live session";
+  _ = kill a;
+  _ = close me b 102;
+  e = spawn ED.run;
+  _ = boot me ns fs "editor" 103 e;
+  _ = get (AC.callWithin 500 me e (AW.Event 103 1 (AW.Key 30)));
+  _ = get (EP.writeOnce me ns (PC.url "editor" 103) (EP.IStr (P.encode 0 editor)));
+  # No tick/close after the path switch: the write acknowledgement suffices.
+  _ = kill e;
+  migrated = get (FS.replay me fs (P.recoveryPath editor));
+  _ = check (migrated != original and strIndexOf "unsaved persistent text" migrated >= 0) "new recovery path was not committed before settings";
+  _ = get (FS.append me fs "test/preferences/recovery-expected" migrated);
+  _ = check (get (FS.replay me fs (P.recoveryPath P.defaults)) == original) "old recovery copy changed";
+  _ = verify me ns fs;
+  _ = print "preferencespersistent: first boot HOLDS"; Unit.
+verify me ns fs =
+  t = spawn TM.run;
+  settings = boot me ns fs "terminal" 201 t;
+  _ = check (strIndexOf "revision=1 inputBytes=512 outputLines=1 historyEntries=7 history=keep-newest" settings == 0 and strIndexOf "outputUsed=1" settings >= 0) "Terminal did not reload persisted preferences";
+  e = spawn ED.run;
+  settings2 = boot me ns fs "editor" 202 e;
+  _ = check (strIndexOf (P.encode 1 editor) settings2 == 0) "Editor did not reload persisted preferences";
+  # A close writes the restored buffer. This checks that startup used the
+  # configured recovery path, not just that the preferences text was loaded.
+  _ = close me e 202;
+  expected = get (FS.readLatest me fs "test/preferences/recovery-expected");
+  _ = check (get (FS.replay me fs (P.recoveryPath editor)) == expected) "Editor startup lost recovered text";
+  _ = close me t 201; Unit.
+second me ns fs =
+  _ = verify me ns fs;
+  saved = get (FS.readLatest me fs (PS.key "terminal"));
+  _ = get (FS.append me fs (PS.key "terminal") "future-or-corrupt-format");
+  _ = check (failed (EP.readOnce me ns (PS.url "terminal"))) "corrupt preferences silently defaulted";
+  bad = spawn TM.run;
+  _ = get (AC.callWithin 500 me bad (AW.magic, AW, (301, (800, 480), (ns, fs, 0))));
+  _ = ended (AC.nowUs Unit + 2000000) bad;
+  _ = check (failed (EP.writeOnce me ns (PS.url "terminal") (EP.IStr (T.encode 2 T.defaults)))) "corrupt record overwritten";
+  _ = check (get (FS.readLatest me fs (PS.key "terminal")) == "future-or-corrupt-format") "corrupt bytes not preserved";
+  _ = get (FS.append me fs (PS.key "terminal") saved);
+  _ = check (failed (EP.writeOnce me ns (PS.url "editor") (EP.IStr (P.encode 2 P.defaults)))) "path migration accepted without recovery copy";
+  _ = print "preferencespersistent: second boot HOLDS"; Unit.
+main =
+  me = myself 0;
+  block = B.serve me (device "blk");
+  fs = get (FS.startBlock me block);
+  QS.Qsys ns _ _ _ _ = QS.bootWire me fs Nil;
+  saved = text (get (EP.readOnce me ns (PS.url "terminal")));
+  _ = if saved == T.encode 0 T.defaults then first me ns fs else second me ns fs;
+  live = spawn TM.run;
+  before = boot me ns fs "terminal" 401 live;
+  _ = get (FS.shutdown me fs block);
+  _ = check (failed (EP.writeOnce me ns (PC.url "terminal" 401) (EP.IStr (T.encode 1 T.defaults)))) "offline save succeeded";
+  after = text (get (EP.readOnce me ns (PC.url "terminal" 401)));
+  _ = check (before == after) "offline save changed the live preferences";
+  _ = close me live 401;
+  _ = check (failed (EP.readOnce me ns (PS.url "terminal"))) "offline storage silently defaulted";
+  "preferencespersistent: HOLDS".

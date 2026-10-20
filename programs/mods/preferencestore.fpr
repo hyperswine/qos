@@ -1,0 +1,88 @@
+# One serialized endpoint owner per QOS namespace. Disk records are whole
+# snapshots, never delete-then-append. Live app sessions own their own models.
+unsafe module.
+E = use "editorpreferences".
+T = use "terminalpreferences".
+EP = use "ep#c66ad65e68dd97f5".
+ED = use "epdeadline".
+Endpoint = use "epservice#e8bce05a1ddf73db".
+AC = use "std/actor#201a0e9bf98a5154".
+Storage = use "std/storageclient".
+SP = use "std/storageprotocol".
+Wire = use "std/storage#a8f7ee14e1efae76".
+PC = use "preferencecontrol".
+Snapshot = Type (Editor E.Snapshot | Terminal T.Snapshot).
+url app = "/services/preferences/{app}".
+key app = "sys/preferences/v1/{app}".
+magic = "qos-preferences-1\n".
+parse "editor" text = case E.parse text of Ok p -> Ok (Editor p) | Err why -> Err why.
+parse "terminal" text = case T.parse text of Ok p -> Ok (Terminal p) | Err why -> Err why.
+parse other text = Err "unknown preference type".
+revision (Editor p) = E.revision p.
+revision (Terminal p) = T.revision p.
+render (Editor p) = E.render p.
+render (Terminal p) = T.render p.
+defaults "editor" = Ok (Editor (E.Snapshot 0 E.defaults)).
+defaults "terminal" = Ok (Terminal (T.Snapshot 0 T.defaults)).
+defaults other = Err "unknown preference type".
+appAt path = if path == url "editor" then "editor" else if path == url "terminal" then "terminal" else "".
+load until me storage app = case Storage.requestUntil until me (Storage.Owner storage) (SP.ReadLatest (key app)) of
+    Err why -> if SP.missing why then defaults app else Err (SP.message why)
+  | Ok bytes -> if not (SP.prefix magic bytes) then Err "invalid persisted preference format; record preserved" else
+      parse app (substr bytes (strlen magic) (strlen bytes - strlen magic)).
+serve ns storage me = Endpoint.simpleUntil (readSaved storage) (writeSaved ns storage) me.
+readSaved storage until me client path = if path == "/services/preferences/schema" then Ok (EP.IStr schema) else
+  case defaults (appAt path) of Err why -> Err why
+  | Ok unused -> case load until me storage (appAt path) of Err why -> Err why | Ok p -> Ok (EP.IStr (render p)).
+writeSaved ns storage until me client path value =
+  if Sys.pidOf client != 0 then Err "preferences are system-only" else
+  case value of
+    EP.IStr text -> writeText ns storage until me path text
+  | other -> Err "preferences want IStr".
+writeText ns storage until me path text = if strlen text > Wire.maxPayloadBytes then Err "preference snapshot too large" else
+      split = strIndexOf "\n" text;
+      fields = if split < 0 then text else substr text 0 split;
+      recovery = if split < 0 then "" else substr text (split + 1) (strlen text - split - 1);
+      app = appAt path;
+      case parse app fields of Err why -> Err why
+      | Ok proposed -> case load until me storage app of Err why -> Err why
+        | Ok old -> if revision old == intMax Unit or revision proposed != revision old + 1 then Err "stale persisted preference revision; inspect {url app} and restart this session"
+          else case migrate until me ns old proposed recovery of Err why -> Err why
+          | Ok u -> case Storage.requestUntil until me (Storage.Owner storage) (SP.Append (key app) "{magic}{render proposed}") of
+              Err why -> Err "preference persistence: {SP.message why}; inspect {url app} before retrying"
+            | Ok ignored -> Ok (EP.IStr (render proposed)).
+# A failed migration leaves the old selected path and its copy intact. The
+# destination may have changed; no preference mutation is retried implicitly.
+migrate until me ns (Editor old) (Editor proposed) recovery =
+  path = E.recoveryPath (E.preferences proposed);
+  if path == E.recoveryPath (E.preferences old) then Ok Unit else
+  if not (SP.prefix "qed1\n" recovery) then Err "changing recoveryPath requires the current Editor recovery snapshot" else
+  id = Sys.nextId Unit;
+  worker = spawn (copyRecovery until me id ns path recovery);
+  result = EP.flat (AC.awaitReplyUntil until me worker id);
+  _ = kill worker;
+  result.
+migrate until me ns (Terminal old) (Terminal proposed) recovery = Ok Unit.
+migrate until me ns old proposed recovery = Err "preference type mismatch".
+# Namespace forwards new opens from its own actor. Keep those envelopes off
+# the correlated namespace reply channel used by the migration worker.
+copyRecovery until owner id ns path recovery me =
+  result = case ED.openUntil until me ns path "replace" of Err why -> Err why
+    | Ok endpoint -> case ED.withClose until me endpoint (ED.writeUntil until me endpoint (EP.IStr recovery)) of
+        Err why -> Err "recovery migration: {why}"
+      | Ok u -> Ok Unit;
+  _ = AC.reply (owner, id) result; Unit.
+current until me ns storage app = if storage == 0 then defaults app else
+  case ED.readOnceUntil until me ns (url app) of
+    Err why -> Err "load {app} preferences: {why}"
+  | Ok (EP.IStr text) -> parse app text
+  | Ok other -> Err "invalid preference store response".
+save deadline me ns storage app text recovery = if storage == 0 then Ok Unit else
+  bound = AC.nowUs Unit + PC.controlMs * 1000;
+  until = if deadline < bound then deadline else bound;
+  case ED.writeOnceUntil until me ns (url app) (EP.IStr "{text}\n{recovery}") of
+    Err why -> Err why
+  | Ok (EP.IStr saved) -> if saved == text then Ok Unit else Err "preference store returned a different snapshot"
+  | Ok other -> Err "invalid preference store response".
+mode storage = if storage == 0 then "session-only (no disk)" else "disk; shared defaults; existing sessions retain their admitted snapshot".
+schema = "type=PersistentPreferences version=1\nrecords=sys/preferences/v1/editor,sys/preferences/v1/terminal\nformat=qos-preferences-1 newline canonical typed snapshot\nread=current durable snapshot; missing record alone selects defaults\nwrite=system-only; next durable revision; optional newline and current qed1 recovery snapshot for Editor path migration\ncommit=one whole append-only settings record; never delete the previous snapshot\nconcurrency=serialized compare-and-write; stale sessions must restart to load newer defaults\nrecovery=write destination before selecting it; retain old path; failed updates may leave a destination copy\nerrors=malformed/unavailable records refuse startup and updates; timeout may have committed, inspect before retry\ncontrolMs={PC.controlMs}; each load or save transport bound\ndurability=storage acknowledgement; clean shutdown flush where supported; no power-loss guarantee\n".

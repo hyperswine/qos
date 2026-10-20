@@ -637,20 +637,17 @@ This policy governs preference updates; normal ongoing output/history remains a
 bounded rolling history under either setting. Counts may range up to the machine
 integer maximum, but raising them does not reserve memory or guarantee capacity.
 
-Recovery-path changes wait for the existing work to finish by refusing the
-update while it is pending. A successful change keeps the previous on-disk
-recovery file, invalidates the recorded marker and schedules a fresh copy at the
-new path on the next eligible Editor tick. Existing job payloads keep their
-original paths. Failed copy writes clear the marker, display the failure and
-allow a later tick to retry. The update acknowledgement confirms model settings,
-not a completed disk write. The previous file is never deleted by this switch.
+Recovery-path changes refuse updates while restore, document-save or recovery
+work is pending. Existing job payloads keep their original paths. With a disk,
+the persistence continuation below writes the current recovery snapshot to the
+new path before saving the preference. The previous recovery file is retained.
+Without a disk, changes remain session-local and schedule a copy on the next
+eligible tick. Failed routine recovery writes clear the marker, display the
+failure and allow a later tick to retry.
 
-Preferences are **session-local and volatile** in this slice. New sessions use
-defaults, including the default recovery path; they do not automatically restore
-from a custom path selected in a previous session. A durable preference store
-and discovery of custom recovery files remain separate work. The recovery path
-is constrained to the existing reserved directory rather than silently changing
-hosted-program file-access grants.
+Preferences now persist with disk-backed QOS. New sessions load the saved
+settings before selecting an Editor recovery file. The recovery path stays in
+the existing reserved directory, preserving hosted-program file-access grants.
 
 `preferencecontrol.fpr` is the shared leased endpoint adapter. It exchanges text
 requests with the owning app and never owns or overwrites the app model. Its
@@ -684,3 +681,82 @@ Evidence is under `.qos/validation/preferences-20261020/`. This validates source
 and Portable execution, not a graphical session, physical device, native target
 or full sweep. Rebuild and launch the app bundles to acquire the new endpoints;
 subsequent preference edits apply to those running sessions without rebuilding.
+
+
+## Preference persistence continuation (2026-10-20)
+
+`preferencestore.fpr` owns `/services/preferences` in disk-backed QOS. Settings
+are shared per app, with separate Editor and Terminal records. Each record is
+one complete typed snapshot: a `qos-preferences-1` header, newline, and canonical
+preference fields. Keys are `sys/preferences/v1/editor` and
+`sys/preferences/v1/terminal`; updates append a new record and reads use the
+latest record. Settings are never deleted before replacement.
+
+Rebuild Main and the Editor/Terminal bundles together to install this service.
+A new app with a disk configured refuses to start if the running Main does not
+provide the preference store.
+
+```text
+cat /services/preferences/editor
+cat /services/preferences/terminal
+cat /services/preferences/schema
+```
+
+Continue changing a running app through `/apps/APP/SESSION/preferences`. It
+validates the proposed settings against its live buffer, histories and pending
+jobs, persists them, and only then changes the model and acknowledges success.
+The per-session read includes `persistence=`. The shared endpoints above expose
+the last saved defaults; existing sessions keep their admitted values until
+updated or relaunched. This persists settings, not undo stacks, Terminal command
+history, draft input or output. Editor recovery remains its separate mechanism.
+
+Revisions also survive restarts. The store serializes a read/compare/append and
+requires exactly the next saved revision. A second session with older settings
+cannot overwrite a newer snapshot. Restart that stale session to load the
+current saved defaults. Advanced direct writes to the shared endpoint supply
+the **next** revision, unlike per-session writes, which supply the **expected
+current** revision. Direct writes change defaults for future sessions and do not
+apply live-model validation. Both write surfaces are system-process-only, even
+if an application process has a namespace grant.
+
+Editor startup loads preferences before constructing its restore job. For a
+recovery-path change, the store first writes the current `qed1` snapshot at the
+new destination, then appends the settings record, then acknowledges. This
+preserves recovery even when the app ends immediately after the update, without
+a subsequent tick or close. The copy uses a separate worker so namespace-open
+forwarding cannot be confused with correlated namespace replies. The previous
+path remains intact. A failed migration or settings commit can leave a copy at
+the destination, but does not select it in the live model. Direct shared writes
+that change the path must include a newline and current recovery snapshot.
+
+Only an exact missing-record result permits defaults. An invalid version,
+malformed fields, unavailable storage or a dead service refuses startup/update
+without overwriting the record. Explicit `storage=0` still means standalone,
+session-only preferences. App-side loading and saving use the existing 250 ms
+preference control budget; the incoming deadline can shorten it. Direct shared
+endpoint calls use their endpoint deadline. Each request carries the same
+deadline through storage and migration, with no implicit mutation retry.
+If an acknowledgement is lost or endpoint cleanup fails, settings may already
+be on disk while the live model remains unchanged. Inspect the shared saved
+snapshot and restart the session before retrying after an ambiguous failure.
+
+Persistence means an acknowledged storage append and restoration on another
+host run. Clean shutdown drains storage and flushes where the backend supports
+it. This does not establish power-loss atomicity or physical-device durability.
+The CAS guarantee covers writers using the one store in a QOS namespace; raw
+administrative writes to storage bypass it, as they do other service contracts.
+
+Validation is recorded under `.qos/validation/persistence-20261020-final/`,
+with the Main compiler check and pin verification in
+`.qos/validation/persistence-20261020/`. The preferences checker includes two separate
+Portable host boots on the same disk, with 1 and 4 workers. The fixture covers
+abrupt app death/relaunch, persisted limits and revisions, custom Editor
+recovery without an intervening tick, stale/duplicate writes, corrupt records,
+startup refusal, offline updates and unchanged live state on failed persistence.
+Existing live-preference, recovery, Editor-state, app-session and retention
+regressions remain part of the same checker. All six fixtures and both second
+boots passed with 1 and 4 workers against FP-RISC `e732971`; all five type-refusal
+probes passed. Main passed Portable check-only, all 302 pins resolved, and the
+four sweep-verdict unit tests plus shell/Python syntax checks passed. Native
+targets, graphical sessions, physical devices and the complete sweep are
+separate validation legs.

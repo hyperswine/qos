@@ -22,6 +22,7 @@ AS = use "appsession".
 Prefs = use "terminalpreferences".
 History = use "preferencehistory".
 PC = use "preferencecontrol".
+PS = use "preferencestore".
 AV = use "appview".
 L = use "shelllayout".
 ST = use "scrolltext".
@@ -30,7 +31,7 @@ AC = use "std/actor#201a0e9bf98a5154".
 
 promptRows = 1.
 
-init = ({preferences = Prefs.defaults, preferenceRevision = 0, preferenceAdapter = 0, input = "", out = ["qsh -- a small shell over the namespace; `help` lists the words", ""], hist = Nil, histAt = 0 - 1, draft = "",
+init = ({preferences = Prefs.defaults, preferenceRevision = 0, preferenceAdapter = 0, preferencePersistence = PS.mode 0, input = "", out = ["qsh -- a small shell over the namespace; `help` lists the words", ""], hist = Nil, histAt = 0 - 1, draft = "",
          cwd = "/home", vars = Nil, queue = Nil, stages = Nil, acc = Nil, target = "", running = False,
          token = 1, busy = False, phase = AW.Ready, w = 960, h = 530, full = 530, focused = True, down = False, capture = 0 - 1,
          wheel = 0, scroll = 0, dragY = 0, dragScroll = 0, dragged = False, follow = True}, Nil).
@@ -276,13 +277,17 @@ splitGo sep s st i n acc =
 run me = case AS.start me of
     Err why -> Unit
   | Ok ctx ->
-      (initial, commands) = init;
+      case PS.current (AC.nowUs Unit + PC.controlMs * 1000) me ctx.ns ctx.storage "terminal" of
+        Err why -> _ = AS.abandon me ctx; _ = Sys.logAt 2 why; Unit
+      | Ok snapshot -> runLoaded me ctx snapshot.
+runLoaded me ctx snapshot =
+      (initial, commands) = persistedInit snapshot;
       (model, ignored) = update (AW.Resize ctx.w ctx.h) initial;
       case PC.start me ctx.ns (PC.url "terminal" ctx.session) Prefs.schema of
         Err why -> _ = AS.abandon me ctx; _ = Sys.logAt 2 why; Unit
       | Ok adapter ->
           _ = AS.issue me ctx commands;
-          _ = Sys.loop (ctx, {model | preferenceAdapter = adapter}) (step me); Unit.
+          _ = Sys.loop (ctx, {model | preferencePersistence = PS.mode ctx.storage, preferenceAdapter = adapter}) (step me); Unit.
 step me state =
   (ctx, model) = state;
   case AS.next me ctx of
@@ -305,7 +310,7 @@ step me state =
           _ = AC.reply ret (AW.Frame next.session next.revision tree vals (AW.status fresh.phase));
           (True, (next, fresh)).
 
-preferenceText m = "{Prefs.encode m.preferenceRevision m.preferences}\ninputUsed={strlen m.input} draftUsed={strlen m.draft} outputUsed={count m.out} historyUsed={count m.hist} historyMaxBytes={longest m.hist}\n".
+preferenceText m = "{Prefs.encode m.preferenceRevision m.preferences}\npersistence={m.preferencePersistence}\ninputUsed={strlen m.input} draftUsed={strlen m.draft} outputUsed={count m.out} historyUsed={count m.hist} historyMaxBytes={longest m.hist}\n".
 longest Nil = 0.
 longest (line :: rest) = n = longest rest; if strlen line > n then strlen line else n.
 applyPreferences p m = case Prefs.validate p of Err why -> Err why
@@ -331,5 +336,14 @@ preferencesStep me ctx m = if m.preferenceAdapter == 0 then _ = Sys.sleepUs 1000
           (True, (ctx, m))
       | PC.Change until client text -> case configurePreferences until client text m of
           Err why -> _ = AC.reply (from, id) (Err why); (True, (ctx, m))
-        | Ok fresh -> _ = AC.reply (from, id) (Ok (preferenceText fresh));
-            (True, (AS.advance ctx ctx.sequence, fresh)).
+        | Ok fresh -> case PS.save until me ctx.ns ctx.storage "terminal" (Prefs.encode fresh.preferenceRevision fresh.preferences) ("") of
+            Err why -> _ = AC.reply (from, id) (Err why); (True, (ctx, m))
+          | Ok u -> _ = AC.reply (from, id) (Ok (preferenceText fresh));
+              (True, (AS.advance ctx ctx.sequence, fresh)).
+
+persistedInit (PS.Terminal (Prefs.Snapshot rev p)) =
+  (m, commands) = init;
+  # Startup banner is output too; honor even a persisted one-line limit.
+  output = if count m.out > Prefs.outputLines p then drop (count m.out - Prefs.outputLines p) m.out else m.out;
+  ({m | preferences = p, preferenceRevision = rev, out = output}, commands).
+persistedInit other = error "wrong Terminal preference type".

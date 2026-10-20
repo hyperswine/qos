@@ -60,6 +60,7 @@ GX = use "graphics".
 GL = use "glsvc".
 Wire = use "std/storage#a8f7ee14e1efae76".
 FP = use "filepolicy".
+Preferences = use "preferencestore".
 
 glHas : Int -> Int .
 
@@ -721,6 +722,7 @@ caStep me ns appsA r a = case a of App aid anm ati ->
 bootDiskUrls : unsafe Int -> Int -> Int -> Unit .
 bootDiskUrls me ns st =
   _ = claim me ns "/services/storage" (Wire.spawn 8 Wire.inboxBytes (Endpoint.simple (stR st) (stW st)));
+  _ = claim me ns "/services/preferences" (Wire.spawn 8 Wire.inboxBytes (Preferences.serve ns st));
   known = filesKnownAtBoot me st;
   mgr = Wire.spawn 8 Wire.inboxBytes (filesManaged st ns known);
   _ = claim me ns "/tmp" mgr;
