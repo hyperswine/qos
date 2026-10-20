@@ -1,0 +1,216 @@
+{
+  "date": "2026-10-20",
+  "qos_source_revision": "d340ecb53a45ddf2f95ad9c9a3aab6db7361c330",
+  "codegen_revision": 55,
+  "portable_abi": 22,
+  "dependency_pin_count": 302,
+  "smoke": {
+    "passed": 16,
+    "total": 16,
+    "log_sha256": "fd675dec00375535113c09b69d1f4cbf48716d789bcc96077794303b4e6a2038"
+  },
+  "boards": {
+    "pi": {
+      "manifest": {
+        "stage": "/tmp/qos-consuming-1792478840226802000",
+        "files": {
+          "qosp-es": "20a986381e887137b5f6165250686e02277888585a11913a3836f6a3fd32171b",
+          "main.qa": "48f773ff0a1dc077d48b833520147d16919fdf4fafb0e8d908a80595a62ed6c3",
+          "Main.disk": "ab62af3cb23376eaf2fde57783f059ca6ad2679e7631675db6d1e9fd3f2cc3dc",
+          "runner": "a26d3454c49d3ba89876b52d24b38ca017f6afee6260621b50d36a5142ba498b",
+          "clock.qa": "22ca26bb15c3825761d629cc2a9d88ce430d6a8e9e38f16f512265d13c222ccd",
+          "logs.qa": "bc24a57479a20e26607810f4b90fab1d9a52509d9653b80f0be13951c3450c4f",
+          "browser.qa": "180d33a8825bfa5d767d15337681512d3c407dde0bb475b3799bba484babaa03",
+          "disk.qa": "225a563225ddf584d653a86178168430ad16404fb31f8fbac3b2cc9304613671",
+          "terminal.qa": "97036f793ba121b2d5aecfe3fdd294e8cf3e1b8b9d206523d6952e9f66c6a80e",
+          "editor.qa": "70280f614c3ee0c79ee5a5699c5fbee3eba8813594a095b20df5f2fce3d5ba81"
+        },
+        "board": "pi",
+        "preflight_exit": 0,
+        "cleanup": "removed task-created test directory"
+      },
+      "preflight": {
+        "remote_dir": "/tmp/qos-consuming-1792478840226802000",
+        "work": "/tmp/qos-consuming-1792478840226802000/soak-1792478868150906000",
+        "store": "/tmp/qos-consuming-1792478840226802000/private-disk-1792478868150906000",
+        "bundle_hashes": "20a986381e887137b5f6165250686e02277888585a11913a3836f6a3fd32171b  /tmp/qos-consuming-1792478840226802000/qosp-es\n48f773ff0a1dc077d48b833520147d16919fdf4fafb0e8d908a80595a62ed6c3  /tmp/qos-consuming-1792478840226802000/main.qa\nab62af3cb23376eaf2fde57783f059ca6ad2679e7631675db6d1e9fd3f2cc3dc  /tmp/qos-consuming-1792478840226802000/Main.disk\n",
+        "production_before": "running pid=7660 restarts=0",
+        "boots": [
+          {
+            "boot": 1,
+            "exit": 0,
+            "signal": 0,
+            "seconds": 118.750058,
+            "user_seconds": 10.798811,
+            "system_seconds": 4.54991,
+            "max_rss_kib": 54688,
+            "peak_temp_millic": 55991,
+            "min_cpu_khz": 600000,
+            "max_cpu_khz": 600000,
+            "timeout": false,
+            "stop_requested": false,
+            "killed": false,
+            "cycles": 2,
+            "samples": 2,
+            "rss_first_kib": 54212,
+            "rss_last_kib": 54852,
+            "rss_min_kib": 54212,
+            "rss_max_kib": 54852
+          },
+          {
+            "boot": 2,
+            "exit": 0,
+            "signal": 0,
+            "seconds": 30.065137,
+            "user_seconds": 3.616411,
+            "system_seconds": 1.392253,
+            "max_rss_kib": 50396,
+            "peak_temp_millic": 55991,
+            "min_cpu_khz": 600000,
+            "max_cpu_khz": 600000,
+            "timeout": false,
+            "stop_requested": true,
+            "killed": false
+          }
+        ],
+        "memory_probe": false,
+        "arena_limit_mib": 256,
+        "harts": 4,
+        "viewport": "1024x600",
+        "pointer_probe": false,
+        "reliability_probe": false,
+        "scope": "isolated Main UI workload and two graceful shutdown paths; residency and optional allocator reservations/root counts, not reachability proof",
+        "production_after": "running pid=7660 restarts=0",
+        "passed": true
+      },
+      "logs": {
+        "1": {
+          "sha256": "b054c428fcefbd56978a447c282b54410794a2c6ad53be16be44da3611ebb1a7",
+          "gpu_lines": [
+            "[gfx] EGL 1.4 (surfaceless)  V3D 4.2.14 / OpenGL ES 3.1 Mesa 24.0.9",
+            "[host] [gfx] EGL 1.4 (surfaceless)  V3D 4.2.14 / OpenGL ES 3.1 Mesa 24.0.9"
+          ]
+        },
+        "2": {
+          "sha256": "f0d6d5a18f7178eeb7324a6fefc8ebd28658d22482bef017c6acc1d06c8269bb",
+          "gpu_lines": [
+            "[gfx] EGL 1.4 (surfaceless)  V3D 4.2.14 / OpenGL ES 3.1 Mesa 24.0.9",
+            "[host] [gfx] EGL 1.4 (surfaceless)  V3D 4.2.14 / OpenGL ES 3.1 Mesa 24.0.9"
+          ]
+        }
+      }
+    },
+    "star64": {
+      "manifest": {
+        "stage": "/tmp/qos-consuming-1792478934520842000",
+        "files": {
+          "qosp-es": "ce6b7cdad6213325cf081b330ebb0cf2e609fc5e49659106d31c8eae7893eb62",
+          "main.qa": "e82fab501d6c90aea9d8dc6be87ba786d7fe85ebedbd0cc2e9629c4bbe4cd6b8",
+          "Main.disk": "555bb37333882643d0a514a1ee8d3f75c085fc9010ffaf1974bc4fc163bb47b2",
+          "runner": "2c54851a9574ca4ff8e0fe624d822129a75a6dd087059d985575d1bc8282eafe",
+          "clock.qa": "cb298685b4aae10001158338e0641b3f389afb82bbb8762aa4d4731fcb19f19c",
+          "logs.qa": "126c33038bdc8b2f9bc233e15cea92d2e12c49352954a1e2903e3964886be01a",
+          "browser.qa": "751a38930336e6af8b98325ea3c5b4f91d57ffcdc0d686aeecddff0d7d04c37b",
+          "disk.qa": "05fe5e3df9d917d13f660266f534521edc4dc2832bc9159be7b71d9f5cecc8db",
+          "terminal.qa": "a6b2122e450df30649f5046926d1db6f7ff9fb6b03f992530a7c608efb7c3797",
+          "editor.qa": "a8e310f3f0e53a989711dd242b9cf7509430ffb5fee75e8444e29708d8438890"
+        },
+        "board": "star64",
+        "preflight_exit": 0,
+        "cleanup": "removed task-created test directory"
+      },
+      "preflight": {
+        "remote_dir": "/tmp/qos-consuming-1792478934520842000",
+        "work": "/tmp/qos-consuming-1792478934520842000/soak-1792478956013204000",
+        "store": "/tmp/qos-consuming-1792478934520842000/private-disk-1792478956013204000",
+        "bundle_hashes": "ce6b7cdad6213325cf081b330ebb0cf2e609fc5e49659106d31c8eae7893eb62  /tmp/qos-consuming-1792478934520842000/qosp-es\ne82fab501d6c90aea9d8dc6be87ba786d7fe85ebedbd0cc2e9629c4bbe4cd6b8  /tmp/qos-consuming-1792478934520842000/main.qa\n555bb37333882643d0a514a1ee8d3f75c085fc9010ffaf1974bc4fc163bb47b2  /tmp/qos-consuming-1792478934520842000/Main.disk\n",
+        "production_before": "running pid=32320 restarts=0",
+        "boots": [
+          {
+            "boot": 1,
+            "exit": 0,
+            "signal": 0,
+            "seconds": 75.929465,
+            "user_seconds": 13.085104,
+            "system_seconds": 1.546211,
+            "max_rss_kib": 45680,
+            "peak_temp_millic": 49658,
+            "min_cpu_khz": 375000,
+            "max_cpu_khz": 1500000,
+            "timeout": false,
+            "stop_requested": false,
+            "killed": false,
+            "cycles": 1,
+            "samples": 1,
+            "rss_first_kib": 45428,
+            "rss_last_kib": 45428,
+            "rss_min_kib": 45428,
+            "rss_max_kib": 45428
+          },
+          {
+            "boot": 2,
+            "exit": 0,
+            "signal": 0,
+            "seconds": 30.071281,
+            "user_seconds": 6.041627,
+            "system_seconds": 0.637078,
+            "max_rss_kib": 42224,
+            "peak_temp_millic": 49194,
+            "min_cpu_khz": 375000,
+            "max_cpu_khz": 1500000,
+            "timeout": false,
+            "stop_requested": true,
+            "killed": false
+          }
+        ],
+        "memory_probe": false,
+        "arena_limit_mib": 256,
+        "harts": 4,
+        "viewport": "1280x720",
+        "pointer_probe": false,
+        "reliability_probe": false,
+        "scope": "isolated Main UI workload and two graceful shutdown paths; residency and optional allocator reservations/root counts, not reachability proof",
+        "production_after": "running pid=32320 restarts=0",
+        "passed": true
+      },
+      "logs": {
+        "1": {
+          "sha256": "cdcb64652e96a346f84ee93a1b1b409edcde69baa57164a699d665335c43878b",
+          "gpu_lines": [
+            "[gfx] EGL 1.5 (surfaceless)  PowerVR B-Series BXE-4-32 / OpenGL ES 3.2 build 1.17@6210866",
+            "[host] [gfx] EGL 1.5 (surfaceless)  PowerVR B-Series BXE-4-32 / OpenGL ES 3.2 build 1.17@6210866"
+          ]
+        },
+        "2": {
+          "sha256": "a39c52126960bde65ea15a346471d9f70abec55628e2830bc049313ac4b06a8e",
+          "gpu_lines": [
+            "[gfx] EGL 1.5 (surfaceless)  PowerVR B-Series BXE-4-32 / OpenGL ES 3.2 build 1.17@6210866",
+            "[host] [gfx] EGL 1.5 (surfaceless)  PowerVR B-Series BXE-4-32 / OpenGL ES 3.2 build 1.17@6210866"
+          ]
+        }
+      }
+    }
+  },
+  "scope": "isolated GPU-backed Main workloads and two shutdown paths; installed sessions unchanged; no HDMI or manual visual acceptance; no long-term memory bound",
+  "fprisc_revision": "4c16996364c38b8ef1a8a82500813225cf7e3436",
+  "compiler_source_sha256": {
+    "compiler/Codegen.hs": "926ddfe9dca99ebf2c3c9e90a1f3ee6688e877550a86c017c298b8f82bdedb29",
+    "compiler/Reuse.hs": "a749feba05b3dbfb506f28a5aaa0ac4f098744ae5f1a6699a3a13380d2586412",
+    "tests/Reuse.hs": "477ddca076f5c0532489f92dd95e31e0262b845dee923932e89ebbb88469c3be",
+    "tests/base/consumingreuse.fpr": "94542d99fb5cbf174592de04f99ec61495b23bdf0260255e3378d005cc92451c",
+    "tests/check_consuming_reuse.py": "bb6aadde632377a70dc9fb0839c08b12889c08806e732509901797d42bdd1d45",
+    "tests/check_base.py": "d1ee1ea66acf9e7e6882a287ca2be5ce4506bbcccb76c20cbba7c66fe4a7fcaa"
+  },
+  "compiler_full_base_suite": {
+    "status": "PASS",
+    "exit_code": 0,
+    "log_sha256": "e3178cb905519719ee286b9cb8d9d9569f3cd26bcd085505677b14aa91a42fd1",
+    "final_lines": [
+      "fpr run passes arguments and status through; -v shows the compiler; the runtime is cached: PASS",
+      "A server out of descriptors says so and keeps serving (std/tcp accept loop): PASS",
+      "The job broker: host work off the harts, in order, three actors at once (std/job): PASS",
+      "A primitive-built list survives send (the heap nil is a leaf to the copier): PASS",
+      "I64: wrapping 64-bit arithmetic, unsigned views, conversions, parse, structures, send, and no implicit mixing with Int: PASS"
+    ]
+  }
+}
