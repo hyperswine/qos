@@ -1,0 +1,44 @@
+#: fprd
+#: expect editorpolicyprocess: HOLDS
+unsafe program.
+XP = use "../programs/mods/editorpolicy".
+Policy = use "../programs/mods/runpolicy".
+ED = use "../programs/mods/editapp".
+Process = use "../programs/mods/runprog".
+PG = use "std/hosted".
+Compile = use "std/compile".
+EP = use "../programs/mods/ep#c66ad65e68dd97f5".
+Endpoint = use "../programs/mods/epservice#e8bce05a1ddf73db".
+check what True = Unit.
+check what False = error "editorpolicyprocess: {what}".
+get what (Ok x) = x.
+get what (Err why) = error "editorpolicyprocess: {what}: {why}".
+# Wait until explicitly released, then exceed the actual confinement budget.
+source = "unsafe program.\nhog : unsafe Int -> List Int -> Int .\nhog n acc = hog (n + 1) (n :: acc).\nmain = _ = receive (myself 0); hog 0 Nil.".
+drain m n = if not m.running then m else if n <= 0 then
+    _ = ED.stopProgram m; error "editorpolicyprocess: child did not finish"
+  else _ = Sys.sleepUs 5000; (next, _) = ED.poll m; drain next (n - 1).
+set me ns rev bytes = get "set" (EP.writeOnce me ns Policy.url (EP.IStr (Policy.encode rev (Policy.FixedBytes bytes)))).
+main =
+  me = myself 0;
+  ns = spawn Endpoint.namespace;
+  (owner, adapter) = XP.start me ns;
+  qa = get "compile package" (Compile.plugin 0 "edpolicychild" (Process.wrap source));
+  (empty, _) = ED.init;
+  model = {empty | policyNamespace = ns};
+  _ = set me ns 0 33554432;
+  first = ED.launch qa model;
+  _ = check "first actual child admitted" (first.running and first.runAdmission == Policy.Admitted 1 33554432);
+  _ = set me ns 1 16777216;
+  (still, _) = ED.poll first;
+  _ = check "policy decrease did not kill or rewrite child" (still.running and still.runAdmission == Policy.Admitted 1 33554432);
+  _ = Process.tellActor still.proc (PG.KeyIn 0);
+  ended = drain still 2000;
+  _ = check "old child retains actual 32 MiB confinement" (strIndexOf "budget of 32 MiB is used up" ended.msg >= 0 and strIndexOf "heap" ended.msg >= 0);
+  second = ED.launch qa ended;
+  _ = check "next child admits changed budget" (second.running and second.runAdmission == Policy.Admitted 2 16777216);
+  _ = Process.tellActor second.proc (PG.KeyIn 0);
+  ended2 = drain second 2000;
+  _ = check "new child uses actual 16 MiB confinement" (strIndexOf "budget of 16 MiB is used up" ended2.msg >= 0 and strIndexOf "heap" ended2.msg >= 0);
+  _ = kill owner; _ = kill adapter; _ = kill ns;
+  "editorpolicyprocess: HOLDS".

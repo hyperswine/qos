@@ -1,0 +1,159 @@
+#: expect apppolicy: HOLDS
+unsafe program.
+CP = use "../programs/mods/apppolicy".
+AP = use "../programs/mods/appclient".
+AJ = use "../programs/mods/appjobs".
+AS = use "../programs/mods/appsession".
+AW = use "../programs/mods/appwire".
+EP = use "../programs/mods/ep#c66ad65e68dd97f5".
+Endpoint = use "../programs/mods/epservice#e8bce05a1ddf73db".
+AC = use "std/actor#201a0e9bf98a5154".
+S2 = use "../programs/mods/scene2d".
+check tag True = Unit.
+check tag False = error "apppolicy: {tag}".
+get tag (Ok value) = value.
+get tag (Err why) = error "apppolicy: {tag}: {why}".
+rejected (Err why) = True.
+rejected other = False.
+text (EP.IStr s) = s.
+text other = error "apppolicy: expected text".
+set me ns rev p = get "update" (EP.writeOnce me ns CP.url (EP.IStr (CP.encode rev p))).
+fetch me worker job = case AC.callWithin 2000 me worker (AW.Read 0 job) of
+    Ok (AW.Completed token value) -> value | other -> Err "bad worker reply".
+# Read/write take 120 ms; close takes 80 ms. Notify the test immediately
+# after a read starts so updates race a real in-flight operation, not a sleep.
+endpoint parent me = _ = Sys.loop 0 (epStep parent me); Unit.
+epStep parent me state =
+  (from, id, request) = receive me;
+  case request of
+    EP.Open path mode ->
+      _ = if mode == "delete" then Sys.sleepUs 120000 else Unit;
+      _ = AC.reply (from, id) (EP.Opened 7); (True, state)
+  | EP.Timed until (EP.Read h n) ->
+      _ = send parent ("reading", until);
+      _ = Sys.sleepUs 120000;
+      _ = AC.reply (from, id) (Ok (EP.IStr "body")); (True, state + 1)
+  | EP.Timed until (EP.Write h value) ->
+      _ = Sys.sleepUs 120000;
+      _ = AC.reply (from, id) (Ok (EP.IInt 4)); (True, state)
+  | EP.Timed until (EP.Close h) ->
+      _ = Sys.sleepUs 80000;
+      _ = AC.reply (from, id) (Ok 0); (True, state)
+  | other -> _ = AC.reply (from, id) state; (True, state).
+# Owner with an existing failure history: updates must not reset it.
+seeded policies parent ns me =
+  _ = Sys.loop {AP.empty | failures = 3} (AP.step policies parent ns 0 800 480 me); Unit.
+# Deliberately slower than the former hardcoded startup/response limits.
+appMain me =
+  _ = Sys.sleepUs 650000;
+  ctx = get "app bootstrap" (AS.start me);
+  _ = Sys.loop ctx (appStep me); Unit.
+appStep me ctx = case AS.next me ctx of
+    AS.Idle -> _ = Sys.sleepUs 1000; (True, ctx)
+  | AS.Gone -> _ = AS.abandon me ctx; (False, ctx)
+  | AS.JobResult token result -> (True, ctx)
+  | AS.Message ret request -> (case request of
+      AW.CloseWith session until stopMs -> (AS.closeWithin until stopMs me ctx ret session, ctx)
+    | AW.Close session -> (AS.close me ctx ret session, ctx)
+    | AW.Event session sequence event ->
+        _ = Sys.sleepUs 650000;
+        next = AS.advance ctx sequence;
+        _ = AC.reply ret (AW.Frame session next.revision (S2.Box Nil Nil) Nil "ok"); (True, next)).
+# A caller obtains one policy snapshot, then the shared policy changes while
+# the owner is queued. Its wait and execution still use the admitted snapshot.
+pinnedOwner parent policies me =
+  (from, id, AP.PolicyNow) = receive me;
+  snapshot = get "pinned policy" (CP.current me policies);
+  _ = AC.reply (from, id) (Ok snapshot);
+  _ = send parent Unit;
+  _ = receiveFromRes me parent;
+  (caller, nextId, AP.Using admitted AP.Home) = receive me;
+  _ = check "caller and owner use identical snapshot" (admitted == snapshot);
+  _ = Sys.sleepUs 2700000;
+  AC.reply (caller, nextId) (Ok (AW.Refused "pinned" )).
+callPinned parent owner me = send parent (AP.call me owner AP.Home).
+main =
+  _ = check "round trip" (CP.parse (CP.encode 0 CP.defaults) == Ok (CP.Snapshot 0 CP.defaults));
+  _ = check "invalid zero duration" (rejected (CP.validate (CP.Policy (CP.IoPolicy 0 1 1 1) CP.defaultRecovery)));
+  _ = check "invalid shutdown relationship" (rejected (CP.validate (CP.Policy CP.defaultIo (CP.RecoveryPolicy 3 500 500 500 500))));
+  _ = check "overflow" (rejected (CP.parse "revision=9999999999999999999999999"));
+  _ = check "extra fields" (rejected (CP.parse "{CP.encode 0 CP.defaults} extra=1"));
+  me = myself 0;
+  ns = spawn Endpoint.namespace;
+  (policies, adapter) = CP.start me ns;
+  before = text (get "initial" (EP.readOnce me ns CP.url));
+  _ = check "defaults visible" (strIndexOf (CP.encode 0 CP.defaults) before == 0);
+  _ = check "schema visible" (strIndexOf "one snapshot per job" (text (get "schema" (EP.readOnce me ns CP.schemaUrl))) >= 0);
+  _ = check "schema read only" (rejected (EP.writeOnce me ns CP.schemaUrl (EP.IStr "bad")));
+  _ = check "malformed rejected" (rejected (EP.writeOnce me ns CP.url (EP.IStr "bad")));
+  _ = check "wrong type rejected" (rejected (EP.writeOnce me ns CP.url (EP.IInt 7)));
+  ep = spawn (endpoint me);
+  _ = get "claim file" (EP.register me ns "/slow" ep);
+  long = CP.Policy (CP.IoPolicy 300 300 300 200) CP.defaultRecovery;
+  short = CP.Policy (CP.IoPolicy 30 30 30 200) CP.defaultRecovery;
+  _ = set me ns 0 long;
+  worker = spawn (AJ.runWithPolicies policies me ns 0);
+  id = Sys.nextId Unit;
+  _ = send worker (me, id, AW.Read 1 (AW.ReadPath "/slow"));
+  _ = receiveFromRes me ep;
+  _ = set me ns 1 short;
+  original = AC.awaitReplyUntil (AC.nowUs Unit + 1500000) me worker id;
+  _ = check "in-flight read keeps old deadline" (case original of Ok (AW.Completed token (Ok (AW.Text value))) -> value == "body" | other -> False);
+  used = AC.callWithin 200 me worker AW.InspectPolicy;
+  _ = check "worker exposes admitted revision" (used == Ok (CP.Snapshot 1 long));
+  _ = check "next read uses new budget" (rejected (fetch me worker (AW.ReadPath "/slow")));
+  _ = receiveFromRes me ep;
+  _ = check "next write uses new budget" (rejected (fetch me worker (AW.WritePath "/slow" "body")));
+  clean = AC.callWithin 200 me worker AW.Inspect;
+  _ = check "cleanup retained own longer budget" (case clean of Ok s -> s.held == (0, 0) and s.uncertain == "" | other -> False);
+  _ = check "stale rejected" (rejected (EP.writeOnce me ns CP.url (EP.IStr (CP.encode 1 CP.defaults))));
+  _ = check "stale preserved values" (CP.current me policies == Ok (CP.Snapshot 2 short));
+  expired = AC.callWithin 200 me policies (CP.Put (AC.nowUs Unit - 1) me 2 CP.defaults);
+  _ = check "expired refused" (case expired of Ok (Err why) -> True | other -> False);
+  _ = check "expired leaves revision" (CP.current me policies == Ok (CP.Snapshot 2 short));
+  _ = check "delete uses live budget" (rejected (fetch me worker (AW.DeletePath "/slow")));
+  blocked = AC.callWithin 200 me worker AW.Inspect;
+  _ = check "unknown open stays unknown" (case blocked of Ok s -> s.uncertain != "" | other -> False);
+  tinyClose = CP.Policy (CP.IoPolicy 300 300 300 20) CP.defaultRecovery;
+  _ = set me ns 2 tinyClose;
+  _ = check "policy edits do not clear uncertain ownership" (rejected (fetch me worker (AW.ReadPath "/slow")));
+  _ = AC.callWithin 1000 me worker AW.Stop;
+  closer = spawn (AJ.runWithPolicies policies me ns 0);
+  _ = check "cleanup uses live budget" (rejected (fetch me closer (AW.WritePath "/slow" "body")));
+  held = AC.callWithin 200 me closer AW.Inspect;
+  _ = check "failed close preserves handle" (case held of Ok s -> s.held == (ep, 7) | other -> False);
+  _ = set me ns 3 long;
+  _ = get "retry cleanup and write" (fetch me closer (AW.WritePath "/slow" "body"));
+  _ = AC.callWithin 1000 me closer AW.Stop;
+  owner = spawn (seeded policies me ns);
+  _ = check "existing recovery failures block" (case AP.call me owner (AP.Open 99999) of Err why -> strIndexOf "budget exhausted" why >= 0 | other -> False);
+  raised = CP.Policy CP.defaultIo (CP.RecoveryPolicy 5 1000 1000 1400 1100);
+  _ = set me ns 4 raised;
+  _ = check "raising cap admits next attempt" (case AP.call me owner (AP.Open 99999) of Err why -> why == "no app-session entry" | other -> False);
+  inspected = AP.call me owner AP.Inspect;
+  _ = check "failure history preserved" (case inspected of Ok (AW.Refused s) -> strIndexOf "failures=3" s >= 0 and strIndexOf "maxFailures=5" s >= 0 | other -> False);
+  # Exercise the same post-entry spawn/bootstrap path without requiring an
+  # installed plugin table in this standalone test archive.
+  (live, booted) = AP.startWith raised policies ns 0 800 480 me appMain AP.empty;
+  _ = get "configured startup and response" booted;
+  (active, replied) = AP.exchangeWith raised me AW.Tick live;
+  _ = get "configured response on running app" replied;
+  (closed, stopped) = AP.leaveWith raised me active;
+  _ = get "configured close" stopped;
+  lower = CP.Policy CP.defaultIo (CP.RecoveryPolicy 2 1000 1000 1400 1100);
+  _ = set me ns 5 lower;
+  _ = check "lowering cap blocks next launch" (case AP.call me owner (AP.Open 0) of Err why -> strIndexOf "budget exhausted" why >= 0 | other -> False);
+  _ = get "stop owner" (AP.stop me owner);
+  pinned = spawn (pinnedOwner me policies);
+  caller = spawn (callPinned me pinned);
+  _ = receiveFromRes me pinned;
+  _ = set me ns 6 (CP.Policy (CP.IoPolicy 30 30 30 20) (CP.RecoveryPolicy 0 30 30 200 100));
+  _ = send pinned Unit;
+  pinnedResult = receiveFromRes me caller;
+  _ = check "outer wait follows admitted policy beyond old 2500 ms" (case pinnedResult of Ok (Ok (AW.Refused value)) -> value == "pinned" | other -> False);
+  deadWorker = spawn (AJ.runWithPolicies policies me ns 0);
+  _ = kill policies;
+  _ = check "dead policy fails explicitly" (case fetch me deadWorker AW.Clock of Err why -> strIndexOf "policy unavailable" why >= 0 | other -> False);
+  _ = AC.callWithin 1000 me deadWorker AW.Stop;
+  _ = kill ep; _ = kill adapter; _ = kill ns;
+  "apppolicy: HOLDS".

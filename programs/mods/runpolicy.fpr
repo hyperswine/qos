@@ -1,0 +1,34 @@
+# Launch admission only. A running process keeps the budget already confined.
+Text = use "policytext".
+RunPolicy = Type (RamShare Int Int | FixedBytes Int).
+Snapshot = Type (Snapshot Int RunPolicy).
+Admission = Type (Unadmitted | Admitted Int Int).
+defaults = RamShare 4 1073741824.
+url = "/services/run-policy".
+schemaUrl = "/services/run-policy/schema".
+revision (Snapshot r p) = r.
+policy (Snapshot r p) = p.
+validate (RamShare divisor fallback) = if divisor <= 0 or fallback <= 0 then Err "divisor and fallbackBytes must be positive" else Ok (RamShare divisor fallback).
+validate (FixedBytes bytes) = if bytes <= 0 then Err "bytes must be positive" else Ok (FixedBytes bytes).
+budget (RamShare divisor fallback) total = if total > 0 then total / divisor else fallback.
+budget (FixedBytes bytes) total = bytes.
+admit (Snapshot r p) total = case validate p of
+    Err why -> Err why
+  | Ok valid -> bytes = budget valid total; if bytes <= 0 then Err "no memory to give it" else Ok (Admitted r bytes).
+bytes Unadmitted = 0.
+bytes (Admitted r n) = n.
+admittedRevision Unadmitted = 0.
+admittedRevision (Admitted r n) = r.
+encode r (RamShare divisor fallback) = "revision={r} mode=ram-share divisor={divisor} fallbackBytes={fallback}".
+encode r (FixedBytes bytes) = "revision={r} mode=fixed bytes={bytes}".
+render (Snapshot r p) = encode r p.
+schema = "type=RunPolicy version=1\ndefaults={encode 0 defaults}\nforms=revision=N mode=ram-share divisor=N fallbackBytes=N | revision=N mode=fixed bytes=N\nvalues=positive machine integers; divisor uses floor division; a zero result refuses launch\nboundary=after build, before spawn; existing processes retain their admitted budget\nenforcement=per-process confinement; not a reservation or whole-system memory account\ninspection=Editor launch output includes revision and admitted bytes\nwrite=complete policy, listed order, expected revision, atomic, system-process-only\npersistence=until-restart\n".
+parse text = if strlen text > 256 then Err "update exceeds 256 bytes" else case Text.tokens text 0 of
+    [r, "mode=ram-share", d, f] -> (case (Text.field "revision=" r, Text.field "divisor=" d, Text.field "fallbackBytes=" f) of
+        (Ok rev, Ok divisor, Ok fallback) -> checked rev (RamShare divisor fallback)
+      | other -> Err "expected revision, divisor and fallbackBytes as unsigned decimals")
+  | [r, "mode=fixed", b] -> (case (Text.field "revision=" r, Text.field "bytes=" b) of
+        (Ok rev, Ok bytes) -> checked rev (FixedBytes bytes)
+      | other -> Err "expected revision and bytes as unsigned decimals")
+  | other -> Err "invalid run policy fields".
+checked rev p = case validate p of Err why -> Err why | Ok valid -> Ok (Snapshot rev valid).

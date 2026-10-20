@@ -1,0 +1,101 @@
+#: expect editorpolicy: HOLDS
+unsafe program.
+XP = use "../programs/mods/editorpolicy".
+RP = use "../programs/mods/runpolicy".
+FA = use "../programs/mods/fileaccesspolicy".
+ED = use "../programs/mods/editapp".
+AW = use "../programs/mods/appwire".
+PG = use "std/hosted".
+Process = use "../programs/mods/runprog".
+EP = use "../programs/mods/ep#c66ad65e68dd97f5".
+Endpoint = use "../programs/mods/epservice#e8bce05a1ddf73db".
+AC = use "std/actor#201a0e9bf98a5154".
+check what True = Unit.
+check what False = error "editorpolicy: {what}".
+get what (Ok x) = x.
+get what (Err why) = error "editorpolicy: {what}: {why}".
+rejected (Err why) = True.
+rejected other = False.
+text (EP.IStr s) = s.
+text other = error "expected policy text".
+# Stand-in for the process actor: forward only the program's actual replies.
+stand parent me = _ = Sys.loop Unit (standStep parent me); Unit.
+standStep parent me state =
+  (from, id, command) = receive me;
+  case command of Process.Tell message -> _ = send parent message; (True, Unit)
+    | other -> (False, Unit).
+reply me actor = case receiveFromRes me actor of Ok borrowed -> value = keep borrowed; _ = drop borrowed; value | Err why -> error why.
+setRun me ns rev p = get "run update" (EP.writeOnce me ns RP.url (EP.IStr (RP.encode rev p))).
+setAccess me ns rev p = get "access update" (EP.writeOnce me ns FA.url (EP.IStr (FA.encode rev p))).
+# A confined process must not be able to alter the system-owned policy.
+unprivileged owner parent me =
+  result = AC.callWithin 200 me owner (XP.PutRun (AC.nowUs Unit + 200000) me 0 (RP.FixedBytes 1048576));
+  send parent result.
+main =
+  _ = check "default run codec" (RP.parse (RP.encode 0 RP.defaults) == Ok (RP.Snapshot 0 RP.defaults));
+  _ = check "fixed run codec" (RP.parse (RP.encode 7 (RP.FixedBytes 1234)) == Ok (RP.Snapshot 7 (RP.FixedBytes 1234)));
+  _ = check "quarter RAM and fallback" (RP.admit (RP.Snapshot 0 RP.defaults) 400 == Ok (RP.Admitted 0 100) and RP.admit (RP.Snapshot 0 RP.defaults) 0 == Ok (RP.Admitted 0 1073741824));
+  _ = check "tiny total refuses, fixed ignores total" (rejected (RP.admit (RP.Snapshot 0 RP.defaults) 1) and RP.admit (RP.Snapshot 2 (RP.FixedBytes 1234)) 1 == Ok (RP.Admitted 2 1234));
+  _ = check "invalid run values" (rejected (RP.validate (RP.RamShare 0 1)) and rejected (RP.validate (RP.RamShare 1 0)) and rejected (RP.validate (RP.FixedBytes 0)));
+  _ = check "strict run codec" (rejected (RP.parse "revision=0 mode=fixed bytes=1x") and rejected (RP.parse "revision=0 mode=fixed bytes=999999999999999999999") and rejected (RP.parse "revision=0 mode=fixed bytes=1 extra=1"));
+  _ = check "default access codec" (FA.parse (FA.encode 0 FA.defaults) == Ok (FA.Snapshot 0 FA.defaults));
+  default = FA.Snapshot 0 FA.defaults;
+  _ = check "root file refused" (rejected (FA.admit default FA.Read "/home"));
+  _ = check "space in filename remains valid" (not (rejected (FA.admit default FA.Read "/home/a b.txt")));
+  _ = check "aliases refused" (rejected (FA.admit default FA.Read "/home/./.editor/session") and rejected (FA.admit default FA.Read "/home//.editor/session") and rejected (FA.admit default FA.Read "/home/a/../x") and rejected (FA.admit default FA.Read "/home/x\n"));
+  _ = check "excluded directory itself refused" (rejected (FA.admit default FA.List "/home/.editor"));
+  _ = check "invalid policy paths" (rejected (FA.validate (FA.Policy "/home/../" "/home/.editor/" 1024 True True)) and rejected (FA.validate (FA.Policy "/home" "/home/.editor/" 1024 True True)));
+  _ = check "invalid access fields" (rejected (FA.parse "revision=0 root=/home/ exclude=/home/.editor/ maxPathBytes=1024 read=2 write=1") and rejected (FA.validate (FA.Policy "/home/" "/home/.editor/" 1025 True True)));
+  listing = get "list grant" (FA.admit default FA.List "/home/a");
+  _ = check "listing segment boundary" (FA.visible listing "/home/a/x" and not (FA.visible listing "/home/ab/x"));
+  _ = check "empty listing is not an absolute path" (rejected (FA.path FA.List ""));
+  small = FA.Snapshot 3 (FA.Policy "/home/" "/home/.editor/" 8 True True);
+  _ = check "path limit boundary" (not (rejected (FA.admit small FA.Read "/home/ab")) and rejected (FA.admit small FA.Read "/home/abc"));
+  blind = FA.Snapshot 4 (FA.Policy "/home/" "/home/.editor/" 1024 False True);
+  _ = check "read flag also controls listing" (rejected (FA.admit blind FA.Read "/home/x") and rejected (FA.admit blind FA.List "/home") and not (rejected (FA.admit blind FA.Write "/home/x")));
+  me = myself 0;
+  ns = spawn Endpoint.namespace;
+  (owner, adapter) = XP.start me ns;
+  _ = check "default service values" (XP.currentRun me ns == Ok (RP.Snapshot 0 RP.defaults) and XP.currentAccess me ns == Ok default);
+  schema = text (get "run schema" (EP.readOnce me ns RP.schemaUrl));
+  _ = check "effective budget introspected" (strIndexOf "nextBudgetBytes=" schema >= 0 and strIndexOf "reportedMemoryBytes=" schema >= 0);
+  _ = check "schema immutable" (rejected (EP.writeOnce me ns FA.schemaUrl (EP.IStr "x")));
+  _ = check "malformed unchanged" (rejected (EP.writeOnce me ns RP.url (EP.IStr "revision=0 mode=fixed bytes=0")) and XP.currentRun me ns == Ok (RP.Snapshot 0 RP.defaults));
+  child = Sys.spawnApp (unprivileged owner me);
+  denied = reply me child;
+  _ = check "process cannot update system policy" (case denied of Ok (Err why) -> strIndexOf "system-only" why >= 0 | other -> False);
+  _ = setRun me ns 0 (RP.FixedBytes 33554432);
+  admission = get "admit first run" (RP.admit (get "snapshot" (XP.currentRun me ns)) 100);
+  _ = setRun me ns 1 (RP.FixedBytes 16777216);
+  _ = check "running admission immutable" (admission == RP.Admitted 1 33554432);
+  _ = check "next run uses current policy" (RP.admit (get "next snapshot" (XP.currentRun me ns)) 100 == Ok (RP.Admitted 2 16777216));
+  _ = check "stale run update" (rejected (EP.writeOnce me ns RP.url (EP.IStr (RP.encode 1 RP.defaults))));
+  expired = AC.callWithin 200 me owner (XP.PutRun (AC.nowUs Unit - 1) me 2 RP.defaults);
+  _ = check "expired unchanged" (case expired of Ok (Err why) -> XP.currentRun me ns == Ok (RP.Snapshot 2 (RP.FixedBytes 16777216)) | other -> False);
+  program = spawn (stand me);
+  (initial, _) = ED.init;
+  hosting = {initial | policyNamespace = ns, running = True, proc = program, appRun = True};
+  (readState, readJobs) = ED.asked 11 (PG.ReadReq "/home/old.txt") hosting;
+  _ = check "initial read admitted" (case readJobs of [AW.Fetch t (AW.ReadPath p)] -> p == "/home/old.txt" | other -> False);
+  (listed, listJobs) = ED.asked 12 (PG.ListReq "/home") readState;
+  limited = FA.Policy "/tmp/" "/tmp/private/" 100 True False;
+  _ = setAccess me ns 0 limited;
+  (refused, refusedJobs) = ED.asked 13 (PG.ReadReq "/home/old.txt") listed;
+  _ = check "live scope revokes subsequent read" (refusedJobs == Nil and (case reply me program of PG.Answer 13 (PG.Failed why) -> True | other -> False));
+  (writes, writeJobs) = ED.asked 14 (PG.WriteReq "/tmp/new.txt" "x") refused;
+  _ = check "write disabled live" (writeJobs == Nil and (case reply me program of PG.Answer 14 (PG.Failed why) -> True | other -> False));
+  (newRead, newJobs) = ED.asked 15 (PG.ReadReq "/tmp/new.txt") writes;
+  _ = check "new scope admitted" (case newJobs of [AW.Fetch t (AW.ReadPath p)] -> p == "/tmp/new.txt" | other -> False);
+  (afterList, _) = ED.arrived listed.token (Ok (AW.Lines ["/home/old.txt", "/home/.editor", "/home/.editor/session", "/tmp/new.txt", "/homework/x"] "")) newRead;
+  _ = check "in-flight listing retains old grant" (case reply me program of PG.Answer 12 (PG.Names names) -> names == ["/home/old.txt"] | other -> False);
+  (afterRead, _) = ED.arrived readState.token (Ok (AW.Text "admitted earlier")) afterList;
+  _ = check "admitted read completes after revocation" (case reply me program of PG.Answer 11 (PG.Text s) -> s == "admitted earlier" | other -> False);
+  _ = check "independent revisions" (XP.currentAccess me ns == Ok (FA.Snapshot 1 limited) and XP.currentRun me ns == Ok (RP.Snapshot 2 (RP.FixedBytes 16777216)));
+  _ = check "stale access rejected" (rejected (EP.writeOnce me ns FA.url (EP.IStr (FA.encode 0 FA.defaults))));
+  _ = kill owner;
+  (offline, offlineJobs) = ED.asked 16 (PG.ReadReq "/tmp/new.txt") afterRead;
+  _ = check "offline access fails closed" (offlineJobs == Nil and (case reply me program of PG.Answer 16 (PG.Failed why) -> strIndexOf "unavailable" why >= 0 | other -> False));
+  failedLaunch = ED.launch "/not/a/package.qa" {offline | running = False};
+  _ = check "offline launch refuses before loading image" (not failedLaunch.running and strIndexOf "policy unavailable" failedLaunch.msg >= 0);
+  _ = kill program; _ = kill adapter; _ = kill ns;
+  "editorpolicy: HOLDS".

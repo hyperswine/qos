@@ -18,7 +18,7 @@
 #   with an `app` (std/hosted: init, update, view, subs) runs in the
 #   panel: its view drawn there, the keys its own (^J hands them back to
 #   the text and to it again), its file commands asked of the Editor,
-#   which allows /home and nothing else
+#   which admits each request using the live file-access policy
 #   ^J show or hide the output panel
 #   live checks: a moment after the typing stops, the compiler's front end
 #   (fprd's check op, a tenth of a second) marks the gutter, counts the
@@ -42,6 +42,9 @@ Fm = use "fontm".
 S2 = use "scene2d".
 AC = use "std/actor#201a0e9bf98a5154".
 RP = use "runprog".
+RunPolicy = use "runpolicy".
+FA = use "fileaccesspolicy".
+Policies = use "editorpolicy".
 PG = use "std/hosted".
 
 sessionPath = "/home/.editor/session".
@@ -50,10 +53,10 @@ outKeep = 400.
 # the kinds of job in flight (a list: the worker serves them in order)
 kOpen = 1. kList = 2. kSave = 3. kSession = 4. kBuild = 5. kRun = 6. kRestore = 7. kCheck = 8. kAsk = 10.
 
-init = ({buf = E.empty, path = "", version = 0, savedVersion = 0, nextStamp = 1, recorded = "", idle = 0,
+init = ({policyNamespace = 0, runAdmission = RunPolicy.Unadmitted, buf = E.empty, path = "", version = 0, savedVersion = 0, nextStamp = 1, recorded = "", idle = 0,
          top = 0, left = 0, undo = Nil, redo = Nil, lastKind = 0, clip = "",
          mode = 0, query = "", files = Nil, listed = False, pick = 0, findText = "", msg = "", warn = False,
-         out = Nil, outOpen = False, confirm = 0, pending = [{token = 1, kind = kRestore, version = 0, path = sessionPath, wrapped = False}],
+         out = Nil, outOpen = False, confirm = 0, pending = [{token = 1, kind = kRestore, version = 0, path = sessionPath, wrapped = False, grant = FA.NoGrant}],
          diags = Nil, checking = False, checker = True, checkedVersion = 0 - 1,
          outBack = 0, token = 1, building = False, running = False, proc = 0, partial = "", appRun = False, progView = Nil, progFocus = False, busy = False, phase = AW.Ready, w = 960, h = 530, focused = True,
          down = False, capture = 0 - 1, wheel = 0, scroll = 0, dragY = 0, dragScroll = 0, dragged = False},
@@ -209,9 +212,10 @@ gotoLine m = n = parseInt m.query;
 issue kind version path job m = issueAs False kind version path job m.
 # `wrapped`: the source sent was Run's package of the buffer (its lines map
 # back past the entry: mods/runprog.fpr)
-issueAs wrapped kind version path job m =
+issueAs wrapped kind version path job m = issueGranted FA.NoGrant wrapped kind version path job m.
+issueGranted grant wrapped kind version path job m =
   t = m.token + 1;
-  ({m | token = t, pending = {token = t, kind = kind, version = version, path = path, wrapped = wrapped} :: m.pending}, [AW.Fetch t job]).
+  ({m | token = t, pending = {token = t, kind = kind, version = version, path = path, wrapped = wrapped, grant = grant} :: m.pending}, [AW.Fetch t job]).
 openPicker m = issue kList 0 "" AW.ListRoot {m | mode = 1, query = "", pick = 0, listed = False, confirm = 0}.
 pickList m = filterS (fn u -> matches m.query u) m.files.
 matches q u = strlen q == 0 or strIndexOf (lower q) (lower u) >= 0.
@@ -375,7 +379,12 @@ started p result m = case result of
 # (RP.open), which holds the linear RP.Proc and the program's console capture;
 # ticks ask it what the program printed and whether it has ended, ^R stops it,
 # and closing the Editor does too.
-launch qa m = budget = runBudget (Sys.memTotal Unit);
+launch qa m = case Policies.currentRun (myself 0) m.policyNamespace of
+    Err why -> failRun why m
+  | Ok snapshot -> case RunPolicy.admit snapshot (Sys.memTotal Unit) of
+      Err why -> failRun why m
+    | Ok admission -> launchAdmitted qa admission m.
+launchAdmitted qa admission m = budget = RunPolicy.bytes admission;
   started = (if budget <= 0 then Err "no memory to give it"
     else RP.open (myself 0) qa budget (progCols m) (progRows m));
   case started of
@@ -383,12 +392,11 @@ launch qa m = budget = runBudget (Sys.memTotal Unit);
   | Ok (actor, pid) ->
       _ = print "editor: run {name m}: started";
       {m | building = False, running = True, proc = actor, partial = "", progFocus = m.appRun,
-      out = say m.out ["run {name m}: started as process {pid}, with {budget / 1048576} MiB -- ^R stops it"],
+      runAdmission = admission,
+      out = say m.out ["run {name m}: started as process {pid}, with {budget} bytes (run policy revision {RunPolicy.admittedRevision admission}) -- ^R stops it"],
       msg = "Running {name m} -- ^R stops it", warn = False}.
-# A run may take a quarter of the machine's memory (the host says how much:
-# Sys.memTotal); a program past it ends with that reason, the system does not.
-# 1 GiB when the host cannot say.
-runBudget total = if total > 0 then total / 4 else 1073741824.
+# Standalone compatibility helper. Production launch reads the live policy.
+runBudget total = RunPolicy.budget RunPolicy.defaults total.
 failRun why m = _ = print "editor: run {name m}: {why}";
   {m | building = False, appRun = False, outBack = 0, out = say m.out ["run {name m}: {why}"], outOpen = True, msg = "Run failed: {why}", warn = True}.
 # a tick: what it printed since, what an app sent (its frames, its asks),
@@ -401,29 +409,31 @@ heard Nil m cmds = (m, cmds).
 heard (x :: rest) m cmds = case x of
     PG.Frame lines -> heard rest {m | progView = lines} cmds
   | PG.Ask token req -> (m2, c) = asked token req m; heard rest m2 (E.append cmds c).
-# An app's file command, asked of the Editor: a path under /home is done
-# by the worker and answered when it arrives; any other is answered at once,
-# refused.  The program holds no capability -- this is the whole of its reach.
-asked token req m = case req of
-    PG.ReadReq path -> forProgram token path (AW.ReadPath path) m
-  | PG.WriteReq path text -> forProgram token path (AW.WritePath path text) m
-  | PG.AppendReq path text -> forProgram token path (AW.AppendPath path text) m
-  | PG.RemoveReq path -> forProgram token path (AW.DeletePath path) m
-  | PG.ListReq prefix -> if allowedPrefix prefix then issue kAsk token prefix AW.ListRoot m
-      else (tellProg (PG.Answer token (PG.Failed "{prefix}: a program may list /home only")) m, Nil).
-forProgram token path job m = if allowedPath path then issue kAsk token path job m
-  else (tellProg (PG.Answer token (PG.Failed "{path}: a program may use files under /home only")) m, Nil).
-# what a program may touch: a file under /home, not the Editor's own records,
-# no `..` step, no longer than the file manager takes
-allowedPath p = E.startsWith "/home/" p and not (E.startsWith "/home/.editor/" p) and strlen p > 6 and strlen p <= 1024
-  and strIndexOf "/../" p < 0 and not (E.endsWith "/.." p).
-allowedPrefix p = (p == "/home" or E.startsWith "/home/" p) and strIndexOf "/.." p < 0.
+# Every hosted-program request is admitted under the current policy. The
+# program owns no file capability. Retain its grant with the pending job so
+# later listing replies use the same scope even after a policy update.
+asked token req m = case Policies.currentAccess (myself 0) m.policyNamespace of
+    Err why -> refuseAsk token why m
+  | Ok snapshot -> askedWith snapshot token req m.
+askedWith snapshot token req m = case req of
+    PG.ReadReq path -> forProgramWith snapshot FA.Read token path (AW.ReadPath path) m
+  | PG.WriteReq path text -> forProgramWith snapshot FA.Write token path (AW.WritePath path text) m
+  | PG.AppendReq path text -> forProgramWith snapshot FA.Write token path (AW.AppendPath path text) m
+  | PG.RemoveReq path -> forProgramWith snapshot FA.Write token path (AW.DeletePath path) m
+  | PG.ListReq prefix -> forProgramWith snapshot FA.List token prefix AW.ListRoot m.
+forProgramWith snapshot operation token path job m = case FA.admit snapshot operation path of
+    Err why -> refuseAsk token why m
+  | Ok grant -> issueGranted grant False kAsk token path job m.
+refuseAsk token why m = (tellProg (PG.Answer token (PG.Failed why)) m, Nil).
+# Pure default-policy probes used by standalone clients and existing tests.
+allowedPath p = case FA.admit (FA.Snapshot 0 FA.defaults) FA.Read p of Ok g -> True | Err why -> False.
+allowedPrefix p = case FA.admit (FA.Snapshot 0 FA.defaults) FA.List p of Ok g -> True | Err why -> False.
 # the worker's answer, as the program's: Arrived for a kAsk
 answered p result m = if not m.running then m else
   reply = (case result of
       Ok (AW.Text t) -> PG.Text t
     | Ok (AW.Done note) -> PG.Done
-    | Ok (AW.Lines lines label) -> PG.Names (filterS (fn u -> E.startsWith p.path u and not (E.startsWith "/home/.editor/" u)) lines)
+    | Ok (AW.Lines lines label) -> PG.Names (filterS (FA.visible p.grant) lines)
     | Ok other -> PG.Failed "an answer of the wrong kind"
     | Err why -> PG.Failed why);
   tellProg (PG.Answer p.version reply) m.
@@ -731,7 +741,7 @@ run me = case AS.start me of
     Err why -> Unit
   | Ok ctx ->
       (initial, commands) = init;
-      (model, ignored) = update (AW.Resize ctx.w ctx.h) initial;
+      (model, ignored) = update (AW.Resize ctx.w ctx.h) {initial | policyNamespace = ctx.ns};
       _ = AS.issue me ctx commands;
       _ = Sys.loop (ctx, model) (step me); Unit.
 step me state =
@@ -744,7 +754,12 @@ step me state =
       _ = AS.issue me ctx commands;
       (True, (AS.advance ctx ctx.sequence, fresh2))
   | AS.Message ret request -> case request of
-      AW.Close session -> if session != ctx.session then (AS.close me ctx ret session, state) else
+      AW.CloseWith session until stopMs -> if session != ctx.session then (AS.closeWithin until stopMs me ctx ret session, state) else
+        _ = stopProgram model;
+        (kept, commands) = keepSession True model;
+        _ = AS.issue me ctx commands;
+        (AS.closeWithin until stopMs me ctx ret session, state)
+    | AW.Close session -> if session != ctx.session then (AS.close me ctx ret session, state) else
         _ = stopProgram model;
         (kept, commands) = keepSession True model;
         _ = AS.issue me ctx commands;

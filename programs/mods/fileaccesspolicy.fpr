@@ -1,0 +1,66 @@
+# Hosted programs have no direct file capabilities. Each new request receives
+# a typed grant, including the policy snapshot used to filter a later listing.
+Text = use "policytext".
+FileAccessPolicy = Type (Policy String String Int Bool Bool).
+Snapshot = Type (Snapshot Int FileAccessPolicy).
+Operation = Type (Read | Write | List).
+Path = Type (File String | Directory String).
+Grant = Type (NoGrant | Granted Snapshot Operation Path).
+defaults = Policy "/home/" "/home/.editor/" 1024 True True.
+url = "/services/file-access-policy".
+schemaUrl = "/services/file-access-policy/schema".
+pathCeiling = 1024.
+revision (Snapshot r p) = r.
+policy (Snapshot r p) = p.
+root (Policy r x n rd wr) = r.
+excluded (Policy r x n rd wr) = x.
+maxPathBytes (Policy r x n rd wr) = n.
+canRead (Policy r x n rd wr) = rd.
+canWrite (Policy r x n rd wr) = wr.
+starts prefix s = strlen s >= strlen prefix and substr s 0 (strlen prefix) == prefix.
+ends suffix s = strlen s >= strlen suffix and substr s (strlen s - strlen suffix) (strlen suffix) == suffix.
+# Canonical absolute paths: no empty, dot or parent segments, control bytes,
+# or backslashes. Policy roots end in '/' and also exclude whitespace.
+validChars s i = if i >= strlen s then True else c = charAt s i;
+  c >= 32 and c != 127 and c != 92 and validChars s (i + 1).
+canonical s = strlen s > 0 and strlen s <= pathCeiling and starts "/" s and validChars s 0
+  and strIndexOf "//" s < 0 and strIndexOf "/./" s < 0 and not (ends "/." s)
+  and strIndexOf "/../" s < 0 and not (ends "/.." s).
+directory s = if ends "/" s then s else "{s}/".
+within dir s = starts dir s or s == substr dir 0 (strlen dir - 1).
+validate p = if not (canonical (root p) and strIndexOf " " (root p) < 0 and strIndexOf " " (excluded p) < 0 and ends "/" (root p) and canonical (excluded p) and ends "/" (excluded p)) then Err "root and exclude must be canonical absolute directory paths ending in /"
+  else if maxPathBytes p <= 0 or maxPathBytes p > pathCeiling then Err "maxPathBytes must be 1..1024" else Ok p.
+path List s = if canonical s and canonical (directory s) then Ok (Directory (directory s)) else Err "invalid directory path".
+path other s = if canonical s and not (ends "/" s) then Ok (File s) else Err "invalid file path".
+value (File s) = s.
+value (Directory s) = s.
+inScope p (File s) = starts (root p) s.
+inScope p (Directory s) = within (root p) s.
+permitted p List = canRead p.
+permitted p Read = canRead p.
+permitted p Write = canWrite p.
+admit snapshot operation s = p = policy snapshot;
+  case validate p of Err why -> Err why
+  | Ok valid -> case path operation s of Err why -> Err why
+    | Ok typed -> name = value typed;
+        if strlen name > maxPathBytes p or not (inScope p typed) or within (excluded p) name or not (permitted p operation) then Err "{s}: refused by file access policy revision {revision snapshot}"
+        else Ok (Granted snapshot operation typed).
+# Directory entries are checked too: listing '/home' cannot reveal excluded
+# records or a sibling directory merely sharing the requested string prefix.
+visible (Granted snapshot List (Directory prefix)) entry = p = policy snapshot;
+  canonical entry and strlen entry <= maxPathBytes p and within prefix entry
+    and within (root p) entry and not (within (excluded p) entry).
+visible other entry = False.
+flag True = 1.
+flag False = 0.
+encode r p = "revision={r} root={root p} exclude={excluded p} maxPathBytes={maxPathBytes p} read={flag (canRead p)} write={flag (canWrite p)}".
+render (Snapshot r p) = encode r p.
+schema = "type=FileAccessPolicy version=1\ndefaults={encode 0 defaults}\npaths=canonical absolute; no control bytes, backslashes, dot/parent/empty segments; root and exclude end in / and contain no whitespace\nmaxPathBytes=1..{pathCeiling}; read/write=0 or 1; listing requires read\nboundary=each new hosted-program request, including already-running programs\nin-flight=admitted requests finish under their captured grant; listings filter with that same grant\nrevocation=no retroactive cancellation or rollback; subsequent requests revalidate\nwrite=complete policy, listed order, expected revision, atomic, system-process-only\npersistence=until-restart\n".
+stringField key s = if starts key s and strlen s > strlen key then Ok (substr s (strlen key) (strlen s - strlen key)) else Err "expected {key}".
+parse text = if strlen text > 2304 then Err "update exceeds 2304 bytes" else case Text.tokens text 0 of
+    [rev, r, x, n, rd, wr] -> (case (Text.field "revision=" rev, stringField "root=" r, stringField "exclude=" x, Text.field "maxPathBytes=" n, Text.field "read=" rd, Text.field "write=" wr) of
+        (Ok version, Ok root, Ok exclude, Ok limit, Ok reads, Ok writes) ->
+          if reads > 1 or writes > 1 then Err "read/write must be 0 or 1" else
+          (case validate (Policy root exclude limit (reads == 1) (writes == 1)) of Err why -> Err why | Ok p -> Ok (Snapshot version p))
+      | other -> Err "invalid file access fields")
+  | other -> Err "invalid file access field count".

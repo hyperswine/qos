@@ -1,0 +1,104 @@
+# One live owner for app I/O and recovery policy. Jobs take immutable
+# snapshots; updates cannot reset endpoint ownership or recovery counters.
+AC = use "std/actor#201a0e9bf98a5154".
+EP = use "ep#c66ad65e68dd97f5".
+Endpoint = use "epservice#e8bce05a1ddf73db".
+Text = use "policytext".
+IoPolicy = Type (IoPolicy Int Int Int Int).
+RecoveryPolicy = Type (RecoveryPolicy Int Int Int Int Int).
+Policy = Type (Policy IoPolicy RecoveryPolicy).
+Snapshot = Type (Snapshot Int Policy).
+Request = Type (Get Int | Put Int Int Int Policy).
+# The control plane has a fixed bootstrap budget, independent of the policy
+# it is fetching. It is exposed in the schema and never silently falls back.
+controlMs = 250.
+bootstrapReceiveMs = 1000.
+defaultIo = IoPolicy 500 2000 1000 150.
+defaultRecovery = RecoveryPolicy 3 500 500 1200 1000.
+defaults = Policy defaultIo defaultRecovery.
+io (Policy p r) = p.
+recovery (Policy p r) = r.
+readMs (IoPolicy r w d c) = r.
+writeMs (IoPolicy r w d c) = w.
+deleteMs (IoPolicy r w d c) = d.
+cleanupMs (IoPolicy r w d c) = c.
+maxFailures (RecoveryPolicy f s e c w) = f.
+startupMs (RecoveryPolicy f s e c w) = s.
+responseMs (RecoveryPolicy f s e c w) = e.
+closeMs (RecoveryPolicy f s e c w) = c.
+workerStopMs (RecoveryPolicy f s e c w) = w.
+policy (Snapshot revision p) = p.
+revision (Snapshot revision p) = revision.
+# Covers old-session close, startup, response and failure cleanup. The
+# caller and owner use the SAME snapshot, even across a concurrent update.
+ownerMs p = r = recovery p; 2 * closeMs r + startupMs r + responseMs r + controlMs.
+maxMs = (intMax Unit / 1000 - controlMs) / 4.
+validMs n = n > 0 and n <= maxMs.
+validate p = i = io p; r = recovery p;
+  if not (validMs (readMs i) and validMs (writeMs i) and validMs (deleteMs i) and validMs (cleanupMs i)
+      and validMs (startupMs r) and validMs (responseMs r) and validMs (closeMs r) and validMs (workerStopMs r)) then Err "durations must be positive and fit the derived microsecond deadline"
+  else if maxFailures r < 0 then Err "maxFailures must be nonnegative"
+  else if workerStopMs r >= closeMs r then Err "workerStopMs must be less than closeMs"
+  else Ok p.
+url = "/services/app-policy".
+schemaUrl = "/services/app-policy/schema".
+encode rev p = i = io p; r = recovery p;
+  "revision={rev} readMs={readMs i} writeMs={writeMs i} deleteMs={deleteMs i} cleanupMs={cleanupMs i} maxFailures={maxFailures r} startupMs={startupMs r} responseMs={responseMs r} closeMs={closeMs r} workerStopMs={workerStopMs r}".
+render (Snapshot rev p) = "{encode rev p}\nownerCallMs={ownerMs p}\npersistence=until-restart\n".
+schema = "type=AppPolicies version=1\n{encode 0 defaults}\nwrite=all-fields-in-listed-order; expected revision; atomic; system-process-only\ndurations=1..{maxMs} ms; workerStopMs<closeMs\nmaxFailures=nonnegative; existing failure counts never reset; lower caps block subsequent launches\nreadMs=read, listing and disk-query operations\nwriteMs=write or append; deleteMs=delete; cleanupMs=each endpoint cleanup attempt\nboundary=one snapshot per job (including every safe-save phase) or lifecycle command\nownerCallMs=2*closeMs+startupMs+responseMs+{controlMs}; same snapshot as owner\ncontrolMs={controlMs}; bootstrap transport bound\nbootstrapReceiveMs={bootstrapReceiveMs}; initial handshake before policy address is known\npersistence=until-restart\n".
+parse text = if strlen text > 512 then Err "update exceeds 512 bytes" else
+  case Text.fields ["revision=", "readMs=", "writeMs=", "deleteMs=", "cleanupMs=", "maxFailures=", "startupMs=", "responseMs=", "closeMs=", "workerStopMs="] (Text.tokens text 0) of
+    Err why -> Err why
+  | Ok [rev, rd, wr, del, cl, failures, boot, response, close, stop] ->
+      (case validate (Policy (IoPolicy rd wr del cl) (RecoveryPolicy failures boot response close stop)) of
+        Err why -> Err why | Ok p -> Ok (Snapshot rev p))
+  | other -> Err "invalid policy fields".
+current me owner = if owner == 0 then Ok (Snapshot 0 defaults) else
+  case AC.deadlineAfter controlMs of Err why -> Err why
+  | Ok until -> case AC.callUntil until me owner (Get until) of
+      Ok answer -> answer | Err why -> Err "app policy unavailable: {why}".
+# Explicit owner 0 is the standalone/default mode. A failed configured
+# service never becomes owner 0 or silently selects defaults.
+start me ns =
+  owner = spawn serve;
+  adapter = spawn (Endpoint.simpleUntil (readPolicy owner) (writePolicy owner));
+  _ = claim me ns url adapter;
+  _ = claim me ns schemaUrl adapter;
+  (owner, adapter).
+claim me ns path owner = case EP.register me ns path owner of Ok u -> Unit | Err why -> error "app policy registration: {why}".
+serve me = _ = Sys.loop (Snapshot 0 defaults) (step me); Unit.
+step me snapshot =
+  message = receive me;
+  (from, id, request) = message;
+  ret = (from, id);
+  case request of
+    Get until -> _ = AC.reply ret (if AC.nowUs Unit >= until then Err "app policy: deadline exceeded" else Ok snapshot); (True, snapshot)
+  | Put until client expected next ->
+      result = update until client expected next snapshot;
+      case result of
+        Err why -> _ = AC.reply ret (Err why); (True, snapshot)
+      | Ok applied -> _ = AC.reply ret (Ok applied); (True, applied).
+update until client expected next snapshot =
+  rev = revision snapshot;
+  if Sys.pidOf client != 0 then Err "app policy: updates are system-only"
+  else if expected != rev then Err "app policy: stale revision; current revision={rev}"
+  else if rev == intMax Unit then Err "app policy: revision exhausted"
+  else case validate next of
+    Err why -> Err "app policy: {why}"
+  | Ok p -> (case AC.deadlineAfter (ownerMs p) of
+      Err why -> Err "app policy: derived deadline would overflow"
+    | Ok deadline -> if AC.nowUs Unit >= until then Err "app policy: deadline exceeded before update"
+        else Ok (Snapshot (rev + 1) p)).
+readPolicy owner until me client path =
+  if path == schemaUrl then Ok (EP.IStr schema)
+  else if path != url then Err "no such app-policy endpoint"
+  else answer (AC.callUntil until me owner (Get until)).
+writePolicy owner until me client path value =
+  if path != url then Err "app-policy schema is read-only" else
+  case value of
+    EP.IStr text -> (case parse text of Err why -> Err "app policy: {why}"
+      | Ok (Snapshot expected next) -> answer (AC.callUntil until me owner (Put until client expected next)))
+  | other -> Err "app policy: update wants IStr".
+answer (Err why) = Err "app policy: {why}; read the revision before retrying".
+answer (Ok (Err why)) = Err why.
+answer (Ok (Ok snapshot)) = Ok (EP.IStr (render snapshot)).

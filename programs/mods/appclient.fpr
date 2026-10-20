@@ -1,38 +1,52 @@
 # Main's one app-session owner. The module table is consulted once at start;
 # subsequent input, views and lifecycle are versioned data conversations.
 unsafe module.
+CP = use "apppolicy".
 AW = use "appwire".
 AC = use "std/actor#201a0e9bf98a5154".
 S2 = use "scene2d".
-Cmd = Type (Open Int | Deliver AW.Event | Resize Int Int | Home | Stop | Inspect).
-empty = {actor = 0, session = 0, sequence = 0, revision = 0, cleanup = "", failures = 0, w = 960, h = 530}.
-run owner ns storage w h me = _ = Sys.loop {empty | w = w, h = h} (step owner ns storage w h me); Unit.
-# Drain queued stale replies before parking on the owning actor. A dead owner
-# wakes receiveFromRes, so lifecycle cleanup needs no 1 ms polling loop.
-step owner ns storage w h me state = case next owner me of
-    Err why -> (idle, result) = leave me state; (False, idle)
+Cmd = Type (Open Int | Deliver AW.Event | Resize Int Int | Home | Stop | Inspect | PolicyNow | Using CP.Snapshot Cmd).
+empty = {actor = 0, session = 0, sequence = 0, revision = 0, cleanup = "", failures = 0, w = 960, h = 530, policy = CP.defaults, policyRevision = 0}.
+run owner ns storage w h me = runWithPolicies 0 owner ns storage w h me.
+runWithPolicies policies owner ns storage w h me =
+  _ = Sys.loop {empty | w = w, h = h} (step policies owner ns storage w h me); Unit.
+# Drain stale replies before parking. Parent death still closes using the
+# last admitted snapshot even if the shared policy service has since ended.
+step policies owner ns storage w h me state = case next owner me of
+    Err why -> (idle, result) = leaveWith state.policy me state; (False, idle)
   | Ok borrowed ->
       received = keep borrowed;
       _ = drop borrowed;
-      dispatch ns storage w h me state received.
+      dispatch policies ns storage w h me state received.
 next owner me = if not (Sys.alive owner) then Err "dead actor" else case receiveNow me of
     Ok message -> Ok message
   | Err why -> receiveFromRes me owner.
-dispatch ns storage w h me state received =
-  case received of
-    (from, id, command) ->
-      (next, answer) = case command of
-          Open table -> launch ns storage state.w state.h me table state
-        | Deliver event -> exchange me event state
-        | Resize newW newH ->
-            sized = {state | w = newW, h = newH};
-            if state.actor == 0 then (sized, Ok (AW.Closed 0 (Ok Unit))) else exchange me (AW.Resize newW newH) sized
-        | Home -> leave me state
-        | Stop -> leave me state
-        | Inspect -> (state, Ok (AW.Refused "actor={state.actor} session={state.session}"));
-      _ = AC.reply (from, id) answer;
-      (case command of Stop -> False | other -> True, next)
+dispatch policies ns storage w h me state received = case received of
+    (from, id, command) -> (case command of
+        Inspect -> dispatchWith (CP.Snapshot state.policyRevision state.policy) policies ns storage me state (from, id) Inspect
+      | PolicyNow -> _ = AC.reply (from, id) (CP.current me policies); (True, state)
+      | Using snapshot inner -> dispatchWith snapshot policies ns storage me state (from, id) inner
+      | other -> (case CP.current me policies of
+          Err why -> _ = AC.reply (from, id) (Err why); (True, state)
+        | Ok snapshot -> dispatchWith snapshot policies ns storage me state (from, id) other))
   | stale -> (True, state).
+dispatchWith snapshot policies ns storage me state ret command =
+  case CP.validate (CP.policy snapshot) of
+    Err why -> _ = AC.reply ret (Err "app policy: {why}"); (True, state)
+  | Ok p ->
+      selected = {state | policy = p, policyRevision = CP.revision snapshot};
+      (next, answer) = case command of
+          Open table -> launchWith p policies ns storage state.w state.h me table selected
+        | Deliver event -> exchangeWith p me event selected
+        | Resize newW newH ->
+            sized = {selected | w = newW, h = newH};
+            if state.actor == 0 then (sized, Ok (AW.Closed 0 (Ok Unit))) else exchangeWith p me (AW.Resize newW newH) sized
+        | Home -> leaveWith p me selected
+        | Stop -> leaveWith p me selected
+        | Inspect -> (selected, Ok (AW.Refused "actor={state.actor} session={state.session} failures={state.failures} maxFailures={CP.maxFailures (CP.recovery p)} policyRevision={CP.revision snapshot}"))
+        | other -> (state, Err "invalid nested app-owner command");
+      _ = AC.reply ret answer;
+      (case command of Stop -> False | other -> True, next).
 # Unsafe FP roots have no checked interface stamp. Enforce the root scope and
 # machine arity before entry; ABI/archive trust plus the primitive handshake
 # are the remaining boundary. This is not type or process isolation.
@@ -41,54 +55,68 @@ findEntry table root i rows = if i >= rows then Err "no app-session entry" else
   if Mod.rowHash table i == root and Mod.rowName table i == "appMain" then
     if Mod.rowArity table i == 1 then Ok (Mod.rowFn table i) else Err "appMain must take one actor argument"
     else findEntry table root (i + 1) rows.
-launch ns storage w h me table old =
-  (idle, closed) = leave me old;
-  if idle.failures >= 3 then (idle, Err "app recovery budget exhausted; restart Main") else
+launch ns storage w h me table old = launchWith CP.defaults 0 ns storage w h me table old.
+launchWith p policies ns storage w h me table old =
+  (idle, closed) = leaveWith p me old;
+  if idle.failures >= CP.maxFailures (CP.recovery p) then (idle, Err "app recovery budget exhausted; raise maxFailures or restart Main") else
     case entry table of
       Err why -> (idle, Err why)
-    | Ok start ->
-        actor = spawn start;
-        session = Sys.nextId Unit;
-        state = {idle | actor = actor, session = session, sequence = 0, revision = 0};
-        boot = AC.callWithin 500 me actor (AW.magic, AW, (session, (w, h), (ns, storage)));
-        case boot of
-          Ok (magic, schema, sid) -> if magic == AW.magic and schema == AW and sid == session then exchange me AW.Tick state
-            else abortStartup state "app-session version/schema refused"
-        | Err why -> abortStartup state "app startup: {why}".
-exchange me event state = if state.actor == 0 then (state, Err "app session is closed") else
+    | Ok start -> startWith p policies ns storage w h me start idle.
+startWith p policies ns storage w h me start idle =
+  actor = spawn start;
+  session = Sys.nextId Unit;
+  state = {idle | actor = actor, session = session, sequence = 0, revision = 0, policy = p};
+  boot = AC.callWithin (CP.startupMs (CP.recovery p)) me actor (AW.magic, AW, (session, (w, h), (ns, storage, policies)));
+  case boot of
+    Ok (magic, schema, sid) -> if magic == AW.magic and schema == AW and sid == session then exchangeWith p me AW.Tick state
+      else abortStartup state "app-session version/schema refused"
+  | Err why -> abortStartup state "app startup: {why}".
+exchange me event state = exchangeWith CP.defaults me event state.
+exchangeWith p me event state = if state.actor == 0 then (state, Err "app session is closed") else
   sequence = state.sequence + 1;
-  case AC.callWithin 500 me state.actor (AW.Event state.session sequence event) of
+  case AC.callWithin (CP.responseMs (CP.recovery p)) me state.actor (AW.Event state.session sequence event) of
     Ok (AW.Frame sid revision tree vals status) ->
       if sid == state.session and revision > state.revision then
         ({state | sequence = sequence, revision = revision}, Ok (AW.Frame sid revision tree vals status))
-      else failed me state "stale app view"
-  | Ok (AW.Refused why) -> failed me state "app refused: {why}"
-  | Ok other -> failed me state "invalid app view reply"
-  | Err why -> failed me state "app response: {why}".
-failed me state why =
-  (idle, cleanup) = leave me state;
+      else failedWith p me state "stale app view"
+  | Ok (AW.Refused why) -> failedWith p me state "app refused: {why}"
+  | Ok other -> failedWith p me state "invalid app view reply"
+  | Err why -> failedWith p me state "app response: {why}".
+failed me state why = failedWith CP.defaults me state why.
+failedWith p me state why =
+  (idle, cleanup) = leaveWith p me state;
   (idle, Err (case cleanup of Ok u -> why | Err detail -> "{why}; {detail}")).
-leave me state =
+leave me state = leaveWith CP.defaults me state.
+leaveWith p me state =
   result = if state.actor == 0 then
       if state.cleanup == "" then Ok Unit else Err state.cleanup
-    else case AC.callWithin 1200 me state.actor (AW.Close state.session) of
+    else case AC.deadlineAfter (CP.closeMs (CP.recovery p)) of
+      Err why -> Err why
+    | Ok until -> case AC.callUntil until me state.actor (AW.CloseWith state.session until (CP.workerStopMs (CP.recovery p))) of
         Ok (AW.Closed sid answer) -> if sid == state.session then answer else Err "close session mismatch"
       | Ok other -> Err "invalid close acknowledgement"
       | Err why -> Err "app forced stop; cleanup unconfirmed: {why}";
   _ = if state.actor == 0 then Unit else kill state.actor;
   cleanup = case result of Ok u -> state.cleanup | Err why -> retain state.cleanup why;
-  failures = state.failures + (case result of Err why -> if state.actor == 0 then 0 else 1 | Ok u -> 0);
-  ({empty | cleanup = cleanup, failures = failures, w = state.w, h = state.h}, if cleanup != "" then Err cleanup
+  failures = case result of Err why -> if state.actor == 0 then state.failures else bump state.failures | Ok u -> state.failures;
+  ({empty | cleanup = cleanup, failures = failures, w = state.w, h = state.h, policy = p, policyRevision = state.policyRevision}, if cleanup != "" then Err cleanup
     else Ok (AW.Closed state.session (Ok Unit))).
-call me owner command = case AC.callWithin 2500 me owner command of
-    Err why -> Err "session owner: {why}"
-  | Ok answer -> answer.
+call me owner Inspect = case AC.callWithin CP.controlMs me owner Inspect of
+    Err why -> Err "session owner: {why}" | Ok answer -> answer.
+call me owner command = case AC.callWithin CP.controlMs me owner PolicyNow of
+    Err why -> Err "session policy: {why}"
+  | Ok (Err why) -> Err why
+  | Ok (Ok snapshot) -> case AC.callWithin (CP.ownerMs (CP.policy snapshot)) me owner (Using snapshot command) of
+      Err why -> Err "session owner: {why}" | Ok answer -> answer.
 stop me owner = case call me owner Stop of Ok reply -> Ok Unit | Err why -> Err why.
 
 # No typed request, including Close, is safe until bootstrap agrees.
 abortStartup state why =
   _ = kill state.actor;
   cleanup = retain state.cleanup "startup forced stop; cleanup unconfirmed: {why}";
-  ({empty | cleanup = cleanup, failures = state.failures + 1, w = state.w, h = state.h}, Err cleanup).
+  ({empty | cleanup = cleanup, failures = bump state.failures, w = state.w, h = state.h, policy = state.policy, policyRevision = state.policyRevision}, Err cleanup).
 
 retain previous why = if previous == "" or previous == why then why else "{previous}; {why}".
+
+# Failed cleanup counts saturate; changing a cap never clears this history.
+bump n = if n == intMax Unit then n else n + 1.
