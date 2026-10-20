@@ -1,19 +1,25 @@
 # Strict text boundary shared by live policy services.
+number : unsafe String -> Result Int String .
 number s = if strlen s == 0 then Err "empty number" else digits s 0 0.
+digits : unsafe String -> Int -> Int -> Result Int String .
 digits s i n = if i >= strlen s then Ok n else
   c = charAt s i - 48;
   if c < 0 or c > 9 then Err "expected unsigned decimal integer"
   else if n > (intMax Unit - c) / 10 then Err "integer overflow"
   else digits s (i + 1) (n * 10 + c).
+field : unsafe String -> String -> Result Int String .
 field key text = n = strlen key;
   if strlen text <= n or substr text 0 n != key then Err "expected {key}"
   else number (substr text n (strlen text - n)).
 space c = c == 32 or c == 9 or c == 10 or c == 13.
+tokens : unsafe String -> Int -> List String .
 tokens s i = if i >= strlen s then Nil
   else if space (charAt s i) then tokens s (i + 1) else token s i i.
+token : unsafe String -> Int -> Int -> List String .
 token s start i = if i >= strlen s then [substr s start (i - start)]
   else if space (charAt s i) then substr s start (i - start) :: tokens s (i + 1)
   else token s start (i + 1).
+fields : unsafe List String -> List String -> Result (List Int) String .
 fields Nil Nil = Ok Nil.
 fields (key :: keys) (word :: words) = case field key word of
     Err why -> Err why

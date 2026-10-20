@@ -37,11 +37,15 @@ snapshot revision policy live = "{encode revision policy}\nliveFiles={live}\nper
 schema = "type=FilesPolicy version=1\ndefaults={encode 0 defaults}\nfields=revision,maxLiveFiles,maxPathBytes,reclaimMs,retireMarginMs\nwrite=all-fields-in-listed-order decimal-integers expected-revision\nmaxLiveFiles=positive; cannot fall below liveFiles\nmaxPathBytes=1..{pathCeiling}; applies to new names; existing names remain usable\nreclaimMs=positive representable microseconds; next reclamation pass\nretireMarginMs=positive and less than reclaimMs; next retirement request including existing actors\nupdate=atomic; system-process-only; effective on next manager request\npersistence=until-restart\n".
 
 # Keep the original typed errors while sharing the strict decimal boundary.
+number : unsafe String -> Result Int PolicyError .
 number s = parsed (Text.number s).
+field : unsafe String -> String -> Result Int PolicyError .
 field key text = parsed (Text.field key text).
 parsed (Ok value) = Ok value.
 parsed (Err why) = Err (Invalid why).
+tokens : unsafe String -> Int -> List String .
 tokens s i = Text.tokens s i.
+parse : unsafe String -> Result Update PolicyError .
 parse text = if strlen text > 512 then Err (Invalid "update exceeds 512 bytes") else
   case tokens text 0 of
     [r, l, p, b, m] -> parseFields (field "revision=" r) (field "maxLiveFiles=" l) (field "maxPathBytes=" p) (field "reclaimMs=" b) (field "retireMarginMs=" m)
