@@ -9,6 +9,9 @@ std/actor v3.0 201a0e9bf98a5154 programs/mods/appjobs.fpr
 std/fs v5.0 84826bc9e8ddb4b5 programs/mods/appjobs.fpr
 std/actor v3.0 201a0e9bf98a5154 programs/mods/appkit.fpr
 ep v3.0 c66ad65e68dd97f5 programs/mods/appkit.fpr
+std/actor v3.0 201a0e9bf98a5154 programs/mods/apppolicy.fpr
+ep v3.0 c66ad65e68dd97f5 programs/mods/apppolicy.fpr
+epservice v3.0 e8bce05a1ddf73db programs/mods/apppolicy.fpr
 ep v3.0 c66ad65e68dd97f5 programs/mods/appsep.fpr
 std/actor v3.0 201a0e9bf98a5154 programs/mods/appsession.fpr
 ep v3.0 c66ad65e68dd97f5 programs/mods/blockep.fpr
@@ -116,6 +119,9 @@ std/fs v5.0 84826bc9e8ddb4b5 tests/appidnative.fpr
 ../programs/mods/svc v5.0 75479fb6d5f34670 tests/appidnative.fpr
 ../programs/mods/ep v3.0 c66ad65e68dd97f5 tests/appjobs.fpr
 std/actor v3.0 201a0e9bf98a5154 tests/appjobs.fpr
+../programs/mods/ep v3.0 c66ad65e68dd97f5 tests/apppolicy.fpr
+../programs/mods/epservice v3.0 e8bce05a1ddf73db tests/apppolicy.fpr
+std/actor v3.0 201a0e9bf98a5154 tests/apppolicy.fpr
 std/fs v5.0 84826bc9e8ddb4b5 tests/apps.fpr
 std/actor v3.0 201a0e9bf98a5154 tests/appsession.fpr
 ../programs/mods/ep v3.0 c66ad65e68dd97f5 tests/appsessionmemory.fpr

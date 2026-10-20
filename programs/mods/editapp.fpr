@@ -744,7 +744,12 @@ step me state =
       _ = AS.issue me ctx commands;
       (True, (AS.advance ctx ctx.sequence, fresh2))
   | AS.Message ret request -> case request of
-      AW.Close session -> if session != ctx.session then (AS.close me ctx ret session, state) else
+      AW.CloseWith session until stopMs -> if session != ctx.session then (AS.closeWithin until stopMs me ctx ret session, state) else
+        _ = stopProgram model;
+        (kept, commands) = keepSession True model;
+        _ = AS.issue me ctx commands;
+        (AS.closeWithin until stopMs me ctx ret session, state)
+    | AW.Close session -> if session != ctx.session then (AS.close me ctx ret session, state) else
         _ = stopProgram model;
         (kept, commands) = keepSession True model;
         _ = AS.issue me ctx commands;

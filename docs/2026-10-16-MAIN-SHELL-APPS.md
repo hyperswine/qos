@@ -77,8 +77,11 @@ dead is treated as absent), which an earlier kill would have left as a
 stale entry.
 
 The app wire grew `WritePath`, `AppendPath` and `DeletePath` jobs and a
-`Done` snapshot; its magic is `qos.app-session/3`, so the shell and the
-five archives rebuild together, as the contract says.
+`Done` snapshot; that change used `qos.app-session/3`, requiring the shell
+and the then-five archives to rebuild together. The subsequent
+[runtime policy slice](2026-10-20-RUNTIME-POLICY.md#runtime-app-io-and-recovery-policies)
+uses `qos.app-session/4`, adds the policy-owner address and bounded close
+request, and requires Main and all six current app archives to rebuild together.
 
 ## Verification
 

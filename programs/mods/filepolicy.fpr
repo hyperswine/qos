@@ -1,6 +1,7 @@
 # Live file-service policy. Wire text is confined to this module; service
 # decisions use Policy/Update, and validation happens before any mutation.
 Wire = use "std/storage#a8f7ee14e1efae76".
+Text = use "policytext".
 Policy = Type (Policy Int Int Int Int).
 Update = Type (Update Int Policy).
 PolicyError = Type (Invalid String | Stale Int | InUse Int | RevisionExhausted).
@@ -35,22 +36,12 @@ encode revision (Policy live path budget margin) =
 snapshot revision policy live = "{encode revision policy}\nliveFiles={live}\npersistence=until-restart\n".
 schema = "type=FilesPolicy version=1\ndefaults={encode 0 defaults}\nfields=revision,maxLiveFiles,maxPathBytes,reclaimMs,retireMarginMs\nwrite=all-fields-in-listed-order decimal-integers expected-revision\nmaxLiveFiles=positive; cannot fall below liveFiles\nmaxPathBytes=1..{pathCeiling}; applies to new names; existing names remain usable\nreclaimMs=positive representable microseconds; next reclamation pass\nretireMarginMs=positive and less than reclaimMs; next retirement request including existing actors\nupdate=atomic; system-process-only; effective on next manager request\npersistence=until-restart\n".
 
-# Strict bounded decimal parsing: no parseInt prefix acceptance or overflow.
-number s = if strlen s == 0 then Err (Invalid "empty number") else digits s 0 0.
-digits s i n = if i >= strlen s then Ok n else
-  c = charAt s i - 48;
-  if c < 0 or c > 9 then Err (Invalid "expected unsigned decimal integer")
-  else if n > (intMax Unit - c) / 10 then Err (Invalid "integer overflow")
-  else digits s (i + 1) (n * 10 + c).
-field key text = n = strlen key;
-  if strlen text <= n or substr text 0 n != key then Err (Invalid "expected {key}")
-  else number (substr text n (strlen text - n)).
-space c = c == 32 or c == 9 or c == 10 or c == 13.
-tokens s i = if i >= strlen s then Nil
-  else if space (charAt s i) then tokens s (i + 1) else token s i i.
-token s start i = if i >= strlen s then [substr s start (i - start)]
-  else if space (charAt s i) then substr s start (i - start) :: tokens s (i + 1)
-  else token s start (i + 1).
+# Keep the original typed errors while sharing the strict decimal boundary.
+number s = parsed (Text.number s).
+field key text = parsed (Text.field key text).
+parsed (Ok value) = Ok value.
+parsed (Err why) = Err (Invalid why).
+tokens s i = Text.tokens s i.
 parse text = if strlen text > 512 then Err (Invalid "update exceeds 512 bytes") else
   case tokens text 0 of
     [r, l, p, b, m] -> parseFields (field "revision=" r) (field "maxLiveFiles=" l) (field "maxPathBytes=" p) (field "reclaimMs=" b) (field "retireMarginMs=" m)

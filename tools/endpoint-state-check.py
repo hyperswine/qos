@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Linear endpoint ownership, worker transitions, inspection and memory parity."""
+"""Linear ownership, live app/file policy, session transitions and memory parity."""
 import argparse
 import os
 from pathlib import Path
@@ -44,7 +44,7 @@ def check(out):
 
     host = out / 'qosp'
     run('host-build', ['make', '-s', '-C', ROOT / 'qos', 'portable', f'QOSP_OUT={host}'])
-    for name in ('appjobs', 'appsession', 'appsessionmemory', 'filepolicy'):
+    for name in ('appjobs', 'appsession', 'appsessionmemory', 'filepolicy', 'apppolicy'):
         image = out / (name + '.qa')
         run(name + '-build', ['make', '-s', '-C', ROOT, 'qos-app',
                              f'PROG=tests/{name}.fpr', f'BUILD={out / (name + "-build")}',

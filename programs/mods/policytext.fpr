@@ -1,0 +1,21 @@
+# Strict text boundary shared by live policy services.
+number s = if strlen s == 0 then Err "empty number" else digits s 0 0.
+digits s i n = if i >= strlen s then Ok n else
+  c = charAt s i - 48;
+  if c < 0 or c > 9 then Err "expected unsigned decimal integer"
+  else if n > (intMax Unit - c) / 10 then Err "integer overflow"
+  else digits s (i + 1) (n * 10 + c).
+field key text = n = strlen key;
+  if strlen text <= n or substr text 0 n != key then Err "expected {key}"
+  else number (substr text n (strlen text - n)).
+space c = c == 32 or c == 9 or c == 10 or c == 13.
+tokens s i = if i >= strlen s then Nil
+  else if space (charAt s i) then tokens s (i + 1) else token s i i.
+token s start i = if i >= strlen s then [substr s start (i - start)]
+  else if space (charAt s i) then substr s start (i - start) :: tokens s (i + 1)
+  else token s start (i + 1).
+fields Nil Nil = Ok Nil.
+fields (key :: keys) (word :: words) = case field key word of
+    Err why -> Err why
+  | Ok value -> (case fields keys words of Err why -> Err why | Ok rest -> Ok (value :: rest)).
+fields keys words = Err "wrong number of fields".

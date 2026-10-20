@@ -1,21 +1,27 @@
 # Shared transport/lifecycle mechanics. App update/view functions stay named
 # in their own modules: this module never accepts an application callback.
 unsafe module.
+CP = use "apppolicy".
 AW = use "appwire".
 AJ = use "appjobs".
 L = use "shelllayout".
 AC = use "std/actor#201a0e9bf98a5154".
 Inbox = Type (Message (Int, Int) AW.Request | JobResult Int (Result AW.Snapshot String) | Idle | Gone).
-start me = case bootstrap (AC.nowUs Unit + 1000000) me of
+start me = case bootstrap (AC.nowUs Unit + CP.bootstrapReceiveMs * 1000) me of
     Err why -> Err why
   | Ok request -> begin me request.
 begin me request =
-  (parent, id, (magic, schema, (session, (w, h), (ns, storage)))) = request;
-  case magic == AW.magic and schema == AW and session > 0 and L.valid w h of
+  (parent, id, (magic, schema, payload)) = request;
+  if magic != AW.magic or schema != AW then
+    _ = AC.reply (parent, id) ("refused", AW, 0); Err "startup refused"
+  else beginPayload me parent id payload.
+beginPayload me parent id payload =
+  (session, (w, h), (ns, storage, policies)) = payload;
+  case session > 0 and L.valid w h of
     False -> _ = AC.reply (parent, id) ("refused", AW, 0); Err "startup refused"
   | True ->
-      worker = spawn (AJ.run me ns storage);
-      ctx = {parent = parent, session = session, worker = worker, w = w, h = h, revision = 1, sequence = 0};
+      worker = spawn (AJ.runWithPolicies policies me ns storage);
+      ctx = {parent = parent, session = session, worker = worker, policies = policies, w = w, h = h, revision = 1, sequence = 0};
       case AC.reply (parent, id) (AW.magic, AW, session) of
         Err why -> _ = finish me ctx; Err "startup refused"
       | Ok u -> Ok ctx.
@@ -43,18 +49,25 @@ issue me ctx (AW.Fetch token job :: rest) =
     Ok u -> Unit
   | Err why -> _ = send me (token, AW.Completed token (Err "app worker: {why}")); Unit;
   issue me ctx rest.
-finish me ctx =
-  result = case AC.callWithin 1000 me ctx.worker AW.Stop of
+finish me ctx = case CP.current me ctx.policies of
+    Err why -> _ = kill ctx.worker; Err "worker forced stop; {why}"
+  | Ok snapshot -> finishWithin (CP.workerStopMs (CP.recovery (CP.policy snapshot))) (intMax Unit) me ctx.
+finishWithin stopMs until me ctx =
+  deadline = case AC.deadlineAfter stopMs of Ok d -> if d < until then d else until | Err why -> AC.nowUs Unit;
+  result = case AC.callUntil deadline me ctx.worker AW.Stop of
       Err why -> Err "worker forced stop: {why}"
     | Ok (AW.Stopped result) -> result
     | Ok other -> Err "invalid worker stop acknowledgement";
   _ = kill ctx.worker;
   result.
-close me ctx ret session = case session == ctx.session of
+close me ctx ret session = if session != ctx.session then
+    _ = AC.reply ret (AW.Refused "stale session"); True
+  else result = finish me ctx; _ = AC.reply ret (AW.Closed session result); False.
+closeWithin until stopMs me ctx ret session = case session == ctx.session of
     False -> _ = AC.reply ret (AW.Refused "stale session"); True
   | True ->
       # Closing: no more updates or reads are admitted while awaiting Stop.
-      result = finish me ctx;
+      result = finishWithin stopMs until me ctx;
       _ = AC.reply ret (AW.Closed session result);
       False.
 

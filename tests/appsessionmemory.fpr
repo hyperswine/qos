@@ -43,7 +43,7 @@ main =
   app = spawn C.run;
   owner = spawn (AP.run me 0 0 800 480);
   worker = spawn (AJ.run me 0 0);
-  _ = check (case AC.callWithin 1000 me app (AW.magic, AW, (1, (800, 480), (0, 0))) of Ok (magic, schema, sid) -> sid == 1 | other -> False);
+  _ = check (case AC.callWithin 1000 me app (AW.magic, AW, (1, (800, 480), (0, 0, 0))) of Ok (magic, schema, sid) -> sid == 1 | other -> False);
   ns = spawn namespace;
   pane = spawn (PJ.readWorker ns me 1000);
   _ = batch me app owner worker pane 1 101;

@@ -13,11 +13,11 @@ Job = Type (Clock | Logs Int | ListRoot | ReadPath String | Disk | WritePath Str
           | SaveFile String String | Compile String String).
 Snapshot = Type (Time Int | Lines (List String) String | Text String | Done String).
 Cmd = Type (Fetch Int Job).
-Request = Type (Event Int Int Event | Close Int).
+Request = Type (Event Int Int Event | Close Int | CloseWith Int Int Int).
 Reply = Type (Frame Int Int S2.Sn (List String) String | Closed Int (Result Unit String) | Refused String | Completed Int (Result Snapshot String) | Stopped (Result Unit String)).
-Work = Type (Read Int Job | Stop | Inspect).
+Work = Type (Read Int Job | Stop | Inspect | InspectPolicy).
 Phase = Type (Loading | Ready | Failed String).
-magic = "qos.app-session/3".
+magic = "qos.app-session/4".
 status Loading = "Loading".
 status Ready = "Ready".
 status (Failed why) = "{why} - R RETRY".

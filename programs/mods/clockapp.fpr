@@ -56,7 +56,8 @@ step me state =
       _ = AS.issue me ctx commands;
       (True, (AS.advance ctx ctx.sequence, fresh))
   | AS.Message ret request -> case request of
-      AW.Close session -> (AS.close me ctx ret session, state)
+      AW.CloseWith session until stopMs -> (AS.closeWithin until stopMs me ctx ret session, state)
+    | AW.Close session -> (AS.close me ctx ret session, state)
     | AW.Event session sequence event -> case AS.valid ctx session sequence of
         False -> _ = AC.reply ret (AW.Refused "stale session or sequence"); (True, state)
       | True ->

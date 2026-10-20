@@ -1,5 +1,6 @@
 # Worker-owned endpoint state. Inspection returns data plus the successor
 # owner; it never copies ownership. Raw IPC actor/handle ids remain cooperative.
+CP = use "apppolicy".
 AC = use "std/actor#201a0e9bf98a5154".
 ED = use "epdeadline".
 State 1 = Type (Vacant | Held Int Int | Uncertain String).
@@ -15,10 +16,12 @@ acquired : (Int, Int) -> State .
 acquired (actor, handle) = Held actor handle.
 
 cleanup : unsafe Int -> State -> (Result Unit String, State) .
-cleanup me state = case state of
+cleanup me state = cleanupWithin (CP.cleanupMs CP.defaultIo) me state.
+cleanupWithin : unsafe Int -> Int -> State -> (Result Unit String, State) .
+cleanupWithin ms me state = case state of
     Vacant -> (Ok Unit, Vacant)
   | Uncertain why -> (Err why, Uncertain why)
-  | Held actor handle -> case AC.deadlineAfter 150 of
+  | Held actor handle -> case AC.deadlineAfter ms of
       Err why -> (Err why, Held actor handle)
     | Ok deadline -> case ED.closeUntil deadline me (actor, handle) of
         Ok value -> (Ok Unit, Vacant)
