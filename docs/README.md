@@ -137,3 +137,4 @@ Source-adjacent READMEs under `tools/` stay beside the tools they explain.
 | 2026-10-18 | [QOS-DESIGN-ALIGNMENT.md](2026-10-18-QOS-DESIGN-ALIGNMENT.md) | Design/style work queue and first implementation: linear hosted timer ownership, refinement contracts, checked arithmetic bounds and lifecycle tests |
 | 2026-10-18 | [FREEBSD-PORTABLE.md](2026-10-18-FREEBSD-PORTABLE.md) | Portable v22 on FreeBSD QEMU, networking-header fixes, storage/lifecycle/network checks and measured native-server concurrency limit |
 | 2026-10-20 | [RUNTIME-POLICY.md](2026-10-20-RUNTIME-POLICY.md) | Typed policy roadmap and live, revisioned file-service configuration |
+| 2026-10-21 | [TYPED-IR-COMPILER-PIN.md](2026-10-21-TYPED-IR-COMPILER-PIN.md) | Pin to FP-RISC with the typed-IR merge (codegen revision 67); check-all on macOS with three red legs that also fail on the previous pin |
