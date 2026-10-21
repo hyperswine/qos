@@ -127,6 +127,7 @@ int fpr_hal_sleep_us(uintptr_t us) {
  * plugin loads into any app that exports what it needs, and says what is
  * missing when one does not. */
 int fpr_mod_attach(const uw *tab);
+void fpr_mod_detach(const uw *tab);
 /* defined by tools/mkexports.py's table, absent in the FIRST link (which
  * ignores unresolved symbols: qos-app.mk).  Not weak: a weak extern is
  * reached through the GOT, whose slot the image's relocation list cannot
@@ -223,6 +224,7 @@ typedef struct {
   fpr_image_t im;
   uint64_t base, execsz; /* the pages the host made r-x: made r-w again before reuse */
   int ending;
+  const uw *modtab; /* its module table in the registry: detached before the image is freed */
 } plug_image_t;
 static fpr_lock_t g_plug_lock; /* serializes teardown against reaps on other harts */
 static void plug_image_quiet(uw pid) {
@@ -232,6 +234,9 @@ static void plug_image_quiet(uw pid) {
   pi->ending = 1;
   fpr_image_remove(&pi->im);
   fpr_unlock(&g_plug_lock);
+  /* the registry must not keep a table whose pages are about to go back
+   * to the host (fprisc runtime/mod.c, fpr_mod_detach) */
+  fpr_mod_detach(pi->modtab);
   if (g_syscall) {
     char err[128];
     qos_unload_t u = {pi->base, pi->execsz};
@@ -328,9 +333,13 @@ static V h_sys_attach_image(V idv, V abiv, V shav, V relshav, V numsv, V secsv) 
   pi->base = (uint64_t)(uintptr_t)base;
   pi->execsz = n[2];
   pi->ending = 0;
+  pi->modtab = (const uw *)(uintptr_t)r;
   if (!fpr_pid_quiet) fpr_pid_quiet = plug_image_quiet;
   fpr_image_add(&pi->im);
-  if (fpr_mod_attach((const uw *)(uintptr_t)r))
+  int attached = fpr_mod_attach(pi->modtab);
+  if (attached == -2)
+    return fpr_mkresult(1, "no memory for the module registry");
+  if (attached)
     return fpr_mkresult(1, "module table has an unsupported interface schema (rebuild plugin)");
   return fpr_mkresult(0, "");
 }
