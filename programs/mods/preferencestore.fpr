@@ -15,6 +15,7 @@ Snapshot = Type (Editor E.Snapshot | Terminal T.Snapshot).
 url app = "/services/preferences/{app}".
 key app = "sys/preferences/v1/{app}".
 magic = "qos-preferences-1\n".
+parse : unsafe String -> String -> Result Snapshot String .
 parse "editor" text = case E.parse text of Ok p -> Ok (Editor p) | Err why -> Err why.
 parse "terminal" text = case T.parse text of Ok p -> Ok (Terminal p) | Err why -> Err why.
 parse other text = Err "unknown preference type".

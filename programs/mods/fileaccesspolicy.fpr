@@ -21,9 +21,10 @@ starts prefix s = strlen s >= strlen prefix and substr s 0 (strlen prefix) == pr
 ends suffix s = strlen s >= strlen suffix and substr s (strlen s - strlen suffix) (strlen suffix) == suffix.
 # Canonical absolute paths: no empty, dot or parent segments, control bytes,
 # or backslashes. Policy roots end in '/' and also exclude whitespace.
-validChars s i = if i >= strlen s then True else c = charAt s i;
-  c >= 32 and c != 127 and c != 92 and validChars s (i + 1).
-canonical s = strlen s > 0 and strlen s <= pathCeiling and starts "/" s and validChars s 0
+validChars : String -> (n : Int | measure n) -> Bool .
+validChars s n = if n <= 0 then True else c = charAt s (n - 1);
+  c >= 32 and c != 127 and c != 92 and validChars s (n - 1).
+canonical s = strlen s > 0 and strlen s <= pathCeiling and starts "/" s and validChars s (strlen s)
   and strIndexOf "//" s < 0 and strIndexOf "/./" s < 0 and not (ends "/." s)
   and strIndexOf "/../" s < 0 and not (ends "/.." s).
 directory s = if ends "/" s then s else "{s}/".
@@ -57,6 +58,7 @@ encode r p = "revision={r} root={root p} exclude={excluded p} maxPathBytes={maxP
 render (Snapshot r p) = encode r p.
 schema = "type=FileAccessPolicy version=1\ndefaults={encode 0 defaults}\npaths=canonical absolute; no control bytes, backslashes, dot/parent/empty segments; root and exclude end in / and contain no whitespace\nmaxPathBytes=1..{pathCeiling}; read/write=0 or 1; listing requires read\nboundary=each new hosted-program request, including already-running programs\nin-flight=admitted requests finish under their captured grant; listings filter with that same grant\nrevocation=no retroactive cancellation or rollback; subsequent requests revalidate\nwrite=complete policy, listed order, expected revision, atomic, system-process-only\npersistence=until-restart\n".
 stringField key s = if starts key s and strlen s > strlen key then Ok (substr s (strlen key) (strlen s - strlen key)) else Err "expected {key}".
+parse : unsafe String -> Result Snapshot String .
 parse text = if strlen text > 2304 then Err "update exceeds 2304 bytes" else case Text.tokens text 0 of
     [rev, r, x, n, rd, wr] -> (case (Text.field "revision=" rev, stringField "root=" r, stringField "exclude=" x, Text.field "maxPathBytes=" n, Text.field "read=" rd, Text.field "write=" wr) of
         (Ok version, Ok root, Ok exclude, Ok limit, Ok reads, Ok writes) ->

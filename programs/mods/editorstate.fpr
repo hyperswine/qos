@@ -41,6 +41,7 @@ renderJobs Nil = "".
 renderJobs (PendingJob token kind version :: rest) = "job token={token} kind={jobName kind} version={version}\n{renderJobs rest}".
 schema = "type=EditorState version=1\nprompts=editing,open,save-as,find,goto\njobs=open-document,list-documents,save-document,keep-session,build-source,run-source,restore-session,check-source,program-request\nedits=none,typing,line-break,clipboard,structural,deleting\nwrite=revision=N open | revision=N save-as QUERY | revision=N find QUERY | revision=N goto QUERY | revision=N cancel\ncommand=at most 2048 bytes; optional LF or CRLF terminator; single line; query spaces preserved\ntransitions=show or cancel a prompt through the normal Editor transition; never submit, save, discard or rewrite pending jobs\nrevision=app-state revision; includes events and completed jobs; stale writes refused\nconfirmation=none,discard-for-open PATH,discard-for-new; changes of target require fresh confirmation\nauthorization=system-process-only, cooperative caller identity\nlifetime=one Editor session; endpoints removed on normal exit or owner death\n".
 # Preserve the query verbatim after the command's first separator.
+parse : unsafe String -> Result (Int, Action) String .
 parse raw = if strlen raw > 2048 then Err "command exceeds 2048 bytes" else
   s = line raw;
   if strIndexOf "\n" s >= 0 or strIndexOf "\r" s >= 0 then Err "expected a single-line command" else parseLine s.
@@ -51,6 +52,7 @@ line s = n = strlen s;
     width = if n > 1 and charAt s (n - 2) == 13 then 2 else 1;
     substr s 0 (n - width)
   else s.
+parseLine : unsafe String -> Result (Int, Action) String .
 parseLine s =
   first = strIndexOf " " s;
   if first < 0 then Err "expected revision=N COMMAND" else

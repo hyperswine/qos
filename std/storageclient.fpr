@@ -14,7 +14,7 @@ request me target op = within Wire.defaultMs me target op.
 within ms me target op = case P.decodeResult (Wire.deadline ms) of
     Err why -> Err why
   | Ok until -> requestUntil until me target op.
-requestUntil : unsafe Int -> Int -> Target -> P.StorageOp -> Result String P.StorageError .
+requestUntil : Int -> Int -> Target -> P.StorageOp -> Result String P.StorageError .
 requestUntil until me target op = case P.encode P.DeadlineV2 (kind target) op of
     Err why -> Err why
   | Ok (tag, key, bytes) -> if actor target == 0 then Err (P.fromLegacy "no disk") else

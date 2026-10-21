@@ -13,6 +13,7 @@ validate p = if inputBytes p <= 0 or outputLines p <= 0 or historyEntries p < 0 
 encode rev p = "revision={rev} inputBytes={inputBytes p} outputLines={outputLines p} historyEntries={historyEntries p} history={History.name (retention p)}".
 render (Snapshot rev p) = encode rev p.
 checked rev p = case validate p of Err why -> Err why | Ok valid -> Ok (Snapshot rev valid).
+parse : unsafe String -> Result Snapshot String .
 parse text = if strlen text > 512 then Err "update exceeds 512 bytes" else case Text.tokens text 0 of
     [r, i, o, n, h] -> (case (Text.field "revision=" r, Text.field "inputBytes=" i, Text.field "outputLines=" o, Text.field "historyEntries=" n) of
         (Ok rev, Ok input, Ok out, Ok entries) -> (case History.parse h of Err why -> Err why | Ok retention -> checked rev (Preferences input out entries retention))
