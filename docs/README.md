@@ -138,3 +138,4 @@ Source-adjacent READMEs under `tools/` stay beside the tools they explain.
 | 2026-10-18 | [FREEBSD-PORTABLE.md](2026-10-18-FREEBSD-PORTABLE.md) | Portable v22 on FreeBSD QEMU, networking-header fixes, storage/lifecycle/network checks and measured native-server concurrency limit |
 | 2026-10-20 | [RUNTIME-POLICY.md](2026-10-20-RUNTIME-POLICY.md) | Typed policy roadmap and live, revisioned file-service configuration |
 | 2026-10-21 | [TYPED-IR-COMPILER-PIN.md](2026-10-21-TYPED-IR-COMPILER-PIN.md) | Pin to FP-RISC with the typed-IR merge (codegen revision 67); check-all on macOS with three red legs that also fail on the previous pin |
+| 2026-10-22 | [MERGE-REGRESSIONS-FIXED.md](2026-10-22-MERGE-REGRESSIONS-FIXED.md) | The three red check-all legs fixed (policy parser signatures, the module registry and plugin detach, Sol NN); pin FP-RISC 0c9c8b7; 162 legs green |
