@@ -9,7 +9,8 @@
  * What stays is what guards and performs a copy, freestanding by
  * construction (byte loops, no libc): the image must lie inside the window
  * it was given; then copy it there and zero its bss tail.  Protection
- * (mprotect r-x / PMP) is the host's, with the boundaries reported here.
+ * (mprotect r-x on the portable host; none on Native, which programs no
+ * PMP by design) is the host's, with the boundaries reported here.
  */
 #include "fpr.h"
 

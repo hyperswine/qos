@@ -1,7 +1,7 @@
 # Graphics.qa: one owner of the display, programs as sessions
 
 Date: 2026-10-02. Kind: implementation record. Convergence item 5 of
-[2026-10-02-QOS-ARCHITECTURE-AUDIT.md](2026-10-02-QOS-ARCHITECTURE-AUDIT.md)
+[2026-09-29-QOS-ARCHITECTURE-AUDIT.md](2026-09-29-QOS-ARCHITECTURE-AUDIT.md)
 as restated in [2026-10-02-QOS-AUDIT.md](2026-10-02-QOS-AUDIT.md), with the
 part the audit asked for that can be verified without a display done here,
 and the part that needs one stated as such. QOS revision: the commit
