@@ -23,6 +23,7 @@ encode r (RamShare divisor fallback) = "revision={r} mode=ram-share divisor={div
 encode r (FixedBytes bytes) = "revision={r} mode=fixed bytes={bytes}".
 render (Snapshot r p) = encode r p.
 schema = "type=RunPolicy version=1\ndefaults={encode 0 defaults}\nforms=revision=N mode=ram-share divisor=N fallbackBytes=N | revision=N mode=fixed bytes=N\nvalues=positive machine integers; divisor uses floor division; a zero result refuses launch\nboundary=after build, before spawn; existing processes retain their admitted budget\nenforcement=per-process confinement; not a reservation or whole-system memory account\ninspection=Editor launch output includes revision and admitted bytes\nwrite=complete policy, listed order, expected revision, atomic, system-process-only\npersistence=until-restart\n".
+parse : unsafe String -> Result Snapshot String .
 parse text = if strlen text > 256 then Err "update exceeds 256 bytes" else case Text.tokens text 0 of
     [r, "mode=ram-share", d, f] -> (case (Text.field "revision=" r, Text.field "divisor=" d, Text.field "fallbackBytes=" f) of
         (Ok rev, Ok divisor, Ok fallback) -> checked rev (RamShare divisor fallback)

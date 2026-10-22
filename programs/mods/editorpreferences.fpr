@@ -16,6 +16,7 @@ validate p = if undoDepth p < 0 or outputLines p < 1 then Err "undoDepth must be
 encode rev p = "revision={rev} undoDepth={undoDepth p} outputLines={outputLines p} recoveryPath={recoveryPath p} history={History.name (retention p)}".
 render (Snapshot rev p) = encode rev p.
 checked rev p = case validate p of Err why -> Err why | Ok valid -> Ok (Snapshot rev valid).
+parse : unsafe String -> Result Snapshot String .
 parse text = if strlen text > 1536 then Err "update exceeds 1536 bytes" else case Text.tokens text 0 of
     [r, u, o, path, h] -> (case (Text.field "revision=" r, Text.field "undoDepth=" u, Text.field "outputLines=" o) of
         (Ok rev, Ok undo, Ok out) -> (case Path.stringField "recoveryPath=" path of

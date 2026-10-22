@@ -46,6 +46,7 @@ encode rev p = i = io p; r = recovery p;
   "revision={rev} readMs={readMs i} writeMs={writeMs i} deleteMs={deleteMs i} cleanupMs={cleanupMs i} maxFailures={maxFailures r} startupMs={startupMs r} responseMs={responseMs r} closeMs={closeMs r} workerStopMs={workerStopMs r}".
 render (Snapshot rev p) = "{encode rev p}\nownerCallMs={ownerMs p}\npersistence=until-restart\n".
 schema = "type=AppPolicies version=1\n{encode 0 defaults}\nwrite=all-fields-in-listed-order; expected revision; atomic; system-process-only\ndurations=1..{maxMs} ms; workerStopMs<closeMs\nmaxFailures=nonnegative; existing failure counts never reset; lower caps block subsequent launches\nreadMs=read, listing and disk-query operations\nwriteMs=write or append; deleteMs=delete; cleanupMs=each endpoint cleanup attempt\nboundary=one snapshot per job (including every safe-save phase) or lifecycle command\nownerCallMs=2*closeMs+startupMs+responseMs+{controlMs}; same snapshot as owner\ncontrolMs={controlMs}; bootstrap transport bound\nbootstrapReceiveMs={bootstrapReceiveMs}; initial handshake before policy address is known\npersistence=until-restart\n".
+parse : unsafe String -> Result Snapshot String .
 parse text = if strlen text > 512 then Err "update exceeds 512 bytes" else
   case Text.fields ["revision=", "readMs=", "writeMs=", "deleteMs=", "cleanupMs=", "maxFailures=", "startupMs=", "responseMs=", "closeMs=", "workerStopMs="] (Text.tokens text 0) of
     Err why -> Err why
