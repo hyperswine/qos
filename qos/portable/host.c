@@ -51,6 +51,7 @@
 #include "hostlog.h"
 
 #include <inttypes.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -226,11 +227,66 @@ static uint64_t g_arena_size; /* 0: could not reserve address space for the aren
 static uintptr_t g_arena_base; /* where it landed: the published address when free, else anywhere (the image is relocatable) */
 static fpr_elf_load_t g_ld;    /* the placed image (Host.loadImage) */
 static uintptr_t g_img_base;   /* where it was placed: the arena's start */
+/* Every span a plugin names points into the app's own strings, hence into
+ * the arena the host reserved for it.  Check that before reading through
+ * one: the records are app-supplied, and a corrupt one must be refused,
+ * not dereferenced.  The caps also keep the lengths printable (%.*s takes
+ * an int) and the RELOC||IMPORT sum from wrapping. */
+#define QOS_PLUGIN_ID_MAX 128u
+#define QOS_PLUGIN_ABI_MAX 32u
+#define QOS_PLUGIN_DIGEST_MAX 64u
+static int span_in_arena(qos_span_t s) {
+  uintptr_t lo = g_arena_base, hi = lo + g_arena_size;
+  uintptr_t p = (uintptr_t)s.p;
+  if (s.n == 0) return 1;
+  if (g_arena_size == 0 || p < lo || p > hi) return 0;
+  return s.n <= (uint64_t)(hi - p);
+}
 int64_t qosp_load_plugin(const qos_plugin_t *pl, char *err, uint64_t errcap) {
+  /* sizes and spans first: nothing below reads through a span until it is
+   * known to lie inside the arena, and no length that does not fit an int
+   * (or a size_t sum) reaches printf/memcpy */
+  if (pl->id.n > QOS_PLUGIN_ID_MAX || pl->abi.n > QOS_PLUGIN_ABI_MAX ||
+      pl->sha.n > QOS_PLUGIN_DIGEST_MAX || pl->relsha.n > QOS_PLUGIN_DIGEST_MAX ||
+      pl->imp.n > SIZE_MAX - 1 || pl->rel.n > SIZE_MAX - 1 - pl->imp.n ||
+      !span_in_arena(pl->id) || !span_in_arena(pl->abi) || !span_in_arena(pl->sha) ||
+      !span_in_arena(pl->relsha) || !span_in_arena(pl->img) ||
+      !span_in_arena(pl->rel) || !span_in_arena(pl->imp)) {
+    snprintf(err, errcap, "plugin: a name, digest or section span is invalid");
+    return -1;
+  }
   int idn = (int)pl->id.n;
   const char *id = (const char *)pl->id.p;
   char want[24];
   snprintf(want, sizeof want, "%u.%u", (unsigned)QOS_ABI_VERSION, (unsigned)QOSP_CODEGEN_REV);
+  uintptr_t pg = (uintptr_t)getpagesize();
+  uintptr_t lo = (uintptr_t)pl->base, hi = lo + pl->memsz;
+  uintptr_t alo = g_arena_base, ahi = alo + g_arena_size;
+  if (pl->memsz == 0 || hi < lo || lo < alo || hi > ahi) {
+    snprintf(err, errcap, "plugin %.*s: not placed inside the app's arena", idn, id);
+    return -1;
+  }
+  if (lo & (pg - 1)) {
+    snprintf(err, errcap, "plugin %.*s: placed off a page boundary", idn, id);
+    return -1;
+  }
+  /* the r-x span is the code's pages: the code lies inside the image bytes
+   * the app copied (native check_image: execsz <= IMAGE <= memsz), and its
+   * last page ends inside the image -- past it is the app's heap (the block
+   * is not page-padded), which must not turn read-only under its owner */
+  if (pl->execsz == 0 || pl->execsz > pl->img.n || pl->img.n > pl->memsz) {
+    snprintf(err, errcap, "plugin %.*s: LOAD spans inconsistent (code outside its image)", idn, id);
+    return -1;
+  }
+  uintptr_t xend = (lo + pl->execsz + pg - 1) & ~(pg - 1);
+  if (xend < lo || xend > hi || xend > ahi) {
+    snprintf(err, errcap, "plugin %.*s: its code pages run past the image", idn, id);
+    return -1;
+  }
+  if (pl->entry >= pl->memsz || (pl->rwoff < pl->memsz && lo + pl->rwoff < xend)) {
+    snprintf(err, errcap, "plugin %.*s: its code and writable data share a page", idn, id);
+    return -1;
+  }
   if (!span_is(pl->abi, want)) {
     snprintf(err, errcap, "abi mismatch: plugin %.*s built for %.*s, this host is %s "
              "-- rebuild the plugin", idn, id, (int)pl->abi.n, (const char *)pl->abi.p, want);
@@ -262,34 +318,6 @@ int64_t qosp_load_plugin(const qos_plugin_t *pl, char *err, uint64_t errcap) {
       snprintf(err, errcap, "plugin %.*s: RELOC sha256 mismatch (corrupt archive)", idn, id);
       return -1;
     }
-  }
-  uintptr_t pg = (uintptr_t)getpagesize();
-  uintptr_t lo = (uintptr_t)pl->base, hi = lo + pl->memsz;
-  uintptr_t alo = g_arena_base, ahi = alo + g_arena_size;
-  if (pl->memsz == 0 || hi < lo || lo < alo || hi > ahi) {
-    snprintf(err, errcap, "plugin %.*s: not placed inside the app's arena", idn, id);
-    return -1;
-  }
-  if (lo & (pg - 1)) {
-    snprintf(err, errcap, "plugin %.*s: placed off a page boundary", idn, id);
-    return -1;
-  }
-  /* the r-x span is the code's pages: the code lies inside the image bytes
-   * the app copied (native check_image: execsz <= IMAGE <= memsz), and its
-   * last page ends inside the image -- past it is the app's heap (the block
-   * is not page-padded), which must not turn read-only under its owner */
-  if (pl->execsz == 0 || pl->execsz > pl->img.n || pl->img.n > pl->memsz) {
-    snprintf(err, errcap, "plugin %.*s: LOAD spans inconsistent (code outside its image)", idn, id);
-    return -1;
-  }
-  uintptr_t xend = (lo + pl->execsz + pg - 1) & ~(pg - 1);
-  if (xend < lo || xend > hi || xend > ahi) {
-    snprintf(err, errcap, "plugin %.*s: its code pages run past the image", idn, id);
-    return -1;
-  }
-  if (pl->entry >= pl->memsz || (pl->rwoff < pl->memsz && lo + pl->rwoff < xend)) {
-    snprintf(err, errcap, "plugin %.*s: its code and writable data share a page", idn, id);
-    return -1;
   }
   if (mprotect((void *)lo, xend - lo, PROT_READ | PROT_EXEC)) {
     snprintf(err, errcap, "plugin mprotect: %s", strerror(errno));
