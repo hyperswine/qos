@@ -22,6 +22,55 @@ def leg(prefix):
 
 
 class SweepVerdicts(unittest.TestCase):
+    def run_sweep_file(self, body, env=None):
+        """Run legs plus the real summary block as a script file, so its
+        `grep "$0"` leg count sees three legs rather than a bash -c string."""
+        with tempfile.TemporaryDirectory(prefix="qos-sweep-summary-") as temp:
+            lines = (ROOT / "check-all.sh").read_text().splitlines()
+            start = next(i for i, line in enumerate(lines)
+                         if line.startswith("# ---- sweep summary"))
+            script = "\n".join([
+                "set -euo pipefail",
+                'leg_failed() { echo "** LEG FAILED";'
+                ' printf "%s\\n" "${1:-?}" >> "${CK_TMP}/ck-fail.lines";'
+                ' : > "${CK_TMP}/ck-fail.flag"; }',
+                'leg_skipped() { echo "skipped ($1)";'
+                ' printf "%s\\n" "$1" >> "${CK_TMP}/ck-skip.lines"; }',
+                body,
+                "\n".join(lines[start:]),
+                "",
+            ])
+            path = Path(temp) / "sweep.sh"
+            path.write_text(script)
+            return subprocess.run(
+                ["bash", str(path)], cwd=temp, capture_output=True, text=True,
+                env=dict(os.environ, CK_TMP=temp, **(env or {})), timeout=10)
+
+    def test_summary_counts_pass_fail_and_skip(self):
+        result = self.run_sweep_file(
+            'echo "== pass ==" && true || leg_failed "${LINENO:-?}"\n'
+            'echo "== fail ==" && false || leg_failed "${LINENO:-?}"\n'
+            'echo "== skip ==" && (leg_skipped "no tool") || leg_failed "${LINENO:-?}"\n')
+        output = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 1, output)
+        self.assertIn("SWEEP: 1 passed, 1 failed, 1 skipped (of 3 legs)", output)
+        self.assertIn("SWEEP HAS FAILURES", output)
+
+    def test_a_skip_is_visible_and_strict_mode_fails(self):
+        body = ('echo "== pass ==" && true || leg_failed "${LINENO:-?}"\n'
+                'echo "== skip ==" && (leg_skipped "no tool") || leg_failed "${LINENO:-?}"\n')
+        result = self.run_sweep_file(body)
+        output = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 0, output)
+        self.assertIn("SWEEP: 1 passed, 0 failed, 1 skipped (of 2 legs)", output)
+        self.assertIn("which is not a pass", output)
+        self.assertIn("ALL RUNNABLE LEGS GREEN (1 SKIPPED, NOT RUN)", output)
+        self.assertNotIn("ALL LEGS GREEN", output)
+        strict = self.run_sweep_file(body, env={"QOS_SWEEP_STRICT": "1"})
+        strict_output = strict.stdout + strict.stderr
+        self.assertEqual(strict.returncode, 1, strict_output)
+        self.assertIn("SWEEP HAS SKIPPED LEGS", strict_output)
+
     def run_leg(self, prefix, mode, success):
         with tempfile.TemporaryDirectory(prefix="qos-sweep-test-") as temp:
             root = Path(temp)
@@ -59,9 +108,21 @@ if 'txnabort.sol' in args:
 sys.exit(2)
 ''')
             fake.chmod(0o755)
-            final = (ROOT / "check-all.sh").read_text().splitlines()[-1]
+            final = (ROOT / "check-all.sh").read_text().splitlines()
+            start = next(i for i, line in enumerate(final)
+                         if line.startswith("# ---- sweep summary"))
+            final = "\n".join(final[start:])
             script = '''set -euo pipefail
 ran() { "$@" || true; }
+leg_failed() {
+    echo "** LEG FAILED"
+    printf '%s\\n' "${1:-?}" >> "${CK_TMP}/ck-fail.lines"
+    : > "${CK_TMP}/ck-fail.flag"
+}
+leg_skipped() {
+    echo "skipped ($1)"
+    printf '%s\\n' "$1" >> "${CK_TMP}/ck-skip.lines"
+}
 timeout() { shift; "$@"; }
 make() {
     if [ "$CASE" != empty ]; then echo '3.5 3 1000'; fi

@@ -55,12 +55,13 @@ that get committed.  `./qos.py release [X.Y.Z] [--push]`:
    mints the annotated tag `vX.Y.Z` with `RELEASE.txt` as its message,
    and with `--push` pushes branch and tag.
 
-The tag landing on GitHub runs `.github/workflows/release.yml`, which
-rebuilds the same bundles from the tagged tree (`qos.py release
-<tag> --no-git --skip-tests`, after `lock --check`) and publishes a
-GitHub Release with the tarball, `SHA256SUMS` and `fpr.lock` attached
-and `RELEASE.txt` as the notes.  Nothing is uploaded by hand: the
-release assets are what a checkout of the tag builds.
+After the repository split there is no publication workflow in this tree: the
+monorepo tag workflow is archived in `docs/history/monorepo-release.yml`, and
+`docs/2026-09-18-REPOSITORY-SPLIT.md` explains why it cannot truthfully build
+two repositories from one checkout.  `./qos.py release --push` therefore pushes
+the branch and the annotated tag only.  A GitHub Release must be cut from the
+tag's `dist/` artifacts (or a split-aware workflow written and configured)
+before anything is published; nothing uploads itself.
 
 So a shipped `.qa` names its release, the release names its git
 commit and its module versions, and each module version names its

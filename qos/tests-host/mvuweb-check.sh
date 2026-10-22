@@ -18,19 +18,29 @@
 
 set -e
 cd "$(dirname "$0")"
+ROOT=$(cd ../.. && pwd)
 
 PORT=${MVUWEB_PORT:-8123}
-OUT=/tmp/mvuweb-check.out
-JA=/tmp/mvuweb-ja.txt
-JB=/tmp/mvuweb-jb.txt
+TMP=$(mktemp -d "${TMPDIR:-/tmp}/qos-mvuweb.XXXXXX")
+OUT=$TMP/run.out
+JA=$TMP/ja.txt
+JB=$TMP/jb.txt
+PA=$TMP/pa.html
+PB=$TMP/pb.html
+QA=$TMP/mvuweb.qa
 CURL="curl -s --noproxy 127.0.0.1 --max-time 10"
+QOSP_PID=
+cleanup() {
+  if [ -n "$QOSP_PID" ]; then kill "$QOSP_PID" 2>/dev/null || true; fi
+  rm -rf "$TMP"
+}
+trap cleanup EXIT
 
-(cd ../.. && make -s qos-app PROG=tests/mvuweb.fpr >/dev/null 2>&1)
+(cd "$ROOT" && make -s qos-app PROG=tests/mvuweb.fpr QA_OUT="$QA" BUILD="$TMP/build" >/dev/null 2>&1)
 
-rm -f "$OUT" "$JA" "$JB"
-(cd .. && FPR_PORT=$PORT ./qosp --yes ../app.qa > "$OUT" 2>&1) &
-QOSP=$!
-trap 'kill $QOSP 2>/dev/null || true' EXIT
+# its own disk, store and cwd: this leg can run beside the others
+(cd "$TMP" && FPR_DISK="$TMP/disk" FPR_PORT=$PORT "$ROOT/qos/qosp" --yes "$QA" > "$OUT" 2>&1) &
+QOSP_PID=$!
 sleep 2
 
 fail() { echo "mvuweb-check: FAIL: $1"; exit 1; }

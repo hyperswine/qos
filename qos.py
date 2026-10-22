@@ -78,6 +78,7 @@ import subprocess
 import sys
 import time
 import tempfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from contextlib import contextmanager, nullcontext
 from typing import NoReturn
@@ -288,11 +289,50 @@ def prog_directives(path):
 
 # ---- the stages -------------------------------------------------------------
 
+_drift_reported = False
+
+
+def fprisc_drift():
+    """How this checkout differs from the compiler `release` pins, or None.
+    Development accepts a newer or dirty checkout (docs/2026-09-18-REPOSITORY-SPLIT.md);
+    what it must not do is report results as though it were the pinned one."""
+    if INSTALLED:
+        return None
+    pin = fprisc_pin()
+    if not pin:
+        return None
+    try:
+        head = fprisc_git("rev-parse", "HEAD")
+        dirty = fprisc_git("status", "--porcelain", "--untracked-files=no")
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    why = []
+    if head != pin:
+        why.append(f"at {head[:12]}, releases pin {pin[:12]}")
+    if dirty:
+        why.append(f"{len(dirty.splitlines())} tracked file(s) modified")
+    return "; ".join(why) or None
+
+
+def report_drift():
+    """Warn once per invocation: a build against a drifted compiler is not
+    the configuration a release was validated with."""
+    global _drift_reported
+    if _drift_reported or os.environ.get("QOS_ALLOW_COMPILER_DRIFT") == "1":
+        return
+    why = fprisc_drift()
+    if why:
+        _drift_reported = True
+        say(f"warning: fprisc {why} -- these results are not the release pin's "
+            f"(set QOS_ALLOW_COMPILER_DRIFT=1 to silence)")
+
+
 def build_fpr():
     if INSTALLED:
         if not COMPILER.is_file():
             die(f"installed tree at {ROOT} has no fpr: reinstall (qos.py install / brew reinstall qos-fpr)")
         return
+    report_drift()
     say("fpr (compiler; no-op when fresh)")
     sh(["make", "-s", "fpr"], cwd=ROOT, quiet=True)
 
@@ -316,11 +356,16 @@ def build_native():
        + WS.make_vars(), cwd=QOS, quiet=True)
 
 
-def build_app(prog, harts=None):
-    qa = WS.mk().qa(prog)
+def build_app(prog, harts=None, out=None, build=None):
+    """Compile one program to a .qa.  `out`/`build` override the workspace
+    (the parallel smoke runner gives every leg its own pair)."""
+    out = out or WS.mk().out
+    out.mkdir(parents=True, exist_ok=True)
+    qa = out / f"{Path(prog).stem}.qa"
     say(f"qos-app {prog} -> {rel(qa)}")
     target = "qos-app"  # qos-app.mk picks the image this host's qosp runs
-    cmd = ["make", "-s", target, f"PROG={prog}", f"QA_OUT={qa}"] + WS.make_vars()
+    cmd = ["make", "-s", target, f"PROG={prog}", f"QA_OUT={qa}",
+           f"BUILD={build or WS.build}"]
     if harts:
         cmd.append(f"HARTS={harts}")
     sh(cmd, cwd=ROOT, quiet=True)
@@ -1167,8 +1212,8 @@ def cmd_release(a):
     stamped self-contained bundle under dist/qos-fpr-vX.Y.Z/, write the
     RELEASE manifest + SHA256SUMS + a tarball, then commit the version
     files and mint the annotated tag vX.Y.Z (--push sends branch + tag;
-    the GitHub release itself is cut by .github/workflows/release.yml
-    when the tag lands)."""
+    nothing publishes itself: the monorepo release workflow was archived
+    at the split, docs/2026-09-18-REPOSITORY-SPLIT.md)."""
     import tarfile
     if not INSTALLED:
         fprisc_release_check()
@@ -1212,10 +1257,10 @@ def cmd_release(a):
     # 3. proof: the smoke set (the full sweep is --full)
     if a.full:
         say("the full sweep (check-all.sh)")
-        if subprocess.call(["sh", "check-all.sh"], cwd=ROOT) != 0 or Path("/tmp/ck-fail.flag").exists():
+        if subprocess.call(["bash", "check-all.sh"], cwd=ROOT) != 0:
             die("check-all.sh failed; not releasing")
     elif not a.skip_tests:
-        cmd_test(argparse.Namespace(all=False, legs=[]))
+        cmd_test(argparse.Namespace(all=False, legs=[], jobs=0))
     # 4. the artifacts: one stamped bundle per app
     out = WS.dist / f"qos-fpr-{tag}"
     if out.exists():
@@ -1255,7 +1300,7 @@ def cmd_release(a):
             branch = git("rev-parse", "--abbrev-ref", "HEAD")
             sh(["git", "push", "-u", "origin", branch], cwd=ROOT)
             sh(["git", "push", "origin", tag], cwd=ROOT)
-            say(f"pushed {branch} + {tag} (the release workflow attaches the bundles)")
+            say(f"pushed {branch} + {tag} (attach the bundles from dist/ to the release)")
         else:
             say(f"not pushed: `git push origin {git('rev-parse', '--abbrev-ref', 'HEAD')} {tag}` when ready")
     say(f"release {tag} done in {time.time() - t0:.0f}s")
@@ -1281,40 +1326,87 @@ SMOKE = [
     ("bigframe / virt",   "tests/bigframe.fpr", "virt", "sum3=57569"),
 ]
 
+def _smoke_one(label, prog, backend, expect, index, out_root, jobs):
+    """One smoke leg in its own directory: qosp creates qosp.disk and
+    qos-store/ in its cwd, so a leg must not share them with another leg."""
+    slug = re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-")
+    leg = out_root / f"{index:02d}-{slug}"
+    leg.mkdir(parents=True, exist_ok=True)
+    env = dict(os.environ)
+    if jobs > 1:
+        # each qosp starts one hart thread per core; cap the product so N
+        # concurrent legs do not oversubscribe the machine
+        env["FPR_HARTS"] = str(max(1, min(8, (os.cpu_count() or 2) // jobs)))
+    t0 = time.time()
+    try:
+        if backend == "qosp":
+            qa = build_app(prog, out=leg, build=leg / "build")
+            r = subprocess.run([str(QOS / "qosp"), "--yes", str(qa)], cwd=leg, env=env,
+                               stdin=subprocess.DEVNULL, capture_output=True, timeout=180)
+        else:
+            r = subprocess.run(["make", "-s", "bare-metal-run", f"PROG={prog}",
+                                f"IMAGE={leg / 'image.elf'}", f"BUILD={leg / 'build'}"],
+                               cwd=ROOT, env=env, stdin=subprocess.DEVNULL,
+                               capture_output=True, timeout=300)
+        out = (r.stdout + r.stderr).decode("utf-8", "replace")
+        return label, r.returncode == 0 and expect in out, out, time.time() - t0
+    except (Exception, SystemExit) as exc:  # a leg's failure is its verdict, not the runner's crash
+        return label, False, f"{type(exc).__name__}: {exc}", time.time() - t0
+
+
 def cmd_test(a):
     if a.all:
-        say("the full sweep (check-all.sh; ~12-15 min)")
-        return subprocess.call(["sh", "check-all.sh"], cwd=ROOT)
+        say("the full sweep (check-all.sh; the summary prints pass/fail/skip counts)")
+        return subprocess.call(["bash", "check-all.sh"], cwd=ROOT)
     build_fpr()
     build_qosp()
     t0 = time.time()
+    jobs = max(1, min(4, a.jobs or os.cpu_count() or 1))
+    selected = [(i, leg) for i, leg in enumerate(SMOKE, 1)
+                if not a.legs or any(k in leg[0] or k in leg[1] for k in a.legs)]
+    out_root = WS.mk().path("smoke")
     fails = []
     ran = 0
-    for label, prog, backend, expect in SMOKE:
-        if a.legs and not any(k in label or k in prog for k in a.legs):
-            continue
-        if backend == "qosp":
-            qa = build_app(prog)
-            r = subprocess.run([str(QOS / "qosp"), "--yes", str(qa)], cwd=WS.out, stdin=subprocess.DEVNULL, capture_output=True, timeout=180)
-            out = r.stdout.decode("utf-8", "replace")
-        else:
-            r = subprocess.run(["make", "-s", "bare-metal-run", f"PROG={prog}", f"IMAGE={WS.mk().image(prog)}"] + WS.make_vars(),
-                               cwd=ROOT, stdin=subprocess.DEVNULL, capture_output=True, timeout=300)
-            out = r.stdout.decode("utf-8", "replace")
-        ok = r.returncode == 0 and expect in out
-        ran += 1
-        say(f"{'ok  ' if ok else 'FAIL'} {label}")
-        if not ok:
-            fails.append(label)
+    if jobs == 1:
+        results = [_smoke_one(label, prog, backend, expect, i, out_root, jobs)
+                   for i, (label, prog, backend, expect) in selected]
+        for label, ok, out, dt in results:
+            say(f"{'ok  ' if ok else 'FAIL'} {label} ({dt:.1f}s)")
+            if not ok:
+                print(out)
+    else:
+        say(f"smoke: {len(selected)} leg(s), {jobs} at a time")
+        results = []
+        with ThreadPoolExecutor(max_workers=jobs) as pool:
+            futures = [pool.submit(_smoke_one, label, prog, backend, expect, i, out_root, jobs)
+                       for i, (label, prog, backend, expect) in selected]
+            for future in as_completed(futures):
+                result = future.result()
+                results.append(result)
+                label, ok, out, dt = result
+                say(f"{'ok  ' if ok else 'FAIL'} {label} ({dt:.1f}s)")
+                if not ok:
+                    print(out)
+    fails = [label for label, ok, out, dt in results if not ok]
+    ran = len(results)
     # the multi-client LiveView wire rides its own script
     if not a.legs or any("web" in k or "live" in k for k in a.legs):
-        r = subprocess.run(["sh", "tests-host/mvuweb-check.sh"], cwd=QOS, stdin=subprocess.DEVNULL, capture_output=True, timeout=300)
+        r = subprocess.run(["bash", "tests-host/mvuweb-check.sh"], cwd=QOS,
+                           stdin=subprocess.DEVNULL, capture_output=True, timeout=300)
         ok = r.returncode == 0 and b"ALL LEGS PASS" in r.stdout
         ran += 1
         say(f"{'ok  ' if ok else 'FAIL'} liveview multi-client")
         if not ok:
+            print((r.stdout + r.stderr).decode("utf-8", "replace"))
             fails.append("liveview")
-    say(f"smoke: {ran - len(fails)}/{ran} in {time.time() - t0:.0f}s")
+    drift = fprisc_drift()
+    rev = ""
+    try:
+        rev = f", fprisc {fprisc_git('rev-parse', '--short=12', 'HEAD')}"
+    except (OSError, subprocess.CalledProcessError):
+        pass
+    say(f"smoke: {ran - len(fails)}/{ran} in {time.time() - t0:.0f}s "
+        f"(jobs={jobs}{rev}{'; not the release pin' if drift else ''})")
     if fails:
         die("failed: " + ", ".join(fails))
 
@@ -1488,7 +1580,7 @@ def main():
 
     p = sub.add_parser("release", help="cut vX.Y.Z: fpr commit the modules, lock, smoke, pack stamped bundles, tag")
     p.add_argument("version", nargs="?", help="X.Y.Z (default: release.toml's version)")
-    p.add_argument("--push", action="store_true", help="push the branch and the tag (triggers the GitHub release workflow)")
+    p.add_argument("--push", action="store_true", help="push the branch and the tag (publication itself is manual after the split)")
     p.add_argument("--full", action="store_true", help="run the full sweep (check-all.sh) instead of the smoke set")
     p.add_argument("--skip-tests", action="store_true", help="no tests (CI builds after the sweep already ran)")
     p.add_argument("--no-git", action="store_true", help="build the dist bundles only: no commit, no tag (what CI runs)")
@@ -1497,6 +1589,8 @@ def main():
     p = sub.add_parser("test", help="the fast smoke set (--all = check-all)")
     p.add_argument("legs", nargs="*", help="filter by label/prog substring")
     p.add_argument("--all", action="store_true")
+    p.add_argument("--jobs", type=int, default=int(os.environ.get("QOS_JOBS", "0")),
+                   help="smoke legs to run at once (default: min(4, CPUs); 1 = one at a time)")
     p.set_defaults(f=cmd_test)
 
     p = sub.add_parser("install", help="lay the tree down as a toolchain under a prefix (what brew runs)")
