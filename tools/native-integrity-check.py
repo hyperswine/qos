@@ -62,7 +62,7 @@ def native_checks(out):
     original=out/'CkVector.qa'
     run(['tools/build-process-app.sh','tests/vectorproc.fpr',manifest,original])
     sections=unpack(original.read_bytes())
-    native_abi=re.search(r'^#define FPR_NATIVE_ABI (\d+)u',(FPRISC/'runtime/fpr.h').read_text(),re.M)[1].encode()
+    native_abi,actors_abi,memory_abi=[value.encode() for value in run(['python3','tools/native-abis.py',FPRISC]).stdout.split()]
     assert b'nativeabi '+native_abi+b'\n' in sections['LOAD'], sections['LOAD']
     assert sections['IMAGE'] and sections['RELOC'] and not sections.get('IMPORT',b'')
     archives=[original]
@@ -76,11 +76,10 @@ def native_checks(out):
         changed['LOAD']=b''.join(row+b'\n' for row in changed['LOAD'].splitlines() if not row.startswith(key))
         variants[name]=changed
     changed=dict(sections);changed['LOAD']=changed['LOAD'].replace(b'nativeabi '+native_abi+b'\n',b'nativeabi 1\n');variants['OldAbi']=changed
-    actors_abi=re.search(r'^#define FPR_PLANE_ACTORS_ABI (\d+)u',(FPRISC/'runtime/fpr.h').read_text(),re.M)[1].encode()
-    memory_abi=re.search(r'^#define FPR_PLANE_MEMORY_ABI (\d+)u',(FPRISC/'runtime/fpr.h').read_text(),re.M)[1].encode()
     assert b'planeactors '+actors_abi+b'\nplanememory '+memory_abi+b'\n' in sections['LOAD'], sections['LOAD']
     changed=dict(sections);changed['LOAD']=changed['LOAD'].replace(b'planeactors '+actors_abi+b'\n',(b'planeactors 2\n' if actors_abi == b'3' else b'planeactors 999\n'));variants['OldActors']=changed
-    changed=dict(sections);changed['LOAD']=changed['LOAD'].replace(b'planememory '+memory_abi+b'\n',b'planememory 999\n');variants['OldMemory']=changed
+    previous_memory=str(int(memory_abi)-1).encode() if int(memory_abi)>1 else b'999'
+    changed=dict(sections);changed['LOAD']=changed['LOAD'].replace(b'planememory '+memory_abi+b'\n',b'planememory '+previous_memory+b'\n');variants['OldMemory']=changed
     if actors_abi != b'1':
         changed=dict(sections);changed['LOAD']=changed['LOAD'].replace(b'planeactors '+actors_abi+b'\n',b'planeactors 1\n');variants['LegacyActors']=changed
     if memory_abi != b'1':
