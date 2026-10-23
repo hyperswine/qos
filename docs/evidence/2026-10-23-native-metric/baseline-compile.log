@@ -1,0 +1,10 @@
+Traceback (most recent call last):
+  File "/Users/jasonqin/Documents/GitHub/qos/tools/baseline-compile-check.py", line 17, in <module>
+    run(['make', '-s', '-C', 'qos', 'portable'])
+    ~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/jasonqin/Documents/GitHub/qos/tools/baseline-compile-check.py", line 12, in run
+    assert p.returncode == expected, f'{args}: exit {p.returncode}\n{p.stdout}{p.stderr}'
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: ['make', '-s', '-C', 'qos', 'portable']: exit 2
+fpr: /Users/jasonqin/.cache/fpr/build/qosp-58573.s.log: openFile: permission denied (Operation not permitted)
+make: *** [qosp] Error 1

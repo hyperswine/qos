@@ -71,6 +71,27 @@ class SweepVerdicts(unittest.TestCase):
         self.assertEqual(strict.returncode, 1, strict_output)
         self.assertIn("SWEEP HAS SKIPPED LEGS", strict_output)
 
+    def test_native_instruction_gate_status_is_required(self):
+        with tempfile.TemporaryDirectory(prefix="qos-native-gate-") as temp:
+            compiler = Path(temp) / "compiler with spaces"
+            (compiler / "tools").mkdir(parents=True)
+            gate = compiler / "tools/native-insns-ratchet.py"
+            source = '''import os,sys
+assert sys.argv[1:] == ['programs/system.fpr','312','rv64','--runtime-call-sites-ceiling','67'],sys.argv
+print('native-insns-v1 ratchet holds')
+sys.exit({'ok':0,'regression':1,'timeout':124,'crash':139}[os.environ['CASE']])
+'''
+            for mode in ("ok", "regression", "timeout", "crash", "missing"):
+                if mode == "missing":
+                    gate.unlink()
+                else:
+                    gate.write_text(source)
+                result = self.run_sweep_file(leg("Native instruction ratchet:"),
+                    env={"FPRISC_ROOT":str(compiler),"CASE":mode})
+                output = result.stdout + result.stderr
+                self.assertEqual(result.returncode, 0 if mode == "ok" else 1, output)
+                self.assertIn("ALL LEGS GREEN" if mode == "ok" else "SWEEP HAS FAILURES", output)
+
     def run_leg(self, prefix, mode, success):
         with tempfile.TemporaryDirectory(prefix="qos-sweep-test-") as temp:
             root = Path(temp)

@@ -90,6 +90,13 @@ jobs:
       - name: unittest
         # FPRISC_ROOT stays exported: the tests isolate themselves from it
         run: python3 -m unittest discover -s tests -p 'test_*.py' -v
+      - name: native instruction regression contract
+        run: |
+          python3 "$FPRISC_ROOT/tests/check_native_insns_ratchet.py"
+          export FPR_HOME="$GITHUB_WORKSPACE"
+          export FPR_PATH="$FPRISC_ROOT"
+          export FPR_FOREIGN="$GITHUB_WORKSPACE/core/foreign.fpr"
+          python3 "$FPRISC_ROOT/tools/native-insns-ratchet.py" programs/system.fpr 312 rv64 --runtime-call-sites-ceiling 67
       - name: host C checks
         run: |
           for c in buddy store park blkraw blkflush compile drm-scanout pointer; do

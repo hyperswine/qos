@@ -30,6 +30,7 @@ links so their anchors continue to lead to the moved material.
 - [HAL](2026-09-19-HAL.md): ownership and implementation backings.
 - [Archive format](2026-07-19-QA-FORMAT.md): format reference; identify revisions
   explicitly when changing the contract.
+- [Native instruction admission](2026-10-23-NATIVE-INSTRUCTION-ADMISSION.md): complete typed coverage and separate per-function instruction/runtime-call-site regression ceilings; timing and call/return composition limits.
 
 A living reference keeps its original filename and dates later changes. Other
 pages, including installation/versioning accounts, may describe older packaging
@@ -161,3 +162,4 @@ Source-adjacent READMEs under `tools/` stay beside the tools they explain.
 | 2026-10-20 | [HIGH-VALUE-NEXT.md](2026-10-20-HIGH-VALUE-NEXT.md) | Assessment after the runtime-preference work: atomic replacement, compile-versus-save scheduling, compiler-provided Editor facts, qsh argument boundaries and a policy catalogue, ranked with acceptance criteria |
 | 2026-10-21 | [TYPED-IR-COMPILER-PIN.md](2026-10-21-TYPED-IR-COMPILER-PIN.md) | Pin to FP-RISC with the typed-IR merge (codegen revision 67); check-all on macOS with three red legs that also fail on the previous pin |
 | 2026-10-22 | [MERGE-REGRESSIONS-FIXED.md](2026-10-22-MERGE-REGRESSIONS-FIXED.md) | The three red check-all legs fixed (policy parser signatures, the module registry and plugin detach, Sol NN); pin FP-RISC 0c9c8b7; 162 legs green |
+| 2026-10-23 | [NATIVE-INSTRUCTION-ADMISSION.md](2026-10-23-NATIVE-INSTRUCTION-ADMISSION.md) | Living native-insns-v1 regression contract: complete linked closure, separate instruction/call-site ceilings, and explicit timing/composition limits |

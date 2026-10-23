@@ -1,0 +1,27 @@
+{
+  "qos_starting_revision": "e671e18",
+  "compiler_revision": "afebff101790bb9e9cb2ab33ca047836610aa892",
+  "codegen_revision": 76,
+  "rv_selection_revision": 16,
+  "emission_mode": "mixed, strict all",
+  "system_native_baseline": {
+    "functions": 1669,
+    "files": 27,
+    "max_segment_per_function": 312,
+    "max_exit_tail_per_function": 256,
+    "max_runtime_call_sites_per_function": 67,
+    "runtime_call_sites_total": 7763
+  },
+  "validation": [
+    "actual check-all native gate PASS",
+    "instruction ceiling 311 refuses actual system",
+    "runtime-call-site ceiling 66 refuses actual system",
+    "13 unittest tests PASS",
+    "302 module pins resolvable; lock current",
+    "graphics-independent compile suite PASS"
+  ],
+  "full_check_all": "not run for this milestone",
+  "hosted_ci": "configured, not run for this milestone",
+  "physical_board": "not run for this milestone",
+  "contract": "Per-function regression bounds only; runtime time and call/return composition unprovided."
+}
