@@ -15,6 +15,7 @@ the app first.
 """
 import asyncio, json, os, re, socket, struct, subprocess, sys, time
 import websockets
+from http_ready import wait_http_ready
 
 QOS, QA = sys.argv[1], sys.argv[2]
 PORT = int(sys.argv[3]) if len(sys.argv) > 3 else 8151
@@ -48,16 +49,9 @@ class Server:
         env = dict(os.environ, FPR_PORT=str(PORT), FPR_DISK=DISK, FPR_DISK_MB="64")
         self.p = subprocess.Popen(["./qosp", "--yes", QA], cwd=QOS, env=env,
                                   stdout=self.out, stderr=subprocess.STDOUT)
-        for _ in range(100):
-            if "hosting" not in self.log():   # this process's listener, not a predecessor's
-                time.sleep(0.05)
-                continue
-            try:
-                socket.create_connection(("127.0.0.1", PORT), 0.2).close()
-                return
-            except OSError:
-                time.sleep(0.05)
-        raise SystemExit("server did not come up")
+        # The transport binds before storage replay and the register actor
+        # are ready. A real page response proves application readiness.
+        wait_http_ready(self.p,PORT)
 
     def stop(self):
         if self.p and self.p.poll() is None:
@@ -287,8 +281,9 @@ async def leg_page():
     page = http(b"GET / HTTP/1.1\r\nHost: x\r\n\r\n").decode("utf8", "replace")
     ok(page.startswith("HTTP/1.1 200 OK"), "GET /: 200")
     ok('id="lv-root"' in page and "window.__LV__" in page, "page: lv-root + __LV__ seed")
-    ok("new WebSocket(" in page and "data-slot" in page, "page: the fprlive client")
-    ok("box-sizing" in page and ".field{" in page, "page: generated CSS incl. the input field rule")
+    ok(re.search(r"new\s+\(?WebSocket\)?\(", page) and "data-slot" in page, "page: the fprlive client")
+    style = page.split("<style>", 1)[1].split("</style>", 1)[0]
+    ok(".field{" in style and "font-family:inherit" in style and ".col{display:flex;flex-direction:column}" in style, "page: generated input field and layout CSS")
     ok("Content-Length: " in page, "page: content-length")
     m = re.search(r"Content-Length: (\d+)", page)
     body = page.split("\r\n\r\n", 1)[1]

@@ -16,6 +16,7 @@ Needs `websockets` (pip).  Run through pos1-check.sh, which builds first.
 """
 import asyncio, json, os, re, signal, socket, subprocess, sys, time
 import websockets
+from http_ready import wait_http_ready
 
 QOS, QA = sys.argv[1], sys.argv[2]
 PORT = int(sys.argv[3]) if len(sys.argv) > 3 else 8161
@@ -45,17 +46,9 @@ class Server:
         env = dict(os.environ, FPR_PORT=str(PORT), FPR_DISK=DISK, FPR_DISK_MB="64")
         self.p = subprocess.Popen(["./qosp", "--yes", QA], cwd=QOS, env=env,
                                   stdout=self.out, stderr=subprocess.STDOUT)
-        mark = self.log().count("hosting")
-        for _ in range(200):
-            if self.log().count("hosting") <= mark:
-                time.sleep(0.05)
-                continue
-            try:
-                socket.create_connection(("127.0.0.1", PORT), 0.2).close()
-                return
-            except OSError:
-                time.sleep(0.05)
-        raise SystemExit("server did not come up")
+        # The transport binds before storage replay and the register actor
+        # are ready. A real page response proves application readiness.
+        wait_http_ready(self.p,PORT)
 
     def stop(self):
         if self.p and self.p.poll() is None:

@@ -92,6 +92,24 @@ sys.exit({'ok':0,'regression':1,'timeout':124,'crash':139}[os.environ['CASE']])
                 self.assertEqual(result.returncode, 0 if mode == "ok" else 1, output)
                 self.assertIn("ALL LEGS GREEN" if mode == "ok" else "SWEEP HAS FAILURES", output)
 
+    def test_web_checks_distinguish_missing_dependency_and_failed_producer(self):
+        with tempfile.TemporaryDirectory(prefix="qos-web-verdict-") as temp:
+            root=Path(temp)
+            for script in ("fprlive-check.sh","pos1-check.sh"):
+                path=root/script
+                path.write_text('#!/bin/sh\ncase "$CASE" in ok) echo "ALL LEGS PASS";; empty) exit 0;; crash) echo "ALL LEGS PASS"; exit 139;; broken) echo "wrong result";; esac\n')
+                path.chmod(0o755)
+            for prefix in ("FPRLive:","POS v1:"):
+                body='python3() { [ "$CASE" != missing ]; }\n'+leg(prefix).replace('qos/tests-host/',str(root)+'/')
+                for mode in ("ok","missing","empty","crash","broken"):
+                    with self.subTest(prefix=prefix,mode=mode):
+                        result=self.run_sweep_file(body,env={"CASE":mode})
+                        output=result.stdout+result.stderr
+                        self.assertEqual(result.returncode,0 if mode in ("ok","missing") else 1,output)
+                        if mode=="missing":self.assertIn("0 passed, 0 failed, 1 skipped",output)
+                        elif mode=="ok":self.assertIn("ALL LEGS GREEN",output)
+                        else:self.assertIn("SWEEP HAS FAILURES",output)
+
     def run_leg(self, prefix, mode, success):
         with tempfile.TemporaryDirectory(prefix="qos-sweep-test-") as temp:
             root = Path(temp)

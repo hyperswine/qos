@@ -58,7 +58,9 @@ parseNatGo s i n acc = case i >= n of
   | False -> parseNatCh s i n acc (charAt s i).
 parseNatCh : unsafe String -> Int -> Int -> Int -> Int -> Result Int String .
 parseNatCh s i n acc c = case and2 (c >= 48) (c <= 57) of
-    True -> parseNatGo s (i + 1) n (acc * 10 + (c - 48))
+    True -> (case acc <= (intMax Unit - (c - 48)) / 10 of
+        True -> parseNatGo s (i + 1) n (acc * 10 + (c - 48))
+      | False -> Err "natural number overflow")
   | False -> Err "not a natural number".
 
 # Compatibility parser: consume the leading digit run, returning zero when

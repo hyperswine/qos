@@ -10,7 +10,15 @@ parseOk r = case r of
     | True -> parseBad (C.parseNat "12x").
 parseBad r = case r of
     Ok n -> error "coreutil: invalid parse accepted"
-  | Err e -> compatibility Unit.
+  | Err e -> parseBounds Unit.
+parseBounds u = case C.parseNat "{intMax Unit}" of
+    Err why -> error "coreutil: maximum natural refused"
+  | Ok n -> case n == intMax Unit of
+      False -> error "coreutil: maximum natural changed"
+    | True -> parseOverflow (C.parseNat "{intMax Unit}0").
+parseOverflow r = case r of
+    Ok n -> error "coreutil: oversized natural accepted"
+  | Err why -> compatibility Unit.
 compatibility u =
   (word, next) = C.wordAt "abc 12" 0 6;
   case C.and2 (C.strEq word "abc") (next == 4) of

@@ -288,4 +288,4 @@ main =
   env = case blkPages disk == 0 of
       True -> E me 0
     | False -> E me (FS.serve disk);
-  FL.serve { env = env, css = G.cssFor } (App pInit pUpdate pView pSubs).
+  FL.serve { env = env, css = G.cssWith Nil } (App pInit pUpdate pView pSubs).
