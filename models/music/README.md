@@ -4,13 +4,14 @@ Terra II uses **Skyward, Little World** (`Skyward_Little_World.mp3`), an origina
 NeoMusic instrumental: 144 BPM, D major / B minor, approximately 95 seconds.
 It is synthesized from Haskell notes, patches, and percussion without samples.
 
-The reproducible score lives in the sibling repository:
-`HaskPlayground/app/terra-bgm/Main.hs`. That directory also contains `master.py`
-and full arrangement/rebuild notes. From HaskPlayground:
+The reproducible score lives in the sibling NeoMusic repository
+([hyperswine/neomusic](https://github.com/hyperswine/neomusic)):
+`neomusic/app/terra-bgm/Main.hs`. That directory also contains `master.py`
+and full arrangement/rebuild notes. From the neomusic checkout:
 
 ```sh
-stack run terra-bgm -- --check
-stack run terra-bgm -- /tmp/skyward-raw.wav
+cabal run terra-bgm -- --check
+cabal run terra-bgm -- /tmp/skyward-raw.wav
 python3 app/terra-bgm/master.py /tmp/skyward-raw.wav ../qos/models/music/Skyward_Little_World.mp3
 ```
 
