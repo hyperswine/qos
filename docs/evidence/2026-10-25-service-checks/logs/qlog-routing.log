@@ -1,0 +1,22 @@
+Portable block routing: 1 hart(s), readiness/page I/O/native-budget refusal HOLDS
+Portable block routing: 2 hart(s), readiness/page I/O/native-budget refusal HOLDS
+Qlog route: virtio v1, 1 hart(s), partial append/restart/service death HOLDS
+Files owner: virtio v1, 1 hart(s), recovery/no replay/latched offline HOLDS
+System routing: virtio v1, 1 hart(s), two persistent boots HOLDS
+System routing: virtio v1, 1 hart(s), failed initialization refuses startup HOLDS
+Qlog route: virtio v2, 1 hart(s), partial append/restart/service death HOLDS
+Files owner: virtio v2, 1 hart(s), recovery/no replay/latched offline HOLDS
+System routing: virtio v2, 1 hart(s), two persistent boots HOLDS
+System routing: virtio v2, 1 hart(s), failed initialization refuses startup HOLDS
+System routing: 1 hart(s), no-disk bootstrap HOLDS
+Qlog route: virtio v1, 2 hart(s), partial append/restart/service death HOLDS
+Files owner: virtio v1, 2 hart(s), recovery/no replay/latched offline HOLDS
+System routing: virtio v1, 2 hart(s), two persistent boots HOLDS
+System routing: virtio v1, 2 hart(s), failed initialization refuses startup HOLDS
+Qlog route: virtio v2, 2 hart(s), partial append/restart/service death HOLDS
+Files owner: virtio v2, 2 hart(s), recovery/no replay/latched offline HOLDS
+System routing: virtio v2, 2 hart(s), two persistent boots HOLDS
+System routing: virtio v2, 2 hart(s), failed initialization refuses startup HOLDS
+System routing: 2 hart(s), no-disk bootstrap HOLDS
+Process storage ABI: virtio v1, stable binding/recovery/no replay/mailbox preservation HOLDS
+Process storage ABI: virtio v2, stable binding/recovery/no replay/mailbox preservation HOLDS

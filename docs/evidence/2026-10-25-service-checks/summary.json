@@ -1,0 +1,45 @@
+{
+  "platform": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+  "qos_base_revision": "986b025",
+  "paired_measurement": {
+    "checks": [
+      "files-service",
+      "endpoint-state",
+      "editor-policy",
+      "storage-types"
+    ],
+    "serial_seconds": 399.15435341605917,
+    "two_worker_seconds": 239.86442008288577,
+    "speedup": 1.6640832069972293,
+    "wall_time_reduction_percent": 39.90685106398859,
+    "fixture_and_production_inputs_compared": 480,
+    "fixture_and_production_inputs_byte_identical": true,
+    "scope": "One local sample; not a whole-sweep or hosted-CI timing claim."
+  },
+  "validation": {
+    "two_worker_checks_passed": 16,
+    "invocations": "Full combined default group, plus previous paired/focused runs",
+    "internal_skip_markers": 0,
+    "host_unittests_passed": 26,
+    "service_verdict_replay_passed": 16,
+    "completed_worker_process_registries_empty": true,
+    "full_163_leg_sweep_run": false,
+    "hosted_linux_ci_run": false,
+    "combined_default_run": true,
+    "combined_default_seconds": 1059.5368389999494,
+    "combined_default_workers": 2,
+    "combined_default_checks_passed": 16,
+    "linux_vm_process_tests_passed": 8
+  },
+  "exclusions": [
+    "Old shared-host baseline refused a 22.89 app with the pre-existing 22.105 host.",
+    "Prototype runner measurements are excluded."
+  ],
+  "practical_stopping_point": {
+    "met": true,
+    "basis": "Measured 39.9 percent less wall time for the paired sample; the complete default group passes at two workers in 17m40s; no assertions or variants removed.",
+    "fprisc": "19 repeated CI/Base invocations removed; 31 explicit configurations retained; existing Base validation passed 126 jobs.",
+    "restraint": "Kept the existing QOS job order and two-worker default. No new cache or scheduler layers in the goal-completion pass.",
+    "remaining_validation": "Hosted CI and the full 163-leg sweep were not run."
+  }
+}

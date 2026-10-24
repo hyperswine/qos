@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 cd "$(dirname "$0")/.."
-W=$(mktemp -d /tmp/qsys-check.XXXXXX)
+W=$(mktemp -d "${TMPDIR:-/tmp}/qsys-check.XXXXXX")
 trap 'rm -rf "$W"' EXIT INT TERM
 make -s qos-app PROG=tests/qsys.fpr
 make -s plugin-qa PROG=tests/plugmini.fpr

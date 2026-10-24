@@ -71,6 +71,33 @@ class SweepVerdicts(unittest.TestCase):
         self.assertEqual(strict.returncode, 1, strict_output)
         self.assertIn("SWEEP HAS SKIPPED LEGS", strict_output)
 
+    def test_parallel_service_results_preserve_individual_sweep_verdicts(self):
+        import json, shlex, sys
+        source=(ROOT/'check-all.sh').read_text()
+        function=source[source.index('service_leg() {'):source.index('echo "== sweep verdicts:')]
+        with tempfile.TemporaryDirectory(prefix='qos-service-verdict-') as temp:
+            directory=Path(temp)
+            fake=directory/'fake.py'
+            fake.write_text('''import json,sys,subprocess,pathlib
+args=sys.argv[2:]
+if '--verdict' in args:
+ sys.exit(subprocess.run([sys.executable,REAL,*args]).returncode)
+out=pathlib.Path(args[args.index('--output')+1]);out.mkdir(parents=True)
+(out/'results.json').write_text(json.dumps({'checks':{'files-service':{'status':'failed'},'endpoint-state':{'status':'ok'}}}))
+count=pathlib.Path(COUNT);count.write_text(str(int(count.read_text())+1) if count.exists() else '1')
+sys.exit(1)
+'''.replace('REAL',repr(str(ROOT/'tools/check-services.py'))).replace('COUNT',repr(str(directory/'count'))))
+            body='python3() { '+shlex.quote(sys.executable)+' '+shlex.quote(str(fake))+' "$@"; }\n'+function+'''
+echo "== failed ==" && (service_leg files-service) || leg_failed "$LINENO"
+echo "== passed ==" && (service_leg endpoint-state) || leg_failed "$LINENO"
+echo "== missing ==" && (service_leg preferences) || leg_failed "$LINENO"
+'''
+            result=self.run_sweep_file(body,env={'ROOT':str(directory)})
+            self.assertEqual(result.returncode,1,result.stdout+result.stderr)
+            self.assertIn('SWEEP: 1 passed, 2 failed, 0 skipped',result.stdout)
+            self.assertEqual((directory/'count').read_text(),'1')
+            self.assertTrue(list((directory/'build/service-checks').glob('*/results.json')))
+
     def test_native_instruction_gate_status_is_required(self):
         with tempfile.TemporaryDirectory(prefix="qos-native-gate-") as temp:
             compiler = Path(temp) / "compiler with spaces"

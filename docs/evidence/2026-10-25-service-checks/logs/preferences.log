@@ -1,0 +1,19 @@
+Preferences: integer-editor refused
+Preferences: integer-terminal refused
+Preferences: crossed-preferences refused
+Preferences: string-retention refused
+Preferences: boolean-retention refused
+preferences: 1 worker(s) HOLDS
+preferences: 4 worker(s) HOLDS
+preferencesrecovery: 1 worker(s) HOLDS
+preferencesrecovery: 4 worker(s) HOLDS
+preferencespersistent: 1 worker(s) HOLDS
+preferencespersistent: 4 worker(s) HOLDS
+editorstate: 1 worker(s) HOLDS
+editorstate: 4 worker(s) HOLDS
+appsession: 1 worker(s) HOLDS
+appsession: 4 worker(s) HOLDS
+appsessionmemory: 1 worker(s) HOLDS
+appsessionmemory: 4 worker(s) HOLDS
+preferencespersistent: 1 worker(s), second host boot HOLDS
+preferencespersistent: 4 worker(s), second host boot HOLDS

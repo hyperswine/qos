@@ -1,0 +1,9 @@
+editorpolicy: 1 worker(s) HOLDS
+editorpolicy: 4 worker(s) HOLDS
+Compiler daemon: /tmp/qos-fprd-tnmpvhme/compiler.sock (log /private/tmp/qos-services-final-parallel/jobs/editor-policy/tmp/qos-editor-policy-5389i813/fprd.log)
+editorpolicyprocess: 1 worker(s) HOLDS
+editorpolicyprocess: 4 worker(s) HOLDS
+appsession: 1 worker(s) HOLDS
+appsession: 4 worker(s) HOLDS
+appsessionmemory: 1 worker(s) HOLDS
+appsessionmemory: 4 worker(s) HOLDS

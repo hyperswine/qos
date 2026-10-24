@@ -1,0 +1,33 @@
+check-services: 16 checks, 2 worker(s), output /private/tmp/qos-services-goal-combined
+portable-shutdown: starting (exclusive)
+portable-shutdown: ok (92.9 s)
+files-service: starting
+files-shutdown: starting
+kv-large: starting
+files-service: ok (25.5 s)
+files-shutdown: ok (65.8 s)
+hosted-timers: starting
+endpoint-state: starting
+kv-large: ok (47.1 s)
+editor-policy: starting
+hosted-timers: ok (194.6 s)
+editor-state: starting
+endpoint-state: ok (192.9 s)
+preferences: starting
+editor-policy: ok (174.9 s)
+portable-durable: starting
+editor-state: ok (171.9 s)
+qsys: starting
+portable-durable: ok (110.9 s)
+qlog-routing: starting
+qsys: ok (32.3 s)
+block-lifecycle: starting
+qlog-routing: ok (134.8 s)
+storage-reliability: starting
+preferences: ok (283.4 s)
+storage-types: starting
+storage-reliability: ok (150.5 s)
+baseline-compile: starting
+block-lifecycle: ok (184.6 s)
+baseline-compile: ok (23.0 s)
+storage-types: ok (90.9 s)

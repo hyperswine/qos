@@ -1,0 +1,3 @@
+POS with namespace Files client compiles: PASS
+gl2d + LiveView compile without graphics; unmarked LiveView caller refused: PASS
+scene2d: invalid dynamic entries fail by name in both list and packed paths: PASS

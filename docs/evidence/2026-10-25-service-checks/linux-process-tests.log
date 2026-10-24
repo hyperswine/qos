@@ -1,0 +1,28 @@
+test_cancellation_stops_active_workers_and_their_children (test_service_checks.Services.test_cancellation_stops_active_workers_and_their_children) ... probe: starting
+ok
+test_exclusive_and_worker_bound_without_timing_thresholds (test_service_checks.Services.test_exclusive_and_worker_bound_without_timing_thresholds) ... exclusive: ok (0.0 s)
+a: ok (0.0 s)
+b: ok (0.0 s)
+c: ok (0.0 s)
+ok
+test_failure_and_timeout_kill_children_in_independent_sessions (test_service_checks.Services.test_failure_and_timeout_kill_children_in_independent_sessions) ... probe: starting
+probe: starting
+ok
+test_parallel_checks_get_private_fixed_paths_cache_temp_port_and_logs (test_service_checks.Services.test_parallel_checks_get_private_fixed_paths_cache_temp_port_and_logs) ... one: starting
+two: starting
+two: ok (0.3 s)
+one: ok (0.3 s)
+ok
+test_partial_failure_keeps_each_verdict_and_other_checks_finish (test_service_checks.Services.test_partial_failure_keeps_each_verdict_and_other_checks_finish) ... files-service: failed (0.0 s)
+  log: /tmp/tmp11zyx1bv/jobs/files-service/output.log
+editor-policy: ok (0.0 s)
+ok
+test_registered_coverage_and_workflow (test_service_checks.Services.test_registered_coverage_and_workflow) ... ok
+test_shell_subgroups_and_forced_worker_kill_are_cleaned (test_service_checks.Services.test_shell_subgroups_and_forced_worker_kill_are_cleaned) ... probe: starting
+ok
+test_snapshot_uses_working_files_without_aliases_or_ignored_outputs (test_service_checks.Services.test_snapshot_uses_working_files_without_aliases_or_ignored_outputs) ... ok
+
+----------------------------------------------------------------------
+Ran 8 tests in 8.122s
+
+OK

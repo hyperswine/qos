@@ -1,0 +1,10 @@
+Files shutdown: Portable, 1 hart(s) HOLDS
+Files shutdown: virtio v1, 1 hart(s) HOLDS
+Files shutdown behind failed I/O: virtio v1, 1 hart(s), DMA remains reserved HOLDS
+Files shutdown: virtio v2, 1 hart(s) HOLDS
+Files shutdown behind failed I/O: virtio v2, 1 hart(s), DMA remains reserved HOLDS
+Files shutdown: Portable, 2 hart(s) HOLDS
+Files shutdown: virtio v1, 2 hart(s) HOLDS
+Files shutdown behind failed I/O: virtio v1, 2 hart(s), DMA remains reserved HOLDS
+Files shutdown: virtio v2, 2 hart(s) HOLDS
+Files shutdown behind failed I/O: virtio v2, 2 hart(s), DMA remains reserved HOLDS

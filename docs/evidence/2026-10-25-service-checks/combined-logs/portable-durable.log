@@ -1,0 +1,11 @@
+Portable durable: blank format, fresh-process reopen, v1/v2 bounded migration: PASS
+Portable durable: invalid/nonblank metadata and unsafe migration refuse without mutation: PASS
+Portable durable: append survives reopen, newest valid slot wins, corrupt slots refused/repaired: PASS
+Portable durable: SWAP wraps before the backup superblock: PASS
+Portable durable: stale heads refuse without mutation; invalid header/bounds/shape/hash/bulk refuse compact and actor startup: PASS
+Portable durable: invalid tags/keys/header size/tombstone/bulk inputs refuse without mutation and valid image reopens: PASS
+Portable durable: streamed ~2MiB QREC startup verifies partial last page and catches its final payload byte corruption: PASS
+Portable durable: injected data/commit flush failures end owner without success ACK: PASS
+Portable durable: staged, partial-copy, full-copy and first-final-slot snapshots recover; bad stage refused: PASS
+Portable durable: real compaction/idempotence, pre-mutation capacity refusal, all six flush failure boundaries: PASS
+Portable durability checks: PASS (simulated crash snapshots; physical power cuts untested)

@@ -1,0 +1,18 @@
+Portable blocknamespace: 1 hart(s) HOLDS
+Portable blocknamespace: 2 hart(s) HOLDS
+Portable blocklifecyclep: 1 hart(s) HOLDS
+Portable blocklifecyclep: 2 hart(s) HOLDS
+Portable blockmemory: 1 hart(s) HOLDS
+Portable blockmemory: 2 hart(s) HOLDS
+Native blocklifecycle: virtio v1, 1 hart(s) HOLDS
+Native blocknamespace: virtio v1, 1 hart(s) HOLDS
+Native blockmemory: virtio v1, 1 hart(s) HOLDS
+Native blocklifecycle: virtio v2, 1 hart(s) HOLDS
+Native blocknamespace: virtio v2, 1 hart(s) HOLDS
+Native blockmemory: virtio v2, 1 hart(s) HOLDS
+Native blocklifecycle: virtio v1, 2 hart(s) HOLDS
+Native blocknamespace: virtio v1, 2 hart(s) HOLDS
+Native blockmemory: virtio v1, 2 hart(s) HOLDS
+Native blocklifecycle: virtio v2, 2 hart(s) HOLDS
+Native blocknamespace: virtio v2, 2 hart(s) HOLDS
+Native blockmemory: virtio v2, 2 hart(s) HOLDS

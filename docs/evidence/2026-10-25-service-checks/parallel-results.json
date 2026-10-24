@@ -1,0 +1,35 @@
+{
+  "workers": 2,
+  "seconds": 239.86442008288577,
+  "compiler": "/Users/jasonqin/Documents/GitHub/fprisc",
+  "checks": {
+    "files-service": {
+      "status": "ok",
+      "exclusive": false,
+      "script": "tools/files-service-check.py",
+      "exit": 0,
+      "seconds": 20.337589457863942
+    },
+    "endpoint-state": {
+      "status": "ok",
+      "exclusive": false,
+      "script": "tools/endpoint-state-check.py",
+      "exit": 0,
+      "seconds": 157.95315008284524
+    },
+    "editor-policy": {
+      "status": "ok",
+      "exclusive": false,
+      "script": "tools/editor-policy-check.py",
+      "exit": 0,
+      "seconds": 143.1395226251334
+    },
+    "storage-types": {
+      "status": "ok",
+      "exclusive": false,
+      "script": "tools/storage-types-check.py",
+      "exit": 0,
+      "seconds": 77.26525733293965
+    }
+  }
+}

@@ -163,3 +163,4 @@ Source-adjacent READMEs under `tools/` stay beside the tools they explain.
 | 2026-10-21 | [TYPED-IR-COMPILER-PIN.md](2026-10-21-TYPED-IR-COMPILER-PIN.md) | Pin to FP-RISC with the typed-IR merge (codegen revision 67); check-all on macOS with three red legs that also fail on the previous pin |
 | 2026-10-22 | [MERGE-REGRESSIONS-FIXED.md](2026-10-22-MERGE-REGRESSIONS-FIXED.md) | The three red check-all legs fixed (policy parser signatures, the module registry and plugin detach, Sol NN); pin FP-RISC 0c9c8b7; 162 legs green |
 | 2026-10-23 | [NATIVE-INSTRUCTION-ADMISSION.md](2026-10-23-NATIVE-INSTRUCTION-ADMISSION.md) | Living native-insns-v1 regression contract: complete linked closure, separate instruction/call-site ceilings, and explicit timing/composition limits |
+| 2026-10-25 | [PARALLEL-SERVICE-CHECKS.md](2026-10-25-PARALLEL-SERVICE-CHECKS.md) | isolated service workspaces, bounded workers, process cleanup and per-leg sweep verdicts |

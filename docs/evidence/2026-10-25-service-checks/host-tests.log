@@ -1,0 +1,46 @@
+test_a_skip_is_visible_and_strict_mode_fails (test_check_all.SweepVerdicts.test_a_skip_is_visible_and_strict_mode_fails) ... ok
+test_float_build_and_output_are_both_required (test_check_all.SweepVerdicts.test_float_build_and_output_are_both_required) ... ok
+test_holes_expected_refusals_pass_but_missing_diagnostics_fail (test_check_all.SweepVerdicts.test_holes_expected_refusals_pass_but_missing_diagnostics_fail) ... ok
+test_jit_requires_matching_output_and_successful_producers (test_check_all.SweepVerdicts.test_jit_requires_matching_output_and_successful_producers) ... ok
+test_native_instruction_gate_status_is_required (test_check_all.SweepVerdicts.test_native_instruction_gate_status_is_required) ... ok
+test_parallel_service_results_preserve_individual_sweep_verdicts (test_check_all.SweepVerdicts.test_parallel_service_results_preserve_individual_sweep_verdicts) ... ok
+test_summary_counts_pass_fail_and_skip (test_check_all.SweepVerdicts.test_summary_counts_pass_fail_and_skip) ... ok
+test_transaction_requires_expected_panic_and_no_partial_write (test_check_all.SweepVerdicts.test_transaction_requires_expected_panic_and_no_partial_write) ... ok
+test_web_checks_distinguish_missing_dependency_and_failed_producer (test_check_all.SweepVerdicts.test_web_checks_distinguish_missing_dependency_and_failed_producer) ... ok
+test_a_named_path_must_be_a_checkout (test_fprisc_path.FpriscPath.test_a_named_path_must_be_a_checkout) ... ok
+test_dev_watches_external_modules_and_new_apps_land_in_apps (test_fprisc_path.FpriscPath.test_dev_watches_external_modules_and_new_apps_land_in_apps) ... ok
+test_fprisc_command_remembers_the_path (test_fprisc_path.FpriscPath.test_fprisc_command_remembers_the_path) ... ok
+test_installed_tree_uses_its_toolchain (test_fprisc_path.FpriscPath.test_installed_tree_uses_its_toolchain) ... ok
+test_nothing_found_says_how (test_fprisc_path.FpriscPath.test_nothing_found_says_how) ... ok
+test_order_flag_env_file_sibling (test_fprisc_path.FpriscPath.test_order_flag_env_file_sibling) ... ok
+test_exited_process_is_not_ready (test_http_ready.HTTPReady.test_exited_process_is_not_ready) ... ok
+test_listener_and_unready_status_do_not_pass (test_http_ready.HTTPReady.test_listener_and_unready_status_do_not_pass) ... ok
+test_unready_application_times_out (test_http_ready.HTTPReady.test_unready_application_times_out) ... ok
+test_cancellation_stops_active_workers_and_their_children (test_service_checks.Services.test_cancellation_stops_active_workers_and_their_children) ... probe: starting
+ok
+test_exclusive_and_worker_bound_without_timing_thresholds (test_service_checks.Services.test_exclusive_and_worker_bound_without_timing_thresholds) ... exclusive: ok (0.0 s)
+a: ok (0.0 s)
+b: ok (0.0 s)
+c: ok (0.0 s)
+ok
+test_failure_and_timeout_kill_children_in_independent_sessions (test_service_checks.Services.test_failure_and_timeout_kill_children_in_independent_sessions) ... probe: starting
+probe: starting
+ok
+test_parallel_checks_get_private_fixed_paths_cache_temp_port_and_logs (test_service_checks.Services.test_parallel_checks_get_private_fixed_paths_cache_temp_port_and_logs) ... two: starting
+one: starting
+two: ok (0.2 s)
+one: ok (0.2 s)
+ok
+test_partial_failure_keeps_each_verdict_and_other_checks_finish (test_service_checks.Services.test_partial_failure_keeps_each_verdict_and_other_checks_finish) ... files-service: failed (0.0 s)
+  log: /var/folders/rd/0pnnmwhx69qdhg4mf34ltqnh0000gn/T/tmph4f57r8x/jobs/files-service/output.log
+editor-policy: ok (0.0 s)
+ok
+test_registered_coverage_and_workflow (test_service_checks.Services.test_registered_coverage_and_workflow) ... ok
+test_shell_subgroups_and_forced_worker_kill_are_cleaned (test_service_checks.Services.test_shell_subgroups_and_forced_worker_kill_are_cleaned) ... probe: starting
+ok
+test_snapshot_uses_working_files_without_aliases_or_ignored_outputs (test_service_checks.Services.test_snapshot_uses_working_files_without_aliases_or_ignored_outputs) ... ok
+
+----------------------------------------------------------------------
+Ran 26 tests in 9.939s
+
+OK

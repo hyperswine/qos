@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # check-all.sh -- the four profiles + the std proof pass, end to end.
-# NOTE: the sweep is 162 legs and takes ~30-75 min on a fast workstation
+# NOTE: the sweep is 163 legs and takes ~30-75 min on a fast workstation
 # (qemu boots + Sol/compiler examples + the GL tiers).  The summary at the
 # end counts passed, failed and skipped legs; a skip is not a pass.
 #
@@ -54,27 +54,38 @@ leg_skipped() {
   echo "skipped ($1)"
   printf '%s\n' "$1" >> "${CK_TMP}/ck-skip.lines"
 }
-echo "== sweep verdicts: injected failures must fail the sweep ==" && (python3 -m unittest discover -s tests -p test_check_all.py) || leg_failed "${LINENO:-?}"
+# Run the service group once in private checkouts; retain one sweep verdict per
+# check. A group failure must not hide which checks did/did not pass.
+service_leg() {
+  if [ ! -f "$CK_TMP/services-started" ]; then
+    : > "$CK_TMP/services-started"
+    local output="$ROOT/build/service-checks/$(basename "$CK_TMP")"
+    ln -s "$output" "$CK_TMP/services"
+    python3 tools/check-services.py --jobs "${QOS_CHECK_JOBS:-2}" --output "$output" || true
+  fi
+  python3 tools/check-services.py --verdict "$1" --results "$CK_TMP/services/results.json"
+}
+echo "== sweep verdicts: injected failures must fail the sweep ==" && (python3 -m unittest discover -s tests -p test_check_all.py && python3 -m unittest discover -s tests -p test_service_checks.py) || leg_failed "${LINENO:-?}"
 echo "== fprc =="                && (make -s fpr) || leg_failed "${LINENO:-?}"
 echo "== Linux RV64 lowering, cache isolation and QOS TLS ==" && (python3 "$FPRISC_ROOT/tests/check_rv64_linux.py") || leg_failed "${LINENO:-?}"
 echo "== DRM scanout: RGB, orientation, pitch and full-screen scaling ==" && (sh qos/tests-host/drm-scanout-check.sh) || leg_failed "${LINENO:-?}"
 echo "== STAR64 console ownership with optional QOS autostart ==" && (python3 tools/buildroot/star64-console-check.py) || leg_failed "${LINENO:-?}"
-echo "== baseline compile gates: graphics-independent, explicit LiveView safety and dynamic-slot refusal ==" && (python3 tools/baseline-compile-check.py) || leg_failed "${LINENO:-?}"
+echo "== baseline compile gates: graphics-independent, explicit LiveView safety and dynamic-slot refusal ==" && (service_leg baseline-compile) || leg_failed "${LINENO:-?}"
 echo "== disk suspension: one-hart progress, abandoned requests and copied buffers ==" && (python3 tools/disk-suspend-check.py) || leg_failed "${LINENO:-?}"
 echo "== virtio raw policy: register programming and full-word deadlines against C ==" && (python3 tools/virtio-check.py) || leg_failed "${LINENO:-?}"
 echo "== native block service: configurable budgets and failure isolation ==" && (python3 tools/block-service-check.py) || leg_failed "${LINENO:-?}"
-echo "== block lifecycle: cancellation, drain and bounded reusable helpers ==" && (python3 tools/block-lifecycle-check.py) || leg_failed "${LINENO:-?}"
-echo "== Qlog and bootstrap block routing ==" && (python3 tools/qlog-routing-check.py) || leg_failed "${LINENO:-?}"
-echo "== Storage deadlines, late replies and finite service budgets ==" && (python3 tools/storage-reliability-check.py) || leg_failed "${LINENO:-?}"
-echo "== Storage operation types, compatibility and live schema ==" && (python3 tools/storage-types-check.py) || leg_failed "${LINENO:-?}"
+echo "== block lifecycle: cancellation, drain and bounded reusable helpers ==" && (service_leg block-lifecycle) || leg_failed "${LINENO:-?}"
+echo "== Qlog and bootstrap block routing ==" && (service_leg qlog-routing) || leg_failed "${LINENO:-?}"
+echo "== Storage deadlines, late replies and finite service budgets ==" && (service_leg storage-reliability) || leg_failed "${LINENO:-?}"
+echo "== Storage operation types, compatibility and live schema ==" && (service_leg storage-types) || leg_failed "${LINENO:-?}"
 echo "== Bootstrap missing-only storage fallbacks ==" && (python3 tools/storage-fallback-check.py) || leg_failed "${LINENO:-?}"
 echo "== Qlog scratch reclamation, binary reads and two-boot persistence ==" && (python3 tools/qlog-memory-check.py) || leg_failed "${LINENO:-?}"
-echo "== Portable durable storage: barriers, dual metadata and staged recovery ==" && (python3 tools/portable-durable-check.py) || leg_failed "${LINENO:-?}"
+echo "== Portable durable storage: barriers, dual metadata and staged recovery ==" && (service_leg portable-durable) || leg_failed "${LINENO:-?}"
 echo "== Portable compatibility KV durability and torn-tail recovery ==" && (sh qos/tests-host/store-check.sh) || leg_failed "${LINENO:-?}"
 echo "== the compile bridge: worker-backed, a reply past the old 256 KiB whole, no server, a silent server, an abandoned request (sanitizers) ==" && (sh qos/tests-host/compile-check.sh) || leg_failed "${LINENO:-?}"
 echo "== Portable compatibility KV application ABI and uncertain outcomes ==" && (python3 tools/portable-store-check.py) || leg_failed "${LINENO:-?}"
-echo "== Files quiesce, block drain and final flush ==" && (python3 tools/files-shutdown-check.py) || leg_failed "${LINENO:-?}"
-echo "== Portable bounded graceful shutdown ==" && (python3 tools/portable-shutdown-check.py) || leg_failed "${LINENO:-?}"
+echo "== Files quiesce, block drain and final flush ==" && (service_leg files-shutdown) || leg_failed "${LINENO:-?}"
+echo "== Portable bounded graceful shutdown ==" && (service_leg portable-shutdown) || leg_failed "${LINENO:-?}"
 echo "== Buildroot service supervision and finite restart ==" && (python3 tools/buildroot/service-check.py) || leg_failed "${LINENO:-?}"
 echo "== Buildroot persistent state directory installation ==" && (python3 tools/buildroot/package-install-check.py) || leg_failed "${LINENO:-?}"
 echo "== Pi quiet boot splash and vector rendering ==" && (python3 tools/buildroot/splash-check.py) || leg_failed "${LINENO:-?}"
@@ -108,9 +119,9 @@ echo "== dedup ratchet: the frontend un-forking must not regress ==" && "${FPRIS
 echo "== spans: diagnostics carry file:line[:col] anchors (steps 1-3) ==" && (python3 tools/diagnostics-check.py) || leg_failed "${LINENO:-?}"
 echo "== versions: every pin is a committed version, fpr.lock current ==" && ./qos.py lock --check | tail -1 || leg_failed "${LINENO:-?}"
 echo "== QOSPortable app =="     && (make -s qos-app PROG=${FPRISC_ROOT}/tests/hello.fpr >/dev/null 2>&1) || leg_failed "${LINENO:-?}"
+echo "== QOSPortable host+run ==" && (cd qos && make -s portable 2>/dev/null && ./qosp --yes ../app.qa | grep "=>") || leg_failed "${LINENO:-?}"
 echo "== clause groups: a function split by another definition is still one function ==" && (make -s qos-app PROG=${FPRISC_ROOT}/tests/split.fpr >/dev/null 2>&1 && cd qos && ./qosp --yes ../app.qa 2>/dev/null | grep -a "split: zero n6 one") || leg_failed "${LINENO:-?}"
 echo "== the mailbox contract: Static refuses and says so, Dynamic grows in order, the ARC table grows (${FPRISC_ROOT}/tests/mailbox.fpr, ${FPRISC_ROOT}/docs/MAILBOX.md) ==" && (make -s qos-app PROG=${FPRISC_ROOT}/tests/mailbox.fpr >/dev/null 2>&1 && cd qos && timeout 60 ./qosp --yes ../app.qa 2>&1 | grep -a "^mailbox: static 8 queued 8 of 20 (12 refused), drained 8 in order; dynamic 8 queued 20 of 20, drained 20 in order; arc 3000 shared values held, drained 3000 in order; a dead actor answers dead actor") || leg_failed "${LINENO:-?}"
-echo "== QOSPortable host+run ==" && (cd qos && make -s portable 2>/dev/null && ./qosp --yes ../app.qa | grep "=>") || leg_failed "${LINENO:-?}"
 echo "== Memory.qa stage 1: one actor owns the buddy; 100 workers' blocks come home, on qosp and on the bare-metal kernel (${FPRISC_ROOT}/tests/memory.fpr, ${FPRISC_ROOT}/docs/MEMORY.md) ==" && (make -s qos-app PROG=${FPRISC_ROOT}/tests/memory.fpr >/dev/null 2>&1 && (cd qos && timeout 120 ./qosp --yes ../app.qa 2>&1 | tr -d '\r' > ${CK_TMP}/ck-mem.out) && grep -aq "MEMORY HOLDS" ${CK_TMP}/ck-mem.out && grep -a "^memory: arena" ${CK_TMP}/ck-mem.out | sed 's/^/qosp /' && make -s bare-metal-run PROG=${FPRISC_ROOT}/tests/memory.fpr 2>/dev/null | tr -d '\r' > ${CK_TMP}/ck-memb.out && grep -aq "MEMORY HOLDS" ${CK_TMP}/ck-memb.out && grep -a "^memory: arena" ${CK_TMP}/ck-memb.out | sed 's/^/bare-metal /') || leg_failed "${LINENO:-?}"
 echo "== apps: two app images from the disk, each under its own pid, memory home when they exit (tests/apps.fpr) ==" && (make -s qos-app PROG=tests/apps.fpr >/dev/null 2>&1 && make -s plugin-qa PROG=tests/appa.fpr >/dev/null 2>&1 && make -s plugin-qa PROG=tests/appb.fpr >/dev/null 2>&1 && python3 tools/mkdisk.py ${CK_TMP}/ck-apps.img 8 appa.qa appb.qa >/dev/null && FPR_DISK=${CK_TMP}/ck-apps.img timeout 60 qos/qosp --yes app.qa 2>/dev/null | tr -d '\r' | grep -a "apps: appa pid 1 ran (helper pid 1) = 9006000; appb pid 2 ran (helper pid 2) = 42; shell pid 0; APPS HOLD") || leg_failed "${LINENO:-?}"
 echo "== MVU: the elm surface (App / Ev / subs) on the engine ==" && (make -s qos-app PROG=tests/mvutick.fpr >/dev/null 2>&1 && cd qos && timeout 60 ./qosp --yes ../app.qa 2>/dev/null | grep >/dev/null -c "final count=31.*4 statics builds" && cd .. && make -s qos-app PROG=tests/mvugame.fpr >/dev/null 2>&1 && cd qos && timeout 60 ./qosp --yes ../app.qa 2>/dev/null | tr -d '\r' > ${CK_TMP}/ck-mvug.out; grep -q "gr f2: x=1 vp=32x8" ${CK_TMP}/ck-mvug.out && grep -aq "game over \[mvu: 3 frames, 1 statics builds\]" ${CK_TMP}/ck-mvug.out && echo "mvutick: STick-only ticks; mvugame: scripted SKeys -> exact 3-frame run on a custom render service") || leg_failed "${LINENO:-?}"
@@ -133,23 +144,24 @@ echo "== std.compile: the fpr compiler behind a unix socket (editor loop) ==" &&
 echo "== sysdisk: the disk IS the system (loader + sys/live replay across two boots) ==" && (make -s qos-app PROG=tests/sysdisk.fpr >/dev/null 2>&1 && make -s plugin-qa PROG=tests/sysed1.fpr >/dev/null 2>&1 && make -s plugin-qa PROG=tests/sysed2.fpr >/dev/null 2>&1 && make -s plugin-qa PROG=tests/sysbad.fpr >/dev/null 2>&1 && python3 tools/mkdisk.py ${CK_TMP}/ck-sd.img 8 sysed1.qa sysed2.qa sysbad.qa >/dev/null && FPR_DISK=${CK_TMP}/ck-sd.img timeout 60 qos/qosp --yes app.qa 2>/dev/null | tr -d '\r' | grep >/dev/null -ac "sysdisk boot1: \[one\] \[Two\] bad=refused live=sysed2 sysed1 ver=sys.v2" && FPR_DISK=${CK_TMP}/ck-sd.img timeout 60 qos/qosp --yes app.qa 2>/dev/null | tr -d '\r' | grep >/dev/null -ac "sysdisk boot2: replayed 2 \[Three\] ver=sys.v2 (no loads, no compiler -- the disk decided)" && echo "boot1 builds the live set as sys/live records; boot2 replays it -- the hot swap survives the reboot with no compiler present") || leg_failed "${LINENO:-?}"
 echo "== endpoints: a new service claims a url with no central edit; open/read/write/close direct, listing, refusals, cancel, grants (tests/epecho.fpr) ==" && (./qos.py run tests/epecho.fpr </dev/null >${CK_TMP}/ck-epecho.out 2>&1 && grep -aq "epecho: HOLDS" ${CK_TMP}/ck-epecho.out && echo "epecho: HOLDS") || leg_failed "${LINENO:-?}"
 echo "== the Svc surface over the namespace: display, clock, keyboard, diskless storage, unknown url, wrong shape (tests/svcurl.fpr) ==" && (./qos.py run tests/svcurl.fpr </dev/null >${CK_TMP}/ck-svcurl.out 2>&1 && grep -aq "svcurl done" ${CK_TMP}/ck-svcurl.out && echo "svcurl: done") || leg_failed "${LINENO:-?}"
-echo "== Files.qa: two application prefixes, two boots and owner-death refusal ==" && (python3 tools/files-service-check.py) || leg_failed "${LINENO:-?}"
+echo "== Large KV replies: Portable and Native replay intact ==" && (service_leg kv-large) || leg_failed "${LINENO:-?}"
+echo "== Files.qa: two application prefixes, two boots and owner-death refusal ==" && (service_leg files-service) || leg_failed "${LINENO:-?}"
 echo "== Graphics.qa: real Terra II + dungeon, focused input, close/restart and captured pixels ==" && (if { [ "$(uname -s)" = Darwin ] && pkg-config --exists glfw3; } || { command -v xvfb-run >/dev/null && pkg-config --exists glfw3; }; then python3 tools/gfxapps-check.py; else leg_skipped "needs GLFW and macOS or xvfb-run"; fi) || leg_failed "${LINENO:-?}"
 echo "== Main Profile: paged GUI shell, onboard .qa apps, refusals and two boots ==" && (if { [ "$(uname -s)" = Darwin ] && pkg-config --exists glfw3; } || { command -v xvfb-run >/dev/null && pkg-config --exists glfw3; }; then python3 tools/guishell-check.py --output "$(mktemp -d ${CK_TMP}/qos-shell-parent.XXXXXX)/check"; else leg_skipped "needs GLFW and macOS or xvfb-run"; fi) || leg_failed "${LINENO:-?}"
 echo "== Graphics.qa: two programs on one display, focus, close and restart, a dead program never holds it (tests/gfxshare.fpr, headless) ==" && (./qos.py run tests/gfxshare.fpr </dev/null >${CK_TMP}/ck-gfxshare.out 2>&1 && grep -aq "gfxshare: HOLDS" ${CK_TMP}/ck-gfxshare.out && echo "gfxshare: HOLDS") || leg_failed "${LINENO:-?}"
 echo "== the keyboard endpoint over UART.qa: a held read, bytes queued before the first poll one per poll, an empty poll (tests/kbdread.fpr) ==" && (make -s qos-app PROG=tests/kbdread.fpr >/dev/null 2>&1 && (printf 'wxyz'; sleep 2; printf 'ab'; sleep 2) | timeout 20 qos/qosp --yes app.qa 2>/dev/null | tr -d '\r' | grep -a "kbdread: seq=wxyz00 first=97 second=98 poll=0 HOLDS") || leg_failed "${LINENO:-?}"
-echo "== qsys: namespace and plugins persist across two boots ==" && (sh tools/qsys-check.sh) || leg_failed "${LINENO:-?}"
+echo "== qsys: namespace and plugins persist across two boots ==" && (service_leg qsys) || leg_failed "${LINENO:-?}"
 echo "== plugin imports: one plugin build under two shell builds, bound by name; a missing import refused by name ==" && (sh tools/plugimports-check.sh) || leg_failed "${LINENO:-?}"
 echo "== storage RPC: mixed traffic, refusal and death ==" && (./qos.py run tests/storerpc.fpr </dev/null >${CK_TMP}/ck-storerpc.out 2>&1 && grep -aq "storerpc: HOLDS" ${CK_TMP}/ck-storerpc.out) || leg_failed "${LINENO:-?}"
 echo "== failure honesty: publication, contracts and atomic writes ==" && (python3 ${FPRISC_ROOT}/tools/failure-honesty-check.py) || leg_failed "${LINENO:-?}"
 echo "== qsys failure paths: refused and ended services are answers; a refused write leaves the file as the disk has it (tests/qsysfail.fpr) ==" && (./qos.py run tests/qsysfail.fpr </dev/null >${CK_TMP}/ck-qsysfail.out 2>&1 && grep -aq "qsysfail: HOLDS" ${CK_TMP}/ck-qsysfail.out && echo "qsysfail: HOLDS") || leg_failed "${LINENO:-?}"
 echo "== loader: a load whose sys/live record fails is rolled back (tests/loaderfail.fpr) ==" && (./qos.py run tests/loaderfail.fpr </dev/null >${CK_TMP}/ck-loaderfail.out 2>&1 && grep -aq "loaderfail: refused=rolled back live=\[\] bound=no replay=0 HOLDS" ${CK_TMP}/ck-loaderfail.out && echo "loaderfail: HOLDS") || leg_failed "${LINENO:-?}"
 echo "== selfhost: on-QOS edit -> package (fprd plugin op) -> store -> hot-swap ==" && (python3 tools/fprd.py ${CK_TMP}/ck-shd.sock > ${CK_TMP}/ck-shd.log 2>&1 & FPRD=$!; sleep 1; (make -s qos-app PROG=tests/selfhost.fpr >/dev/null 2>&1) && (cd qos && rm -f ${CK_TMP}/ck-sh.img && FPRD_SOCK=${CK_TMP}/ck-shd.sock FPR_DISK=${CK_TMP}/ck-sh.img timeout 180 ./qosp --yes ../app.qa 2>/dev/null | tr -d '\r' | grep -a "selfhost: v1 one | v2 hot self-compiled Two | bad: refused | still v2: Three ver=self.v2"); R=$?; kill $FPRD 2>/dev/null; exit $R) || leg_failed "${LINENO:-?}"
-echo "== endpoint state: linear ownership, close retries, uncertainty and app memory ==" && (python3 tools/endpoint-state-check.py) || leg_failed "${LINENO:-?}"
-echo "== Editor policies: live run budgets, file grants and existing-process confinement ==" && (python3 tools/editor-policy-check.py) || leg_failed "${LINENO:-?}"
-echo "== Editor state: named types, live prompt transitions and lifecycle ==" && (python3 tools/editor-state-check.py) || leg_failed "${LINENO:-?}"
-echo "== Editor and Terminal live preferences and restart persistence ==" && (python3 tools/preferences-check.py) || leg_failed "${LINENO:-?}"
-echo "== hosted timers: linear owners, checked durations, cancellation, stale ticks, backpressure and owner death ==" && (python3 tools/hosted-timers-check.py) || leg_failed "${LINENO:-?}"
+echo "== endpoint state: linear ownership, close retries, uncertainty and app memory ==" && (service_leg endpoint-state) || leg_failed "${LINENO:-?}"
+echo "== Editor policies: live run budgets, file grants and existing-process confinement ==" && (service_leg editor-policy) || leg_failed "${LINENO:-?}"
+echo "== Editor state: named types, live prompt transitions and lifecycle ==" && (service_leg editor-state) || leg_failed "${LINENO:-?}"
+echo "== Editor and Terminal live preferences and restart persistence ==" && (service_leg preferences) || leg_failed "${LINENO:-?}"
+echo "== hosted timers: linear owners, checked durations, cancellation, stale ticks, backpressure and owner death ==" && (service_leg hosted-timers) || leg_failed "${LINENO:-?}"
 echo "== the Editor's Run: packaged by the host compiler, started as a process of its own, its console captured, its end seen; a compile holds no hart (tests/runprog.fpr, one hart) ==" && (./qos.py run tests/runprog.fpr --harts 1 </dev/null >${CK_TMP}/ck-runprog.out 2>&1 && grep -aq "runprog: HOLDS" ${CK_TMP}/ck-runprog.out && echo "runprog: HOLDS") || leg_failed "${LINENO:-?}"
 echo "== the Editor's buffer: edits, selections, find, indentation (tests/editbuf.fpr) ==" && (./qos.py run tests/editbuf.fpr </dev/null >${CK_TMP}/ck-editbuf.out 2>&1 && grep -aq "editbuf: HOLDS" ${CK_TMP}/ck-editbuf.out && echo "editbuf: HOLDS") || leg_failed "${LINENO:-?}"
 echo "== dtree: histogram decision tree, F64 columns, == GHC reference ==" && (make -s qos-app PROG=${FPRISC_ROOT}/tests/dtree.fpr >/dev/null 2>&1 && cd qos && timeout 120 ./qosp --yes ../app.qa 2>/dev/null | tr -d '\r' > ${CK_TMP}/ck-dtree.out; grep -q "nodes=133 depth=8" ${CK_TMP}/ck-dtree.out && grep -q "test  acc: 0.949" ${CK_TMP}/ck-dtree.out && grep -q "root split: col 1 @ -0.937404442753177" ${CK_TMP}/ck-dtree.out && echo "noisy-XOR tree == Haskell reference bit-for-bit (133 nodes, test 0.949, same root split)") || leg_failed "${LINENO:-?}"

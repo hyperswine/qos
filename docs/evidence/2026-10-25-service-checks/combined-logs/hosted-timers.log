@@ -1,0 +1,5 @@
+hostedtimers: 1 worker(s) HOLDS
+hostedtimers: 4 worker(s) HOLDS
+appsession: 1 worker(s) HOLDS
+appsession: 4 worker(s) HOLDS
+hosted timers: 6 ownership refusals, 9 contract guards, enforced work/allocation bounds and lifecycle integration HOLDS

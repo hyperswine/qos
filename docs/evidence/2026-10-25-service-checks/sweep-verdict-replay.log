@@ -1,0 +1,18 @@
+== baseline compile gates: graphics-independent, explicit LiveView safety and dynamic-slot refusal ==
+== block lifecycle: cancellation, drain and bounded reusable helpers ==
+== Qlog and bootstrap block routing ==
+== Storage deadlines, late replies and finite service budgets ==
+== Storage operation types, compatibility and live schema ==
+== Portable durable storage: barriers, dual metadata and staged recovery ==
+== Files quiesce, block drain and final flush ==
+== Portable bounded graceful shutdown ==
+== Large KV replies: Portable and Native replay intact ==
+== Files.qa: two application prefixes, two boots and owner-death refusal ==
+== qsys: namespace and plugins persist across two boots ==
+== endpoint state: linear ownership, close retries, uncertainty and app memory ==
+== Editor policies: live run budgets, file grants and existing-process confinement ==
+== Editor state: named types, live prompt transitions and lifecycle ==
+== Editor and Terminal live preferences and restart persistence ==
+== hosted timers: linear owners, checked durations, cancellation, stale ticks, backpressure and owner death ==
+SWEEP: 16 passed, 0 failed, 0 skipped (of 16 legs)
+ALL LEGS GREEN

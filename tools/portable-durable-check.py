@@ -12,7 +12,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PG, NP, D, PRIME = 4096, 64, 56, 1000000007
-ENV = {**os.environ, 'XDG_CACHE_HOME': '/tmp/qos-durable-cache'}
+ENV = dict(os.environ)
 
 
 def run(args, cwd=ROOT, env=None, timeout=300):
@@ -81,6 +81,7 @@ def valid_stable_slots(img, head):
 def main():
     with tempfile.TemporaryDirectory(prefix='qos-durable-') as td:
         tmp = Path(td)
+        ENV.setdefault('XDG_CACHE_HOME', str(tmp / 'cache'))
         host = tmp / 'host'
         run(['make', '-s', 'portable', f'QOSP_OUT={host}',
              'FPRBUILD_EXTRA=--cflag -DQOS_BLK_TEST'], cwd=ROOT / 'qos')

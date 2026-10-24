@@ -1,0 +1,13 @@
+Portable shutdown: 1 hart(s), SIGTERM/SIGINT, TTY, repeated request, fresh-PID readiness and durable replay HOLDS
+Portable shutdown: 2 hart(s), SIGTERM/SIGINT, TTY, repeated request, fresh-PID readiness and durable replay HOLDS
+Portable shutdown: actual flush-error reports exit 1 without a clean claim HOLDS
+Portable shutdown: actual flush-stall reports exit 124 without a clean claim HOLDS
+Portable shutdown: ordinary app return drains and flushes HOLDS
+Portable shutdown: normal stop with stalled flush has a bounded failed exit HOLDS
+Portable shutdown: panic persistence with stalled KV sync has a bounded failed exit without an OS signal HOLDS
+Portable shutdown: software completion 0 exits 0 without an OS signal HOLDS
+Portable shutdown: software completion 1 exits 1 without an OS signal HOLDS
+Portable shutdown: normal return retains the deadline through full host output HOLDS
+Portable shutdown: refused acknowledgement exits 1 within deadline HOLDS
+Portable shutdown: stuck acknowledgement exits 124 within deadline HOLDS
+Portable shutdown: full stderr pipe cannot block the forced deadline HOLDS
