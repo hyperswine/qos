@@ -176,6 +176,10 @@ jobs:
       # in a container job ${{ github.workspace }} is the HOST's path;
       # $GITHUB_WORKSPACE is the one the container sees
       - run: echo "FPRISC_ROOT=$GITHUB_WORKSPACE/fprisc" >> "$GITHUB_ENV"
+      # actions/checkout only marks the workspace safe under a temporary HOME;
+      # check-services.py runs `git ls-files` as root in the container, where
+      # the runner-owned checkout is otherwise "dubious ownership" (exit 128)
+      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: smoke set (qosp legs) + LiveView multi-client
         run: |
           make -C qos portable
