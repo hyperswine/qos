@@ -142,6 +142,10 @@ jobs:
         run: |
           FPRISC_ROOT="$GITHUB_WORKSPACE/fprisc" ./qos.py install --prefix "$RUNNER_TEMP/qos-sdk"
           du -sh "$RUNNER_TEMP/qos-sdk"
+          cat "$RUNNER_TEMP/qos-sdk/libexec/qos-fpr/sdk-version.json"
+          # the SDK layout: the prebuilt compiler, not its sources or tests
+          test ! -e "$RUNNER_TEMP/qos-sdk/libexec/qos-fpr/toolchain/compiler"
+          test ! -e "$RUNNER_TEMP/qos-sdk/libexec/qos-fpr/tests"
       - name: new / run / pack --bundle outside the checkouts
         run: |
           set -e
@@ -194,6 +198,10 @@ jobs:
         run: |
           FPRISC_ROOT="$GITHUB_WORKSPACE/fprisc" ./qos.py install --prefix "$RUNNER_TEMP/qos-sdk"
           du -sh "$RUNNER_TEMP/qos-sdk"
+          cat "$RUNNER_TEMP/qos-sdk/libexec/qos-fpr/sdk-version.json"
+          # the SDK layout: the prebuilt compiler, not its sources or tests
+          test ! -e "$RUNNER_TEMP/qos-sdk/libexec/qos-fpr/toolchain/compiler"
+          test ! -e "$RUNNER_TEMP/qos-sdk/libexec/qos-fpr/tests"
       - name: new / run / pack --bundle outside the checkouts
         run: |
           set -e
