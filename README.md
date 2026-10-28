@@ -13,6 +13,12 @@ git clone https://github.com/hyperswine/fprisc ../fprisc   # a sibling needs no 
 ./qos.py run programs/interactive_desktop_gl.fpr
 ```
 
+The [intended installed-release app workflow](docs/2026-10-28-PORTABLE-APP-WORKFLOW.md)
+describes the planned `brew install qos-portable` environment, external app
+projects, QOS-target builds, disk installation and desktop launch. It is a
+design and implementation plan; the source-based commands below remain the
+current quickstart.
+
 ## Quickstart
 
 Checked on Debian trixie x86-64, using GHC 9.8.2 and cabal 3.12 from ghcup. macOS was not re-checked for this section.
