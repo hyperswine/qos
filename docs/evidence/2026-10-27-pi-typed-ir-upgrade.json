@@ -1,0 +1,265 @@
+{
+  "date": "2026-10-27",
+  "scope": "QOS Portable on the physical Raspberry Pi 4; no native ARM QOS or STAR64 deployment",
+  "sources": {
+    "qos": {
+      "head": "d1a11db9626370bf7fbddf4780c6a7b595115382",
+      "status": "",
+      "source_sha256": "4801b7a33c0ff44138f4e71addf38ed1d4e8d3d0774cc476c7b1b9453eea6377"
+    },
+    "fprisc": {
+      "head": "7d8d2837f8fd007f739248eacf27ea0e54654b12",
+      "status": "",
+      "source_sha256": "f120e070eb043b917d5e07454a15ac96c9e83934555b667b63e765a07e8a5f1d"
+    }
+  },
+  "previous_checkout_pin": "c5f7c2bf8dafeb0efbd1877c305d923a21848246",
+  "previous_installed_fprisc": "2ce2f5a48f4490fdce0d641b32b97d364d0cb590",
+  "previous_installed_qos": "cd83f0a6022db591527d0bb685fc5db7b9da8637",
+  "codegen_revision": 135,
+  "portable_abi": 22,
+  "baseline": {
+    "boundary": "passive installed Main/compiler observation",
+    "clock_ticks_per_second": 100,
+    "cpu_percent_of_one_core": {
+      "mean_over_interval": 6.84966223537361,
+      "peak_sample_interval": 7.17782260704573
+    },
+    "cpu_scale": "100 percent is one fully occupied CPU core",
+    "elapsed_seconds": 60.002958668163046,
+    "frequency_khz": {
+      "max": 600000,
+      "min": 600000
+    },
+    "identities": {
+      "compiler": {
+        "pid": 7289,
+        "starttime_ticks": 35035751,
+        "state": "running pid=7289 restarts=0"
+      },
+      "main": {
+        "pid": 7660,
+        "starttime_ticks": 35036734,
+        "state": "running pid=7660 restarts=0"
+      }
+    },
+    "limitation": "A short observation does not establish long-term memory stability.",
+    "output_directory": "/tmp/qos-pi-typed-20261027/before/health",
+    "passed": true,
+    "pss_kib": {
+      "change": 0,
+      "first": 77369,
+      "last": 77369,
+      "max": 77369,
+      "min": 77368
+    },
+    "raw_samples_retained_on_pi": "/tmp/qos-pi-typed-20261027/before/health/samples.jsonl",
+    "requested_seconds": 60.0,
+    "rss_kib": {
+      "change": 0,
+      "first": 78876,
+      "last": 78876,
+      "max": 78876,
+      "min": 78876
+    },
+    "samples": 13,
+    "temperature_c": {
+      "max": 55.017,
+      "min": 53.069
+    }
+  },
+  "physical_runtime": {
+    "runs": 36,
+    "all_passed": true,
+    "cases": [
+      "floatinline",
+      "fp_pool",
+      "inbox",
+      "inboxownership",
+      "inboxshared",
+      "parked-noinline-0",
+      "parked-noinline-1",
+      "regionnest"
+    ]
+  },
+  "graphical_preflight": {
+    "remote_dir": "/tmp/qos-pi-typed-20261027/bundle",
+    "work": "/tmp/qos-pi-typed-20261027/bundle/soak-1793101717714171000",
+    "store": "/tmp/qos-pi-typed-20261027/bundle/private-disk-1793101717714171000",
+    "bundle_hashes": "7e6dea6b5e23589ea96a1bfc52fa8d511ead68256115e094a6487fd0aaf043e7  /tmp/qos-pi-typed-20261027/bundle/qosp-es\nd7e1ea19554ff5e34919c09b975e7d5e9b8a984c0427ede94c71e4e0129adc9e  /tmp/qos-pi-typed-20261027/bundle/main.qa\n03b3ab5d13e0a117285bbd7adde3dce94c2624e2e9903c5c40e0a6068f238f66  /tmp/qos-pi-typed-20261027/bundle/Main.disk\n",
+    "production_before": "running pid=7660 restarts=0",
+    "boots": [
+      {
+        "boot": 1,
+        "exit": 0,
+        "signal": 0,
+        "seconds": 79.145843,
+        "user_seconds": 8.816075,
+        "system_seconds": 3.09204,
+        "max_rss_kib": 45620,
+        "peak_temp_millic": 56478,
+        "min_cpu_khz": 600000,
+        "max_cpu_khz": 600000,
+        "timeout": false,
+        "stop_requested": false,
+        "killed": false,
+        "cycles": 2,
+        "samples": 2,
+        "rss_first_kib": 45080,
+        "rss_last_kib": 45552,
+        "rss_min_kib": 45080,
+        "rss_max_kib": 45552
+      },
+      {
+        "boot": 2,
+        "exit": 0,
+        "signal": 0,
+        "seconds": 30.070877,
+        "user_seconds": 3.708454,
+        "system_seconds": 1.293848,
+        "max_rss_kib": 41512,
+        "peak_temp_millic": 56478,
+        "min_cpu_khz": 600000,
+        "max_cpu_khz": 600000,
+        "timeout": false,
+        "stop_requested": true,
+        "killed": false
+      }
+    ],
+    "memory_probe": false,
+    "arena_limit_mib": 256,
+    "harts": 4,
+    "viewport": "1024x600",
+    "pointer_probe": false,
+    "reliability_probe": false,
+    "scope": "isolated Main UI workload and two graceful shutdown paths; residency and optional allocator reservations/root counts, not reachability proof",
+    "production_after": "running pid=7660 restarts=0",
+    "passed": true
+  },
+  "installed": {
+    "passed": true,
+    "arch": "aarch64",
+    "qos_revision": "d1a11db9626370bf7fbddf4780c6a7b595115382",
+    "fprisc_revision": "7d8d2837f8fd007f739248eacf27ea0e54654b12",
+    "state": "running pid=22434 restarts=0",
+    "compiler_state": "running pid=21372 restarts=0",
+    "installed_sha256": {
+      "/usr/bin/qosp": "7e6dea6b5e23589ea96a1bfc52fa8d511ead68256115e094a6487fd0aaf043e7",
+      "/usr/share/qosp/app.qa": "d7e1ea19554ff5e34919c09b975e7d5e9b8a984c0427ede94c71e4e0129adc9e",
+      "/usr/share/qosp/Main.disk": "03b3ab5d13e0a117285bbd7adde3dce94c2624e2e9903c5c40e0a6068f238f66",
+      "/usr/share/qosp/compiler-sdk.tar.gz": "292fd9d35855a85f178a2ea81ff06f99e4982dbec448af89eea0d3cf49e44cef"
+    },
+    "renderer": "V3D",
+    "graphics_markers": [
+      "[gfx] scanout: /dev/dri/card1 1024x600 (frame fullscreen)",
+      "[host] [gfx] scanout: /dev/dri/card1 1024x600 (frame fullscreen)",
+      "[gfx] EGL 1.4 (surfaceless)  V3D 4.2.14 / OpenGL ES 3.1 Mesa 24.0.9",
+      "[host] [gfx] EGL 1.4 (surfaceless)  V3D 4.2.14 / OpenGL ES 3.1 Mesa 24.0.9"
+    ],
+    "normal_writable_disk": "/var/lib/qosp/Main.disk",
+    "configuration_preserved": true,
+    "rollback": "/var/lib/qosp/deployment-pi-typed-20261027T115134Z/rollback.sh",
+    "rollback_sha256": "05e0b3b47f06b1dc520bb80b9dd86f0954d650eff40c3a15453556515949d513",
+    "disk_upgrade": {
+      "apps": [
+        "clock",
+        "logs",
+        "browser",
+        "disk",
+        "terminal",
+        "editor"
+      ],
+      "new_generation": 17,
+      "new_head": 1448,
+      "old_apps": [
+        "clock",
+        "logs",
+        "browser",
+        "disk",
+        "terminal",
+        "editor"
+      ],
+      "old_generation": 15,
+      "old_head": 2527,
+      "preserved_records": 7,
+      "reclaimed_app_records": 7
+    },
+    "health": {
+      "boundary": "passive installed Main/compiler observation",
+      "clock_ticks_per_second": 100,
+      "cpu_percent_of_one_core": {
+        "mean_over_interval": 6.899627735073622,
+        "peak_sample_interval": 7.180514321795472
+      },
+      "cpu_scale": "100 percent is one fully occupied CPU core",
+      "elapsed_seconds": 60.00323726097122,
+      "frequency_khz": {
+        "max": 600000,
+        "min": 600000
+      },
+      "identities": {
+        "compiler": {
+          "pid": 21372,
+          "starttime_ticks": 113593712,
+          "state": "running pid=21372 restarts=0"
+        },
+        "main": {
+          "pid": 22434,
+          "starttime_ticks": 113595747,
+          "state": "running pid=22434 restarts=0"
+        }
+      },
+      "limitation": "A short observation does not establish long-term memory stability.",
+      "output_directory": "/tmp/qos-pi-typed-20261027/install-20261027T115134Z/health",
+      "passed": true,
+      "pss_kib": {
+        "change": 449,
+        "first": 42018,
+        "last": 42467,
+        "max": 42469,
+        "min": 42018
+      },
+      "raw_samples_retained_on_pi": "/tmp/qos-pi-typed-20261027/install-20261027T115134Z/health/samples.jsonl",
+      "requested_seconds": 60.0,
+      "rss_kib": {
+        "change": 452,
+        "first": 43544,
+        "last": 43996,
+        "max": 43996,
+        "min": 43544
+      },
+      "samples": 13,
+      "temperature_c": {
+        "max": 56.478,
+        "min": 54.043
+      }
+    }
+  },
+  "hdmi_readback": {
+    "dimensions": [
+      1024,
+      600
+    ],
+    "device": "/dev/dri/card1",
+    "ppm_sha256": "e9347449f7152694861620fe748fb6c3156ea1fdd7b8696f6ce36cbb4a14fa09",
+    "path_on_pi": "/tmp/qos-pi-typed-20261027/installed-hdmi.ppm",
+    "human_visual_inspection": false
+  },
+  "validation_notes": [
+    "Local smoke 16/16 at e6fadfb; final 7d8d283 changes only two imports to hide fix from older mtl. Final compiler builds on Linux/GHC 9.4.7 and macOS/GHC 9.8.2.",
+    "Native Editor SDK selftests passed in builder and on Pi: check, QAR2 compilation, immutable publication/update, invalid-source refusal.",
+    "Full proc/GPU diagnostic sampling timed out in first GUI run. Repeat uses smaps_rollup, skips optional GPU debug counters, and retains the same UI and shutdown assertions.",
+    "SSH access required IPQoS=none and connection reuse during this run; no device network settings changed.",
+    "No long soak, physical power-loss trial, GitHub CI, or human HDMI/USB acceptance in this run.",
+    "Bulk SSH diagnostic/image transfers remain unreliable; the on-device KMS capture checksum is verified but local visual review was not completed. These connection stalls also occurred before installation."
+  ],
+  "installed_followup": {
+    "main_state": "running pid=22434 restarts=0",
+    "compiler_state": "running pid=21372 restarts=0",
+    "same_as_acceptance": true,
+    "client_options": [
+      "IPQoS=0",
+      "KexAlgorithms=curve25519-sha256"
+    ]
+  }
+}
