@@ -17,7 +17,8 @@ The [intended installed-release app workflow](docs/2026-10-28-PORTABLE-APP-WORKF
 describes the planned `brew install qos-portable` environment, external app
 projects, QOS-target builds, disk installation and desktop launch. It is a
 design and implementation plan; the source-based commands below remain the
-current quickstart.
+current quickstart, and [App loop today](#app-loop-today-install-new-run-pack) covers
+what works from an install now.
 
 ## Quickstart
 
@@ -52,6 +53,34 @@ python3 -m unittest discover -s tests -p 'test_*.py'
 
 `./qos.py run` warns when `../fprisc` is not at the release pin in
 `fprisc.lock.json`. CI builds the pinned revision.
+
+## App loop today: install, new, run, pack
+
+This loop works today against an installed toolchain, outside any checkout and with no GHC
+or cabal on PATH. It was checked on Debian trixie x86-64 (2026-10-29), with the checkouts
+moved out of sight. **The install must be built from a qos and fprisc
+checkout on the same machine** (the Quickstart above, once). No binary release or Homebrew
+formula exists yet.
+
+```sh
+./qos.py install --prefix ~/qos-sdk        # from the checkout; copies a relocatable toolchain
+export PATH="$HOME/qos-sdk/bin:$PATH"      # qos, fpr, sol
+cd ~/src                                   # anywhere outside the checkout
+qos new hello                              # hello/app.fpr (templates: min | service | mvu | notes)
+qos run hello/app.fpr                      # [qos] app => hello: done count=12 note=hi ...
+qos pack hello/app.fpr --bundle            # dist/hello/{hello.qa,qosp,run.sh}
+dist/hello/run.sh                          # the bundle runs on its own
+```
+
+At run time an app still needs make, a C compiler and python3, because each `qos run`
+compiles the app's C support code and links it. Build output goes to `.qos/` and `dist/`
+in the directory you run from.
+
+Not verified: macOS, and GL host apps (`#: host gl`,
+qosp-gl), which need GLFW at install time. Desktop-tile installation does not exist yet. The
+planned workflow (binary install, `qos.toml`, `fpr build --target=qos-portable`, disks and
+desktop tiles) is
+[docs/2026-10-28-PORTABLE-APP-WORKFLOW.md](docs/2026-10-28-PORTABLE-APP-WORKFLOW.md).
 
 Try the graphical Main Profile shell with its onboard apps:
 
