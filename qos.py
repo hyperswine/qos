@@ -51,7 +51,7 @@ directories or thread app.qa paths by hand again.
     ./qos.py release 0.2.0 --push   cut a release: commit the modules, lock,
                                     smoke, stamped dist bundles, tag v0.2.0
     ./qos.py test                   the fast smoke set;  --all = check-all.sh
-    ./qos.py install --prefix DIR   the tree as a toolchain: DIR/bin/{fpr,qos,sol}
+    ./qos.py install --prefix DIR   the app SDK: DIR/bin/{fpr,qos,sol} (--full: the whole tree)
     ./qos.py clean
 
 Artifacts never land in the tree.  Every run writes to the WORKSPACE:
@@ -1426,31 +1426,76 @@ def cmd_clean(a):
 # What `brew install` lays down, and what a checkout can lay down for
 # itself (`./qos.py install --prefix ~/.local`):
 #
-#   PREFIX/libexec/qos-fpr/    the tree -- programs/, apps/, std/, tests/,
-#                              the .fpr store, hal/, qos/appside+portable,
-#                              qosp[-gl], docs, and toolchain/ (the fprisc
-#                              checkout: fpr, core/, std/, sol/) -- plus the
-#                              .installed marker that makes qos.py treat
-#                              it as shipped (never rebuilt, never written)
+#   PREFIX/libexec/qos-fpr/    the SDK: what `qos new|run|pack|dev` needs
+#                              to compile an app against QOS -- std/,
+#                              core/, programs/mods/ (std's imports), the
+#                              .fpr store, hal/, loader/, tools/ (mkqa &c),
+#                              qos/appside+portable, qosp[-gl] -- and
+#                              toolchain/: the prebuilt fpr with the
+#                              library dirs it resolves through
+#                              $FPR_HOME/$FPR_PATH (core/ std/ sol/
+#                              runtime/ machine/, tools/ for bare-metal).  Plus the .installed
+#                              marker (qos.py treats the tree as shipped:
+#                              never rebuilt, never written) and
+#                              sdk-version.json (qos + fprisc versions and
+#                              commits, layout).
 #   PREFIX/bin/fpr             -> libexec/qos-fpr/toolchain/fpr  (a symlink:
 #                              the binary finds core/ and std/ beside its
 #                              REAL path -- compiler/Home.hs)
 #   PREFIX/bin/qos             -> libexec/qos-fpr/qos.py
 #   PREFIX/bin/sol             exec fpr sol "$@"
 #
-# Sources ship because the QOS side is compiled per program (a .qa links
-# hal/ and qos/appside for the host it runs on, or cross for virt); the
-# Haskell is shipped as the binary, with compiler/ beside it for anyone
-# who wants to rebuild.  Relative symlinks, so the prefix can move.
+# Sources of the QOS side ship because it is compiled per program (a .qa
+# links hal/ and qos/appside for the host it runs on).  `--full` installs
+# the old contributor layout instead: the whole tree (programs/, apps/,
+# tests/, docs/, models/, qos/native, ...) and the fprisc checkout's
+# compiler/, tests/ and docs/ -- what `qos test`, `qos native`,
+# `qos release` and `--on virt` need.  Relative symlinks, so the prefix
+# can move.
 
-INSTALL_TREE = [
+INSTALL_TREE_FULL = [
     "qos.py", "dependency.mk", "release.toml", "README.md", "docs", "fprisc.lock.json",
     "Makefile", "qos-app.mk", "std", "programs", "tools", "models", "targets",
     "apps", "profiles", "tests", ".fpr", "fpr.lock", "hal", "loader", "core",
     "qos/Makefile", "qos/store_abi.h", "qos/native", "qos/appside", "qos/portable", "qos/tests-host", "qos/qosp", "qos/qosp-gl",
 ]
+INSTALL_TREE_SDK = [
+    "qos.py", "dependency.mk", "release.toml", "fprisc.lock.json",
+    "Makefile", "qos-app.mk", "std", "programs/mods", "tools", "targets",
+    "profiles", ".fpr", "fpr.lock", "hal", "loader", "core",
+    "qos/Makefile", "qos/store_abi.h", "qos/appside", "qos/portable", "qos/qosp", "qos/qosp-gl",
+]
+TOOLCHAIN_FULL = ("fpr", "Makefile", "compiler", "core", "std", "sol", "tests", "tools", "runtime", "machine", "docs")
+TOOLCHAIN_SDK = ("fpr", "Makefile", "core", "std", "sol", "runtime", "machine", "tools")
 INSTALL_SKIP = shutil.ignore_patterns("*.o", "*.hi", "*.qa", "*.disk", "*.img", "build", "dist-newstyle",
                                       "qos-store", "__pycache__", ".DS_Store", "*.s", "*.units", "*.elf")
+# tools/ subtrees for other machines (board images, VMs): not app-building
+INSTALL_SKIP_SDK_TOOLS = ("tools/buildroot", "tools/pi4", "tools/freebsd-vm")
+
+
+def _git_rev(where):
+    """(commit, dirty) of a checkout, or (None, None) outside git"""
+    r = subprocess.run(["git", "-C", str(where), "rev-parse", "HEAD"], capture_output=True, text=True)
+    if r.returncode != 0:
+        return None, None
+    d = subprocess.run(["git", "-C", str(where), "status", "--porcelain", "--untracked-files=no"],
+                       capture_output=True, text=True)
+    return r.stdout.strip(), bool(d.stdout.strip())
+
+
+def sdk_stamp(layout):
+    qos_rev, qos_dirty = _git_rev(ROOT)
+    fpr_rev, fpr_dirty = _git_rev(TOOLCHAIN)
+    fv = subprocess.run([str(COMPILER), "--version"], capture_output=True, text=True)
+    return {
+        "layout": layout,
+        "qos": {"version": read_release()["version"], "commit": qos_rev, "dirty": qos_dirty},
+        "fprisc": {"commit": fpr_rev, "dirty": fpr_dirty,
+                   "fpr_version": (fv.stdout or fv.stderr).strip() or None,
+                   "lock": json.loads(FPRISC_LOCK.read_text()).get("revision") if FPRISC_LOCK.is_file() else None},
+        "host": {"os": os.uname().sysname, "arch": os.uname().machine},
+        "installed": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+    }
 
 
 def cmd_install(a):
@@ -1464,28 +1509,39 @@ def cmd_install(a):
         # the GL host wants GLFW; a machine without it still gets fpr + qosp
         if sh(["make", "-s", "portable-gl"], cwd=QOS, quiet=True, check=False) != 0:
             say("qosp-gl: not built (no GLFW dev package found) -- `#: host gl` programs need it")
+    layout = "full" if a.full else "sdk"
+    tree, chain = (INSTALL_TREE_FULL, TOOLCHAIN_FULL) if a.full else (INSTALL_TREE_SDK, TOOLCHAIN_SDK)
     if lib.exists():
         shutil.rmtree(lib)
-    for item in INSTALL_TREE:
+    for item in tree:
         src = ROOT / item
         if not src.exists():
             continue
         dst = lib / item
         dst.parent.mkdir(parents=True, exist_ok=True)
         if src.is_dir():
-            shutil.copytree(src, dst, ignore=INSTALL_SKIP, symlinks=False)
+            skip = INSTALL_SKIP
+            if not a.full and item == "tools":
+                def skip(d, names, base=INSTALL_SKIP):
+                    here = os.path.relpath(d, ROOT)
+                    return set(base(d, names)) | {n for n in names if f"{here}/{n}" in INSTALL_SKIP_SDK_TOOLS}
+            shutil.copytree(src, dst, ignore=skip, symlinks=False)
         else:
             shutil.copy2(src, dst)
     # Ship a distinct compiler tree, never a symlink overlay in the QOS tree.
-    for item in ("fpr", "Makefile", "compiler", "core", "std", "sol", "tests", "tools", "runtime", "machine", "docs"):
+    for item in chain:
         src, dst = TOOLCHAIN / item, lib / "toolchain" / item
+        if not src.exists():
+            continue
         dst.parent.mkdir(parents=True, exist_ok=True)
         if src.is_dir():
             shutil.copytree(src, dst, ignore=INSTALL_SKIP)
         else:
             shutil.copy2(src, dst)
     ver = read_release()["version"]
-    (lib / ".installed").write_text(f"qos-fpr {ver} installed {time.strftime('%Y-%m-%d')} from {ROOT}\n")
+    stamp = sdk_stamp(layout)
+    (lib / "sdk-version.json").write_text(json.dumps(stamp, indent=2) + "\n")
+    (lib / ".installed").write_text(f"qos-fpr {ver} installed {time.strftime('%Y-%m-%d')} from {ROOT} ({layout} layout)\n")
     bin_.mkdir(parents=True, exist_ok=True)
     for name, target in (("fpr", lib / "toolchain" / "fpr"), ("qos", lib / "qos.py")):
         link = bin_ / name
@@ -1495,7 +1551,11 @@ def cmd_install(a):
     sol.write_text('#!/bin/sh\n# sol -- the HostedBytecode profile is a subcommand of fpr\nexec "$(dirname "$0")/fpr" sol "$@"\n')
     sol.chmod(0o755)
     hosts = [h for h in ("qosp", "qosp-gl") if (lib / "qos" / h).is_file()]
-    say(f"installed qos-fpr {ver} -> {lib} ({', '.join(['fpr'] + hosts)}); {bin_}/{{fpr,qos,sol}}")
+    size = sum(f.stat().st_size for f in lib.rglob("*") if f.is_file() and not f.is_symlink())
+    say(f"installed qos-fpr {ver} ({layout} layout, {size / 1e6:.0f} MB) -> {lib} ({', '.join(['fpr'] + hosts)}); {bin_}/{{fpr,qos,sol}}")
+    say(f"versions: qos {stamp['qos']['commit'] or '?'}, fprisc {stamp['fprisc']['commit'] or '?'} -> {lib / 'sdk-version.json'}")
+    if not a.full:
+        say("SDK layout: app new/run/pack/dev; `install --full` for the whole tree (test, native, release, --on virt)")
     say(f"try: cd /tmp && {bin_}/qos new hello && {bin_}/qos run hello/app.fpr")
     say(f"install done in {time.time() - t0:.1f}s")
 
@@ -1595,6 +1655,7 @@ def main():
 
     p = sub.add_parser("install", help="lay the tree down as a toolchain under a prefix (what brew runs)")
     p.add_argument("--prefix", required=True, help="e.g. ~/.local or $(brew --prefix)/Cellar/qos-fpr/X.Y.Z")
+    p.add_argument("--full", action="store_true", help="the whole tree + fprisc sources (contributor layout: test, native, release, --on virt), not the app SDK")
     p.set_defaults(f=cmd_install)
 
     p = sub.add_parser("clean")

@@ -17,10 +17,13 @@ P="$T/prefix"
 W="$T/work"
 fail() { echo "install-check: FAIL: $1"; tail -20 "$T/log" 2>/dev/null; exit 1; }
 "$HERE/qos.py" install --prefix "$P" > "$T/log" 2>&1 || fail "install"
-for f in bin/fpr bin/qos bin/sol libexec/qos-fpr/.installed libexec/qos-fpr/toolchain/fpr libexec/qos-fpr/qos/qosp \
+for f in bin/fpr bin/qos bin/sol libexec/qos-fpr/.installed libexec/qos-fpr/sdk-version.json libexec/qos-fpr/toolchain/fpr libexec/qos-fpr/qos/qosp \
          libexec/qos-fpr/toolchain/core/prelude.fpr libexec/qos-fpr/toolchain/std/mvu.fpr libexec/qos-fpr/toolchain/runtime/runtime.c; do
   [ -e "$P/$f" ] || fail "missing $P/$f"
 done
+# the SDK layout: the prebuilt compiler, not its sources (install --full keeps them)
+[ ! -e "$P/libexec/qos-fpr/toolchain/compiler" ] && [ ! -e "$P/libexec/qos-fpr/tests" ] || fail "SDK layout ships compiler sources or tests"
+grep -q '"layout": "sdk"' "$P/libexec/qos-fpr/sdk-version.json" || fail "sdk-version.json layout"
 [ -L "$P/bin/fpr" ] && [ -L "$P/bin/qos" ] || fail "bin/fpr and bin/qos must be symlinks (Home.hs resolves the real path)"
 # nothing the tree builds may ship: a .qa, an elf, a build/ dir
 BAD=$(cd "$P/libexec/qos-fpr" && find . -name '*.qa' -o -name '*.elf' -o -name 'build' -o -name '*.o' -o -name 'dist-newstyle' | head -3)
@@ -34,8 +37,10 @@ grep -q 'use "std/' hello/app.fpr || fail "a project outside the tree should use
 qos run hello/app.fpr > "$T/log" 2>&1 || fail "qos run hello"
 grep -aq "expect: found" "$T/log" || fail "the template's own expect line"
 [ -f .qos/app.qa ] || fail "the .qa should land in the project's .qos/ (got: $(ls -a))"
-# 2. an in-tree test program by absolute path (the compiler's home store + std)
-qos run "$P/libexec/qos-fpr/toolchain/tests/eq.fpr" > "$T/log" 2>&1 || fail "qos run tests/eq.fpr"
+# 2. a compiler test program by absolute path (the compiler's home store + std);
+# the SDK layout ships no tests/, so it is copied in from the checkout
+cp "$FPRISC_ROOT/tests/eq.fpr" "$W/eq.fpr"
+qos run "$W/eq.fpr" > "$T/log" 2>&1 || fail "qos run tests/eq.fpr"
 grep -aq "eq: done" "$T/log" || fail "eq.fpr's transcript"
 # 3. sol, with the installed lib
 printf 'B = use "sol/lib/base".\n> print "sol: {B.max0 7}{B.boolInt True}".\n' > s.sol
