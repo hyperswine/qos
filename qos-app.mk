@@ -1,4 +1,7 @@
 # ---- QOSPortable profile: the app side ---------------------------------
+# QA_ID / QA_NAME / QA_VERSION (qos.py passes them from a project's qos.toml)
+# set the .qa manifest's id, name and version; unset, id = name = the source
+# file's stem and version = "1", as before.
 # The .qa is freestanding at the published slot; every effect goes
 # through the qos_hal_t table (qos/appside/hal.c).  The HOST is built
 # separately: make -C qos portable.
@@ -50,10 +53,10 @@ $(BUILD)/qosapp.elf: $(BUILD)/qosapp-prog.s $(QOSAPP_RT) $(QOS)/appside/link-qos
 	$(QOSAPP_X64_LINK) -Wl,--defsym=QOS_SLOT_BASE=0x10000000 $(BUILD)/qosapp-exports.s -o $(BUILD)/qosapp.moved.elf
 
 qos-app-x64: $(BUILD)/qosapp.elf tools/mkqa.py
-	@MF=$(BUILD)/qosapp-gen.toml; ID=$$(basename $(SOURCE) .fpr); \
+	@MF=$(BUILD)/qosapp-gen.toml; ID=$(if $(QA_ID),$(QA_ID),$$(basename $(SOURCE) .fpr)); NM="$(if $(QA_NAME),$(QA_NAME),$$ID)"; VER="$(if $(QA_VERSION),$(QA_VERSION),1)"; \
 	ABIV=$$(grep -m1 'define QOS_ABI_VERSION' $(QOS)/appside/qos_abi.h | grep -o '[0-9]\+' | head -1); \
 	REV=$$(cat $(BUILD)/qosapp-prog.s.abirev 2>/dev/null || echo 0); \
-	printf 'name = "%s"\nid = "%s"\nentry = "n/a"\nversion = "1"\nloadMode = "process"\nabi = "%s.%s"\n' $$ID $$ID $$ABIV $$REV > $$MF; \
+	printf 'name = "%s"\nid = "%s"\nentry = "n/a"\nversion = "%s"\nloadMode = "process"\nabi = "%s.%s"\n' "$$NM" $$ID "$$VER" $$ABIV $$REV > $$MF; \
 	python3 tools/mkqa.py $$MF $(BUILD)/qosapp.elf -o $(QA_OUT) \
 	  --relocatable --check-moved $(BUILD)/qosapp.moved.elf --delta 0x10000000
 	@echo "$(QA_OUT) built (relocatable) — run with: (make -C qos portable && qos/qosp --yes $(QA_OUT))"
@@ -85,10 +88,10 @@ $(BUILD)/qosapp-a64.elf: $(BUILD)/qosapp-a64.s $(QOSAPP_RT_COMMON) $(FMACHINE)/u
 	$(QOSAPP_A64_LINK) -Wl,--defsym=QOS_SLOT_BASE=0x10000000 $(BUILD)/qosapp-a64-exports.s -o $(BUILD)/qosapp-a64.moved.elf
 
 qos-app-a64: $(BUILD)/qosapp-a64.elf tools/mkqa.py
-	@MF=$(BUILD)/qosapp-a64-gen.toml; ID=$$(basename $(SOURCE) .fpr); \
+	@MF=$(BUILD)/qosapp-a64-gen.toml; ID=$(if $(QA_ID),$(QA_ID),$$(basename $(SOURCE) .fpr)); NM="$(if $(QA_NAME),$(QA_NAME),$$ID)"; VER="$(if $(QA_VERSION),$(QA_VERSION),1)"; \
 	ABIV=$$(grep -m1 'define QOS_ABI_VERSION' $(QOS)/appside/qos_abi.h | grep -o '[0-9]\+' | head -1); \
 	REV=$$(cat $(BUILD)/qosapp-a64.s.abirev 2>/dev/null || echo 0); \
-	printf 'name = "%s"\nid = "%s"\nentry = "n/a"\nversion = "1"\nloadMode = "process"\nabi = "%s.%s"\n' $$ID $$ID $$ABIV $$REV > $$MF; \
+	printf 'name = "%s"\nid = "%s"\nentry = "n/a"\nversion = "%s"\nloadMode = "process"\nabi = "%s.%s"\n' "$$NM" $$ID "$$VER" $$ABIV $$REV > $$MF; \
 	python3 tools/mkqa.py $$MF $(BUILD)/qosapp-a64.elf -o $(QA_OUT) \
 	  --relocatable --check-moved $(BUILD)/qosapp-a64.moved.elf --delta 0x10000000
 	@echo "$(QA_OUT) built for Apple Silicon (relocatable)"
@@ -217,10 +220,10 @@ $(BUILD)/qosapp-rv64.elf: $(BUILD)/qosapp-rv64.s $(QOSAPP_RT_COMMON) $(FMACHINE)
 	$(QOSAPP_RV64_LINK) -Wl,--defsym=QOS_SLOT_BASE=0x10000000 $(BUILD)/qosapp-rv64-exports.s -o $(BUILD)/qosapp-rv64.moved.elf
 
 qos-app-rv64: $(BUILD)/qosapp-rv64.elf tools/mkqa.py
-	@MF=$(BUILD)/qosapp-rv64-gen.toml; ID=$$(basename $(SOURCE) .fpr); \
+	@MF=$(BUILD)/qosapp-rv64-gen.toml; ID=$(if $(QA_ID),$(QA_ID),$$(basename $(SOURCE) .fpr)); NM="$(if $(QA_NAME),$(QA_NAME),$$ID)"; VER="$(if $(QA_VERSION),$(QA_VERSION),1)"; \
 	ABIV=$$(grep -m1 'define QOS_ABI_VERSION' $(QOS)/appside/qos_abi.h | grep -o '[0-9]\+' | head -1); \
 	REV=$$(cat $(BUILD)/qosapp-rv64.s.abirev); \
-	printf 'name = "%s"\nid = "%s"\nentry = "n/a"\nversion = "1"\nloadMode = "process"\nabi = "%s.%s"\n' $$ID $$ID $$ABIV $$REV > $$MF; \
+	printf 'name = "%s"\nid = "%s"\nentry = "n/a"\nversion = "%s"\nloadMode = "process"\nabi = "%s.%s"\n' "$$NM" $$ID "$$VER" $$ABIV $$REV > $$MF; \
 	python3 tools/mkqa.py $$MF $(BUILD)/qosapp-rv64.elf -o $(QA_OUT) \
 	  --relocatable --check-moved $(BUILD)/qosapp-rv64.moved.elf --delta 0x10000000
 	@echo "$(QA_OUT) built for Linux RV64 (relocatable)"

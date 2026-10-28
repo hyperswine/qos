@@ -18,7 +18,9 @@ directories or thread app.qa paths by hand again.
     ./qos.py new myapp --template mvu           scaffold a WORKING app in
                                     apps/myapp/ (templates: min |
                                     service | mvu | notes) -- it runs,
-                                    self-checks, and packs immediately
+                                    self-checks, and packs immediately;
+                                    its qos.toml (id/name/version/entry)
+                                    is read by run/pack given the dir
     ./qos.py dev apps/myapp/app.fpr             the SKETCH loop: run
                                     INTERPRETED (sol profile: actors, MVU,
                                     paths, transactions), rerun on save
@@ -356,7 +358,7 @@ def build_native():
        + WS.make_vars(), cwd=QOS, quiet=True)
 
 
-def build_app(prog, harts=None, out=None, build=None):
+def build_app(prog, harts=None, out=None, build=None, manifest=None):
     """Compile one program to a .qa.  `out`/`build` override the workspace
     (the parallel smoke runner gives every leg its own pair)."""
     out = out or WS.mk().out
@@ -365,7 +367,7 @@ def build_app(prog, harts=None, out=None, build=None):
     say(f"qos-app {prog} -> {rel(qa)}")
     target = "qos-app"  # qos-app.mk picks the image this host's qosp runs
     cmd = ["make", "-s", target, f"PROG={prog}", f"QA_OUT={qa}",
-           f"BUILD={build or WS.build}"]
+           f"BUILD={build or WS.build}"] + manifest_make_vars(manifest)
     if harts:
         cmd.append(f"HARTS={harts}")
     sh(cmd, cwd=ROOT, quiet=True)
@@ -414,6 +416,129 @@ def declared_plugins(a, prog):
     if getattr(a, "no_plugins", False):
         return []
     return getattr(a, "plugin", None) or prog_directives(ROOT / prog).get("plugins", [])
+
+
+# ---- the project manifest: qos.toml -------------------------------------------
+# A project made by `qos new` carries qos.toml (docs/2026-10-28-PORTABLE-APP-
+# WORKFLOW.md, "Project contract"):
+#
+#     [app]
+#     id = "myapp"            # archive id: names the app's store; stable
+#     name = "myapp"          # display name
+#     version = "0.1.0"
+#     [build]
+#     entry = "app.fpr"       # relative to qos.toml
+#     target = "qos-portable"
+#
+# `qos run` / `qos pack` given the project directory (or its entry file)
+# read it: the .qa's manifest id/name/version come from it, not from the
+# file name, and pack names dist/<id>/ after it.  A project's assets/
+# directory is the asset root (FPR_ASSETS for run, copied beside the .qa by
+# pack).  No qos.toml = the old behaviour (`#:` directives, file stem).
+# The doc's `kind = "desktop"` is accepted but not acted on: no desktop
+# adapter exists yet.  This is the project file, not the archive manifest
+# that tools/mkqa.py writes, and not `fpr build --manifest`.
+MANIFEST = "qos.toml"
+APP_ID_MAX = 64
+
+
+def app_id_invalid(i):
+    """qos/app_id.h's rule, in Python: None when valid, else the reason"""
+    if not isinstance(i, str) or not i:
+        return "app id: missing"
+    if len(i.encode()) > APP_ID_MAX:
+        return "app id: longer than 64 bytes"
+    if i[0] in ".-":
+        return "app id: may not start with '.' or '-'"
+    if not re.fullmatch(r"[A-Za-z0-9_.\-]+", i):
+        return "app id: may use only A-Z a-z 0-9 _ - ."
+    if ".." in i:
+        return 'app id: may not contain ".."'
+    return None
+
+
+def _toml_subset(text):
+    """The part of TOML qos.toml uses ([table], key = "string" | int | bool),
+    for a python3 older than 3.11 (no tomllib -- macOS's /usr/bin/python3)."""
+    out, table = {}, None
+    for n, line in enumerate(text.splitlines(), 1):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        m = re.fullmatch(r"\[([A-Za-z0-9_\-]+)\]", line)
+        if m:
+            table = out.setdefault(m.group(1), {})
+            continue
+        m = re.fullmatch(r'([A-Za-z0-9_\-]+)\s*=\s*("(?:[^"\\]|\\.)*"|-?\d+|true|false)\s*(#.*)?', line)
+        if not m:
+            raise ValueError(f"line {n}: unsupported syntax: {line}")
+        k, v = m.group(1), m.group(2)
+        val = json.loads(v) if v[0] == '"' or v in ("true", "false") else int(v)
+        (out if table is None else table)[k] = val
+    return out
+
+
+def parse_toml(text):
+    try:
+        import tomllib
+    except ModuleNotFoundError:
+        return _toml_subset(text)
+    return tomllib.loads(text)
+
+
+def load_manifest(path):
+    """qos.toml -> {dir, id, name, version, entry, assets}; dies naming the problem"""
+    path = Path(path)
+    try:
+        t = parse_toml(path.read_text())
+    except Exception as e:  # tomllib.TOMLDecodeError / ValueError
+        die(f"{rel(path)}: {e}")
+    app, build = t.get("app") or {}, t.get("build") or {}
+    if not isinstance(app, dict) or not isinstance(build, dict):
+        die(f"{rel(path)}: [app] and [build] must be tables")
+    aid = app.get("id")
+    why = app_id_invalid(aid)
+    if why:
+        die(f"{rel(path)}: [app] id = {aid!r}: {why}")
+    name = app.get("name", aid)
+    version = app.get("version", "1")
+    for key, v in (("name", name), ("version", version)):
+        if not isinstance(v, str) or not v or re.search(r'["\\$`\n\r]', v):
+            die(f"{rel(path)}: [app] {key} must be a non-empty string without quotes, backslashes, $ or backticks")
+    target = build.get("target", "qos-portable")
+    if target != "qos-portable":
+        die(f"{rel(path)}: [build] target = {target!r}: only \"qos-portable\" is supported")
+    entry = build.get("entry")
+    if not isinstance(entry, str) or not entry:
+        die(f"{rel(path)}: [build] entry is required (e.g. entry = \"app.fpr\")")
+    root = path.parent.resolve()
+    ent = (root / entry).resolve()
+    if not ent.is_file():
+        die(f"{rel(path)}: [build] entry {entry!r}: no such file {rel(ent)}")
+    assets = root / "assets"
+    return {"dir": root, "id": aid, "name": name, "version": version, "entry": ent,
+            "assets": assets if assets.is_dir() else None}
+
+
+def find_project(arg):
+    """`qos run|pack ARG`: ARG is a project directory (its qos.toml names the
+    entry) or a program file (a qos.toml beside it whose entry IS that file
+    makes it the project's).  -> (manifest or None, program path)."""
+    p = Path(arg)
+    if p.is_dir():
+        if (p / MANIFEST).is_file():
+            m = load_manifest(p / MANIFEST)
+            return m, str(m["entry"])
+        die(f"{arg}: a directory without {MANIFEST} (give the program file, or `qos new` a project)")
+    if p.is_file() and (p.parent / MANIFEST).is_file():
+        m = load_manifest(p.parent / MANIFEST)
+        if m["entry"] == p.resolve():
+            return m, arg
+    return None, arg
+
+
+def manifest_make_vars(m):
+    return [f"QA_ID={m['id']}", f"QA_NAME={m['name']}", f"QA_VERSION={m['version']}"] if m else []
 
 
 # ---- commands ---------------------------------------------------------------
@@ -475,7 +600,8 @@ def compiler_session(registrations):
 
 def cmd_run(a):
     t0 = time.time()
-    prog = resolve_prog(a.prog)
+    m, arg = find_project(a.prog)
+    prog = resolve_prog(arg)
     build_fpr()
 
     # the program's declared harness (overridable per flag): plugins to
@@ -503,9 +629,11 @@ def cmd_run(a):
     # the default: host the .qa on qosp
     gfx = a.gfx or wants_gl(prog)
     host = "qosp-gl" if gfx else "qosp"
-    qa = build_app(prog, a.harts)
+    qa = build_app(prog, a.harts, manifest=m)
     build_qosp(gfx=gfx)
     env = asset_env(prog)
+    if m and m["assets"] and "FPR_ASSETS" not in env:
+        env["FPR_ASSETS"] = str(m["assets"])
     if a.port:
         env["FPR_PORT"] = a.port
     if a.harts:
@@ -530,7 +658,7 @@ def cmd_run(a):
     with compiler_session(watch_registrations) if needs_compiler else nullcontext(None) as sock:
         if sock:
             env["FPRD_SOCK"] = sock
-        say(f"{host}: {prog}" + (f"  (port {a.port})" if a.port else ""))
+        say(f"{host}: {prog}" + (f"  (app {m['id']} {m['version']}, {MANIFEST})" if m else "") + (f"  (port {a.port})" if a.port else ""))
         # The host runs in the workspace; the app's state stays there.
         rc = run_scan([str(QOS / host), "--yes", str(qa)], cwd=WS.out, env=env, expect=expect)
     say(f"total {time.time() - t0:.1f}s")
@@ -545,14 +673,16 @@ def cmd_pack(a):
     --bundle the qosp host binary + a run.sh -- a folder you can hand
     to someone."""
     t0 = time.time()
-    prog = resolve_prog(a.prog)
+    m, arg = find_project(a.prog)
+    prog = resolve_prog(arg)
     d = prog_directives(ROOT / prog)
-    name = a.name or (d.get("name") or [Path(prog).stem])[0]
+    # --name, then qos.toml's id, then `#: name`, then the file stem
+    name = a.name or (m and m["id"]) or (d.get("name") or [Path(prog).stem])[0]
     size_mb = int((d.get("disk-mb") or ["8"])[0])
     build_fpr()
     gfx = a.gfx or wants_gl(prog)
     host = "qosp-gl" if gfx else "qosp"
-    built = build_app(prog, a.harts)
+    built = build_app(prog, a.harts, manifest=m)
     build_qosp(gfx=gfx)
     out = Path(a.out).resolve() if a.out else WS.dist / name
     out.mkdir(parents=True, exist_ok=True)
@@ -563,6 +693,15 @@ def cmd_pack(a):
         src = (ROOT / prog).parent / f
         shutil.copy2(src, out / src.name)
         pieces.append(f"{src.name} ({src.stat().st_size // 1024}KB, music)")
+    if m and m["assets"]:
+        # the project's assets/ ride beside the .qa, where the host looks
+        files = [f for f in sorted(m["assets"].rglob("*")) if f.is_file() and f.name != ".gitkeep"]
+        for f in files:
+            dst = out / f.relative_to(m["assets"])
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(f, dst)
+        if files:
+            pieces.append(f"{len(files)} asset file(s) from assets/")
     disk = None
     plugins = declared_plugins(a, prog)
     if plugins:
@@ -910,6 +1049,18 @@ editName u = "caps.v2".
 ''',
 }
 
+NEW_MANIFEST = """\
+# qos.toml -- this project's manifest (qos run / qos pack read it)
+[app]
+id = "{name}"
+name = "{name}"
+version = "0.1.0"
+
+[build]
+entry = "app.fpr"
+target = "qos-portable"
+"""
+
 TEMPLATES = {"min": TPL_MIN, "service": TPL_SERVICE, "mvu": TPL_MVU, "notes": TPL_NOTES}
 
 
@@ -927,11 +1078,17 @@ def cmd_new(a):
     dest.mkdir(parents=True)
     for fn, body in tpl.items():
         (dest / fn).write_text(body.replace("__NAME__", name).replace("__STD__", std))
+    # the project contract (docs/2026-10-28-PORTABLE-APP-WORKFLOW.md):
+    # qos.toml names the app and its entry; assets/ is the asset root
+    (dest / MANIFEST).write_text(NEW_MANIFEST.format(name=name))
+    (dest / "assets").mkdir()
+    (dest / "assets" / ".gitkeep").write_text("")
+    (dest / ".gitignore").write_text(".qos/\ndist/\nbuild/\n")
     r = rel(dest)
     me = "./qos.py" if in_tree else "qos"
-    say(f"new {a.template} app: {r}/ ({', '.join(tpl)})")
-    say(f"run it:   {me} run {r}/app.fpr   (its `#: expect` line IS the check)")
-    say(f"ship it:  {me} pack {r}/app.fpr --bundle")
+    say(f"new {a.template} app: {r}/ ({', '.join(list(tpl) + [MANIFEST, 'assets/'])})")
+    say(f"run it:   {me} run {r}   (reads {r}/{MANIFEST}; its `#: expect` line IS the check)")
+    say(f"ship it:  {me} pack {r} --bundle")
 
 
 def cmd_native(a):
@@ -1576,7 +1733,7 @@ def main():
     p.set_defaults(f=cmd_build)
 
     p = sub.add_parser("run", help="compile + run one program (the pipeline)")
-    p.add_argument("prog", help=".fpr or .sol, from anywhere in the tree")
+    p.add_argument("prog", nargs="?", default=".", help=".fpr or .sol, from anywhere in the tree, or a project directory with qos.toml (default: .)")
     p.add_argument("--on", choices=["qosp", "virt", "sol"], default="qosp", help="qosp (hosted, default) | virt (bare-metal QEMU) | sol")
     p.add_argument("--port", help="FPR_PORT for the socket tier")
     p.add_argument("--harts", help="hart count")
@@ -1597,9 +1754,9 @@ def main():
     p.set_defaults(f=cmd_new)
 
     p = sub.add_parser("pack", help="package one program into dist/<name>/ (qa + disk + optional host bundle)")
-    p.add_argument("prog", help=".fpr, from anywhere in the tree")
+    p.add_argument("prog", nargs="?", default=".", help=".fpr, from anywhere in the tree, or a project directory with qos.toml (default: .)")
     p.add_argument("-o", "--out", help="output directory (default dist/<name>/)")
-    p.add_argument("--name", help="artifact name (default: `#: name` directive, else the file stem)")
+    p.add_argument("--name", help="artifact name (default: qos.toml's [app] id, else the `#: name` directive, else the file stem)")
     p.add_argument("--bundle", action="store_true", help="include the qosp host binary + run.sh")
     p.add_argument("--gfx", action="store_true", help="bundle the desktop-GL qosp host")
     p.add_argument("--harts", help="hart count baked into the image build")
