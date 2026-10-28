@@ -13,6 +13,40 @@ git clone https://github.com/hyperswine/fprisc ../fprisc   # a sibling needs no 
 ./qos.py run programs/interactive_desktop_gl.fpr
 ```
 
+## Quickstart
+
+Checked on Debian trixie x86-64, using GHC 9.8.2 and cabal 3.12 from ghcup. macOS was not re-checked for this section.
+
+Prerequisites: GHC and cabal (via [ghcup](https://www.haskell.org/ghcup/)),
+Python 3, make, a C compiler, and the development packages that fprisc needs
+(libgit2 >= 1.9, which Ubuntu 24.04 does not ship, so use Debian trixie or Homebrew):
+
+```sh
+sudo apt-get install make gcc pkg-config python3 libgit2-dev libarchive-dev \
+  libegl-dev libgl-dev libgmp-dev zlib1g-dev
+```
+
+Build the compiler in a sibling checkout, then QOS Portable, then run hello:
+
+```sh
+git clone https://github.com/hyperswine/fprisc ../fprisc
+make -C ../fprisc fpr          # first build fetches Haskell deps; takes a while
+./qos.py fprisc                # shows which fprisc checkout is used
+./qos.py build
+./qos.py run tests/hello.fpr   # [qos] hello => hello from a .qa: fold(1..10)=55 clamp=55
+```
+
+Tests (what CI's host job runs):
+
+```sh
+./qos.py lock --check
+python3 -m unittest discover -s tests -p 'test_*.py'
+./qos.py test hello            # one smoke leg; `./qos.py test --all` is the full local sweep
+```
+
+`./qos.py run` warns when `../fprisc` is not at the release pin in
+`fprisc.lock.json`. CI builds the pinned revision.
+
 Try the graphical Main Profile shell with its onboard apps:
 
 ```sh
