@@ -10,14 +10,14 @@ Event = Type (Key Int | Tick | Resize Int Int | Pointer Int Int Int | Wheel Int 
 # Compile is the host compiler (Sys.compile: a profile and the source; the
 # worker parks while it runs, holding no hart): the Editor's build and run.
 Job = Type (Clock | Logs Int | ListRoot | ReadPath String | Disk | WritePath String String | AppendPath String String | DeletePath String
-          | SaveFile String String | Compile String String).
-Snapshot = Type (Time Int | Lines (List String) String | Text String | Done String).
+          | SaveFile String String | Compile String String | StoreRead String | StoreWrite String String | StoreRemove String).
+Snapshot = Type (Time Int | Lines (List String) String | Text String | Done String | StoreMissing | StoreValue String | StoreSaved | StoreRemoved).
 Cmd = Type (Fetch Int Job).
 Request = Type (Event Int Int Event | Close Int | CloseWith Int Int Int).
 Reply = Type (Frame Int Int S2.Sn (List String) String | Closed Int (Result Unit String) | Refused String | Completed Int (Result Snapshot String) | Stopped (Result Unit String)).
 Work = Type (Read Int Job | Stop | Inspect | InspectPolicy).
 Phase = Type (Loading | Ready | Failed String).
-magic = "qos.app-session/4".
+magic = "qos.app-session/5".
 status Loading = "Loading".
 status Ready = "Ready".
 status (Failed why) = "{why} - R RETRY".

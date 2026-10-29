@@ -1,4 +1,4 @@
-# Generated desktop API v1 adapter. The app's functions remain named.
+# Generated desktop API v2 adapter. The app's functions remain named.
 unsafe program.
 App = use "__ENTRY__".
 D = use "qos/desktop".

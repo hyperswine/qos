@@ -1,12 +1,11 @@
-# Public desktop API v1. Wire conversion stays in the generated adapter.
-# Apps are cooperative Main plugins; this is not a privilege boundary.
+# Public desktop API v2. Wire conversion stays in the generated adapter.
+# Storage is bound by Main to the installed manifest ID, independent of app
+# version/source filename. Cooperative native plugins are not isolated.
 AW = use "programs/mods/appwire".
 S = use "programs/mods/scene2d".
 Event = Type (Key Int | Tick | Resize Int Int | Pointer Int Int Int | Wheel Int Int | Focus Bool | Cancel | Arrived Int (Result Snapshot String)).
-# v1 deliberately exposes only the clock effect; persistent storage and assets
-# need their own contracts rather than access to Main's shared service handles.
-Job = Type (Clock).
-Snapshot = Type (Time Int).
+Job = Type (Clock | Read String | Write String String | Remove String).
+Snapshot = Type (Time Int | Missing | Value String | Saved | Removed).
 Cmd = Type (Fetch Int Job).
 text viewport title subtitle rows =
   (w, h) = viewport;
@@ -24,7 +23,14 @@ fromWire (AW.Focus active) = Focus active.
 fromWire AW.Cancel = Cancel.
 fromWire (AW.Arrived token result) = Arrived token (case result of
     Ok (AW.Time seconds) -> Ok (Time seconds)
+  | Ok AW.StoreMissing -> Ok Missing
+  | Ok (AW.StoreValue text) -> Ok (Value text)
+  | Ok AW.StoreSaved -> Ok Saved
+  | Ok AW.StoreRemoved -> Ok Removed
   | Err why -> Err why
   | other -> Err "unsupported desktop SDK result").
 commands Nil = Nil.
 commands (Fetch token Clock :: rest) = AW.Fetch token AW.Clock :: commands rest.
+commands (Fetch token (Read key) :: rest) = AW.Fetch token (AW.StoreRead key) :: commands rest.
+commands (Fetch token (Write key text) :: rest) = AW.Fetch token (AW.StoreWrite key text) :: commands rest.
+commands (Fetch token (Remove key) :: rest) = AW.Fetch token (AW.StoreRemove key) :: commands rest.

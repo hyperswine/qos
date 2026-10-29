@@ -3,6 +3,7 @@
 unsafe module.
 CP = use "apppolicy".
 AW = use "appwire".
+Store = use "appstore".
 EP = use "ep#c66ad65e68dd97f5".
 ED = use "epdeadline".
 ES = use "endpointstate".
@@ -12,10 +13,11 @@ SP = use "std/storageprotocol".
 AK = use "appkit".
 Worker 1 = Type (Worker CP.Snapshot ES.State).
 run owner ns storage me = runWithPolicies 0 owner ns storage me.
-runWithPolicies policies owner ns storage me =
-  Worker last state = Sys.loop (Worker (CP.Snapshot 0 CP.defaults) ES.Vacant) (step policies owner ns storage me);
+runWithPolicies policies owner ns storage me = runScoped policies "" owner ns storage me.
+runScoped policies appId owner ns storage me =
+  Worker last state = Sys.loop (Worker (CP.Snapshot 0 CP.defaults) ES.Vacant) (step policies appId owner ns storage me);
   ES.ended state.
-step policies owner ns storage me context =
+step policies appId owner ns storage me context =
   Worker admitted state = context;
   io = CP.io (CP.policy admitted);
   case receiveFromRes me owner of
@@ -34,11 +36,21 @@ step policies owner ns storage me context =
             Err why -> _ = AC.reply (from, token) (AW.Completed tag (Err why)); (True, Worker admitted state)
           | Ok snapshot ->
               selected = CP.io (CP.policy snapshot);
-              (result, next) = executeWith selected me ns storage job state;
+              (result, next) = executeScoped selected appId me ns storage job state;
               _ = AC.reply (from, token) (AW.Completed tag result);
               (True, Worker snapshot next).
+executeScoped io appId me ns storage (AW.StoreRead key) state =
+  (Store.read (CP.readMs io) me storage appId key, state).
+executeScoped io appId me ns storage (AW.StoreWrite key text) state =
+  (Store.write (CP.writeMs io) me storage appId key text, state).
+executeScoped io appId me ns storage (AW.StoreRemove key) state =
+  (Store.remove (CP.deleteMs io) me storage appId key, state).
+executeScoped io appId me ns storage job state = executeWith io me ns storage job state.
 execute me ns storage job state = executeWith CP.defaultIo me ns storage job state.
 executeWith : unsafe CP.IoPolicy -> Int -> Int -> Int -> AW.Job -> ES.State -> (Result AW.Snapshot String, ES.State) .
+executeWith io me ns storage (AW.StoreRead key) state = (Err "app store requires a bound session identity", state).
+executeWith io me ns storage (AW.StoreWrite key text) state = (Err "app store requires a bound session identity", state).
+executeWith io me ns storage (AW.StoreRemove key) state = (Err "app store requires a bound session identity", state).
 executeWith io me ns storage AW.Clock state = (Ok (AW.Time (Sys.mtime Unit / 10000000)), state).
 executeWith io me ns storage (AW.Logs sev) state =
   (Ok (AW.Lines (Sys.logSnap sev) "{Sys.logSeq sev} TOTAL"), state).

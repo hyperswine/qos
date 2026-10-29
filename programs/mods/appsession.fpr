@@ -16,12 +16,12 @@ begin me request =
     _ = AC.reply (parent, id) ("refused", AW, 0); Err "startup refused"
   else beginPayload me parent id payload.
 beginPayload me parent id payload =
-  (session, (w, h), (ns, storage, policies)) = payload;
+  (session, (w, h), (ns, storage, policies, appId)) = payload;
   case session > 0 and L.valid w h of
     False -> _ = AC.reply (parent, id) ("refused", AW, 0); Err "startup refused"
   | True ->
-      worker = spawn (AJ.runWithPolicies policies me ns storage);
-      ctx = {parent = parent, session = session, worker = worker, policies = policies, ns = ns, storage = storage, w = w, h = h, revision = 1, sequence = 0};
+      worker = spawn (AJ.runScoped policies appId me ns storage);
+      ctx = {appId = appId, parent = parent, session = session, worker = worker, policies = policies, ns = ns, storage = storage, w = w, h = h, revision = 1, sequence = 0};
       case AC.reply (parent, id) (AW.magic, AW, session) of
         Err why -> _ = finish me ctx; Err "startup refused"
       | Ok u -> Ok ctx.

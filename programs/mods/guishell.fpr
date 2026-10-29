@@ -230,7 +230,7 @@ openTile env m =
         (case scrollable ti of
           True -> paneUpdate (PN.Open (case ti == 0 - 2 of True -> 1 | False -> 2)) next
         | False -> paneUpdate PN.Leave next)
-    | False -> {m | active = ti + 1, appFailed = False, appCommands = [AP.Open ti],
+    | False -> {m | active = ti + 1, appFailed = False, appCommands = [AP.OpenNamed id ti],
         inner = AW.Frame 0 0 (Box Nil Nil) Nil "Loading", status = title, focus = L.Content, down = False, capture = L.None, wheel = 0}.
 
 scrollable a = a == 0 - 2 or a == 0 - 3.
@@ -244,7 +244,10 @@ appKey env 109 m | scrollable m.active = scrollBy env m m.pane.metrics.visible.
 appKey env 102 m | scrollable m.active = scrollTo env m 0.
 appKey env 107 m | scrollable m.active = scrollTo env m 1000000.
 appKey env k m | m.active < 0 = m.
-appKey env 19 m | m.appFailed = {m | appCommands = [AP.Open (m.active - 1)], appFailed = False}.
+appKey env 19 m | m.appFailed =
+  (q, tiles, mt, jobs, sessions) = env;
+  Tile id title hint table = at tiles m.selected;
+  {m | appCommands = [AP.OpenNamed id (m.active - 1)], appFailed = False}.
 appKey env k m | m.appFailed = m.
 appKey env k m = {m | appCommands = [AP.Deliver (AW.Key k)]}.
 appEffects me sessions m Nil = m.

@@ -367,3 +367,23 @@ committed and QOS now pins a revision that includes it.
 Remaining roadmap: **slice 3, public app storage bound to stable ID**, then
 **slice 4, matched binary release/Homebrew packaging and package-upgrade
 acceptance preserving app state**. The overall workflow goal remains active.
+
+## Update 2026-10-29: app storage milestone complete on macOS AArch64
+
+Slice 3 adds SDK v2/session 5 `Read`, `Write` and `Remove` effects. Main binds
+storage to the validated manifest ID, with keys below `app-data/<id>/` on its
+existing disk owner. The durable counter acknowledges a new value only after
+storage acknowledges it, distinguishes missing from empty, and requires an
+explicit read/reconcile after an uncertain mutation. This is cooperative
+namespacing, not memory or privilege isolation.
+
+The [app storage guide](2026-10-29-DESKTOP-APP-STORAGE.md) describes the public
+API, key limits, acknowledgements and compatibility. Installed acceptance
+proved storage through app replacement, host restart, close with a pending
+save, and a second identity using the same compiled code. It denied source
+checkouts and GHC/Cabal/make, and kept the SDK read-only.
+
+Remaining roadmap: **slice 4, publish the matched binary release/Homebrew
+package and prove a package upgrade preserves app state**. The overall goal
+remains active. Generic migration of older session-4 prototype disks is not
+part of this milestone; they require a matching profile and rebuilt apps.

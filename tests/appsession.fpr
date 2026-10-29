@@ -31,7 +31,7 @@ standIn parent me = case receive me of
   | other -> _ = drop other; standIn parent me.
 adopt parent me =
   app = spawn C.run;
-  _ = AC.callWithin 500 me app (AW.magic, AW, (7, (800, 480), (0, 0, 0)));
+  _ = AC.callWithin 500 me app (AW.magic, AW, (7, (800, 480), (0, 0, 0, "")));
   _ = send parent app;
   _ = receive me; Unit.
 adoptClient parent me =
@@ -52,7 +52,7 @@ main =
   _ = check "check 3" (late.mode == 0 and late.lines == Nil and not late.busy);
   me = myself 0;
   app = spawn C.run;
-  boot = AC.callWithin 500 me app (AW.magic, AW, (1, (800, 480), (0, 0, 0)));
+  boot = AC.callWithin 500 me app (AW.magic, AW, (1, (800, 480), (0, 0, 0, "")));
   _ = check "check 4" (case boot of Ok (magic, schema, session) -> magic == AW.magic and schema == AW and session == 1 | other -> False);
   answer = AC.callWithin 500 me app (AW.Event 1 1 (AW.Key 30));
   _ = check "check 5" (case answer of Ok (AW.Frame session revision tree vals status) -> session == 1 and revision >= 2 | other -> False);
@@ -68,10 +68,10 @@ main =
   refused = AC.callWithin 500 me bad ("wrong-version", AW, (2, (800, 480), (0, 0, 0)));
   _ = check "check 10" (case refused of Ok (magic, schema, session) -> magic == "refused" and session == 0 | other -> False);
   legacy = spawn C.run;
-  legacyReply = AC.callWithin 500 me legacy ("qos.app-session/3", "old-schema", (3, (800, 480), (0, 0)));
+  legacyReply = AC.callWithin 500 me legacy ("qos.app-session/4", AW, (3, (800, 480), (0, 0, 0)));
   _ = check "old bootstrap refused before decoding new payload" (case legacyReply of Ok (magic, schema, sid) -> magic == "refused" | other -> False);
   managed = spawn C.run;
-  _ = AC.callWithin 500 me managed (AW.magic, AW, (3, (800, 480), (0, 0, 0)));
+  _ = AC.callWithin 500 me managed (AW.magic, AW, (3, (800, 480), (0, 0, 0, "")));
   (live, frame) = AP.exchange me AW.Tick {AP.empty | actor = managed, session = 3};
   _ = check "client frame" (case frame of Ok (AW.Frame sid rev tree vals status) -> sid == 3 and rev > 0 | other -> False);
   (sized, resizedFrame) = AP.exchange me (AW.Resize 1280 640) live;
@@ -104,7 +104,7 @@ main =
   _ = check "schema refused" (case rejected of Ok (magic, schema, sid) -> magic == "refused" | other -> False);
   slow = spawn silent;
   browser = spawn B.run;
-  _ = AC.callWithin 500 me browser (AW.magic, AW, (5, (800, 480), (slow, 0, 0)));
+  _ = AC.callWithin 500 me browser (AW.magic, AW, (5, (800, 480), (slow, 0, 0, "")));
   closing = AC.callWithin 1500 me browser (AW.Close 5);
   _ = check "close during namespace read" (case closing of Ok (AW.Closed 5 (Ok u)) -> True | other -> False);
   _ = kill slow;

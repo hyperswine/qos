@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Installed QOS desktop SDK v1: scaffold and native plugin builder.
+"""Installed QOS desktop SDK v2: scaffold and native plugin builder.
 
 Python >=3.11, Clang and lld are runtime dependencies. No make, C frontend
 runtime build, GHC, Cabal or source checkout is used by this builder.
@@ -20,8 +20,8 @@ import tomllib
 
 from qos_archive import valid_id
 
-SESSION = "qos.app-session/4"
-API = "qos.desktop/1"
+SESSION = "qos.app-session/5"
+API = "qos.desktop/2"
 ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -72,7 +72,7 @@ def project(path):
         if not isinstance(app[field], str) or not app[field] or any(ord(c) < 32 or c in '"\\' for c in app[field]):
             fail(f"app.{field} must be a nonempty single-line string")
     if app["kind"] != "desktop" or build["target"] != "qos-portable":
-        fail("SDK v1 supports kind=desktop and target=qos-portable only")
+        fail("SDK v2 supports kind=desktop and target=qos-portable only")
     if not isinstance(build["entry"], str) or Path(build["entry"]).is_absolute():
         fail("build.entry must be a relative .fpr file inside the project")
     entry = (path / build["entry"]).resolve()
@@ -80,7 +80,7 @@ def project(path):
         fail("build.entry must be an existing .fpr file inside the project")
     # Assets have no public runtime lookup contract yet: refuse, never silently omit.
     if (path / "assets").exists() and any(p.is_file() and p.name != ".gitkeep" for p in (path / "assets").rglob("*")):
-        fail("asset packaging is not supported by desktop SDK v1")
+        fail("asset packaging is not supported by desktop SDK v2")
     return path, app, entry
 
 
@@ -94,7 +94,7 @@ def native():
         return "aarch64", "qa64", "a64", "aarch64-none-elf"
     if machine in ("x86_64", "amd64"):
         return "x86_64", "qx64", "x64", "x86_64-none-elf"
-    fail(f"desktop SDK v1 does not support {machine}")
+    fail(f"desktop SDK v2 does not support {machine}")
 
 
 def environment(sdk):
@@ -189,7 +189,8 @@ def build(where, compiler=None, verbose=False):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    sub = ap.add_subparsers(dest="command", required=True)
+    ap.add_argument("--version", action="store_true", help="show installed release and API versions")
+    sub = ap.add_subparsers(dest="command")
     p = sub.add_parser("new")
     p.add_argument("destination")
     p = sub.add_parser("build")
@@ -209,6 +210,12 @@ def main():
     p = sub.add_parser("run")
     p.add_argument("disk")
     args = ap.parse_args()
+    if args.version:
+        meta = json.loads((ROOT / "sdk.json").read_text())
+        print(f"QOS Portable {meta.get('release', 'development')} ({API}, {SESSION})")
+        return
+    if not args.command:
+        ap.error("choose a command (see --help)")
     try:
         if args.command == "new":
             scaffold(args.destination)

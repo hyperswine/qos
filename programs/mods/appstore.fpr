@@ -1,0 +1,31 @@
+# Session-bound persistent strings on Main's existing single disk owner.
+# The identity comes from Main's validated archive manifest, never a path or
+# version chosen by a storage command. Cooperative plugins are not isolated.
+M = use "manifest".
+E = use "std/encoding".
+Storage = use "std/storageclient".
+SP = use "std/storageprotocol".
+Wire = use "std/storage#a8f7ee14e1efae76".
+AW = use "appwire".
+address appId key = case M.validId appId of
+    Err why -> Err "app store: no valid session identity ({why})"
+  | Ok id -> if strlen key == 0 then Err "app store: key must not be empty" else
+      prefix = "app-data/{id}/";
+      if strlen key > (Wire.maxKeyBytes - strlen prefix) / 2 then Err "storage: key too large" else
+        url = "{prefix}{E.hex key}";
+        case Wire.validate url "" of Err why -> Err why | Ok u -> Ok url.
+read ms me storage appId key = case address appId key of
+    Err why -> Err why
+  | Ok url -> case Storage.within ms me (Storage.Owner storage) (SP.ReadLatest url) of
+      Ok text -> Ok (AW.StoreValue text)
+    | Err why -> if SP.missing why then Ok AW.StoreMissing else Err (SP.message why).
+write ms me storage appId key text = case address appId key of
+    Err why -> Err why
+  | Ok url -> case Storage.within ms me (Storage.Owner storage) (SP.Append url text) of
+      Ok head -> Ok AW.StoreSaved
+    | Err why -> Err (SP.message why).
+remove ms me storage appId key = case address appId key of
+    Err why -> Err why
+  | Ok url -> case Storage.within ms me (Storage.Owner storage) (SP.Delete url) of
+      Ok head -> Ok AW.StoreRemoved
+    | Err why -> Err (SP.message why).

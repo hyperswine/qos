@@ -7,6 +7,8 @@ Date: 2026-10-29. This implements slice 1 of the
 adds disk creation, safe installation/replacement, and launch. Current contributor
 toolchain installation is `qos.py toolchain install --prefix`; the original
 slice-1 evidence below remains scoped to that stage.
+The current [SDK v2 storage contract](2026-10-29-DESKTOP-APP-STORAGE.md)
+adds persistent values and uses session 5.
 
 An installed SDK can scaffold and build an external counter application and
 open it in a matching prebuilt Main. Binary release publication, a generic

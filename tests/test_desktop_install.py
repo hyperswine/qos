@@ -41,7 +41,7 @@ def pack(parts):
 
 def app(aid='counter', version='1', *, process=False, arity=1, **overrides):
     manifest = dict(id=aid, name='Counter', version=version, abi='22.137', architecture='aarch64',
-                    desktopSession='qos.app-session/4', desktopApi='qos.desktop/1',
+                    desktopSession='qos.app-session/5', desktopApi='qos.desktop/2',
                     loadMode='process' if process else 'plugin', entry='n/a' if process else 'fpr_modtab')
     manifest.update(overrides)
     image = fixture_image(arity)
@@ -62,8 +62,8 @@ class Installer(unittest.TestCase):
         main, seed = app('main', process=True), app('seed')
         (self.sdk / 'profile/main.qa').write_bytes(main)
         (self.sdk / 'profile/seed.qa').write_bytes(seed)
-        self.meta = dict(architecture='aarch64', os=sys.platform, abi='22.137', desktopSession='qos.app-session/4',
-                         desktopApi='qos.desktop/1', diskLockContract=1, profileApps=['seed.qa'],
+        self.meta = dict(architecture='aarch64', os=sys.platform, abi='22.137', desktopSession='qos.app-session/5',
+                         desktopApi='qos.desktop/2', diskLockContract=1, profileApps=['seed.qa'],
                          profileFiles={'main.qa': hashlib.sha256(main).hexdigest(), 'seed.qa': hashlib.sha256(seed).hexdigest()})
         (self.sdk / 'sdk.json').write_text(json.dumps(self.meta))
         self.path = self.base / 'main.disk'
@@ -251,7 +251,7 @@ class Installer(unittest.TestCase):
 
 class ArchiveStructure(unittest.TestCase):
     def read(self, raw):
-        return archive.read(raw, '22.137', 'aarch64', 'qos.app-session/4', 'qos.desktop/1')
+        return archive.read(raw, '22.137', 'aarch64', 'qos.app-session/5', 'qos.desktop/2')
 
     def test_table_extents_and_trailing_data(self):
         raw = app()

@@ -51,9 +51,12 @@ def main():
     if not compiler.is_file():
         ap.error("build the compiler before staging")
     arch = native()[0]
+    if args.profile and not (args.profile / "main.qa").is_file():
+        ap.error("profile must contain a prebuilt main.qa")
     sdk = prefix / "libexec/qos-portable"
     sdk.mkdir(parents=True)
     copy(compiler, sdk / "compiler/fpr")
+    copy(fprisc / "LICENSE", sdk / "compiler/LICENSE")
     # Library sources and committed blobs are SDK inputs, not compiler/platform
     # source checkouts. No .git, .hs, makefiles or runtime C build is installed.
     for folder in ("core", "std", ".fpr"):
@@ -73,8 +76,6 @@ def main():
                 fpriscDirty=bool(subprocess.check_output(["git", "-C", str(fprisc), "status", "--porcelain"], text=True)),
                 dependencies=["Python >=3.11", "Clang (ELF assembler)", "lld (ELF linker)"])
     if args.profile:
-        if not (args.profile / "main.qa").is_file():
-            ap.error("profile must contain a prebuilt main.qa")
         for artifact in args.profile.glob("*.qa"):
             if artifact.is_file():
                 copy(artifact, sdk / "profile" / artifact.name)

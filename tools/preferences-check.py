@@ -40,7 +40,7 @@ def check(out):
         print(f'Preferences: {name} refused', flush=True)
     for harts in (1, 4):
         (out / f'preferencespersistent-{harts}.disk').unlink(missing_ok=True)
-    runner.check(out, ('preferences', 'preferencesrecovery', 'preferencespersistent', 'editorstate', 'appsession', 'appsessionmemory'))
+    runner.check(out, ('appstore', 'preferences', 'preferencesrecovery', 'preferencespersistent', 'editorstate', 'appsession', 'appsessionmemory'))
 
     # The first runner pass created each disk. Reuse it in a new host process.
     for harts in (1, 4):

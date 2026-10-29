@@ -88,7 +88,7 @@ main =
   _ = check "application cannot control Editor" (get "child" (receiveFromRes me child));
   ns = spawn Endpoint.namespace;
   app = spawn ED.run;
-  boot = AC.callWithin 500 me app (AW.magic, AW, (81, (800, 480), (ns, 0, 0)));
+  boot = AC.callWithin 500 me app (AW.magic, AW, (81, (800, 480), (ns, 0, 0, "")));
   _ = check "real Editor bootstrap" (case boot of Ok (magic, schema, sid) -> magic == AW.magic and sid == 81 | other -> False);
   start = ready (AC.nowUs Unit + 1000000) me ns 81;
   _ = check "live initial state" (strIndexOf "prompt=editing" start >= 0);
@@ -120,14 +120,14 @@ main =
   _ = removed (AC.nowUs Unit + 1000000) me ns 81;
   _ = check "closed actor ended" (not (Sys.alive app));
   orphan = spawn ED.run;
-  _ = AC.callWithin 500 me orphan (AW.magic, AW, (82, (800, 480), (ns, 0, 0)));
+  _ = AC.callWithin 500 me orphan (AW.magic, AW, (82, (800, 480), (ns, 0, 0, "")));
   _ = ready (AC.nowUs Unit + 1000000) me ns 82;
   _ = kill orphan;
   _ = removed (AC.nowUs Unit + 1000000) me ns 82;
   # Fail the second registration: withdraw the first, preserve another owner.
   _ = get "reserve schema" (EP.register me ns (EC.schemaUrl 83) me);
   collision = spawn ED.run;
-  _ = AC.callWithin 500 me collision (AW.magic, AW, (83, (800, 480), (ns, 0, 0)));
+  _ = AC.callWithin 500 me collision (AW.magic, AW, (83, (800, 480), (ns, 0, 0, "")));
   _ = ended (AC.nowUs Unit + 1000000) collision;
   paths = get "collision listing" (EP.flat (AC.callWithin 250 me ns (EP.NsList (EC.url 83))));
   _ = check "partial registration withdrawn, other owner preserved" (strIndexOf (EC.schemaUrl 83) paths >= 0 and strIndexOf "{EC.url 83}\n" paths < 0);

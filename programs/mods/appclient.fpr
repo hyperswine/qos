@@ -5,7 +5,8 @@ CP = use "apppolicy".
 AW = use "appwire".
 AC = use "std/actor#201a0e9bf98a5154".
 S2 = use "scene2d".
-Cmd = Type (Open Int | Deliver AW.Event | Resize Int Int | Home | Stop | Inspect | PolicyNow | Using CP.Snapshot Cmd).
+Manifest = use "manifest".
+Cmd = Type (Open Int | OpenNamed String Int | Deliver AW.Event | Resize Int Int | Home | Stop | Inspect | PolicyNow | Using CP.Snapshot Cmd).
 empty = {actor = 0, session = 0, sequence = 0, revision = 0, cleanup = "", failures = 0, w = 960, h = 530, policy = CP.defaults, policyRevision = 0}.
 run owner ns storage w h me = runWithPolicies 0 owner ns storage w h me.
 runWithPolicies policies owner ns storage w h me =
@@ -37,6 +38,7 @@ dispatchWith snapshot policies ns storage me state ret command =
       selected = {state | policy = p, policyRevision = CP.revision snapshot};
       (next, answer) = case command of
           Open table -> launchWith p policies ns storage state.w state.h me table selected
+        | OpenNamed appId table -> launchNamedWith p policies appId ns storage state.w state.h me table selected
         | Deliver event -> exchangeWith p me event selected
         | Resize newW newH ->
             sized = {selected | w = newW, h = newH};
@@ -56,17 +58,23 @@ findEntry table root i rows = if i >= rows then Err "no app-session entry" else
     if Mod.rowArity table i == 1 then Ok (Mod.rowFn table i) else Err "appMain must take one actor argument"
     else findEntry table root (i + 1) rows.
 launch ns storage w h me table old = launchWith CP.defaults 0 ns storage w h me table old.
-launchWith p policies ns storage w h me table old =
+launchWith p policies ns storage w h me table old = launchAsWith p policies "" ns storage w h me table old.
+launchNamed appId ns storage w h me table old = launchNamedWith CP.defaults 0 appId ns storage w h me table old.
+launchNamedWith p policies appId ns storage w h me table old = case Manifest.validId appId of
+    Err why -> (old, Err why)
+  | Ok id -> launchAsWith p policies appId ns storage w h me table old.
+launchAsWith p policies appId ns storage w h me table old =
   (idle, closed) = leaveWith p me old;
   if idle.failures >= CP.maxFailures (CP.recovery p) then (idle, Err "app recovery budget exhausted; raise maxFailures or restart Main") else
     case entry table of
       Err why -> (idle, Err why)
-    | Ok start -> startWith p policies ns storage w h me start idle.
-startWith p policies ns storage w h me start idle =
+    | Ok start -> startAsWith p policies appId ns storage w h me start idle.
+startWith p policies ns storage w h me start idle = startAsWith p policies "" ns storage w h me start idle.
+startAsWith p policies appId ns storage w h me start idle =
   actor = spawn start;
   session = Sys.nextId Unit;
   state = {idle | actor = actor, session = session, sequence = 0, revision = 0, policy = p};
-  boot = AC.callWithin (CP.startupMs (CP.recovery p)) me actor (AW.magic, AW, (session, (w, h), (ns, storage, policies)));
+  boot = AC.callWithin (CP.startupMs (CP.recovery p)) me actor (AW.magic, AW, (session, (w, h), (ns, storage, policies, appId)));
   case boot of
     Ok (magic, schema, sid) -> if magic == AW.magic and schema == AW and sid == session then exchangeWith p me AW.Tick state
       else abortStartup state "app-session version/schema refused"

@@ -34,7 +34,7 @@ removed until me ns path =
     _ = Sys.sleepUs 1000; removed until me ns path.
 ended until actor = if not (Sys.alive actor) then Unit else if AC.nowUs Unit >= until then error "failed app remained alive" else
   _ = Sys.sleepUs 1000; ended until actor.
-boot me app sid ns = check "app bootstrap" (case AC.callWithin 500 me app (AW.magic, AW, (sid, (800, 480), (ns, 0, 0))) of Ok (magic, schema, id) -> id == sid | other -> False).
+boot me app sid ns = check "app bootstrap" (case AC.callWithin 500 me app (AW.magic, AW, (sid, (800, 480), (ns, 0, 0, ""))) of Ok (magic, schema, id) -> id == sid | other -> False).
 unprivileged parent ns path me =
   _ = receive me;
   answer = EP.writeOnce me ns path (EP.IStr (T.encode 1 T.defaults));

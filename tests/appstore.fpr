@@ -1,0 +1,73 @@
+#: expect appstore: HOLDS
+unsafe program.
+Store = use "../programs/mods/appstore".
+AW = use "../programs/mods/appwire".
+AJ = use "../programs/mods/appjobs".
+ES = use "../programs/mods/endpointstate".
+CP = use "../programs/mods/apppolicy".
+FS = use "std/fs#84826bc9e8ddb4b5".
+B = use "std/blockio#8b4ffa1467ca03a5".
+SVC = use "../programs/mods/svc#75479fb6d5f34670".
+AC = use "std/actor#201a0e9bf98a5154".
+get (Ok value) = value.
+get (Err why) = error "appstore: {why}".
+check label True = Unit.
+check label False = error "appstore: {label}".
+isError (Err _) = True.
+isError other = False.
+text (Ok (AW.StoreValue value)) = value.
+text other = error "appstore: expected value".
+# Consume one write without replying. Observe it through a separate actor;
+# the storage reply channel must contain only its correlated envelopes.
+Watch = Type (Mutation | Inspect).
+observe me = _ = Sys.loop 0 (observeStep me); Unit.
+observeStep me count =
+  borrowed = receive me;
+  message = keep borrowed;
+  _ = drop borrowed;
+  (from, id, command) = message;
+  case command of
+    Mutation -> (True, count + 1)
+  | Inspect -> _ = AC.reply (from, id) count; (True, count)
+  | other -> (True, count).
+stalled observer me =
+  request = receive me;
+  _ = send observer (me, 0, Mutation);
+  _ = Sys.sleepUs 1000000; Unit.
+longKey n = if n <= 0 then "" else strcat "k" (longKey (n - 1)).
+main =
+  me = myself 0;
+  _ = check "escaped key" (Store.address "counter" "a/../b" == Ok "app-data/counter/612f2e2e2f62");
+  _ = check "different identities" (Store.address "one" "x" != Store.address "two" "x");
+  _ = check "invalid identity" (isError (Store.address "../escape" "x"));
+  _ = check "empty key" (isError (Store.address "one" ""));
+  _ = check "wire key admission" (isError (Store.address "one" (longKey 600)));
+  _ = check "no disk is not missing" (case Store.read 100 me 0 "one" "x" of Err why -> why == "no disk" | other -> False);
+  block = B.serve me (device "blk");
+  fs = get (FS.startBlock me block);
+  _ = get (Store.remove 1000 me fs "one" "x");
+  _ = get (Store.remove 1000 me fs "two" "x");
+  _ = check "missing is explicit" (Store.read 1000 me fs "one" "x" == Ok AW.StoreMissing);
+  _ = check "empty value saved" (Store.write 1000 me fs "one" "x" "" == Ok AW.StoreSaved);
+  _ = check "empty is present" (text (Store.read 1000 me fs "one" "x") == "");
+  _ = get (Store.write 1000 me fs "one" "x" "first");
+  _ = get (Store.write 1000 me fs "two" "x" "second");
+  _ = check "first namespace" (text (Store.read 1000 me fs "one" "x") == "first");
+  _ = check "second namespace" (text (Store.read 1000 me fs "two" "x") == "second");
+  _ = check "delete acknowledged" (Store.remove 1000 me fs "one" "x" == Ok AW.StoreRemoved);
+  _ = check "delete is missing" (Store.read 1000 me fs "one" "x" == Ok AW.StoreMissing);
+  _ = check "delete leaves other app" (text (Store.read 1000 me fs "two" "x") == "second");
+  (unbound, vacant) = AJ.executeWith CP.defaultIo me 0 fs (AW.StoreRead "x") ES.Vacant;
+  _ = ES.ended vacant;
+  _ = check "legacy/unbound worker refused" (isError unbound);
+  observer = spawn observe;
+  slow = spawn (stalled observer);
+  answer = Store.write 50 me slow "one" "uncertain" "once";
+  _ = check "mutation outcome retained" (case answer of Err why -> strIndexOf "outcome unknown" why >= 0 | other -> False);
+  _ = check "one write, no replay" (get (AC.callWithin 500 me observer Inspect) == 1);
+  _ = kill slow;
+  _ = kill observer;
+  _ = get (FS.shutdown me fs block);
+  _ = kill fs;
+  _ = kill block;
+  "appstore: HOLDS".

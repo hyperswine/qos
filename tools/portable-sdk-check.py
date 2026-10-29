@@ -101,7 +101,7 @@ def main():
     sec = sections(archive)
     app = tomllib.loads(sec["MANIFEST"].decode())
     assert (app["id"], app["name"], app["version"], app["loadMode"], app["desktopSession"]) == (
-        "counter-example", "External Counter", "1.2.3", "plugin", "qos.app-session/4")
+        "counter-example", "External Counter", "1.2.3", "plugin", "qos.app-session/5")
     assert sec["IMPORT"] and sec["RELOC"] and sec["IMAGE"]
     assert b"sha " + hashlib.sha256(sec["IMAGE"]).hexdigest().encode() in sec["LOAD"]
     run([prefix / "bin/fpr", "build", "--target=qos-portable", "--manifest=cost.toml"],
@@ -134,6 +134,11 @@ view viewport ready = (D.text viewport "Clock effect" "" Nil, Nil,
     run([prefix / "bin/qos", "install", archive, disk], "counter-install.log")
     run([prefix / "bin/qos", "install", clock / "build/clock-example.qa", disk], "clock-install.log")
     run([prefix / "bin/qos", "install", "--prefix", out / "unused"], "old-toolchain-option-refused.log", expect=1)
+    # First process saves real app state before the archive is replaced.
+    first = run([sdk / "runtime/qosp", "--yes", out / "driver.qa"], "session-1.log",
+                extra={"FPR_DISK": str(disk), "FPR_HARTS": "1"})
+    assert "sdkdesktop: HOLDS persisted=1 loaded=0" in first, first
+    before_update = values("before-update-values.json")
     original_archive = archive.read_bytes()
     manifest.write_text(manifest.read_text().replace('"1.2.3"', '"1.2.4"'))
     source = project / "counter.fpr"
@@ -146,22 +151,24 @@ view viewport ready = (D.text viewport "Clock effect" "" Nil, Nil,
     updated_records = values("after-update-values.json")
     assert all(updated_records[k] == v for k, v in original_records.items() if k != "apps/index"), "installer changed unrelated app/user records"
     assert updated_records["apps/counter-example.qa"] == hashlib.sha256(archive.read_bytes()).hexdigest()
+    assert all(updated_records[k] == v for k, v in before_update.items() if k not in ("apps/index", "apps/counter-example.qa")), "app update changed saved state"
     # The real QLOG reader below will prove that Python's bulk framing and
     # durable metadata interoperate with the production FP-RISC implementation.
-    for harts in ("1", "4"):
-        text = run([sdk / "runtime/qosp", "--yes", out / "driver.qa"], f"session-{harts}.log",
-                   extra={"FPR_DISK": str(disk), "FPR_HARTS": harts})
-        assert "sdkdesktop: HOLDS" in text and "PANIC" not in text, text
+    second = run([sdk / "runtime/qosp", "--yes", out / "driver.qa"], "session-4.log",
+                 extra={"FPR_DISK": str(disk), "FPR_HARTS": "4"})
+    assert "sdkdesktop: HOLDS persisted=1 loaded=1" in second, second
     if args.gui:
         gui(out, sdk, guard, env, disk)
         after_launch = values("after-main-values.json")
-        assert all(after_launch[k] == v for k, v in updated_records.items()), "Main launch changed previously installed app/user records"
+        assert all(after_launch[k] == v for k, v in updated_records.items() if not k.startswith("app-data/counter-example/")), "Main launch changed unrelated app/user records"
+        assert after_launch["app-data/counter-example/636f756e74"] == hashlib.sha256(b"2").hexdigest(), "graphical counter did not save the increment"
     assert tree_hashes(prefix) == before, "SDK modified during build or runtime"
     evidence = dict(result="passed", os=sys.platform, architecture=app["architecture"],
                     sourceAccess="denied by sandbox-exec", absentTools=["ghc", "cabal", "make"],
                     readOnlySdkUnchanged=True, app=app, archiveSha256=hashlib.sha256(archive.read_bytes()).hexdigest(),
                     sessionHarts=[1, 4], clockEffect=True, graphicalMain=args.gui,
-                    offlineInstallUpdate=True, unrelatedRecordsPreserved=True, hostInstallerExclusion=args.gui,
+                    offlineInstallUpdate=True, persistentAppStore=True, storeSurvivesAppReplacement=True, storeSurvivesHostRestart=True,
+                    isolatedAppIdentities=True, closeDrainsPendingSave=True, unrelatedRecordsPreserved=True, hostInstallerExclusion=args.gui,
                     sdk=json.loads((sdk / "sdk.json").read_text()))
     (out / "evidence.json").write_text(json.dumps(evidence, indent=2) + "\n")
     print(f"installed SDK: HOLDS ({out / 'evidence.json'})")

@@ -1,54 +1,81 @@
-# Prebuilt acceptance driver: attaches the externally built SDK counter.
+# Prebuilt acceptance driver for the installed durable counter.
+# Run twice against one disk: the second process must load the first's state.
 unsafe program.
 QL = use "../programs/mods/qlog#7022992c8e4a9fba".
 Plug = use "../programs/mods/plug".
 AP = use "../programs/mods/appclient".
 AW = use "../programs/mods/appwire".
 S = use "../programs/mods/scene2d".
+FS = use "std/fs#84826bc9e8ddb4b5".
+B = use "std/blockio#8b4ffa1467ca03a5".
+Str = use "std/string".
 AC = use "std/actor#201a0e9bf98a5154".
+get (Ok value) = value.
+get (Err why) = error "sdkdesktop: {why}".
 check tag True = Unit.
 check tag False = error "sdkdesktop: {tag}".
 status (Ok (AW.Frame sid rev tree values text)) = text.
+status (Err why) = "ERR {why}".
 status other = "invalid frame".
-awaitClock me state left =
-  if left <= 0 then error "sdkdesktop: clock effect did not complete" else
+awaitStatus me state wanted left =
+  if left <= 0 then error "sdkdesktop: did not reach {wanted}" else
     (fresh, frame) = AP.exchange me AW.Tick state;
-    if status frame == "clock ready" then fresh else
-      _ = Sys.sleepUs 5000; awaitClock me fresh (left - 1).
+    if status frame == wanted then fresh else
+      _ = Sys.sleepUs 5000; awaitStatus me fresh wanted (left - 1).
+count me state n = awaitStatus me state "Count: {n}" 300.
+key me state code = (fresh, frame) = AP.exchange me (AW.Key code) state; fresh.
+close me state =
+  (idle, closed) = AP.leave me state;
+  _ = check "bounded close acknowledged" (case closed of Ok (AW.Closed sid (Ok u)) -> idle.actor == 0 | other -> False);
+  idle.
+launch me fs table id =
+  (state, frame) = AP.launchNamed id 0 fs 800 480 me table AP.empty; state.
 main =
-  disk = QL.direct (device "blk");
+  dev = device "blk";
+  disk = QL.direct dev;
   head = QL.ensure disk;
-  qa = case QL.readLatest disk head "apps/counter-example.qa" of Ok bytes -> bytes | Err why -> error why;
+  qa = get (QL.readLatest disk head "apps/counter-example.qa");
+  clockQa = get (QL.readLatest disk head "apps/clock-example.qa");
   table = Mod.plugs 0;
-  _ = case Plug.attach qa of Ok u -> Unit | Err why -> error why;
+  _ = get (Plug.attach qa);
   me = myself 0;
-  (opened, first) = AP.launch 0 0 800 480 me table AP.empty;
-  _ = check "open with Main session client" (status first == "Count: 0");
-  (one, incremented) = AP.exchange me (AW.Key 57) opened;
-  _ = check "SPACE increments" (status incremented == "Count: 1");
-  (two, incrementedAgain) = AP.exchange me (AW.Key 57) one;
-  _ = check "second increment" (status incrementedAgain == "Count: 2");
+  block = B.serve me dev;
+  fs = get (FS.startBlock me block);
+  expected = case FS.readLatest me fs "test/sdk/expected-count" of
+      Err why -> if why == "no such file" then 0 else error why
+    | Ok value -> get (Str.toInt value);
+  opened = count me (launch me fs table "counter-example") expected;
+  one = count me (key me opened 57) (expected + 1);
+  two = count me (key me one 57) (expected + 2);
   stale = AC.callWithin 500 me two.actor (AW.Event two.session two.sequence AW.Tick);
   _ = check "stale sequence refused" (case stale of Ok (AW.Refused why) -> True | other -> False);
   (sized, frame) = AP.exchange me (AW.Resize 1024 600) two;
   _ = check "resize reaches viewport" (case frame of
       Ok (AW.Frame sid rev (S.Box attrs children) values text) -> S.wOf attrs == 1024 and S.hOf attrs == 600
     | other -> False);
-  (reset, zero) = AP.exchange me (AW.Key 14) sized;
-  _ = check "BACKSPACE resets" (status zero == "Count: 0");
-  (idle, closed) = AP.leave me reset;
-  _ = check "bounded close acknowledged" (case closed of Ok (AW.Closed sid (Ok u)) -> idle.actor == 0 | other -> False);
+  _ = close me sized;
   _ = Sys.sleepUs 10000;
-  _ = check "app stopped" (not (Sys.alive reset.actor));
-  (reopened, fresh) = AP.launch 0 0 800 480 me table idle;
-  _ = check "session state resets on reopen" (status fresh == "Count: 0");
-  (done, ended) = AP.leave me reopened;
-  _ = check "second close" (case ended of Ok (AW.Closed sid (Ok u)) -> True | other -> False);
-  clockQa = case QL.readLatest disk head "apps/clock-example.qa" of Ok bytes -> bytes | Err why -> error why;
+  _ = check "app stopped" (not (Sys.alive sized.actor));
+  reopened = count me (launch me fs table "counter-example") (expected + 2);
+  zero = count me (key me reopened 14) 0;
+  # Close immediately after submitting a write: Stop is serialized behind it.
+  saving = key me zero 57;
+  _ = close me saving;
+  persisted = count me (launch me fs table "counter-example") 1;
+  _ = close me persisted;
+  # The same compiled code under another Main identity uses a different store.
+  shadow = count me (launch me fs table "counter-shadow") 0;
+  shadowOne = count me (key me shadow 57) 1;
+  shadowZero = count me (key me shadowOne 14) 0;
+  _ = close me shadowZero;
+  primary = count me (launch me fs table "counter-example") 1;
+  _ = close me primary;
+  _ = get (FS.append me fs "test/sdk/expected-count" "1");
   clockTable = Mod.plugs 0;
-  _ = case Plug.attach clockQa of Ok u -> Unit | Err why -> error why;
-  (clock, clockFrame) = AP.launch 0 0 800 480 me clockTable AP.empty;
-  readyClock = if status clockFrame == "clock ready" then clock else awaitClock me clock 100;
-  (clockDone, clockClosed) = AP.leave me readyClock;
-  _ = check "clock effect and cleanup" (case clockClosed of Ok (AW.Closed sid (Ok u)) -> True | other -> False);
-  "sdkdesktop: HOLDS".
+  _ = get (Plug.attach clockQa);
+  clock = awaitStatus me (launch me fs clockTable "clock-example") "clock ready" 300;
+  _ = close me clock;
+  _ = get (FS.shutdown me fs block);
+  _ = kill fs;
+  _ = kill block;
+  "sdkdesktop: HOLDS persisted=1 loaded={expected} isolated-identity close-drained".

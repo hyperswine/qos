@@ -1,10 +1,38 @@
-# A Main desktop app. State lasts until the tile closes; no persistence yet.
+# A durable Main desktop counter. Show a new count only after its save ACK.
 unsafe module.
 D = use "qos/desktop".
-init = (0, Nil).
-update (D.Key 57) count = (count + 1, Nil).
-update (D.Key 14) count = (0, Nil).
-update event count = (count, Nil).
-view viewport count =
-  (D.text viewport "Counter" "SPACE increments; BACKSPACE resets"
-    ["Count: {count}", "ESC returns to the desktop"], Nil, "Count: {count}").
+String = use "std/string".
+Phase = Type (Loading | Ready | Saving Int | Failed String).
+init = ({count = 0, token = 1, phase = Loading}, [D.Fetch 1 (D.Read "count")]).
+busy m = case m.phase of Loading -> True | Saving n -> True | other -> False.
+save wanted m =
+  next = m.token + 1;
+  ({m | token = next, phase = Saving wanted}, [D.Fetch next (D.Write "count" "{wanted}")]).
+update (D.Key 57) m = case m.phase of Ready -> save (m.count + 1) m | other -> (m, Nil).
+update (D.Key 14) m = if busy m then (m, Nil) else save 0 m.
+# Read back/reconcile explicitly; never replay a mutation after a timeout.
+update (D.Key 19) m = if busy m then (m, Nil) else
+  ({m | token = m.token + 1, phase = Loading}, [D.Fetch (m.token + 1) (D.Read "count")]).
+update (D.Arrived token result) m = if token != m.token then (m, Nil) else
+  case m.phase of
+    Loading -> (case result of
+        Ok D.Missing -> ({m | count = 0, phase = Ready}, Nil)
+      | Ok (D.Value text) -> (case String.toInt text of
+          Ok n -> ({m | count = n, phase = Ready}, Nil)
+        | Err why -> ({m | phase = Failed "invalid saved count; BACKSPACE explicitly resets"}, Nil))
+      | Err why -> ({m | phase = Failed why}, Nil)
+      | other -> ({m | phase = Failed "unexpected storage read result"}, Nil))
+  | Saving wanted -> (case result of
+        Ok D.Saved -> ({m | count = wanted, phase = Ready}, Nil)
+      | Err why -> ({m | phase = Failed why}, Nil)
+      | other -> ({m | phase = Failed "unexpected storage write result"}, Nil))
+  | other -> (m, Nil).
+update event m = (m, Nil).
+status m = case m.phase of
+    Ready -> "Count: {m.count}"
+  | Loading -> "Loading saved count"
+  | Saving wanted -> "Saving {wanted}"
+  | Failed why -> "Storage error: {why}; R reads/reconciles".
+view viewport m =
+  (D.text viewport "Counter" "SPACE increments; BACKSPACE resets; R reloads"
+    ["Count: {m.count}", "Saved state survives closing, restart and app updates", "ESC returns to the desktop"], Nil, status m).
