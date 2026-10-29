@@ -53,7 +53,7 @@ class QosFpr < Formula
     <<~EOS
       Every run writes to the directory you invoke from (.qos/ and dist/),
       never to the installed tree.  Start a project with:
-        qos new myapp && qos run myapp/app.fpr
+        qos new myapp --template mvu && qos run myapp/app.fpr
       Cross-compiling for QEMU virt (`qos run --on virt`) and QOS Native
       (`qos native`) additionally need riscv64-elf-gcc and qemu:
         brew install riscv64-elf-gcc riscv64-elf-binutils qemu

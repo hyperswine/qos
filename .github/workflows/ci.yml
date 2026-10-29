@@ -115,6 +115,105 @@ jobs:
           python3 tools/portable-store-check.py
           python3 tools/disk-suspend-check.py
 
+  sdk:
+    # The app-author loop against an INSTALLED toolchain: install, then move
+    # the qos and fprisc checkouts out of sight and run qos new/run/pack
+    # from an empty directory with no GHC/cabal on PATH (tools/sdk-smoke.sh).
+    # Depends only on the fprisc build, not on the host job.
+    name: installed SDK app loop (x86-64)
+    needs: fprisc
+    runs-on: ubuntu-latest
+    container: debian:trixie
+    timeout-minutes: 30
+    steps:
+      - name: tools (no ghc/cabal)
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git ca-certificates python3 zstd \
+            make gcc libc6-dev pkg-config libgit2-1.9 libarchive13t64 libegl1 libgl1 \
+            libgmp10 libffi8 libnuma1 libegl-dev libgl-dev
+      - uses: actions/checkout@v4
+      - uses: actions/cache/restore@v4
+        with:
+          path: fprisc
+          key: fprisc-trixie-${{ needs.fprisc.outputs.rev }}
+          fail-on-cache-miss: true
+      - name: qos.py install --prefix
+        run: |
+          FPRISC_ROOT="$GITHUB_WORKSPACE/fprisc" ./qos.py install --prefix "$RUNNER_TEMP/qos-sdk"
+          du -sh "$RUNNER_TEMP/qos-sdk"
+          cat "$RUNNER_TEMP/qos-sdk/libexec/qos-fpr/sdk-version.json"
+          # the SDK layout: the prebuilt compiler, not its sources or tests
+          test ! -e "$RUNNER_TEMP/qos-sdk/libexec/qos-fpr/toolchain/compiler"
+          test ! -e "$RUNNER_TEMP/qos-sdk/libexec/qos-fpr/tests"
+      - name: new / run / pack --bundle outside the checkouts
+        run: |
+          set -e
+          cp tools/sdk-smoke.sh "$RUNNER_TEMP/sdk-smoke.sh"
+          # hide the qos checkout (and the fprisc checkout inside it)
+          hidden="$GITHUB_WORKSPACE.hidden"
+          mv "$GITHUB_WORKSPACE" "$hidden"
+          trap 'mv "$hidden" "$GITHUB_WORKSPACE"' EXIT
+          test ! -e "$GITHUB_WORKSPACE"
+          if command -v ghc || command -v cabal; then echo 'ghc/cabal on PATH'; exit 1; fi
+          cd "$RUNNER_TEMP"
+          env -u FPRISC_ROOT sh "$RUNNER_TEMP/sdk-smoke.sh" "$RUNNER_TEMP/qos-sdk" "$RUNNER_TEMP/smoke"
+
+  sdk-macos:
+    # NON-BLOCKING: the same loop on Apple Silicon (macos-15, arm64).  It
+    # builds fprisc from source with GHC (no cached Mac compiler yet); a red
+    # result here does not fail the workflow.
+    name: installed SDK app loop (macos-15 arm64, non-blocking)
+    runs-on: macos-15
+    continue-on-error: true
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - id: lock
+        run: echo "rev=$(python3 -c 'import json;print(json.load(open("fprisc.lock.json"))["revision"])')" >> "$GITHUB_OUTPUT"
+      - name: brew deps
+        run: |
+          brew install libgit2 libarchive pkg-config lld
+          echo "$(brew --prefix lld)/bin" >> "$GITHUB_PATH"
+      - uses: haskell-actions/setup@v2
+        with:
+          ghc-version: '9.8'
+          cabal-version: '3.12'
+      - id: cache
+        uses: actions/cache@v4
+        with:
+          path: fprisc
+          key: fprisc-macos15-arm64-${{ steps.lock.outputs.rev }}
+      - name: clone + build fprisc at the locked revision
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          git init -q fprisc
+          git -C fprisc remote add origin https://github.com/hyperswine/fprisc.git
+          git -C fprisc fetch -q --depth 1 origin "${{ steps.lock.outputs.rev }}"
+          git -C fprisc checkout -q FETCH_HEAD
+          cabal update
+          make -C fprisc fpr
+          rm -rf fprisc/dist-newstyle
+      - name: qos.py install --prefix
+        run: |
+          FPRISC_ROOT="$GITHUB_WORKSPACE/fprisc" ./qos.py install --prefix "$RUNNER_TEMP/qos-sdk"
+          du -sh "$RUNNER_TEMP/qos-sdk"
+          cat "$RUNNER_TEMP/qos-sdk/libexec/qos-fpr/sdk-version.json"
+          # the SDK layout: the prebuilt compiler, not its sources or tests
+          test ! -e "$RUNNER_TEMP/qos-sdk/libexec/qos-fpr/toolchain/compiler"
+          test ! -e "$RUNNER_TEMP/qos-sdk/libexec/qos-fpr/tests"
+      - name: new / run / pack --bundle outside the checkouts
+        run: |
+          set -e
+          cp tools/sdk-smoke.sh "$RUNNER_TEMP/sdk-smoke.sh"
+          hidden="$GITHUB_WORKSPACE.hidden"
+          mv "$GITHUB_WORKSPACE" "$hidden"
+          trap 'mv "$hidden" "$GITHUB_WORKSPACE"' EXIT
+          cd "$RUNNER_TEMP"
+          # GHC stays installed on this runner; the smoke script drops it from PATH
+          SDK_SMOKE_EXTRA_PATH="$(brew --prefix lld)/bin" \
+            env -u FPRISC_ROOT sh "$RUNNER_TEMP/sdk-smoke.sh" "$RUNNER_TEMP/qos-sdk" "$RUNNER_TEMP/smoke"
+
   native:
     name: QOS Native under QEMU (riscv64 virt)
     needs: fprisc

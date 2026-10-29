@@ -12,7 +12,13 @@ ifeq ($(strip $(FPRISC_ROOT)),)
 FPRISC_ROOT := $(QOS_ROOT)/../fprisc
 endif
 FPRISC_ROOT := $(abspath $(FPRISC_ROOT))
-ifeq ($(wildcard $(FPRISC_ROOT)/compiler/Main.hs),)
+ifneq ($(wildcard $(QOS_ROOT)/.installed),)
+# an installed SDK ships the fpr binary and its library dirs, not the
+# compiler sources (`qos.py install`; --full keeps them)
+ifeq ($(wildcard $(FPRISC_ROOT)/fpr),)
+$(error installed tree at $(QOS_ROOT) has no toolchain/fpr: reinstall)
+endif
+else ifeq ($(wildcard $(FPRISC_ROOT)/compiler/Main.hs),)
 $(error no fprisc checkout at $(FPRISC_ROOT): ./qos.py fprisc /path/to/fprisc, or export FPRISC_ROOT)
 endif
 export FPRISC_ROOT
