@@ -17,7 +17,9 @@ The [intended installed-release app workflow](docs/2026-10-28-PORTABLE-APP-WORKF
 tracks the installed SDK, external projects, QOS-target builds, disk
 installation, desktop launch and persistent app state. These slices are
 implemented on macOS ARM64. The [binary package guide](docs/2026-10-29-DESKTOP-RELEASE.md)
-records release qualification; the source contributor quickstart remains below.
+records the published macOS 27+ ARM64 package and upgrade acceptance. Install
+it with `brew install hyperswine/tap/qos-portable`; the source contributor
+quickstart remains below.
 
 ## Quickstart
 
@@ -153,7 +155,7 @@ The first installed-app slice is available for contributor staging: see the
 an external counter with a read-only SDK and no source checkouts or GHC/Cabal.
 Safe app updates and [stable-ID app storage](docs/2026-10-29-DESKTOP-APP-STORAGE.md)
 are implemented; [binary package qualification](docs/2026-10-29-DESKTOP-RELEASE.md)
-is the final roadmap slice.
+completes the four revised roadmap slices on macOS ARM64.
 
 The installed AArch64 Main disk workflow now supports `qos disk create`,
 `qos install APP.qa DISK`, and `qos run DISK`, with offline locking and atomic

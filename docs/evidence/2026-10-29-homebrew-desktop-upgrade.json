@@ -1,0 +1,86 @@
+{
+  "result": "passed",
+  "fromRelease": "0.1.0-rc1",
+  "toRelease": "0.1.0",
+  "os": "darwin",
+  "architecture": "aarch64",
+  "packageLeftDiskByteIdentical": true,
+  "loadedCount": 2,
+  "upgradedCompilerBuild": true,
+  "appReplacement": true,
+  "unrelatedRecordsPreserved": true,
+  "sourceAccess": "denied by sandbox-exec",
+  "absentTools": [
+    "ghc",
+    "cabal",
+    "make"
+  ],
+  "sdk": {
+    "format": 1,
+    "abi": "22.137",
+    "desktopApi": "qos.desktop/2",
+    "desktopSession": "qos.app-session/5",
+    "architecture": "aarch64",
+    "os": "darwin",
+    "portableAbi": "22",
+    "compilerSha256": "b20b50c46d2b19bb6664e9c4b390f725c23d2b06b8bdeb41d1027a4ca756065b",
+    "qosRevision": "8afee65ae54d9511994d42c044383f225770b9d2",
+    "fpriscRevision": "94f699bc868f49c1e5b5019f9228512e85415993",
+    "qosDirty": false,
+    "fpriscDirty": false,
+    "dependencies": [
+      "Python >=3.11",
+      "Clang (ELF assembler)",
+      "lld (ELF linker)"
+    ],
+    "profileFiles": {
+      "browser.qa": "3a7d62c0ccc007b488eff4ae41a40556f096752fb407dbeafafb7f03cdab5eb0",
+      "clock.qa": "d78f52557a4933ee150dcfa48f7d2e405c85c3ea3c88f1308d05341c3fd1bb2f",
+      "disk.qa": "9203555170f617e5b8ead08b5b9839a4449a57d689ae470ed1673449b2205b15",
+      "editor.qa": "b8e687aeea9c00ec51eb800cf0470413a967cb8d6d50ecfb45c0496332fbc37b",
+      "logs.qa": "7d51cc8f234a19fc4f7c15fbac48b625d79d12ad5bb6ff624eb734e0a9872185",
+      "main.qa": "3551dc19708af2efe18244384b9b8709a0756e00e0eb9e61a9fdc64e8709ac1d",
+      "terminal.qa": "7390f3d88fcec33ae7b7a8817bed713494f2de054605e98be9a61e0f67c642d8"
+    },
+    "profileApps": [
+      "browser.qa",
+      "clock.qa",
+      "disk.qa",
+      "editor.qa",
+      "logs.qa",
+      "terminal.qa"
+    ],
+    "runtimeFiles": {
+      "qosp": "ff26cfddb4b1e53894e62819995910ae7e7f7b390557c911c1ecf79952811e84",
+      "qosp-gl": "611ce30e52cf4fd6405d8b73e2150dbe214a6785fc66f2c3f574e6e5f9f4cbe4"
+    },
+    "diskLockContract": 1,
+    "release": "0.1.0",
+    "minimumMacOS": "27.0",
+    "nativeLibraries": {
+      "compiler/fpr": [
+        "\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1359.0.0)",
+        "\t/opt/homebrew/opt/libgit2/lib/libgit2.1.9.dylib (compatibility version 1.9.0, current version 1.9.7)",
+        "\t/opt/homebrew/opt/libarchive/lib/libarchive.13.dylib (compatibility version 22.0.0, current version 22.10.0)",
+        "\t/usr/lib/libcurl.4.dylib (compatibility version 7.0.0, current version 9.0.0)",
+        "\t/usr/lib/libiconv.2.dylib (compatibility version 7.0.0, current version 7.0.0)",
+        "\t/usr/lib/libffi.dylib (compatibility version 1.0.0, current version 40.0.0)",
+        "\t/usr/lib/libcharset.1.dylib (compatibility version 1.0.0, current version 1.0.0)"
+      ],
+      "runtime/qosp": [
+        "\t/System/Library/Frameworks/AudioToolbox.framework/Versions/A/AudioToolbox (compatibility version 1.0.0, current version 1000.0.0)",
+        "\t/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation (compatibility version 150.0.0, current version 5027.0.69)",
+        "\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1359.0.0)"
+      ],
+      "runtime/qosp-gl": [
+        "\t/opt/homebrew/opt/glfw/lib/libglfw.3.dylib (compatibility version 3.0.0, current version 3.5.0)",
+        "\t/System/Library/Frameworks/OpenGL.framework/Versions/A/OpenGL (compatibility version 1.0.0, current version 1.0.0)",
+        "\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1359.0.0)",
+        "\t/System/Library/Frameworks/AudioToolbox.framework/Versions/A/AudioToolbox (compatibility version 1.0.0, current version 1000.0.0)",
+        "\t/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation (compatibility version 150.0.0, current version 5027.0.69)"
+      ]
+    }
+  },
+  "packageManager": "Homebrew",
+  "preparedDiskSha256": "b3d22a4f039b036b962bd7f701c4ad51c5ba69a299322dc3ee4430f81c947f82"
+}

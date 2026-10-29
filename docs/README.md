@@ -166,3 +166,7 @@ Source-adjacent READMEs under `tools/` stay beside the tools they explain.
 | 2026-10-25 | [PARALLEL-SERVICE-CHECKS.md](2026-10-25-PARALLEL-SERVICE-CHECKS.md) | isolated service workspaces, bounded workers, process cleanup and per-leg sweep verdicts |
 | 2026-10-27 | [PI-TYPED-IR-UPGRADE.md](2026-10-27-PI-TYPED-IR-UPGRADE.md) | Codegen-135 Pi bundle, matching Editor SDK, physical runtime/UI acceptance, preserved configuration and stopped-disk rollback |
 | 2026-10-28 | [PORTABLE-APP-WORKFLOW.md](2026-10-28-PORTABLE-APP-WORKFLOW.md) | Intended binary-installed developer workflow: Homebrew runtime/SDK, external app projects, native builds, recoverable disk installation and Main desktop launch; implementation gaps and acceptance criteria |
+| 2026-10-29 | [INSTALLED-DESKTOP-SDK.md](2026-10-29-INSTALLED-DESKTOP-SDK.md) | Historical slice-1 SDK contract and source-denied external app acceptance; later v2 updates linked |
+| 2026-10-29 | [DESKTOP-DISK-INSTALL.md](2026-10-29-DESKTOP-DISK-INSTALL.md) | Offline disk creation, atomic app/catalogue installation and shared disk ownership |
+| 2026-10-29 | [DESKTOP-APP-STORAGE.md](2026-10-29-DESKTOP-APP-STORAGE.md) | SDK v2 stable-ID storage, acknowledgements, bounded failures and persistence acceptance |
+| 2026-10-29 | [DESKTOP-RELEASE.md](2026-10-29-DESKTOP-RELEASE.md) | Published macOS ARM64 binary SDK/Homebrew package and actual upgrade preserving app state |

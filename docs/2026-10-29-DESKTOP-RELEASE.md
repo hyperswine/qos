@@ -78,8 +78,8 @@ incompatibility requires an explicit migration strategy, not reinitialization
 of the disk. The initial public API is v2/session 5; generic migration of old
 session-4 prototype disks is not implemented.
 
-Publication and upgrade evidence will be linked here once the actual package
-install and upgrade have passed; staging alone is not release acceptance.
+The final release and upgrade evidence below record the actual package
+installation and upgrade; staging alone is not release acceptance.
 
 ## Qualification candidate
 
@@ -95,5 +95,41 @@ bounded timeout failures and subsequent trials without relaxing deadlines.
 Qualification found default Python bytecode caches in the candidate's package
 directory. The final release disables those in the helper and both package
 wrappers. The prepared upgrade disk contains count 2 and a fingerprint of every
-record and the complete disk. Actual final-package upgrade verification remains
-the last acceptance step; the goal is not complete until it passes.
+record and the complete disk. The final release record below supersedes that candidate checkpoint.
+
+## Release and upgrade complete
+
+[QOS Portable 0.1.0](https://github.com/hyperswine/qos/releases/tag/desktop-v0.1.0)
+is published as the stable release, built from QOS `8afee65` and FP-RISC
+`94f699b`. The checksum-pinned formula is published in
+[hyperswine/homebrew-tap](https://github.com/hyperswine/homebrew-tap/blob/main/Formula/qos-portable.rb)
+at `bfa0d3c`.
+
+```sh
+brew install hyperswine/tap/qos-portable
+qos new counter
+cd counter
+fpr build --target=qos-portable
+qos disk create "$HOME/qosp.disk"
+qos install build/counter.qa "$HOME/qosp.disk"
+qos run "$HOME/qosp.disk"
+```
+
+The [final package evidence](evidence/2026-10-29-homebrew-desktop-release.json)
+records passing Homebrew formula and native dependency checks and the full
+graphical installed-SDK acceptance with source access denied. Default formula
+commands leave no Python bytecode in the package. Installed SDK contents remain
+unchanged during the read-only acceptance.
+
+The [actual package upgrade evidence](evidence/2026-10-29-homebrew-desktop-upgrade.json)
+records `brew upgrade` from `0.1.0-rc1` to `0.1.0`: the prepared user disk was
+byte-identical after installation and before launch. The upgraded compiler/SDK
+rebuilt and replaced the counter as version 1.2.5, and the upgraded runtime
+loaded its saved count 2. Unrelated records survived. This qualifies this
+compatible package transition, not arbitrary future ABI/profile migrations.
+
+All four workflow slices are complete for this initial macOS ARM64 package.
+Other operating systems/architectures, older macOS deployment targets, generic
+profile migrations, broader SDK features/assets and physical power-cut testing
+remain separate work. The pre-existing live-preferences retention assertion
+remains red as documented in the app storage guide; its threshold was not changed.

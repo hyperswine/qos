@@ -8,16 +8,22 @@ An application author should need their own project and a QOS Portable
 installation. Building QOS or keeping QOS and FP-RISC source checkouts should
 be work for platform contributors, rather than a prerequisite for app authors.
 
-**Update 2026-10-29:** slice 1 is implemented and tested on macOS AArch64.
+**Update 2026-10-29:** all four revised slices are complete for macOS ARM64
+on macOS 27+. The [final release record](2026-10-29-DESKTOP-RELEASE.md) links
+the published package and actual upgrade evidence.
+
+The earlier slice-1 checkpoint below is retained as history. Slice 1 was
+implemented and tested on macOS AArch64.
 The [dated update at the end](#update-2026-10-29-slice-1-done-slices-revised)
 records what it delivered, which gaps remain, the revised slices and the
 decisions needed before slice 2. Everything before that section is the plan
 as written on 2026-10-28.
 
-The commands and project manifest below describe the intended interface. They
-are not a statement that this interface is implemented. Current source-based
-instructions remain in the [repository README](../README.md), and the existing
-desktop composition is described in the [Main Profile guide](2026-10-03-GUI-SHELL.md).
+The commands and project manifest below are the original proposal. The dated
+milestone updates and their linked SDK/disk/storage/release guides describe the
+implemented contracts. Source contributor instructions remain in the
+[repository README](../README.md); desktop composition is described in the
+[Main Profile guide](2026-10-03-GUI-SHELL.md).
 
 ## The development loop
 
@@ -387,3 +393,22 @@ Remaining roadmap: **slice 4, publish the matched binary release/Homebrew
 package and prove a package upgrade preserves app state**. The overall goal
 remains active. Generic migration of older session-4 prototype disks is not
 part of this milestone; they require a matching profile and rebuilt apps.
+
+## Update 2026-10-29: binary release and package upgrade complete
+
+Slice 4 is complete for the initial macOS ARM64/macOS 27+ target:
+`brew install hyperswine/tap/qos-portable` fetches the matched binary compiler,
+SDK, hosts and Main. The public `desktop-v0.1.0` release and tap formula contain
+real artifact hashes and declared runtime/build-tool dependencies; app authors
+need neither source checkouts nor GHC/Cabal.
+
+The [release record](2026-10-29-DESKTOP-RELEASE.md) includes passing installed
+formula, dependency and source-denied graphical acceptance. An actual Homebrew
+upgrade from 0.1.0-rc1 to 0.1.0 preserved the entire external disk before launch;
+the upgraded compiler/SDK rebuilt and replaced the app and the upgraded host
+restored saved count 2. Unrelated app/user records remained intact.
+
+The four revised roadmap slices are therefore complete within that tested
+platform scope. Future platform ports, richer SDK APIs/assets and general
+ABI/profile migrations are distinct follow-ups. The documented pre-existing
+live-preferences retention failure remains unchanged.
