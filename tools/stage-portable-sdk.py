@@ -101,7 +101,7 @@ def main():
     binaries.mkdir()
     (binaries / "fpr").symlink_to("../libexec/qos-portable/compiler/fpr")
     launcher = binaries / "qos"
-    launcher.write_text('#!/bin/sh\nbindir=${0%/*}\nexec python3 "$bindir/../libexec/qos-portable/tools/portable_sdk.py" "$@"\n')
+    launcher.write_text('#!/bin/sh\nbindir=${0%/*}\nPYTHONDONTWRITEBYTECODE=1 exec python3 "$bindir/../libexec/qos-portable/tools/portable_sdk.py" "$@"\n')
     launcher.chmod(0o755)
     # A hash inventory helps release packaging verify the exact staged inputs.
     inventory = {str(p.relative_to(sdk)): hashlib.sha256(p.read_bytes()).hexdigest()

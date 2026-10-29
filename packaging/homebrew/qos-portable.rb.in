@@ -20,9 +20,9 @@ class QosPortable < Formula
   def install
     libexec.install "libexec/qos-portable"
     tools = "#{Formula["llvm"].opt_bin}:#{Formula["lld"].opt_bin}:#{Formula["python@3.14"].opt_libexec}/bin:$PATH"
-    (bin/"fpr").write_env_script libexec/"qos-portable/compiler/fpr", PATH: tools
+    (bin/"fpr").write_env_script libexec/"qos-portable/compiler/fpr", PATH: tools, PYTHONDONTWRITEBYTECODE: "1"
     (bin/"qos").write_env_script Formula["python@3.14"].opt_bin/"python3.14",
-                               [libexec/"qos-portable/tools/portable_sdk.py"], { PATH: tools }
+                               [libexec/"qos-portable/tools/portable_sdk.py"], { PATH: tools, PYTHONDONTWRITEBYTECODE: "1" }
   end
 
   def caveats

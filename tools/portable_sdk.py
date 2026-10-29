@@ -18,6 +18,8 @@ import sys
 import tempfile
 import tomllib
 
+# Installed SDK helpers never create bytecode beside package-owned modules.
+sys.dont_write_bytecode = True
 from qos_archive import valid_id
 
 SESSION = "qos.app-session/5"

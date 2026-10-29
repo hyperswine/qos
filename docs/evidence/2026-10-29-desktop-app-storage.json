@@ -100,5 +100,50 @@
       11776
     ],
     "assertionChanged": false
+  },
+  "nativeRegressions": {
+    "workers": [
+      1,
+      4
+    ],
+    "passed": [
+      "appstore",
+      "preferencesrecovery",
+      "preferencespersistent (two host boots)",
+      "editorstate",
+      "appsession",
+      "appsessionmemory"
+    ],
+    "pythonTests": 57,
+    "projectTests": 7
+  },
+  "packageQualificationNotes": {
+    "initialCandidate": "desktop-v0.1.0-rc1",
+    "initialFourWorkerRun": "failed bounded close acknowledgement",
+    "diagnosticRuns": "three startup timeouts, followed by successful checkpointed run",
+    "driverChange": "co-locate block and Files services, matching Main lifecycle composition; retain deadlines and all assertions",
+    "independentColocatedTrials": [
+      {
+        "workers": 1,
+        "result": "passed",
+        "startupMs": 3168
+      },
+      {
+        "workers": 4,
+        "result": "passed",
+        "startupMs": 8457
+      },
+      {
+        "workers": 4,
+        "result": "passed",
+        "startupMs": 3587
+      },
+      {
+        "workers": 4,
+        "result": "passed",
+        "startupMs": 6678
+      }
+    ],
+    "scope": "local functional acceptance; no guarantee against deadline refusal under arbitrary load"
   }
 }

@@ -14,11 +14,10 @@ git clone https://github.com/hyperswine/fprisc ../fprisc   # a sibling needs no 
 ```
 
 The [intended installed-release app workflow](docs/2026-10-28-PORTABLE-APP-WORKFLOW.md)
-describes the planned `brew install qos-portable` environment, external app
-projects, QOS-target builds, disk installation and desktop launch. It is a
-design and implementation plan; the source-based commands below remain the
-current quickstart, and [App loop today](#app-loop-today-install-new-run-pack) covers
-what works from an install now.
+tracks the installed SDK, external projects, QOS-target builds, disk
+installation, desktop launch and persistent app state. These slices are
+implemented on macOS ARM64. The [binary package guide](docs/2026-10-29-DESKTOP-RELEASE.md)
+records release qualification; the source contributor quickstart remains below.
 
 ## Quickstart
 
@@ -82,10 +81,9 @@ has been validated on macOS AArch64; see the
 `qos new` scaffold uses `main.fpr` and the generated Main session adapter.
 
 Not verified for the standalone loop above: macOS, and GL host apps (`#: host gl`,
-qosp-gl), which need GLFW at install time. Desktop-tile installation does not exist yet. The
-remaining workflow (binary releases, safe disk installation, app persistence
-and desktop tiles) is
-[docs/2026-10-28-PORTABLE-APP-WORKFLOW.md](docs/2026-10-28-PORTABLE-APP-WORKFLOW.md).
+qosp-gl), which need GLFW at install time. The separate desktop SDK supports
+offline tile installation/replacement and persistent app state; see the
+[workflow milestones](docs/2026-10-28-PORTABLE-APP-WORKFLOW.md).
 
 Try the graphical Main Profile shell with its onboard apps:
 
@@ -153,7 +151,9 @@ under `docs/history/` for reference.
 The first installed-app slice is available for contributor staging: see the
 [installed desktop SDK v1 guide](docs/2026-10-29-INSTALLED-DESKTOP-SDK.md). It builds
 an external counter with a read-only SDK and no source checkouts or GHC/Cabal.
-Safe app updates and public binary packaging are the next slices.
+Safe app updates and [stable-ID app storage](docs/2026-10-29-DESKTOP-APP-STORAGE.md)
+are implemented; [binary package qualification](docs/2026-10-29-DESKTOP-RELEASE.md)
+is the final roadmap slice.
 
 The installed AArch64 Main disk workflow now supports `qos disk create`,
 `qos install APP.qa DISK`, and `qos run DISK`, with offline locking and atomic

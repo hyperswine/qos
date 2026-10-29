@@ -12,6 +12,8 @@ Str = use "std/string".
 AC = use "std/actor#201a0e9bf98a5154".
 get (Ok value) = value.
 get (Err why) = error "sdkdesktop: {why}".
+checked stage (Ok value) = value.
+checked stage (Err why) = error "sdkdesktop: {stage}: {why}".
 check tag True = Unit.
 check tag False = error "sdkdesktop: {tag}".
 status (Ok (AW.Frame sid rev tree values text)) = text.
@@ -26,7 +28,11 @@ count me state n = awaitStatus me state "Count: {n}" 300.
 key me state code = (fresh, frame) = AP.exchange me (AW.Key code) state; fresh.
 close me state =
   (idle, closed) = AP.leave me state;
-  _ = check "bounded close acknowledged" (case closed of Ok (AW.Closed sid (Ok u)) -> idle.actor == 0 | other -> False);
+  _ = case closed of
+      Err why -> error "sdkdesktop: close sequence={state.sequence}: {why}"
+    | Ok (AW.Closed sid (Err why)) -> error "sdkdesktop: worker close sequence={state.sequence}: {why}"
+    | Ok (AW.Closed sid (Ok u)) -> check "closed actor retired" (idle.actor == 0)
+    | other -> error "sdkdesktop: invalid close acknowledgement";
   idle.
 launch me fs table id =
   (state, frame) = AP.launchNamed id 0 fs 800 480 me table AP.empty; state.
@@ -39,8 +45,11 @@ main =
   table = Mod.plugs 0;
   _ = get (Plug.attach qa);
   me = myself 0;
-  block = B.serve me dev;
-  fs = get (FS.startBlock me block);
+  # Match Main's service composition: keep block helpers and Files on one hart.
+  block = B.serveWithOn (hartId 0) me dev B.unsupported B.unsupported;
+  started = Sys.mtime Unit;
+  fs = checked "storage startup" (FS.startBlock me block);
+  _ = print "sdkdesktop: storage ready in {(Sys.mtime Unit - started) / 10000} ms";
   expected = case FS.readLatest me fs "test/sdk/expected-count" of
       Err why -> if why == "no such file" then 0 else error why
     | Ok value -> get (Str.toInt value);
@@ -70,12 +79,12 @@ main =
   _ = close me shadowZero;
   primary = count me (launch me fs table "counter-example") 1;
   _ = close me primary;
-  _ = get (FS.append me fs "test/sdk/expected-count" "1");
+  _ = checked "write expectation" (FS.append me fs "test/sdk/expected-count" "1");
   clockTable = Mod.plugs 0;
   _ = get (Plug.attach clockQa);
   clock = awaitStatus me (launch me fs clockTable "clock-example") "clock ready" 300;
   _ = close me clock;
-  _ = get (FS.shutdown me fs block);
+  _ = checked "storage shutdown" (FS.shutdown me fs block);
   _ = kill fs;
   _ = kill block;
   "sdkdesktop: HOLDS persisted=1 loaded={expected} isolated-identity close-drained".

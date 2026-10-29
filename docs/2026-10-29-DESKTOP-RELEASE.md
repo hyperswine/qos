@@ -80,3 +80,20 @@ session-4 prototype disks is not implemented.
 
 Publication and upgrade evidence will be linked here once the actual package
 install and upgrade have passed; staging alone is not release acceptance.
+
+## Qualification candidate
+
+`desktop-v0.1.0-rc1` was published from QOS `aa50811` with FP-RISC `94f699b`.
+The exact tarball installed through `hyperswine/tap/qos-portable`, and its
+Homebrew formula test passed. The [installed candidate evidence](evidence/2026-10-29-homebrew-desktop-candidate.json)
+records a passing graphical workflow with read-only SDK contents, denied
+checkout access, no GHC/Cabal/make, app replacement, restarts and stored state.
+The updated prebuilt driver follows Main's colocated storage-service plan;
+the [storage guide](2026-10-29-DESKTOP-APP-STORAGE.md) records the earlier
+bounded timeout failures and subsequent trials without relaxing deadlines.
+
+Qualification found default Python bytecode caches in the candidate's package
+directory. The final release disables those in the helper and both package
+wrappers. The prepared upgrade disk contains count 2 and a fingerprint of every
+record and the complete disk. Actual final-package upgrade verification remains
+the last acceptance step; the goal is not complete until it passes.

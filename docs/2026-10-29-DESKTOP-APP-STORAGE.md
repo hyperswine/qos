@@ -88,3 +88,17 @@ report roots `55/71/87` and occupied bytes `11520/11776/11776` across two
 500-change batches. This is a reproduced pre-existing failure, not a passing
 memory-retention qualification. Its threshold is unchanged; investigating the
 root accounting is separate from this storage contract.
+
+The completed native regression set passes on 1 and 4 workers: app store,
+preferences recovery, preferences persistence across two host boots, Editor
+state, app sessions and session memory, plus 57 Python and seven project checks.
+The separate live-preferences retention failure above remains unchanged.
+
+Binary-package qualification initially encountered a bounded close failure
+and three startup timeouts while other compilation was active. The acceptance
+driver now co-locates block/Files services as Main's lifecycle does, retaining
+the same deadlines and assertions, and reports startup time and close errors.
+Four independent driver trials passed (one with 1 worker and three with 4).
+Startup ranged from 3.2 to 8.5 seconds on those trials. This is functional
+qualification, not a promise that deadlines cannot expire under arbitrary load;
+mutation uncertainty remains explicit and mutations are never replayed.
