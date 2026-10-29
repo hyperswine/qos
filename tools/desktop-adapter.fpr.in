@@ -1,0 +1,38 @@
+# Generated desktop API v1 adapter. The app's functions remain named.
+unsafe program.
+App = use "__ENTRY__".
+D = use "qos/desktop".
+AS = use "programs/mods/appsession".
+AW = use "programs/mods/appwire".
+AC = use "std/actor#201a0e9bf98a5154".
+appMain : unsafe Int -> Unit.
+appMain me = case AS.start me of
+    Err why -> Unit
+  | Ok ctx ->
+      (initial, commands) = App.init;
+      (model, resizedCommands) = App.update (D.Resize ctx.w ctx.h) initial;
+      _ = AS.issue me ctx (D.commands commands);
+      _ = AS.issue me ctx (D.commands resizedCommands);
+      _ = Sys.loop (ctx, model) (step me); Unit.
+step me state =
+  (ctx, model) = state;
+  case AS.next me ctx of
+    AS.Idle -> _ = Sys.sleepUs 1000; (True, state)
+  | AS.Gone -> _ = AS.abandon me ctx; (False, state)
+  | AS.JobResult token result ->
+      (fresh, commands) = App.update (D.fromWire (AW.Arrived token result)) model;
+      _ = AS.issue me ctx (D.commands commands);
+      (True, (AS.advance ctx ctx.sequence, fresh))
+  | AS.Message ret request -> case request of
+      AW.CloseWith session until stopMs -> (AS.closeWithin until stopMs me ctx ret session, state)
+    | AW.Close session -> (AS.close me ctx ret session, state)
+    | AW.Event session sequence event -> case AS.valid ctx session sequence of
+        False -> _ = AC.reply ret (AW.Refused "stale session or sequence"); (True, state)
+      | True ->
+          next = AS.advance (AS.resized ctx event) sequence;
+          (fresh, commands) = App.update (D.fromWire event) model;
+          _ = AS.issue me next (D.commands commands);
+          (tree, values, status) = App.view (next.w, next.h) fresh;
+          _ = AC.reply ret (AW.Frame next.session next.revision tree values status);
+          (True, (next, fresh)).
+main = Unit.

@@ -115,3 +115,8 @@ implementation records, references and later updates.
 See [the split guide](docs/2026-09-18-REPOSITORY-SPLIT.md) for the ownership map and the
 release transition.  The previous combined README and tag workflow are kept
 under `docs/history/` for reference.
+
+The first installed-app slice is available for contributor staging: see the
+[installed desktop SDK v1 guide](docs/2026-10-29-INSTALLED-DESKTOP-SDK.md). It builds
+an external counter with a read-only SDK and no source checkouts or GHC/Cabal.
+Safe app updates and public binary packaging are the next slices.

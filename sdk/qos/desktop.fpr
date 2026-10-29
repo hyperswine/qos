@@ -1,0 +1,30 @@
+# Public desktop API v1. Wire conversion stays in the generated adapter.
+# Apps are cooperative Main plugins; this is not a privilege boundary.
+AW = use "programs/mods/appwire".
+S = use "programs/mods/scene2d".
+Event = Type (Key Int | Tick | Resize Int Int | Pointer Int Int Int | Wheel Int Int | Focus Bool | Cancel | Arrived Int (Result Snapshot String)).
+# v1 deliberately exposes only the clock effect; persistent storage and assets
+# need their own contracts rather than access to Main's shared service handles.
+Job = Type (Clock).
+Snapshot = Type (Time Int).
+Cmd = Type (Fetch Int Job).
+text viewport title subtitle rows =
+  (w, h) = viewport;
+  S.Box [S.Col, S.W w, S.H h, S.Pad 20, S.Gap 14, S.Bg (18, 30, 60), S.Clip]
+    (label 28 title :: label 16 subtitle :: labels rows).
+label size text = S.Lbl [S.Fs size, S.Fg (940, 950, 990)] text.
+labels Nil = Nil.
+labels (row :: rest) = label 20 row :: labels rest.
+fromWire (AW.Key k) = Key k.
+fromWire AW.Tick = Tick.
+fromWire (AW.Resize w h) = Resize w h.
+fromWire (AW.Pointer x y buttons) = Pointer x y buttons.
+fromWire (AW.Wheel x y) = Wheel x y.
+fromWire (AW.Focus active) = Focus active.
+fromWire AW.Cancel = Cancel.
+fromWire (AW.Arrived token result) = Arrived token (case result of
+    Ok (AW.Time seconds) -> Ok (Time seconds)
+  | Err why -> Err why
+  | other -> Err "unsupported desktop SDK result").
+commands Nil = Nil.
+commands (Fetch token Clock :: rest) = AW.Fetch token AW.Clock :: commands rest.

@@ -1,0 +1,75 @@
+{
+  "result": "passed",
+  "os": "darwin",
+  "architecture": "aarch64",
+  "sourceAccess": "denied by sandbox-exec",
+  "absentTools": [
+    "ghc",
+    "cabal",
+    "make"
+  ],
+  "readOnlySdkUnchanged": true,
+  "app": {
+    "name": "External Counter",
+    "id": "counter-example",
+    "version": "1.2.3",
+    "entry": "fpr_modtab",
+    "loadMode": "plugin",
+    "abi": "22.137",
+    "architecture": "aarch64",
+    "desktopSession": "qos.app-session/4",
+    "desktopApi": "qos.desktop/1"
+  },
+  "archiveSha256": "8b7bb220940d5114be97af493309b35154ee728b525342843a884c978a98e7ce",
+  "sessionHarts": [
+    1,
+    4
+  ],
+  "clockEffect": true,
+  "graphicalMain": true,
+  "sdk": {
+    "format": 1,
+    "desktopApi": "qos.desktop/1",
+    "desktopSession": "qos.app-session/4",
+    "architecture": "aarch64",
+    "os": "darwin",
+    "portableAbi": "22",
+    "compilerSha256": "4a05ab800b7b556a1a7337aa275a9260622b6a2cab9691eddd2220f1dd9ecfd5",
+    "qosRevision": "433ba49026457a639fe3a70d81ebca626a9ac254",
+    "fpriscRevision": "b8865bd9ba48ace2a2f7083c7d33329595025572",
+    "qosDirty": true,
+    "fpriscDirty": true,
+    "dependencies": [
+      "Python >=3.11",
+      "Clang (ELF assembler)",
+      "lld (ELF linker)"
+    ]
+  },
+  "date": "2026-10-29",
+  "scope": "Focused macOS AArch64 installed-SDK acceptance from local implementation worktrees; no release or deployment",
+  "unitTests": 7,
+  "sourceCliScaffold": "desktop default and explicit legacy mvu passed",
+  "rawEvidenceDirectory": "/private/tmp/qos-sdk-slice1-final-check",
+  "limitations": [
+    "No transactional installer, existing-disk update, upgrade or power-loss tests",
+    "No public binary/Homebrew release",
+    "No Linux, x86-64 or Pi runtime acceptance in this slice",
+    "App persistence and asset packaging are not exposed by SDK v1"
+  ],
+  "nativeLibraryDependencies": {
+    "compiler": [
+      "libgit2.1.9.dylib",
+      "libarchive.13.dylib",
+      "macOS system libraries"
+    ],
+    "graphicalHost": [
+      "libglfw.3.dylib",
+      "macOS OpenGL/AudioToolbox/CoreFoundation frameworks"
+    ]
+  },
+  "visualReview": "Inspected both final captured frames: Count 0 before SPACE, Count 1 afterward",
+  "captures": {
+    "counter-2.ppm": "7d29f9b1ba5a1ffd171b7a13773a6e04d5321f25b2b6ba92fda64cd85b0e2b81",
+    "counter-1.ppm": "08c7155dd23a16ffd24e715fa9a6eb0bd43f700e01ed0a6131d093bb94f1f68c"
+  }
+}

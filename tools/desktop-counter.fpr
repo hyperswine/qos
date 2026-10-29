@@ -1,0 +1,10 @@
+# A Main desktop app. State lasts until the tile closes; no persistence yet.
+unsafe module.
+D = use "qos/desktop".
+init = (0, Nil).
+update (D.Key 57) count = (count + 1, Nil).
+update (D.Key 14) count = (0, Nil).
+update event count = (count, Nil).
+view viewport count =
+  (D.text viewport "Counter" "SPACE increments; BACKSPACE resets"
+    ["Count: {count}", "ESC returns to the desktop"], Nil, "Count: {count}").

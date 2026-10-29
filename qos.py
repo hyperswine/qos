@@ -914,6 +914,14 @@ TEMPLATES = {"min": TPL_MIN, "service": TPL_SERVICE, "mvu": TPL_MVU, "notes": TP
 
 
 def cmd_new(a):
+    if a.template == "desktop":
+        sys.path.insert(0, str(ROOT / "tools"))
+        from portable_sdk import scaffold
+        try:
+            scaffold(Path.cwd() / a.name)
+        except ValueError as exc:
+            die(str(exc))
+        return
     tpl = TEMPLATES[a.template]
     name = a.name
     if not name.replace("_", "").isalnum() or not name[0].islower():
@@ -1496,7 +1504,7 @@ def cmd_install(a):
     sol.chmod(0o755)
     hosts = [h for h in ("qosp", "qosp-gl") if (lib / "qos" / h).is_file()]
     say(f"installed qos-fpr {ver} -> {lib} ({', '.join(['fpr'] + hosts)}); {bin_}/{{fpr,qos,sol}}")
-    say(f"try: cd /tmp && {bin_}/qos new hello && {bin_}/qos run hello/app.fpr")
+    say(f"try: cd /tmp && {bin_}/qos new hello --template mvu && {bin_}/qos run hello/app.fpr")
     say(f"install done in {time.time() - t0:.1f}s")
 
 def main():
@@ -1530,10 +1538,10 @@ def main():
     p.add_argument("--fprd", action="store_true", help="start the host compiler daemon for the run (Sys.compile / CP.plugin)")
     p.set_defaults(f=cmd_run)
 
-    p = sub.add_parser("new", help="scaffold a working app under apps/<name>/")
-    p.add_argument("name", help="project name (lowercase start; becomes the app + artifact name)")
-    p.add_argument("--template", choices=sorted(TEMPLATES), default="mvu",
-                   help="min (pure compute) | service (actor rpc) | mvu (Model+schema+port, default) | notes (MVU + paths + livereload)")
+    p = sub.add_parser("new", help="create a desktop project in the current directory (or an explicit legacy template)")
+    p.add_argument("name", help="project name and stable app ID")
+    p.add_argument("--template", choices=sorted([*TEMPLATES, "desktop"]), default="desktop",
+                   help="desktop (default, installed SDK) | min | service | mvu | notes (legacy contributor templates)")
     p.set_defaults(f=cmd_new)
 
     p = sub.add_parser("pack", help="package one program into dist/<name>/ (qa + disk + optional host bundle)")
