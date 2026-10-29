@@ -15,6 +15,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from portable_sdk import API, SESSION, native
+import qos_archive
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -60,11 +61,12 @@ def main():
     for folder in ("core", "std", "programs/mods", ".fpr"):
         modules(ROOT / folder, sdk / "modules" / folder)
     modules(ROOT / "sdk", sdk / "modules")
-    for name in ("portable_sdk.py", "desktop-adapter.fpr.in", "desktop-counter.fpr", "mkimports.py", "mkqa.py", "mkdisk.py"):
+    for name in ("portable_sdk.py", "desktop-adapter.fpr.in", "desktop-counter.fpr", "mkimports.py", "mkqa.py", "mkdisk.py", "qos_archive.py", "qos_disk.py", "desktop_install.py"):
         copy(ROOT / "tools" / name, sdk / "tools" / name)
     copy(ROOT / "qos/appside/link-qosplug.ld", sdk / "support/link-qosplug.ld")
     abi = re.search(r"#define\s+QOS_ABI_VERSION\s+(\d+)", (ROOT / "qos/appside/qos_abi.h").read_text())[1]
-    meta = dict(format=1, desktopApi=API, desktopSession=SESSION, architecture=arch,
+    codegen = re.search(r"^codegenRev = (\d+)", (fprisc / "compiler/Codegen.hs").read_text(), re.M)[1]
+    meta = dict(format=1, abi=f"{abi}.{codegen}", desktopApi=API, desktopSession=SESSION, architecture=arch,
                 os=sys.platform, portableAbi=abi, compilerSha256=hashlib.sha256(compiler.read_bytes()).hexdigest(),
                 qosRevision=revision(ROOT), fpriscRevision=revision(fprisc),
                 qosDirty=bool(subprocess.check_output(["git", "-C", str(ROOT), "status", "--porcelain"], text=True)),
@@ -73,11 +75,25 @@ def main():
     if args.profile:
         if not (args.profile / "main.qa").is_file():
             ap.error("profile must contain a prebuilt main.qa")
-        for artifact in [*args.profile.glob("*.qa"), args.profile / "Main.disk"]:
+        for artifact in args.profile.glob("*.qa"):
             if artifact.is_file():
                 copy(artifact, sdk / "profile" / artifact.name)
+        meta['profileFiles'] = {}
+        meta['profileApps'] = []
+        for artifact in sorted((sdk / 'profile').glob('*.qa')):
+            app = qos_archive.read(artifact.read_bytes(), meta['abi'], arch, SESSION, API,
+                                   desktop=artifact.name != 'main.qa', bundled=True)
+            if artifact.name != 'main.qa':
+                meta['profileApps'].append(artifact.name)
+            meta['profileFiles'][artifact.name] = app.sha256
+        meta['runtimeFiles'] = {}
         for host in ("qosp", "qosp-gl"):
+            info = json.loads(subprocess.check_output([str(ROOT / 'qos' / host), '--sdk-info'], text=True))
+            if info != {'diskLockContract': 1, 'abi': meta['abi']}:
+                ap.error(f'{host} lacks matching ABI/disk lock contract; rebuild the host')
             copy(ROOT / "qos" / host, sdk / "runtime" / host)
+            meta['diskLockContract'] = 1
+            meta['runtimeFiles'][host] = hashlib.sha256((sdk / 'runtime' / host).read_bytes()).hexdigest()
     # The builder is discovered beside the real installed compiler path.
     (sdk / "sdk.json").write_text(json.dumps(meta, indent=2) + "\n")
     binaries = prefix / "bin"

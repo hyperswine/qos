@@ -3,6 +3,11 @@
 Date: 2026-10-29. This implements slice 1 of the
 [Portable app workflow](2026-10-28-PORTABLE-APP-WORKFLOW.md).
 
+**Update:** the [disk and offline install milestone](2026-10-29-DESKTOP-DISK-INSTALL.md)
+adds disk creation, safe installation/replacement, and launch. Current contributor
+toolchain installation is `qos.py toolchain install --prefix`; the original
+slice-1 evidence below remains scoped to that stage.
+
 An installed SDK can scaffold and build an external counter application and
 open it in a matching prebuilt Main. Binary release publication, a generic
 transactional app installer, and disk/profile upgrades remain later slices.
@@ -143,9 +148,9 @@ A public formula/release mechanism is still slice 3.
 
 The source-tree CLI also defaults `qos.py new NAME` to this desktop scaffold in
 the current directory. Explicit `--template min|service|mvu|notes` retains the
-old contributor templates and their existing locations. Existing toolchain
-installation via `qos.py install --prefix` remains unchanged; it is not the new
-app installer or this staged desktop SDK.
+old contributor templates and their existing locations. Contributor toolchain
+installation is now `qos.py toolchain install --prefix`. The old
+`qos.py install --prefix` spelling refuses with a migration hint.
 
 ```sh
 python3 tools/portable-sdk-test.py

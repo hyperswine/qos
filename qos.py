@@ -53,7 +53,7 @@ directories or thread app.qa paths by hand again.
     ./qos.py release 0.2.0 --push   cut a release: commit the modules, lock,
                                     smoke, stamped dist bundles, tag v0.2.0
     ./qos.py test                   the fast smoke set;  --all = check-all.sh
-    ./qos.py install --prefix DIR   the app SDK: DIR/bin/{fpr,qos,sol} (--full: the whole tree)
+    ./qos.py toolchain install --prefix DIR   the app SDK: DIR/bin/{fpr,qos,sol} (--full: the whole tree)
     ./qos.py clean
 
 Artifacts never land in the tree.  Every run writes to the WORKSPACE:
@@ -61,7 +61,7 @@ Artifacts never land in the tree.  Every run writes to the WORKSPACE:
 the program's .qa, its build/ intermediates, and the host's qosp.disk
 and qos-store/ state; packs go to `dist/` beside it.  From the repo
 root that is ./.qos and ./dist; from your own project it is yours.  An
-installed tree (`qos.py install`, `brew install qos-fpr`) is read-only
+installed tree (`qos.py toolchain install`, `brew install qos-fpr`) is read-only
 to every command, and its fpr and qosp are shipped, never rebuilt.
 
 Everything delegates to make for staleness (an up-to-date tree is a
@@ -87,7 +87,7 @@ from typing import NoReturn
 
 ROOT = Path(__file__).resolve().parent
 QOS = ROOT / "qos"
-# an installed tree (`qos.py install`, the Homebrew formula) carries this
+# an installed tree (`qos.py toolchain install`, the Homebrew formula) carries this
 # marker: its fpr / qosp are shipped, never rebuilt, and nothing below
 # ROOT is written -- every artifact goes to the workspace
 INSTALLED = (ROOT / ".installed").is_file()
@@ -332,7 +332,7 @@ def report_drift():
 def build_fpr():
     if INSTALLED:
         if not COMPILER.is_file():
-            die(f"installed tree at {ROOT} has no fpr: reinstall (qos.py install / brew reinstall qos-fpr)")
+            die(f"installed tree at {ROOT} has no fpr: reinstall (qos.py toolchain install / brew reinstall qos-fpr)")
         return
     report_drift()
     say("fpr (compiler; no-op when fresh)")
@@ -545,6 +545,38 @@ def manifest_make_vars(m):
 
 # ---- commands ---------------------------------------------------------------
 
+def desktop_sdk():
+    sdk = Path(os.environ.get("QOS_PORTABLE_SDK", ROOT)).resolve()
+    if (sdk / "libexec/qos-portable/sdk.json").is_file():
+        sdk = sdk / "libexec/qos-portable"
+    if not (sdk / "sdk.json").is_file():
+        die("use the installed desktop SDK's qos, or set QOS_PORTABLE_SDK to its prefix")
+    sys.path.insert(0, str(ROOT / "tools"))
+    return sdk
+
+
+def cmd_install_app(a):
+    if a.prefix is not None:
+        die("toolchain installation moved to: qos toolchain install --prefix DIR")
+    if not a.archive or not a.disk:
+        die("usage: qos install APP.qa DISK")
+    sdk = desktop_sdk()
+    import desktop_install
+    try:
+        desktop_install.install(sdk, a.archive, a.disk)
+    except (ValueError, OSError) as exc:
+        die(str(exc))
+
+
+def cmd_create_disk(a):
+    sdk = desktop_sdk()
+    import desktop_install
+    try:
+        desktop_install.create(sdk, a.destination, a.size)
+    except (ValueError, OSError) as exc:
+        die(str(exc))
+
+
 def cmd_build(a):
     t0 = time.time()
     build_fpr()
@@ -601,6 +633,13 @@ def compiler_session(registrations):
 
 
 def cmd_run(a):
+    if Path(a.prog).suffix == ".disk":
+        sdk = desktop_sdk()
+        import desktop_install
+        try:
+            return desktop_install.run(sdk, a.prog)
+        except (ValueError, OSError) as exc:
+            die(str(exc))
     t0 = time.time()
     m, arg = find_project(a.prog)
     prog = resolve_prog(arg)
@@ -1591,7 +1630,7 @@ def cmd_clean(a):
 
 # ---- install: the tree as a toolchain under a prefix --------------------------
 # What `brew install` lays down, and what a checkout can lay down for
-# itself (`./qos.py install --prefix ~/.local`):
+# itself (`./qos.py toolchain install --prefix ~/.local`):
 #
 #   PREFIX/libexec/qos-fpr/    the SDK: what `qos new|run|pack|dev` needs
 #                              to compile an app against QOS -- std/,
@@ -1665,7 +1704,7 @@ def sdk_stamp(layout):
     }
 
 
-def cmd_install(a):
+def cmd_toolchain_install(a):
     t0 = time.time()
     prefix = Path(a.prefix).resolve()
     lib = prefix / "libexec" / "qos-fpr"
@@ -1722,7 +1761,7 @@ def cmd_install(a):
     say(f"installed qos-fpr {ver} ({layout} layout, {size / 1e6:.0f} MB) -> {lib} ({', '.join(['fpr'] + hosts)}); {bin_}/{{fpr,qos,sol}}")
     say(f"versions: qos {stamp['qos']['commit'] or '?'}, fprisc {stamp['fprisc']['commit'] or '?'} -> {lib / 'sdk-version.json'}")
     if not a.full:
-        say("SDK layout: app new/run/pack/dev; `install --full` for the whole tree (test, native, release, --on virt)")
+        say("SDK layout: app new/run/pack/dev; `toolchain install --full` for the whole tree (test, native, release, --on virt)")
     say(f"try: cd /tmp && {bin_}/qos new hello --template mvu && {bin_}/qos run hello/app.fpr")
     say(f"install done in {time.time() - t0:.1f}s")
 
@@ -1790,7 +1829,14 @@ def main():
     p.add_argument("--smoke", action="store_true", help="scripted boot-to-launcher check instead of a console")
     p.set_defaults(f=cmd_native)
 
-    p = sub.add_parser("disk", help="seed a QLOG disk image (mkdisk)")
+    p = sub.add_parser("disk", help="create a Main disk or seed a contributor fixture")
+    disks = p.add_subparsers(dest="disk_command", required=True)
+    p = disks.add_parser("create", help="create a new Main disk from the installed profile")
+    p.add_argument("destination")
+    p.add_argument("--profile", choices=["main"], default="main")
+    p.add_argument("--size", type=int, default=32, help="size in MiB")
+    p.set_defaults(f=cmd_create_disk)
+    p = disks.add_parser("seed", help="legacy contributor QLOG fixture seeding")
     p.add_argument("img")
     p.add_argument("size_mb", type=int)
     p.add_argument("apps", nargs="*")
@@ -1820,15 +1866,27 @@ def main():
                    help="smoke legs to run at once (default: min(4, CPUs); 1 = one at a time)")
     p.set_defaults(f=cmd_test)
 
-    p = sub.add_parser("install", help="lay the tree down as a toolchain under a prefix (what brew runs)")
-    p.add_argument("--prefix", required=True, help="e.g. ~/.local or $(brew --prefix)/Cellar/qos-fpr/X.Y.Z")
-    p.add_argument("--full", action="store_true", help="the whole tree + fprisc sources (contributor layout: test, native, release, --on virt), not the app SDK")
-    p.set_defaults(f=cmd_install)
+    p = sub.add_parser("toolchain", help="contributor toolchain operations")
+    chain = p.add_subparsers(dest="toolchain_command", required=True)
+    p = chain.add_parser("install", help="install the standalone source-program toolchain")
+    p.add_argument("--prefix", required=True, help="e.g. ~/.local or a package prefix")
+    p.add_argument("--full", action="store_true", help="include the full contributor tree")
+    p.set_defaults(f=cmd_toolchain_install)
+
+    p = sub.add_parser("install", help="install an app on an offline Main disk using the installed desktop SDK")
+    p.add_argument("archive", nargs="?")
+    p.add_argument("disk", nargs="?")
+    p.add_argument("--prefix", help=argparse.SUPPRESS)
+    p.set_defaults(f=cmd_install_app)
 
     p = sub.add_parser("clean")
     p.set_defaults(f=cmd_clean)
 
-    a = ap.parse_args()
+    argv = sys.argv[1:]
+    # Retain the old contributor `disk IMAGE SIZE QA...` spelling.
+    if argv[:1] == ["disk"] and len(argv) > 1 and argv[1] not in ("create", "seed", "-h", "--help"):
+        argv = ["disk", "seed", *argv[1:]]
+    a = ap.parse_args(argv)
     sys.exit(a.f(a) or 0)
 
 if __name__ == "__main__":

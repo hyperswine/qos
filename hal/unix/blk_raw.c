@@ -23,6 +23,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/file.h>
+#include <limits.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -39,9 +41,42 @@ static void blk_open_locked(void) {
   const char *path = getenv("FPR_DISK");
   if (!path || !*path) path = "qosp.disk";
 
-  int fd = open(path, O_RDWR | O_CREAT, 0644);
+  /* All Portable disk owners use a nonblocking exclusive inode lock.
+   * The installed CLI can pass the same locked open-file description so
+   * validation-to-launch has no unlock/reopen race. */
+  int fd = -1;
+  const char *passed = getenv("FPR_DISK_LOCK_FD");
+  if (passed && *passed) {
+    char *end = NULL;
+    errno = 0;
+    long inherited = strtol(passed, &end, 10);
+    if (!errno && end && !*end && inherited >= 3 && inherited <= INT_MAX) {
+      struct stat held, named;
+      if (!fstat((int)inherited, &held) && !stat(path, &named) &&
+          held.st_dev == named.st_dev && held.st_ino == named.st_ino && S_ISREG(held.st_mode)) {
+        fd = fcntl((int)inherited, F_DUPFD_CLOEXEC, 3);
+        if (fd >= 0) {
+          close((int)inherited);
+          /* A later exec must not receive a stale descriptor number. */
+          unsetenv("FPR_DISK_LOCK_FD");
+        }
+      }
+    }
+    if (fd < 0) {
+      qos_hostlog("blk: invalid inherited disk lock -- refusing disk");
+      return;
+    }
+  } else {
+    fd = open(path, O_RDWR | O_CREAT | O_CLOEXEC, 0644);
+  }
   if (fd < 0) {
     qos_hostlog("blk: cannot open %s (%s) -- no disk", path, strerror(errno));
+    return;
+  }
+
+  if (flock(fd, LOCK_EX | LOCK_NB) < 0) {
+    qos_hostlog("blk: disk in use or lock unavailable: %s (%s)", path, strerror(errno));
+    close(fd);
     return;
   }
 

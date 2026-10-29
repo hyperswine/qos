@@ -1,7 +1,8 @@
-"""`qos.py install` lays down the app SDK by default; --full keeps the
+"""`qos.py toolchain install` lays down the app SDK by default; --full keeps the
 contributor tree.  The SDK list must stay a subset of the full one and
 must keep what an app build reads (qos-app.mk, appside, the runtime)."""
 import importlib.util
+import argparse
 import os
 from pathlib import Path
 import tempfile
@@ -27,6 +28,22 @@ class InstallLayout(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.temp.cleanup()
+
+    def test_old_install_prefix_refuses_with_migration_hint(self):
+        def refuse(message):
+            raise ValueError(message)
+        with patch.object(self.cli, "die", refuse):
+            with self.assertRaisesRegex(ValueError, "qos toolchain install --prefix"):
+                self.cli.cmd_install_app(argparse.Namespace(prefix="/unused"))
+
+    def test_toolchain_install_parser_retains_prefix_and_full(self):
+        with patch.object(self.cli, "cmd_toolchain_install", return_value=0) as command:
+            with patch("sys.argv", ["qos", "toolchain", "install", "--prefix", "/unused", "--full"]):
+                with self.assertRaises(SystemExit) as ended:
+                    self.cli.main()
+            self.assertEqual(ended.exception.code, 0)
+            self.assertEqual(command.call_args.args[0].prefix, "/unused")
+            self.assertTrue(command.call_args.args[0].full)
 
     def test_sdk_is_a_subset_of_full(self):
         full = set(self.cli.INSTALL_TREE_FULL)

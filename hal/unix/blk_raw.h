@@ -23,6 +23,9 @@
  * unformatted superblock, which qlog.fpr's `ensure` formats on first
  * touch: creation is the HAL's job, formatting is the filesystem's,
  * the same split a blank virtio disk has on virt.
+ * The descriptor holds an exclusive nonblocking flock for its lifetime,
+ * shared with the offline installer. FPR_DISK_LOCK_FD optionally supplies
+ * the CLI's inherited locked description; it must match FPR_DISK's inode.
  * Idempotent; failure is not fatal here -- it surfaces as 0 pages,
  * the honest no-disk state system.fpr already degrades on. */
 void qos_blkraw_setup(void);

@@ -20,6 +20,7 @@ M   = use "../../programs/mods/manifest".
 QI  = use "../../programs/mods/qaimg".
 
 Host.init      : Bool -> Result String String .                       # fault reporting; the arena at its address
+Host.sdkInfo   : Unit -> String .
 Host.abi       : Unit -> String .                                     # "<abi>.<codegenRev>" this host was built for
 Host.sha256    : String -> String .                                   # lower-case hex
 Host.loadImage : String -> String -> String -> List Int -> String -> Result String String . # path, sha, IMAGE, LOAD's numbers, RELOC: place it where the arena is, move its address words, publish code r-x
@@ -136,6 +137,9 @@ launch o =
     Err e -> die e
   | Ok result -> print "\n[qos] {M.id man} => {result}".
 
-main = case parseArgs (Sys.args Unit) (Opts False False "") of
+main = case Sys.args Unit of
+    "--sdk-info" :: Nil -> print (Host.sdkInfo Unit)
+  | args -> runArgs args.
+runArgs args = case parseArgs args (Opts False False "") of
     Opts _ _ "" -> _ = Sys.stderr "usage: qosp [--yes] [--trace] <app.qa>\n"; Sys.exit 2
   | o -> launch o.

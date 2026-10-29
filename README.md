@@ -63,7 +63,7 @@ checkout on the same machine** (the Quickstart above, once). No binary release o
 formula exists yet.
 
 ```sh
-./qos.py install --prefix ~/qos-sdk        # from the checkout; copies a relocatable toolchain
+./qos.py toolchain install --prefix ~/qos-sdk        # from the checkout; copies a relocatable toolchain
 export PATH="$HOME/qos-sdk/bin:$PATH"      # qos, fpr, sol
 cd ~/src                                   # anywhere outside the checkout
 qos new hello --template mvu               # standalone app.fpr; desktop is the default template
@@ -154,3 +154,8 @@ The first installed-app slice is available for contributor staging: see the
 [installed desktop SDK v1 guide](docs/2026-10-29-INSTALLED-DESKTOP-SDK.md). It builds
 an external counter with a read-only SDK and no source checkouts or GHC/Cabal.
 Safe app updates and public binary packaging are the next slices.
+
+The installed AArch64 Main disk workflow now supports `qos disk create`,
+`qos install APP.qa DISK`, and `qos run DISK`, with offline locking and atomic
+app/catalogue publication. See the [disk installation guide](docs/2026-10-29-DESKTOP-DISK-INSTALL.md).
+The contributor toolchain installer is `qos.py toolchain install --prefix DIR`.

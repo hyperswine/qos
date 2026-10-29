@@ -1,0 +1,113 @@
+{
+  "result": "passed",
+  "os": "darwin",
+  "architecture": "aarch64",
+  "sourceAccess": "denied by sandbox-exec",
+  "absentTools": [
+    "ghc",
+    "cabal",
+    "make"
+  ],
+  "readOnlySdkUnchanged": true,
+  "app": {
+    "name": "External Counter",
+    "id": "counter-example",
+    "version": "1.2.4",
+    "entry": "fpr_modtab",
+    "loadMode": "plugin",
+    "abi": "22.137",
+    "architecture": "aarch64",
+    "desktopSession": "qos.app-session/4",
+    "desktopApi": "qos.desktop/1"
+  },
+  "archiveSha256": "3eb10dbca3107c28d29e926b14472c8190a86fb92e2259684edad6089b1dd9f6",
+  "sessionHarts": [
+    1,
+    4
+  ],
+  "clockEffect": true,
+  "graphicalMain": true,
+  "offlineInstallUpdate": true,
+  "unrelatedRecordsPreserved": true,
+  "hostInstallerExclusion": true,
+  "sdk": {
+    "format": 1,
+    "abi": "22.137",
+    "desktopApi": "qos.desktop/1",
+    "desktopSession": "qos.app-session/4",
+    "architecture": "aarch64",
+    "os": "darwin",
+    "portableAbi": "22",
+    "compilerSha256": "3775dc05be13433c816fd4874076936070a60ac9d0f223198522330ae3932f41",
+    "qosRevision": "4fbefc278a7fe96f442e19dff74e756900b91c20",
+    "fpriscRevision": "065afb824465e1a00f3f1b6ece86acc387be0104",
+    "qosDirty": true,
+    "fpriscDirty": false,
+    "dependencies": [
+      "Python >=3.11",
+      "Clang (ELF assembler)",
+      "lld (ELF linker)"
+    ],
+    "profileFiles": {
+      "browser.qa": "bc61288fac6e17ea4b8b91f7deeebdde2663f031651dfe40898b0eeb96032edd",
+      "clock.qa": "ed286068ceba2cb4e0c92b22961c43d26f269f119e40543a37b8af6034b15235",
+      "disk.qa": "bd9171a02a245561b2d7765752db76465bcb3828a6f46edaa1ea2e4697be8f7c",
+      "editor.qa": "ab3717e9f7557df50506ffadd133bfb9968a26289d0967c287c8711d1f1828b5",
+      "logs.qa": "da3f0d7a2716c0bd19c6269ff7faa9736374b382eec1c81fe0ad6d5019b03300",
+      "main.qa": "8ef6741a10e0c51f75e1294d5899494c5ebedfba74eebbed0093235988c52066",
+      "terminal.qa": "8e82d5bce892ffbc58ede483e110ab6cb0ebd420308f7ad26d47d75b1cdc7522"
+    },
+    "profileApps": [
+      "browser.qa",
+      "clock.qa",
+      "disk.qa",
+      "editor.qa",
+      "logs.qa",
+      "terminal.qa"
+    ],
+    "runtimeFiles": {
+      "qosp": "ff26cfddb4b1e53894e62819995910ae7e7f7b390557c911c1ecf79952811e84",
+      "qosp-gl": "611ce30e52cf4fd6405d8b73e2150dbe214a6785fc66f2c3f574e6e5f9f4cbe4"
+    },
+    "diskLockContract": 1
+  },
+  "date": "2026-10-29",
+  "scope": "AArch64 macOS installed disk/create/install/update/run milestone; local implementation snapshot, not a published release",
+  "rawEvidenceDirectory": "/private/tmp/qos-workflow-milestone-acceptance",
+  "validation": {
+    "qosPythonSuite": {
+      "tests": 56,
+      "passed": true
+    },
+    "finalInstallerFaultAndArchiveSuite": {
+      "tests": 17,
+      "passed": true
+    },
+    "projectContractSuite": {
+      "tests": 7,
+      "passed": true
+    },
+    "existingPiUpdaterSuite": {
+      "tests": 20,
+      "passed": true
+    },
+    "rawBlockAndFlushChecks": "passed",
+    "portableDurabilityFreshProcessRegression": "passed",
+    "standaloneToolchainInstallNewRunPackSmoke": "passed",
+    "elfArchitectureMismatchRefusal": "passed",
+    "cPythonLockInteropAndInheritedHandoff": "passed; includes parent descriptor closed while host retains ownership"
+  },
+  "visualReview": "Final captures show Counter Updated and Count 0 then Count 1",
+  "preservedRecordsAfterMain": true,
+  "commitSemantics": "Before the single superblock publication the previous app remains installed. At/after publication recovery may expose the complete new app even if success acknowledgement was interrupted.",
+  "limitations": [
+    "Physical power cuts and SD-card qualification not performed",
+    "Only macOS AArch64 installed runtime tested",
+    "Public per-app storage is next milestone",
+    "No binary/Homebrew release published in this milestone"
+  ],
+  "captures": {
+    "counter-1.ppm": "f0c5af772b4d0957119771e4420cec89238537d1fecd9ab1ee63b4808758028f",
+    "counter-2.ppm": "d83f77f102a08b0164c364bfbb3cdfef46005e8e0ff3a6feca3f78679e5a77ca"
+  }
+}

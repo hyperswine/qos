@@ -20,7 +20,7 @@ If <app.elf> is '-' or missing, LOAD is all zeros and IMAGE is empty --
 the name-dispatch placeholder mode (the running image resolves `entry`
 by symbol; there is nothing to load).
 """
-import sys, os, argparse, struct, hashlib
+import sys, os, argparse, struct, hashlib, re
 
 PF_X, PF_W = 1, 2
 PT_LOAD = 1
@@ -205,6 +205,19 @@ def build(manifest_path, elf_path, out_path, relocatable=False,
         with open(elf_path, "rb") as f:
             elf = f.read()
         base, entry, execsz, rwoff, image, memsz = flatten_elf(elf)
+        machine, = struct.unpack_from("<H" if elf[5] == 1 else ">H", elf, 18)
+        architecture = {183: b"aarch64", 62: b"x86_64", 243: b"riscv64"}.get(machine)
+        if architecture is None:
+            raise SystemExit(f"mkqa: unsupported ELF machine {machine}")
+        # Architecture is a packaging fact from ELF, never a filename guess.
+        # Keep it at top level even when permissions tables follow the header.
+        top = re.split(rb"(?m)^\s*\[", manifest, maxsplit=1)[0]
+        declared = re.findall(rb'(?m)^architecture\s*=.*$', top)
+        if declared:
+            if len(declared) != 1 or re.fullmatch(rb'architecture\s*=\s*"' + architecture + rb'"\s*', declared[0]) is None:
+                raise SystemExit("mkqa: manifest architecture differs from the ELF image")
+        else:
+            manifest = b'architecture = "' + architecture + b'"\n' + manifest
         if relocatable:
             if base != 0:
                 raise SystemExit("mkqa: --relocatable expects an image linked at 0")

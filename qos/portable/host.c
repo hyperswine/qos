@@ -39,6 +39,7 @@
 #include "../app_id.h" /* the id is a path component */
 #include "park.h"
 #include "snd_raw.h"
+#include "blk_raw.h"
 
 /* ---- the ABI stamp (kills the apps-qa desync class) -----------------
  * fprc stamps `abi = "<QOS_ABI_VERSION>.<codegenRev>"` into every
@@ -501,6 +502,16 @@ static V h_abi(V u) {
 }
 FPR_FN(fpr_g_Host_x2eabi, h_abi, 1);
 
+/* Release packagers query the actual binary without opening a disk. */
+static V h_sdk_info(V u) {
+  (void)u;
+  char info[128];
+  int n = snprintf(info, sizeof info, "{\"diskLockContract\":1,\"abi\":\"%u.%u\"}",
+                   (unsigned)QOS_ABI_VERSION, (unsigned)QOSP_CODEGEN_REV);
+  return (V)fpr_mkstr((const uint8_t *)info, (uw)n);
+}
+FPR_FN(fpr_g_Host_x2esdkInfo, h_sdk_info, 1);
+
 /* Host.sha256 : String -> String -- lower-case hex */
 static V h_sha256(V sv) {
   const str_t *t = arg_str(sv, "Host.sha256: expected a String");
@@ -552,6 +563,9 @@ static V h_init(V tracev) {
   if (!g_arena_size)
     return res_err("cannot reserve address space for the arena (QOSP_ARENA_MB caps it; a strict "
                    "overcommit or RWX policy refuses it)");
+  const char *disk = getenv("FPR_DISK");
+  if (disk && *disk && qos_blkraw_pages() <= 0)
+    return res_err("cannot acquire requested disk (in use, unavailable, or invalid inherited lock)");
   return res_ok_str("", 0);
 }
 FPR_FN(fpr_g_Host_x2einit, h_init, 1);

@@ -2,7 +2,7 @@
 #
 # Lives in a tap (hyperswine/homebrew-tap: Formula/qos-fpr.rb); this copy
 # is the source of truth the tap is updated from on each release.  The
-# formula does ONE thing after the dependencies: `./qos.py install
+# formula does ONE thing after the dependencies: `./qos.py toolchain install
 # --prefix`, which is also what a checkout runs for itself -- so the
 # layout brew ships is the layout install-check.sh tests.
 #
@@ -45,7 +45,7 @@ class QosFpr < Formula
     # the tree down under libexec/qos-fpr with the .installed marker and
     # bin/{fpr,qos,sol}: fpr and qos are symlinks into libexec, which is
     # how fpr finds its prelude and std (compiler/Home.hs)
-    system "python3.12", "./qos.py", "install", "--prefix", prefix
+    system "python3.12", "./qos.py", "toolchain", "install", "--prefix", prefix
     rewrite_shebang detected_python_shebang, libexec/"qos-fpr/qos.py"
   end
 

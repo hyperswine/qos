@@ -138,9 +138,9 @@ jobs:
           path: fprisc
           key: fprisc-trixie-${{ needs.fprisc.outputs.rev }}
           fail-on-cache-miss: true
-      - name: qos.py install --prefix
+      - name: qos.py toolchain install --prefix
         run: |
-          FPRISC_ROOT="$GITHUB_WORKSPACE/fprisc" ./qos.py install --prefix "$RUNNER_TEMP/qos-sdk"
+          FPRISC_ROOT="$GITHUB_WORKSPACE/fprisc" ./qos.py toolchain install --prefix "$RUNNER_TEMP/qos-sdk"
           du -sh "$RUNNER_TEMP/qos-sdk"
           cat "$RUNNER_TEMP/qos-sdk/libexec/qos-fpr/sdk-version.json"
           # the SDK layout: the prebuilt compiler, not its sources or tests
@@ -194,9 +194,9 @@ jobs:
           cabal update
           make -C fprisc fpr
           rm -rf fprisc/dist-newstyle
-      - name: qos.py install --prefix
+      - name: qos.py toolchain install --prefix
         run: |
-          FPRISC_ROOT="$GITHUB_WORKSPACE/fprisc" ./qos.py install --prefix "$RUNNER_TEMP/qos-sdk"
+          FPRISC_ROOT="$GITHUB_WORKSPACE/fprisc" ./qos.py toolchain install --prefix "$RUNNER_TEMP/qos-sdk"
           du -sh "$RUNNER_TEMP/qos-sdk"
           cat "$RUNNER_TEMP/qos-sdk/libexec/qos-fpr/sdk-version.json"
           # the SDK layout: the prebuilt compiler, not its sources or tests

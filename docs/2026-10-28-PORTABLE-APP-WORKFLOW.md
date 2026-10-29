@@ -343,3 +343,27 @@ not disturb. A per-app store bound to the stable ID becomes its own slice.
   be staged from pinned sources.
 - **x86-64.** The builder also selects x86-64, but nothing has tested an SDK
   on that architecture. Until it is tested, slice 2 targets AArch64 only.
+
+## Update 2026-10-29: disk/install milestone complete on macOS AArch64
+
+Slice 2 now implements `qos disk create`, offline manifest-ID installation and
+replacement, and `qos run` against the installed prebuilt Main. A shared inode
+lock excludes the host and installer, including an inherited lock handoff.
+Archive/architecture/ABI/session/entry checks precede publication; app and
+catalogue share one durable QLOG bulk-record commit point. A pre-commit
+interruption retains the previous app; after the commit point the complete new
+app may be visible even if its success acknowledgement was interrupted.
+
+The [disk/install guide](2026-10-29-DESKTOP-DISK-INSTALL.md) records the format,
+CLI migration, fault boundaries and focused tests. Installed acceptance denied
+checkout/GHC/Cabal access, kept the SDK read-only, preserved unrelated records,
+refused installation while Main held the disk, and rendered changed app code.
+Physical power-cut qualification and other runtime platforms remain untested.
+
+The old contributor installer moved to `qos toolchain install --prefix`; the
+old spelling refuses with an explicit migration hint. The FP-RISC dispatch is
+committed and QOS now pins a revision that includes it.
+
+Remaining roadmap: **slice 3, public app storage bound to stable ID**, then
+**slice 4, matched binary release/Homebrew packaging and package-upgrade
+acceptance preserving app state**. The overall workflow goal remains active.

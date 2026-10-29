@@ -16,7 +16,7 @@ T="$(mktemp -d)"
 P="$T/prefix"
 W="$T/work"
 fail() { echo "install-check: FAIL: $1"; tail -20 "$T/log" 2>/dev/null; exit 1; }
-"$HERE/qos.py" install --prefix "$P" > "$T/log" 2>&1 || fail "install"
+"$HERE/qos.py" toolchain install --prefix "$P" > "$T/log" 2>&1 || fail "install"
 for f in bin/fpr bin/qos bin/sol libexec/qos-fpr/.installed libexec/qos-fpr/sdk-version.json libexec/qos-fpr/toolchain/fpr libexec/qos-fpr/qos/qosp \
          libexec/qos-fpr/toolchain/core/prelude.fpr libexec/qos-fpr/toolchain/std/mvu.fpr libexec/qos-fpr/toolchain/runtime/runtime.c; do
   [ -e "$P/$f" ] || fail "missing $P/$f"

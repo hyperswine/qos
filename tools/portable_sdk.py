@@ -18,6 +18,8 @@ import sys
 import tempfile
 import tomllib
 
+from qos_archive import valid_id
+
 SESSION = "qos.app-session/4"
 API = "qos.desktop/1"
 ROOT = Path(__file__).resolve().parent.parent
@@ -25,12 +27,6 @@ ROOT = Path(__file__).resolve().parent.parent
 
 def fail(message):
     raise ValueError(message)
-
-
-def valid_id(value):
-    return (isinstance(value, str) and 0 < len(value.encode()) <= 64
-            and re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]*", value)
-            and ".." not in value)
 
 
 def scaffold(destination):
@@ -176,6 +172,8 @@ def build(where, compiler=None, verbose=False):
         for base, dest in (("0", image), ("0x10000000", moved)):
             command(common + [f"--defsym=PLUG_BASE={base}", *objects, stub_obj, "-o", dest])
         revision = Path(str(asm) + ".abirev").read_text().strip()
+        if meta.get("abi") != f'{meta["portableAbi"]}.{revision}':
+            fail("SDK compiler/profile ABI mismatch; reinstall a matching SDK")
         fields = dict(name=app["name"], id=app["id"], version=app["version"], entry="fpr_modtab", loadMode="plugin",
                       abi=f'{meta["portableAbi"]}.{revision}', architecture=arch, desktopSession=SESSION, desktopApi=API)
         manifest = work / "manifest.toml"
@@ -198,12 +196,36 @@ def main():
     p.add_argument("project", nargs="?", default=".")
     p.add_argument("--compiler")
     p.add_argument("-v", "--verbose", action="store_true")
+    p = sub.add_parser("disk")
+    disks = p.add_subparsers(dest="disk_command", required=True)
+    p = disks.add_parser("create")
+    p.add_argument("destination")
+    p.add_argument("--profile", choices=["main"], default="main")
+    p.add_argument("--size", type=int, default=32, help="disk size in MiB")
+    p = sub.add_parser("install")
+    p.add_argument("archive", nargs="?")
+    p.add_argument("destination", nargs="?")
+    p.add_argument("--prefix", help=argparse.SUPPRESS)
+    p = sub.add_parser("run")
+    p.add_argument("disk")
     args = ap.parse_args()
     try:
         if args.command == "new":
             scaffold(args.destination)
-        else:
+        elif args.command == "build":
             build(args.project, args.compiler, args.verbose)
+        else:
+            import desktop_install
+            if args.command == "disk":
+                desktop_install.create(ROOT, args.destination, args.size)
+            elif args.command == "install":
+                if args.prefix is not None:
+                    fail("toolchain installation moved to qos toolchain install --prefix (contributor CLI)")
+                if not args.archive or not args.destination:
+                    fail("usage: qos install APP.qa DISK")
+                desktop_install.install(ROOT, args.archive, args.destination)
+            elif args.command == "run":
+                sys.exit(desktop_install.run(ROOT, args.disk))
     except (ValueError, OSError, KeyError, subprocess.CalledProcessError) as exc:
         print(f"qos: {exc}", file=sys.stderr)
         sys.exit(1)

@@ -4,7 +4,7 @@
 Stages no software itself. Pass a fresh staged prefix and a prebuilt
  tests/sdkdesktop.fpr driver. --gui additionally opens prebuilt Main and
 captures the external counter before/after a key, then closes cleanly.
-Only fresh throwaway seeded disks are used; this is not an app installer.
+Exercises disk create, install/update and run using fresh throwaway disks.
 """
 import argparse
 import hashlib
@@ -119,19 +119,49 @@ view viewport ready = (D.text viewport "Clock effect" "" Nil, Nil,
 ''')
     run([prefix / "bin/fpr", "build", "--target=qos-portable"], "clock-build.log", cwd=clock)
     disk = out / "counter.disk"
-    run([restricted / "python3", sdk / "tools/mkdisk.py", disk, "16", archive,
-         clock / "build/clock-example.qa"], "disk.log")
+    run([prefix / "bin/qos", "disk", "create", disk, "--profile", "main", "--size", "32"], "disk-create.log")
+    tools = str(sdk / "tools")
+    seed = (f"import sys;sys.path.insert(0,{tools!r});import qos_disk as d;"
+            f"\nwith d.locked({str(disk)!r}) as fd: d.append(fd,d.metadata(fd),[(b'user/note',b'keep this'),(b'user/history',b'unchanged')])")
+    run([restricted / "python3", "-c", seed], "user-record-seed.log")
+
+    def values(log):
+        probe = (f"import sys,json,hashlib;sys.path.insert(0,{tools!r});import qos_disk as d;"
+                 f"\nwith d.locked({str(disk)!r}) as fd: print(json.dumps({{k.decode():hashlib.sha256(v.read(fd)).hexdigest() for k,v in d.scan(fd,d.metadata(fd)).items()}},sort_keys=True))")
+        return json.loads(run([restricted / "python3", "-c", probe], log))
+
+    original_records = values("before-install-values.json")
+    run([prefix / "bin/qos", "install", archive, disk], "counter-install.log")
+    run([prefix / "bin/qos", "install", clock / "build/clock-example.qa", disk], "clock-install.log")
+    run([prefix / "bin/qos", "install", "--prefix", out / "unused"], "old-toolchain-option-refused.log", expect=1)
+    original_archive = archive.read_bytes()
+    manifest.write_text(manifest.read_text().replace('"1.2.3"', '"1.2.4"'))
+    source = project / "counter.fpr"
+    source.write_text(source.read_text().replace('viewport "Counter"', 'viewport "Counter Updated"'))
+    run([prefix / "bin/fpr", "build", "--target=qos-portable"], "update-build.log", cwd=project)
+    assert archive.read_bytes() != original_archive
+    run([prefix / "bin/qos", "install", archive, disk], "counter-update.log")
+    app = tomllib.loads(sections(archive)["MANIFEST"].decode())
+    assert app["version"] == "1.2.4"
+    updated_records = values("after-update-values.json")
+    assert all(updated_records[k] == v for k, v in original_records.items() if k != "apps/index"), "installer changed unrelated app/user records"
+    assert updated_records["apps/counter-example.qa"] == hashlib.sha256(archive.read_bytes()).hexdigest()
+    # The real QLOG reader below will prove that Python's bulk framing and
+    # durable metadata interoperate with the production FP-RISC implementation.
     for harts in ("1", "4"):
         text = run([sdk / "runtime/qosp", "--yes", out / "driver.qa"], f"session-{harts}.log",
                    extra={"FPR_DISK": str(disk), "FPR_HARTS": harts})
         assert "sdkdesktop: HOLDS" in text and "PANIC" not in text, text
     if args.gui:
         gui(out, sdk, guard, env, disk)
+        after_launch = values("after-main-values.json")
+        assert all(after_launch[k] == v for k, v in updated_records.items()), "Main launch changed previously installed app/user records"
     assert tree_hashes(prefix) == before, "SDK modified during build or runtime"
     evidence = dict(result="passed", os=sys.platform, architecture=app["architecture"],
                     sourceAccess="denied by sandbox-exec", absentTools=["ghc", "cabal", "make"],
                     readOnlySdkUnchanged=True, app=app, archiveSha256=hashlib.sha256(archive.read_bytes()).hexdigest(),
                     sessionHarts=[1, 4], clockEffect=True, graphicalMain=args.gui,
+                    offlineInstallUpdate=True, unrelatedRecordsPreserved=True, hostInstallerExclusion=args.gui,
                     sdk=json.loads((sdk / "sdk.json").read_text()))
     (out / "evidence.json").write_text(json.dumps(evidence, indent=2) + "\n")
     print(f"installed SDK: HOLDS ({out / 'evidence.json'})")
@@ -141,7 +171,8 @@ def gui(out, sdk, guard, env, disk):
     fifo = out / "keys.evd"
     os.mkfifo(fifo)
     fd = os.open(fifo, os.O_RDWR | os.O_NONBLOCK)
-    proc = subprocess.Popen(guard + [str(sdk / "runtime/qosp-gl"), "--yes", str(sdk / "profile/main.qa")],
+    prefix = sdk.parents[1]
+    proc = subprocess.Popen(guard + [str(prefix / "bin/qos"), "run", str(disk)],
         cwd=out, env=dict(env, FPR_DISK=str(disk), FPR_EVDEV=str(fifo)),
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     messages, lines = queue.Queue(), []
@@ -191,9 +222,16 @@ def gui(out, sdk, guard, env, disk):
         raise TimeoutError(str(source))
 
     try:
-        wait("shell: Main Profile ready (6 shortcuts")
-        for _ in range(4):
-            key(106)
+        wait("shell: Main Profile ready (12 shortcuts")
+        # A running Main owns the same lock the installer needs.
+        attempt = subprocess.run(guard + [str(prefix / "bin/qos"), "install",
+            str(out / "renamed project/build/counter-example.qa"), str(disk)],
+            cwd=out, env=env, capture_output=True, text=True, timeout=30)
+        (out / "in-use-refusal.log").write_text(attempt.stdout + attempt.stderr)
+        assert attempt.returncode == 1 and "disk is in use" in attempt.stderr, attempt
+        # Six onboard apps follow four builtin shortcuts; counter is index 10.
+        key(107)
+        key(105)
         key(28)
         wait("shell: open counter-example")
         time.sleep(.5)

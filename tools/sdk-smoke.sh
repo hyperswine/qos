@@ -3,7 +3,7 @@
 # run the way an app author would: outside any checkout, with no GHC or
 # cabal on PATH.  What README's "app loop today" section promises.
 #
-#   ./qos.py install --prefix /tmp/qos-sdk
+#   ./qos.py toolchain install --prefix /tmp/qos-sdk
 #   (move the qos and fprisc checkouts out of sight)
 #   sh tools/sdk-smoke.sh /tmp/qos-sdk /tmp/qos-smoke
 #
