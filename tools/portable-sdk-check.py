@@ -95,7 +95,7 @@ def main():
     (project / "main.fpr").rename(project / "counter.fpr")
     manifest = project / "qos.toml"
     manifest.write_text(manifest.read_text().replace('"main.fpr"', '"counter.fpr"').replace('"Counter Example"', '"External Counter"').replace('"0.1.0"', '"1.2.3"'))
-    run([prefix / "bin/fpr", "build", "--target=qos-portable"], "build.log", cwd=project,
+    run([prefix / "bin/qos", "build"], "build.log", cwd=project,
         extra={"FPR_HOME": str(ROOT), "FPR_PATH": str(args.fprisc), "FPR_FOREIGN": str(ROOT / "core/foreign.fpr")})
     archive = project / "build/counter-example.qa"
     sec = sections(archive)
@@ -104,7 +104,7 @@ def main():
         "counter-example", "External Counter", "1.2.3", "plugin", "qos.app-session/5")
     assert sec["IMPORT"] and sec["RELOC"] and sec["IMAGE"]
     assert b"sha " + hashlib.sha256(sec["IMAGE"]).hexdigest().encode() in sec["LOAD"]
-    run([prefix / "bin/fpr", "build", "--target=qos-portable", "--manifest=cost.toml"],
+    run([prefix / "bin/qos", "build", "--manifest=cost.toml"],
         "cost-option-refused.log", cwd=project, expect=2)
     # A second app proves initial commands, wire result conversion and cleanup.
     run([prefix / "bin/qos", "new", "clock-example"], "clock-scaffold.log")
@@ -117,7 +117,7 @@ update event ready = (ready, Nil).
 view viewport ready = (D.text viewport "Clock effect" "" Nil, Nil,
   if ready then "clock ready" else "clock waiting").
 ''')
-    run([prefix / "bin/fpr", "build", "--target=qos-portable"], "clock-build.log", cwd=clock)
+    run([prefix / "bin/qos", "build"], "clock-build.log", cwd=clock)
     disk = out / "counter.disk"
     run([prefix / "bin/qos", "disk", "create", disk, "--profile", "main", "--size", "32"], "disk-create.log")
     tools = str(sdk / "tools")
@@ -143,7 +143,7 @@ view viewport ready = (D.text viewport "Clock effect" "" Nil, Nil,
     manifest.write_text(manifest.read_text().replace('"1.2.3"', '"1.2.4"'))
     source = project / "counter.fpr"
     source.write_text(source.read_text().replace('viewport "Counter"', 'viewport "Counter Updated"'))
-    run([prefix / "bin/fpr", "build", "--target=qos-portable"], "update-build.log", cwd=project)
+    run([prefix / "bin/qos", "build"], "update-build.log", cwd=project)
     assert archive.read_bytes() != original_archive
     run([prefix / "bin/qos", "install", archive, disk], "counter-update.log")
     app = tomllib.loads(sections(archive)["MANIFEST"].decode())

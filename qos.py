@@ -497,7 +497,7 @@ def load_manifest(path):
     if not isinstance(app, dict) or not isinstance(build, dict):
         die(f"{rel(path)}: [app] and [build] must be tables")
     if app.get("kind") == "desktop":
-        die(f"{rel(path)}: Main desktop projects use the installed desktop SDK: fpr build --target=qos-portable; run the resulting app through Main")
+        die(f"{rel(path)}: Main desktop projects use the installed desktop SDK: qos build; run the resulting app through Main")
     aid = app.get("id")
     why = app_id_invalid(aid)
     if why:

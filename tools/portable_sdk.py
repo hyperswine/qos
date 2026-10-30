@@ -48,7 +48,7 @@ def scaffold(destination):
         f'[app]\nid = {json.dumps(name)}\nname = {json.dumps(title)}\n'
         'version = "0.1.0"\nkind = "desktop"\n\n'
         '[build]\nentry = "main.fpr"\ntarget = "qos-portable"\n')
-    print(f"Created {destination}; cd there and run fpr build --target=qos-portable")
+    print(f"Created {destination}; cd there and run qos build")
 
 
 def project(path):
@@ -133,7 +133,7 @@ def build(where, compiler=None, verbose=False):
         fail("incompatible SDK: install a matching native QOS Portable SDK")
     fpr = (sdk / "compiler/fpr").resolve()
     if compiler and Path(compiler).resolve() != fpr:
-        fail("the selected fpr and SDK differ; use this SDK's bin/fpr")
+        fail("the selected fpr and SDK differ; build with this SDK's `qos build`")
     if digest(fpr) != meta["compilerSha256"]:
         fail("SDK compiler changed; install a matching release set")
     root, app, entry = project(where)

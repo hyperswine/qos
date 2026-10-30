@@ -53,6 +53,9 @@ def package(prefix, version, output, compiler_licenses):
         raise ValueError('staged SDK inventory mismatch')
     if not meta.get('profileFiles') or not meta.get('runtimeFiles'):
         raise ValueError('release must include Main profile and both hosts')
+    # 0.2.0+: the package exports only `qos`; `fpr` belongs to the FP-RISC formula.
+    if (prefix / 'bin/fpr').exists() or (prefix / 'bin/fpr').is_symlink():
+        raise ValueError('stage exports bin/fpr; restage with this tree (only bin/qos is exported)')
     for path in sdk.rglob('*'):
         if path.suffix in ('.disk', '.hs', '.c') or path.name == '.git':
             raise ValueError(f'unexpected release file: {path}')

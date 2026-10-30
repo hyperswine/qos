@@ -99,7 +99,8 @@ def main():
     (sdk / "sdk.json").write_text(json.dumps(meta, indent=2) + "\n")
     binaries = prefix / "bin"
     binaries.mkdir()
-    (binaries / "fpr").symlink_to("../libexec/qos-portable/compiler/fpr")
+    # Since 0.2.0 the package exports only `qos`: `qos build` selects the private,
+    # hash-matched compiler, and global `fpr` belongs to the FP-RISC toolchain.
     launcher = binaries / "qos"
     launcher.write_text('#!/bin/sh\nbindir=${0%/*}\nPYTHONDONTWRITEBYTECODE=1 exec python3 "$bindir/../libexec/qos-portable/tools/portable_sdk.py" "$@"\n')
     launcher.chmod(0o755)

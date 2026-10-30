@@ -83,7 +83,7 @@ def main():
     project = out / 'renamed project'
     manifest = project / 'qos.toml'
     manifest.write_text(manifest.read_text().replace('"1.2.4"', '"1.2.5"'))
-    execute(out, prefix, [prefix / 'bin/fpr', 'build', '--target=qos-portable'], 'upgrade-build.log', cwd=project)
+    execute(out, prefix, [prefix / 'bin/qos', 'build'], 'upgrade-build.log', cwd=project)
     execute(out, prefix, [prefix / 'bin/qos', 'install', project / 'build/counter-example.qa', disk], 'upgrade-install.log')
     run = execute(out, prefix, [sdk / 'runtime/qosp', '--yes', out / 'driver.qa'], 'upgrade-session.log',
                   extra={'FPR_DISK': str(disk), 'FPR_HARTS': '4'})
