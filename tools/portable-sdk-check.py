@@ -66,7 +66,8 @@ def main():
     env.update(PATH=f"{prefix / 'bin'}:{restricted}", HOME=str(out / "home"),
                XDG_CACHE_HOME=str(out / "cache"), PYTHONDONTWRITEBYTECODE="1")
     (out / "home").mkdir()
-    blocked = [ROOT, args.fprisc.resolve(), Path.home() / ".ghcup", Path.home() / ".cabal"]
+    # The folder holding the checkouts also covers sibling worktrees and the main checkouts.
+    blocked = [ROOT, args.fprisc.resolve(), ROOT.parent, Path.home() / ".ghcup", Path.home() / ".cabal"]
     policy = out / "source-free.sb"
     policy.write_text('(version 1)\n(allow default)\n' + ''.join(
         f'(deny file-read* file-write* (subpath {json.dumps(str(path))}))\n' for path in blocked))
