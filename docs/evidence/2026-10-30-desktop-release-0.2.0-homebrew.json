@@ -1,0 +1,67 @@
+{
+  "date": "2026-10-30",
+  "scope": "Published QOS Portable 0.2.0, installed and tested through Homebrew on macOS ARM64",
+  "result": "passed",
+  "release": {
+    "tag": "desktop-v0.2.0",
+    "url": "https://github.com/hyperswine/qos/releases/tag/desktop-v0.2.0",
+    "target": "f4d8ec22a90f6a11f62d15c340f3360a1ca4dbc3",
+    "assets": [
+      "qos-portable-0.2.0-macos-arm64.tar.gz",
+      "qos-portable.rb",
+      "release.json",
+      "SHA256SUMS"
+    ],
+    "downloadedArchiveSha256": "2a25165a1ffcc641c688fc93372620c78e305face349bb79fe70bcc91d4d2e71",
+    "matchesSHA256SUMS": true
+  },
+  "tap": {
+    "repository": "hyperswine/homebrew-tap",
+    "commit": "91922cc",
+    "formula": "Formula/qos-portable.rb"
+  },
+  "before": {
+    "release": "0.1.0",
+    "cellarAcceptance": "passed",
+    "graphicalMain": true,
+    "build": "qos build",
+    "upgradeDiskPrepared": true
+  },
+  "brewUpgrade": "hyperswine/tap/qos-portable 0.1.0 -> 0.2.0; it also upgraded the outdated llvm dependency z3 to 5.3.3 (llvm linkage checked)",
+  "globalCommands": {
+    "qos": "/opt/homebrew/bin/qos -> Cellar/qos-portable/0.2.0",
+    "fpr": "absent after upgrade"
+  },
+  "upgrade": {
+    "result": "passed",
+    "fromRelease": "0.1.0",
+    "toRelease": "0.2.0",
+    "os": "darwin",
+    "architecture": "aarch64",
+    "packageLeftDiskByteIdentical": true,
+    "loadedCount": 2,
+    "upgradedCompilerBuild": true,
+    "appReplacement": true,
+    "unrelatedRecordsPreserved": true,
+    "sourceAccess": "denied by sandbox-exec",
+    "absentTools": [
+      "ghc",
+      "cabal",
+      "make"
+    ]
+  },
+  "brewTest": "passed",
+  "brewLinkage": "no missing or broken libraries",
+  "after": {
+    "release": "0.2.0",
+    "cellarAcceptance": "passed",
+    "graphicalMain": true,
+    "readOnlySdkUnchanged": true,
+    "pythonBytecodeInPackage": false
+  },
+  "notes": [
+    "The acceptance removes write bits from the Cellar keg while it runs; they were restored afterwards",
+    "A pre-existing 0.1.0-rc1 keg remains in the Cellar with unwritable files from an earlier acceptance run"
+  ],
+  "rawEvidenceDirectory": "/private/tmp/claude-501/-Users-jasonqin-Documents-GitHub/02550f56-ef86-4033-a4c5-b561bb9f8f71/scratchpad/q2"
+}

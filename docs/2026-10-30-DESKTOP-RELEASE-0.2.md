@@ -84,13 +84,40 @@ in the published 0.1.0 template (dependency order, the `opt_bin` helpers,
 line length, and Homebrew-internal Sorbet and frozen-string notices).
 See the [evidence](evidence/2026-10-30-desktop-release-0.2.0.json).
 
+## Published and installed (2026-10-30, later)
+
+[QOS Portable 0.2.0](https://github.com/hyperswine/qos/releases/tag/desktop-v0.2.0)
+is published. The tag `desktop-v0.2.0` points at the build commit `f4d8ec2`,
+and the release carries the tarball, `SHA256SUMS`, `release.json` and the
+formula. The downloaded tarball matches its checksum. `Formula/qos-portable.rb`
+in `hyperswine/homebrew-tap` is updated at `91922cc`.
+
+The actual Homebrew path was then tested on this Mac:
+
+1. The graphical installed-SDK acceptance passed against the installed 0.1.0
+   Cellar prefix, and the upgrade disk was prepared (saved count 2, every
+   record fingerprinted).
+2. `brew update` and `brew upgrade hyperswine/tap/qos-portable` moved
+   0.1.0 to 0.2.0. Homebrew also upgraded `z3`, an outdated dependency of
+   `llvm`, to 5.3.3; `llvm`'s linkage was checked afterwards.
+   `/opt/homebrew/bin/fpr` is gone, and `qos --version` reports 0.2.0.
+3. The upgrade check against the 0.2.0 Cellar passed. The disk was
+   byte-identical after the upgrade and before launch; the app was rebuilt
+   with `qos build` and replaced; count 2 was restored; and unrelated
+   records were preserved.
+4. `brew test qos-portable` passed, and `brew linkage` reports no missing
+   libraries.
+5. The graphical installed-SDK acceptance passed against the 0.2.0 Cellar
+   prefix, with no Python bytecode written into the package.
+
+See the [Homebrew evidence](evidence/2026-10-30-desktop-release-0.2.0-homebrew.json).
+The acceptance removes write bits from the keg while it runs; they were
+restored afterwards. An older `0.1.0-rc1` keg is still in the Cellar, and
+`brew cleanup` cannot remove it until its leftover unwritable files are fixed.
+
 ## Not done yet
 
-- Publishing: the GitHub release `desktop-v0.2.0` (tarball, `SHA256SUMS`,
-  `release.json`, formula) and the `hyperswine/homebrew-tap` formula update.
-- An actual `brew upgrade` from 0.1.0, followed by `brew test qos-portable`
-  and the acceptance against the real Cellar prefix. The checks above used
-  a copy of the 0.1.0 package with self-contained launchers instead of
-  Homebrew's wrappers.
+- This branch (`portable-0.2`) is not merged into `main`; the release tag
+  points at its commit `f4d8ec2`.
 - Once 0.2.0 is published, the FP-RISC formula can drop its
   `conflicts_with "qos-portable"`.
