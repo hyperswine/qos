@@ -1,5 +1,9 @@
 # Matched desktop binary releases
 
+**Update 2026-10-30:** QOS Portable 0.2.0 stops installing `fpr`; build with
+`qos build` instead of `fpr build --target=qos-portable`. See
+[QOS Portable 0.2.0](2026-10-30-DESKTOP-RELEASE-0.2.md).
+
 The first package targets macOS ARM64 and macOS 27 or newer, matching the
 actual Mach-O deployment targets of the tested compiler and hosts. It ships
 one matched compiler/SDK/runtime/Main snapshot. FP-RISC still owns its compiler

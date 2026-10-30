@@ -1,0 +1,77 @@
+{
+  "date": "2026-10-30",
+  "scope": "Local macOS ARM64 qualification of the QOS Portable 0.2.0 candidate; not published, not installed with Homebrew",
+  "result": "passed",
+  "release": "0.2.0",
+  "archive": "qos-portable-0.2.0-macos-arm64.tar.gz",
+  "archiveSha256": "2a25165a1ffcc641c688fc93372620c78e305face349bb79fe70bcc91d4d2e71",
+  "qosRevision": "f4d8ec22a90f6a11f62d15c340f3360a1ca4dbc3",
+  "fpriscRevision": "94f699bc868f49c1e5b5019f9228512e85415993",
+  "qosDirty": false,
+  "fpriscDirty": false,
+  "abi": "22.137",
+  "desktopApi": "qos.desktop/2",
+  "desktopSession": "qos.app-session/5",
+  "minimumMacOS": "27.0",
+  "change": "the package exports only qos; qos build replaces fpr build --target=qos-portable",
+  "compiler": {
+    "sha256": "b20b50c46d2b19bb6664e9c4b390f725c23d2b06b8bdeb41d1027a4ca756065b",
+    "sameBinaryAs": "0.1.0",
+    "reason": "a rebuild of 94f699b today resolved network-3.2.10.0 (0.1.0 used 3.2.7.0); the exact 0.1.0 binary and its recorded notices were shipped instead"
+  },
+  "runtimeArtifactsIdenticalTo010": [
+    "main.qa",
+    "clock.qa",
+    "editor.qa",
+    "qosp",
+    "qosp-gl"
+  ],
+  "exportedCommands": [
+    "qos"
+  ],
+  "binFprAbsent": true,
+  "acceptance010": {
+    "result": "passed",
+    "graphicalMain": true,
+    "build": "qos build"
+  },
+  "acceptance020": {
+    "result": "passed",
+    "graphicalMain": true,
+    "build": "qos build",
+    "layout": "unpacked release tarball (libexec/qos-portable + bin/qos launcher)",
+    "readOnlySdkUnchanged": true
+  },
+  "deniedPaths": [
+    "/Users/jasonqin/Documents/GitHub (all checkouts and worktrees)",
+    "~/.ghcup",
+    "~/.cabal"
+  ],
+  "upgrade010to020": {
+    "result": "passed",
+    "fromRelease": "0.1.0",
+    "toRelease": "0.2.0",
+    "os": "darwin",
+    "architecture": "aarch64",
+    "packageLeftDiskByteIdentical": true,
+    "loadedCount": 2,
+    "upgradedCompilerBuild": true,
+    "appReplacement": true,
+    "unrelatedRecordsPreserved": true,
+    "sourceAccess": "denied by sandbox-exec",
+    "absentTools": [
+      "ghc",
+      "cabal",
+      "make"
+    ]
+  },
+  "formula": {
+    "brewStyle": "only pre-existing 0.1.0 template findings (dependency order, opt_bin helpers, line length, Sorbet/frozen-string notices)"
+  },
+  "notQualified": [
+    "GitHub release desktop-v0.2.0 and the tap formula are not published",
+    "brew install / brew upgrade / brew test of the actual Cellar package were not run (would change this machine's Homebrew)",
+    "Old prefix was a copy of the installed 0.1.0 Cellar with self-contained bin launchers, not the Homebrew env-script wrappers"
+  ],
+  "rawEvidenceDirectory": "/private/tmp/claude-501/-Users-jasonqin-Documents-GitHub/02550f56-ef86-4033-a4c5-b561bb9f8f71/scratchpad/q2"
+}

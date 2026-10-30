@@ -1,5 +1,9 @@
 # Installed desktop SDK v1
 
+**Update 2026-10-30:** QOS Portable 0.2.0 stops installing `fpr`; build with
+`qos build` instead of `fpr build --target=qos-portable`. See
+[QOS Portable 0.2.0](2026-10-30-DESKTOP-RELEASE-0.2.md).
+
 Date: 2026-10-29. This implements slice 1 of the
 [Portable app workflow](2026-10-28-PORTABLE-APP-WORKFLOW.md).
 

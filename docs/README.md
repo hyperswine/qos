@@ -170,3 +170,4 @@ Source-adjacent READMEs under `tools/` stay beside the tools they explain.
 | 2026-10-29 | [DESKTOP-DISK-INSTALL.md](2026-10-29-DESKTOP-DISK-INSTALL.md) | Offline disk creation, atomic app/catalogue installation and shared disk ownership |
 | 2026-10-29 | [DESKTOP-APP-STORAGE.md](2026-10-29-DESKTOP-APP-STORAGE.md) | SDK v2 stable-ID storage, acknowledgements, bounded failures and persistence acceptance |
 | 2026-10-29 | [DESKTOP-RELEASE.md](2026-10-29-DESKTOP-RELEASE.md) | Published macOS ARM64 binary SDK/Homebrew package and actual upgrade preserving app state |
+| 2026-10-30 | [DESKTOP-RELEASE-0.2.md](2026-10-30-DESKTOP-RELEASE-0.2.md) | QOS Portable 0.2.0: exports only `qos` (`qos build` replaces `fpr build --target=qos-portable`); same compiler and runtime bytes as 0.1.0; 0.1.0 to 0.2.0 upgrade and both acceptances qualified locally; not yet published |
