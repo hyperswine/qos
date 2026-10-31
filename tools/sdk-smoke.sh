@@ -42,6 +42,19 @@ expect() {  # expect FILE STRING
   ok "found '$2'"
 }
 
+# 0. default template is one this toolchain runs (mvu), and a Main
+#    desktop project refuses `qos build` (also with -v) with a clear,
+#    nonzero error instead of a silent no-op
+"$QOS" new smokedef 2>&1 | tee new-def.out
+[ -f smokedef/app.fpr ] || fail "default qos new did not write the standalone smokedef/app.fpr"
+"$QOS" new smokedesk --template desktop
+for v in "" "-v"; do
+  if (cd smokedesk && "$QOS" build $v) >build-desk.out 2>&1; then
+    cat build-desk.out; fail "qos build $v in a desktop project exited 0"
+  fi
+  expect build-desk.out "cannot build Main desktop apps"
+done
+
 # 1. min template: new + run
 "$QOS" new smokemin --template min
 [ -f smokemin/app.fpr ] || fail "qos new did not write smokemin/app.fpr"
