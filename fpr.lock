@@ -13,6 +13,7 @@ ep v3.0 c66ad65e68dd97f5 programs/mods/apppolicy.fpr
 epservice v3.0 e8bce05a1ddf73db programs/mods/apppolicy.fpr
 ep v3.0 c66ad65e68dd97f5 programs/mods/appsep.fpr
 std/actor v3.0 201a0e9bf98a5154 programs/mods/appsession.fpr
+std/storage v1.1 a8f7ee14e1efae76 programs/mods/appstore.fpr
 ep v3.0 c66ad65e68dd97f5 programs/mods/blockep.fpr
 std/actor v3.0 201a0e9bf98a5154 programs/mods/blockep.fpr
 std/blockio v6.0 8b4ffa1467ca03a5 programs/mods/blockep.fpr
@@ -139,6 +140,10 @@ std/fs v5.0 84826bc9e8ddb4b5 tests/apps.fpr
 std/actor v3.0 201a0e9bf98a5154 tests/appsession.fpr
 ../programs/mods/ep v3.0 c66ad65e68dd97f5 tests/appsessionmemory.fpr
 std/actor v3.0 201a0e9bf98a5154 tests/appsessionmemory.fpr
+std/fs v5.0 84826bc9e8ddb4b5 tests/appstore.fpr
+std/blockio v6.0 8b4ffa1467ca03a5 tests/appstore.fpr
+../programs/mods/svc v5.0 75479fb6d5f34670 tests/appstore.fpr
+std/actor v3.0 201a0e9bf98a5154 tests/appstore.fpr
 ../std/blockio v6.0 8b4ffa1467ca03a5 tests/blocklifecycle.fpr
 ../std/block v6.0 615ea5947fe13b00 tests/blocklifecycle.fpr
 ../std/blockio v6.0 8b4ffa1467ca03a5 tests/blocklifecyclep.fpr
@@ -270,6 +275,10 @@ std/actor v3.0 201a0e9bf98a5154 tests/qpublication.fpr
 std/actor v3.0 201a0e9bf98a5154 tests/qsysfail.fpr
 ../programs/mods/svc v5.0 75479fb6d5f34670 tests/qsysfail.fpr
 std/actor v3.0 201a0e9bf98a5154 tests/runprog.fpr
+../programs/mods/qlog v10.0 7022992c8e4a9fba tests/sdkdesktop.fpr
+std/fs v5.0 84826bc9e8ddb4b5 tests/sdkdesktop.fpr
+std/blockio v6.0 8b4ffa1467ca03a5 tests/sdkdesktop.fpr
+std/actor v3.0 201a0e9bf98a5154 tests/sdkdesktop.fpr
 std/fs v5.0 84826bc9e8ddb4b5 tests/selfhost.fpr
 std/blockio v6.0 8b4ffa1467ca03a5 tests/storagebudgets.fpr
 std/fs v5.0 84826bc9e8ddb4b5 tests/storagebudgets.fpr
