@@ -1,0 +1,1144 @@
+{
+  "date": "2026-10-31",
+  "scope": "QOS Portable on physical Raspberry Pi 4 Model B Rev 1.4; Linux AArch64",
+  "sources": {
+    "qos": {
+      "head": "4525c8d4ed689439c734746c10f36fcb31e017ee",
+      "status": " M fpr.lock\n M fprisc.lock.json\n",
+      "source_archive_sha256": "3ef6cb9241017f0d7498d63151cf509bf68877e588ae38666ca53ad0da4639ee",
+      "overlay_sha256": {
+        "fprisc.lock.json": "60a67393033bf1ebb49ed0242a4b2a4aa7ccffb4e6d1cdb30cc3347c54ff6aee",
+        "fpr.lock": "a4f315b5fe20d9fdd425e41f1a19be55aa398ce10d976d4791a9a159b24585e1"
+      }
+    },
+    "fprisc": {
+      "head": "1a09f0141c7bdb7ed022d7fcc1876f70666f661d",
+      "status": "",
+      "source_archive_sha256": "b012e5083d90e6c37c21a4be050197da3f0e26611f382321257d7b0ee8aa939b"
+    }
+  },
+  "core_manifest": {
+    "abi": 22,
+    "codegen_rev": 141,
+    "production": true,
+    "arch": "aarch64",
+    "qos_revision": "4525c8d4ed689439c734746c10f36fcb31e017ee",
+    "fprisc_revision": "1a09f0141c7bdb7ed022d7fcc1876f70666f661d",
+    "source_snapshots": {
+      "qos": {
+        "head": "4525c8d4ed689439c734746c10f36fcb31e017ee",
+        "status": " M fpr.lock\n M fprisc.lock.json\n",
+        "source_archive_sha256": "3ef6cb9241017f0d7498d63151cf509bf68877e588ae38666ca53ad0da4639ee",
+        "overlay_sha256": {
+          "fprisc.lock.json": "60a67393033bf1ebb49ed0242a4b2a4aa7ccffb4e6d1cdb30cc3347c54ff6aee",
+          "fpr.lock": "a4f315b5fe20d9fdd425e41f1a19be55aa398ce10d976d4791a9a159b24585e1"
+        }
+      },
+      "fprisc": {
+        "head": "1a09f0141c7bdb7ed022d7fcc1876f70666f661d",
+        "status": "",
+        "source_archive_sha256": "b012e5083d90e6c37c21a4be050197da3f0e26611f382321257d7b0ee8aa939b"
+      }
+    },
+    "qos_changes": [
+      "fprisc.lock.json and fpr.lock repinned to the exact compiler revision"
+    ],
+    "compiler_options": {
+      "FPR_TYPED_IR_EARLY_LOOPS": "1",
+      "FPR_TYPED_IR_STRING_SCAN": "1",
+      "FPR_TYPED_IR_LOOP_MOTION": "0"
+    },
+    "apps": [
+      "clock",
+      "logs",
+      "browser",
+      "disk",
+      "terminal",
+      "editor"
+    ],
+    "files": {
+      "qosp-es": "042077d5a0c6bef45bf84a2f6f9e28023ee742e491de64956eaf6cf6803b8a03",
+      "main.qa": "a781a45db73152934e7a9bad6b9d7c5d3d1e24628e681c4fe2432bc273a022e4",
+      "Main.disk": "17e78e173262d24424521d2f5fc0c57719ad0186f6406b3a2ef48fec34fdd98e",
+      "runner": "a26d3454c49d3ba89876b52d24b38ca017f6afee6260621b50d36a5142ba498b",
+      "clock.qa": "76688033e1defd95dc830765163abdb5a6f71f08b47059cb09befb6ec40fd954",
+      "logs.qa": "6e6a7065629940c3bcd60e989f09c9c25a3afffac16cae521c4e0dc278807689",
+      "browser.qa": "380f799550b6706b4801c03d80a485bb16ae5e5e7fd1fd1df45d4941c79a8020",
+      "disk.qa": "db582fc85db7df32e7fc529b21b70a72bc47ac7521766eadd28b5c807549f7d4",
+      "terminal.qa": "4929acaf04062459deaeb38967bc5dcd73dc9789962ab89bc45a83c835ba9e5e",
+      "editor.qa": "878f3379ca66eae7ed1f72375efe91f5da096d4bceee6806f8a57da4a0da2f6d"
+    }
+  },
+  "package": {
+    "sha256": "875e59201ddf896dd928d20d3c34dd280927bb26b438f5a9b6f848b2a5db7146",
+    "files": 26,
+    "fprisc": "1a09f0141c7bdb7ed022d7fcc1876f70666f661d"
+  },
+  "previous_checkout_pin": "94f699bc868f49c1e5b5019f9228512e85415993",
+  "local_checks": {
+    "lock_resolvable_pins": 311,
+    "disk_updater_tests": 20,
+    "deployment_helper_tests": 9,
+    "health_helper_tests": 7,
+    "native_sdk_builder_selftest": true,
+    "sdk_service_and_publication_checks": true
+  },
+  "physical_runtime_probes": [
+    {
+      "name": "inbox",
+      "harts": 1,
+      "args": [],
+      "seconds": 0.054331814870238304,
+      "exit": 0,
+      "stdout": "inbox: global producer slots, charged bytes, oversize refusal and dequeue release HOLDS\n",
+      "stderr": ""
+    },
+    {
+      "name": "inbox",
+      "harts": 4,
+      "args": [],
+      "seconds": 0.05384038807824254,
+      "exit": 0,
+      "stdout": "inbox: global producer slots, charged bytes, oversize refusal and dequeue release HOLDS\n",
+      "stderr": ""
+    },
+    {
+      "name": "inboxshared",
+      "harts": 1,
+      "args": [],
+      "seconds": 0.014978185063228011,
+      "exit": 0,
+      "stdout": "inboxshared: twelve senders, selective shared-ring shifts and full budget reuse HOLDS\n",
+      "stderr": ""
+    },
+    {
+      "name": "inboxshared",
+      "harts": 4,
+      "args": [],
+      "seconds": 0.012548074126243591,
+      "exit": 0,
+      "stdout": "inboxshared: twelve senders, selective shared-ring shifts and full budget reuse HOLDS\n",
+      "stderr": ""
+    },
+    {
+      "name": "inboxownership",
+      "harts": 1,
+      "args": [],
+      "seconds": 0.006406610831618309,
+      "exit": 0,
+      "stdout": "inboxownership: ARC identity/retention/refusal and linear identity HOLDS\n",
+      "stderr": ""
+    },
+    {
+      "name": "inboxownership",
+      "harts": 4,
+      "args": [],
+      "seconds": 0.007561815204098821,
+      "exit": 0,
+      "stdout": "inboxownership: ARC identity/retention/refusal and linear identity HOLDS\n",
+      "stderr": ""
+    },
+    {
+      "name": "regionnest",
+      "harts": 1,
+      "args": [],
+      "seconds": 1.4810545360669494,
+      "exit": 0,
+      "stdout": "regionnest: 800000 cells through 40 arenas, built 45000150000 adopted, loop 19296732; call regions opened yes, loop region reset per slab; memory bounded\n",
+      "stderr": ""
+    },
+    {
+      "name": "regionnest",
+      "harts": 4,
+      "args": [],
+      "seconds": 1.5331670541781932,
+      "exit": 0,
+      "stdout": "regionnest: 800000 cells through 40 arenas, built 45000150000 adopted, loop 19296732; call regions opened yes, loop region reset per slab; memory bounded\n",
+      "stderr": ""
+    },
+    {
+      "name": "floatinline",
+      "harts": 1,
+      "args": [],
+      "seconds": 0.0066819628700613976,
+      "exit": 0,
+      "stdout": "F64 inline: 0 mismatches over 400 pairs\n",
+      "stderr": ""
+    },
+    {
+      "name": "floatinline",
+      "harts": 4,
+      "args": [],
+      "seconds": 0.009793962817639112,
+      "exit": 0,
+      "stdout": "F64 inline: 0 mismatches over 400 pairs\n",
+      "stderr": ""
+    },
+    {
+      "name": "fp_pool",
+      "harts": 1,
+      "args": [],
+      "seconds": 0.011849852045997977,
+      "exit": 0,
+      "stdout": "162000 168000\n",
+      "stderr": ""
+    },
+    {
+      "name": "fp_pool",
+      "harts": 4,
+      "args": [],
+      "seconds": 0.009221241110935807,
+      "exit": 0,
+      "stdout": "162000 168000\n",
+      "stderr": ""
+    },
+    {
+      "name": "parked-noinline-0",
+      "harts": 1,
+      "args": [
+        "any"
+      ],
+      "seconds": 0.005105315009132028,
+      "exit": 0,
+      "stdout": "any PASS\n",
+      "stderr": ""
+    },
+    {
+      "name": "parked-noinline-0",
+      "harts": 1,
+      "args": [
+        "from"
+      ],
+      "seconds": 0.0048364822287112474,
+      "exit": 0,
+      "stdout": "from PASS\n",
+      "stderr": ""
+    },
+    {
+      "name": "parked-noinline-0",
+      "harts": 1,
+      "args": [
+        "dead"
+      ],
+      "seconds": 0.004849759861826897,
+      "exit": 0,
+      "stdout": "dead PASS\n",
+      "stderr": ""
+    },
+    {
+      "name": "parked-noinline-0",
+      "harts": 1,
+      "args": [
+        "result"
+      ],
+      "seconds": 0.005042776931077242,
+      "exit": 0,
+      "stdout": "result PASS\n",
+      "stderr": ""
+    },
+    {
+      "name": "parked-noinline-0",
+      "harts": 1,
+      "args": [
+        "effect"
+      ],
+      "seconds": 0.004715536953881383,
+      "exit": 0,
+      "stdout": "effect PASS\n",
+      "stderr": ""
+    },
+    {
+      "name": "parked-noinline-0",
+      "harts": 1,
+      "args": [
+        "mid"
+      ],
+      "seconds": 0.004694758914411068,
+      "exit": 0,
+      "stdout": "mid PASS\n",
+      "stderr": ""
+    },
+    {
+      "name": "parked-noinline-0",
+      "harts": 4,
+      "args": [
+        "any"
+      ],
+      "seconds": 0.005771128926426172,
+      "exit": 0,
+      "stdout": "any PASS\n",
+      "stderr": ""
+    },
+    {
+      "name": "parked-noinline-0",
+      "harts": 4,
+      "args": [
+        "from"
+      ],
+      "seconds": 0.005856203846633434,
+      "exit": 0,
+      "stdout": "from PASS\n",
+      "stderr": ""
+    },
+    {
+      "name": "parked-noinline-0",
+      "harts": 4,
+      "args": [
+        "dead"
+      ],
+      "seconds": 0.005781702930107713,
+      "exit": 0,
+      "stdout": "dead PASS\n",
+      "stderr": ""
+    },
+    {
+      "name": "parked-noinline-0",
+      "harts": 4,
+      "args": [
+        "result"
+      ],
+      "seconds": 0.006274722050875425,
+      "exit": 0,
+      "stdout": "result PASS\n",
+      "stderr": ""
+    },
+    {
+      "name": "parked-noinline-0",
+      "harts": 4,
+      "args": [
+        "effect"
+      ],
+      "seconds": 0.006707536987960339,
+      "exit": 0,
+      "stdout": "effect PASS\n",
+      "stderr": ""
+    },
+    {
+      "name": "parked-noinline-0",
+      "harts": 4,
+      "args": [
+        "mid"
+      ],
+      "seconds": 0.005446037044748664,
+      "exit": 0,
+      "stdout": "mid PASS\n",
+      "stderr": ""
+    },
+    {
+      "name": "parked-noinline-1",
+      "harts": 1,
+      "args": [
+        "any"
+      ],
+      "seconds": 0.005076369969174266,
+      "exit": 0,
+      "stdout": "any PASS\n",
+      "stderr": ""
+    },
+    {
+      "name": "parked-noinline-1",
+      "harts": 1,
+      "args": [
+        "from"
+      ],
+      "seconds": 0.004971296060830355,
+      "exit": 0,
+      "stdout": "from PASS\n",
+      "stderr": ""
+    },
+    {
+      "name": "parked-noinline-1",
+      "harts": 1,
+      "args": [
+        "dead"
+      ],
+      "seconds": 0.00501790689304471,
+      "exit": 0,
+      "stdout": "dead PASS\n",
+      "stderr": ""
+    },
+    {
+      "name": "parked-noinline-1",
+      "harts": 1,
+      "args": [
+        "result"
+      ],
+      "seconds": 0.004942647879943252,
+      "exit": 0,
+      "stdout": "result PASS\n",
+      "stderr": ""
+    },
+    {
+      "name": "parked-noinline-1",
+      "harts": 1,
+      "args": [
+        "effect"
+      ],
+      "seconds": 0.004729592939838767,
+      "exit": 0,
+      "stdout": "effect PASS\n",
+      "stderr": ""
+    },
+    {
+      "name": "parked-noinline-1",
+      "harts": 1,
+      "args": [
+        "mid"
+      ],
+      "seconds": 0.004685019142925739,
+      "exit": 0,
+      "stdout": "mid PASS\n",
+      "stderr": ""
+    },
+    {
+      "name": "parked-noinline-1",
+      "harts": 4,
+      "args": [
+        "any"
+      ],
+      "seconds": 0.005583741003647447,
+      "exit": 0,
+      "stdout": "any PASS\n",
+      "stderr": ""
+    },
+    {
+      "name": "parked-noinline-1",
+      "harts": 4,
+      "args": [
+        "from"
+      ],
+      "seconds": 0.005657278001308441,
+      "exit": 0,
+      "stdout": "from PASS\n",
+      "stderr": ""
+    },
+    {
+      "name": "parked-noinline-1",
+      "harts": 4,
+      "args": [
+        "dead"
+      ],
+      "seconds": 0.005669685080647469,
+      "exit": 0,
+      "stdout": "dead PASS\n",
+      "stderr": ""
+    },
+    {
+      "name": "parked-noinline-1",
+      "harts": 4,
+      "args": [
+        "result"
+      ],
+      "seconds": 0.005892981076613069,
+      "exit": 0,
+      "stdout": "result PASS\n",
+      "stderr": ""
+    },
+    {
+      "name": "parked-noinline-1",
+      "harts": 4,
+      "args": [
+        "effect"
+      ],
+      "seconds": 0.005903333891183138,
+      "exit": 0,
+      "stdout": "effect PASS\n",
+      "stderr": ""
+    },
+    {
+      "name": "parked-noinline-1",
+      "harts": 4,
+      "args": [
+        "mid"
+      ],
+      "seconds": 0.006901999935507774,
+      "exit": 0,
+      "stdout": "mid PASS\n",
+      "stderr": ""
+    },
+    {
+      "name": "string-scan-0",
+      "harts": 1,
+      "case": "",
+      "exit": 0,
+      "stdout": "visit 1\nvisit 2\n197\n",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "name": "string-scan-0",
+      "harts": 1,
+      "case": "negative",
+      "exit": 1,
+      "stdout": "visit -1\n[ERR] charAt: index out of range (-1, length 3)\n\n*** FPRISC PANIC [actor 0]: charAt: index out of range (-1, length 3) ***\n",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "name": "string-scan-0",
+      "harts": 1,
+      "case": "upper",
+      "exit": 1,
+      "stdout": "visit 0\nvisit 1\nvisit 2\nvisit 3\n[ERR] charAt: index out of range (3, length 3)\n\n*** FPRISC PANIC [actor 0]: charAt: index out of range (3, length 3) ***\n",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "name": "string-scan-0",
+      "harts": 1,
+      "case": "empty",
+      "exit": 1,
+      "stdout": "visit 0\n[ERR] charAt: index out of range (0, length 0)\n\n*** FPRISC PANIC [actor 0]: charAt: index out of range (0, length 0) ***\n",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "name": "string-scan-0",
+      "harts": 1,
+      "case": "wrong",
+      "exit": 1,
+      "stdout": "visit 0\n[ERR] charAt: not a string\n\n*** FPRISC PANIC [actor 0]: charAt: not a string ***\n",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "name": "string-scan-0",
+      "harts": 1,
+      "case": "wrong-empty",
+      "exit": 0,
+      "stdout": "7\n",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "name": "string-scan-0",
+      "harts": 1,
+      "case": "overflow",
+      "exit": 1,
+      "stdout": "visit 0\n[ERR] Int overflow: 4611686018427387903 + 97 does not fit an Int (-4611686018427387904..4611686018427387903); I64 is the type that wraps\n\n*** FPRISC PANIC [actor 0]: Int overflow: 4611686018427387903 + 97 does not fit an Int (-4611686018427387904..4611686018427387903); I64 is the type that wraps ***\n",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "name": "string-scan-0",
+      "harts": 1,
+      "case": "index-overflow",
+      "exit": 1,
+      "stdout": "[ERR] Int overflow: 4611686018427387903 + 1 does not fit an Int (-4611686018427387904..4611686018427387903); I64 is the type that wraps\n\n*** FPRISC PANIC [actor 0]: Int overflow: 4611686018427387903 + 1 does not fit an Int (-4611686018427387904..4611686018427387903); I64 is the type that wraps ***\n",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "name": "string-scan-0",
+      "harts": 1,
+      "case": "near-max",
+      "exit": 1,
+      "stdout": "visit 4611686018427387902\n[ERR] charAt: index out of range (4611686018427387902, length 3)\n\n*** FPRISC PANIC [actor 0]: charAt: index out of range (4611686018427387902, length 3) ***\n",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "name": "string-scan-0",
+      "harts": 1,
+      "case": "zero-max",
+      "exit": 0,
+      "stdout": "9\n",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "name": "string-scan-0",
+      "harts": 4,
+      "case": "",
+      "exit": 0,
+      "stdout": "visit 1\nvisit 2\n197\n",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "name": "string-scan-0",
+      "harts": 4,
+      "case": "negative",
+      "exit": 1,
+      "stdout": "visit -1\n[ERR] charAt: index out of range (-1, length 3)\n\n*** FPRISC PANIC [actor 0]: charAt: index out of range (-1, length 3) ***\n",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "name": "string-scan-0",
+      "harts": 4,
+      "case": "upper",
+      "exit": 1,
+      "stdout": "visit 0\nvisit 1\nvisit 2\nvisit 3\n[ERR] charAt: index out of range (3, length 3)\n\n*** FPRISC PANIC [actor 0]: charAt: index out of range (3, length 3) ***\n",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "name": "string-scan-0",
+      "harts": 4,
+      "case": "empty",
+      "exit": 1,
+      "stdout": "visit 0\n[ERR] charAt: index out of range (0, length 0)\n\n*** FPRISC PANIC [actor 0]: charAt: index out of range (0, length 0) ***\n",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "name": "string-scan-0",
+      "harts": 4,
+      "case": "wrong",
+      "exit": 1,
+      "stdout": "visit 0\n[ERR] charAt: not a string\n\n*** FPRISC PANIC [actor 0]: charAt: not a string ***\n",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "name": "string-scan-0",
+      "harts": 4,
+      "case": "wrong-empty",
+      "exit": 0,
+      "stdout": "7\n",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "name": "string-scan-0",
+      "harts": 4,
+      "case": "overflow",
+      "exit": 1,
+      "stdout": "visit 0\n[ERR] Int overflow: 4611686018427387903 + 97 does not fit an Int (-4611686018427387904..4611686018427387903); I64 is the type that wraps\n\n*** FPRISC PANIC [actor 0]: Int overflow: 4611686018427387903 + 97 does not fit an Int (-4611686018427387904..4611686018427387903); I64 is the type that wraps ***\n",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "name": "string-scan-0",
+      "harts": 4,
+      "case": "index-overflow",
+      "exit": 1,
+      "stdout": "[ERR] Int overflow: 4611686018427387903 + 1 does not fit an Int (-4611686018427387904..4611686018427387903); I64 is the type that wraps\n\n*** FPRISC PANIC [actor 0]: Int overflow: 4611686018427387903 + 1 does not fit an Int (-4611686018427387904..4611686018427387903); I64 is the type that wraps ***\n",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "name": "string-scan-0",
+      "harts": 4,
+      "case": "near-max",
+      "exit": 1,
+      "stdout": "visit 4611686018427387902\n[ERR] charAt: index out of range (4611686018427387902, length 3)\n\n*** FPRISC PANIC [actor 0]: charAt: index out of range (4611686018427387902, length 3) ***\n",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "name": "string-scan-0",
+      "harts": 4,
+      "case": "zero-max",
+      "exit": 0,
+      "stdout": "9\n",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "name": "string-scan-1",
+      "harts": 1,
+      "case": "",
+      "exit": 0,
+      "stdout": "visit 1\nvisit 2\n197\n",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "name": "string-scan-1",
+      "harts": 1,
+      "case": "negative",
+      "exit": 1,
+      "stdout": "visit -1\n[ERR] charAt: index out of range (-1, length 3)\n\n*** FPRISC PANIC [actor 0]: charAt: index out of range (-1, length 3) ***\n",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "name": "string-scan-1",
+      "harts": 1,
+      "case": "upper",
+      "exit": 1,
+      "stdout": "visit 0\nvisit 1\nvisit 2\nvisit 3\n[ERR] charAt: index out of range (3, length 3)\n\n*** FPRISC PANIC [actor 0]: charAt: index out of range (3, length 3) ***\n",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "name": "string-scan-1",
+      "harts": 1,
+      "case": "empty",
+      "exit": 1,
+      "stdout": "visit 0\n[ERR] charAt: index out of range (0, length 0)\n\n*** FPRISC PANIC [actor 0]: charAt: index out of range (0, length 0) ***\n",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "name": "string-scan-1",
+      "harts": 1,
+      "case": "wrong",
+      "exit": 1,
+      "stdout": "visit 0\n[ERR] charAt: not a string\n\n*** FPRISC PANIC [actor 0]: charAt: not a string ***\n",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "name": "string-scan-1",
+      "harts": 1,
+      "case": "wrong-empty",
+      "exit": 0,
+      "stdout": "7\n",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "name": "string-scan-1",
+      "harts": 1,
+      "case": "overflow",
+      "exit": 1,
+      "stdout": "visit 0\n[ERR] Int overflow: 4611686018427387903 + 97 does not fit an Int (-4611686018427387904..4611686018427387903); I64 is the type that wraps\n\n*** FPRISC PANIC [actor 0]: Int overflow: 4611686018427387903 + 97 does not fit an Int (-4611686018427387904..4611686018427387903); I64 is the type that wraps ***\n",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "name": "string-scan-1",
+      "harts": 1,
+      "case": "index-overflow",
+      "exit": 1,
+      "stdout": "[ERR] Int overflow: 4611686018427387903 + 1 does not fit an Int (-4611686018427387904..4611686018427387903); I64 is the type that wraps\n\n*** FPRISC PANIC [actor 0]: Int overflow: 4611686018427387903 + 1 does not fit an Int (-4611686018427387904..4611686018427387903); I64 is the type that wraps ***\n",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "name": "string-scan-1",
+      "harts": 1,
+      "case": "near-max",
+      "exit": 1,
+      "stdout": "visit 4611686018427387902\n[ERR] charAt: index out of range (4611686018427387902, length 3)\n\n*** FPRISC PANIC [actor 0]: charAt: index out of range (4611686018427387902, length 3) ***\n",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "name": "string-scan-1",
+      "harts": 1,
+      "case": "zero-max",
+      "exit": 0,
+      "stdout": "9\n",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "name": "string-scan-1",
+      "harts": 4,
+      "case": "",
+      "exit": 0,
+      "stdout": "visit 1\nvisit 2\n197\n",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "name": "string-scan-1",
+      "harts": 4,
+      "case": "negative",
+      "exit": 1,
+      "stdout": "visit -1\n[ERR] charAt: index out of range (-1, length 3)\n\n*** FPRISC PANIC [actor 0]: charAt: index out of range (-1, length 3) ***\n",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "name": "string-scan-1",
+      "harts": 4,
+      "case": "upper",
+      "exit": 1,
+      "stdout": "visit 0\nvisit 1\nvisit 2\nvisit 3\n[ERR] charAt: index out of range (3, length 3)\n\n*** FPRISC PANIC [actor 0]: charAt: index out of range (3, length 3) ***\n",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "name": "string-scan-1",
+      "harts": 4,
+      "case": "empty",
+      "exit": 1,
+      "stdout": "visit 0\n[ERR] charAt: index out of range (0, length 0)\n\n*** FPRISC PANIC [actor 0]: charAt: index out of range (0, length 0) ***\n",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "name": "string-scan-1",
+      "harts": 4,
+      "case": "wrong",
+      "exit": 1,
+      "stdout": "visit 0\n[ERR] charAt: not a string\n\n*** FPRISC PANIC [actor 0]: charAt: not a string ***\n",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "name": "string-scan-1",
+      "harts": 4,
+      "case": "wrong-empty",
+      "exit": 0,
+      "stdout": "7\n",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "name": "string-scan-1",
+      "harts": 4,
+      "case": "overflow",
+      "exit": 1,
+      "stdout": "visit 0\n[ERR] Int overflow: 4611686018427387903 + 97 does not fit an Int (-4611686018427387904..4611686018427387903); I64 is the type that wraps\n\n*** FPRISC PANIC [actor 0]: Int overflow: 4611686018427387903 + 97 does not fit an Int (-4611686018427387904..4611686018427387903); I64 is the type that wraps ***\n",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "name": "string-scan-1",
+      "harts": 4,
+      "case": "index-overflow",
+      "exit": 1,
+      "stdout": "[ERR] Int overflow: 4611686018427387903 + 1 does not fit an Int (-4611686018427387904..4611686018427387903); I64 is the type that wraps\n\n*** FPRISC PANIC [actor 0]: Int overflow: 4611686018427387903 + 1 does not fit an Int (-4611686018427387904..4611686018427387903); I64 is the type that wraps ***\n",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "name": "string-scan-1",
+      "harts": 4,
+      "case": "near-max",
+      "exit": 1,
+      "stdout": "visit 4611686018427387902\n[ERR] charAt: index out of range (4611686018427387902, length 3)\n\n*** FPRISC PANIC [actor 0]: charAt: index out of range (4611686018427387902, length 3) ***\n",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "name": "string-scan-1",
+      "harts": 4,
+      "case": "zero-max",
+      "exit": 0,
+      "stdout": "9\n",
+      "stderr": "",
+      "passed": true
+    }
+  ],
+  "isolated_main_preflight": {
+    "remote_dir": "/tmp/qos-pi-string-scan-20261031/preflight",
+    "work": "/tmp/qos-pi-string-scan-20261031/preflight/soak-1793438649823157000",
+    "store": "/tmp/qos-pi-string-scan-20261031/preflight/private-disk-1793438649823157000",
+    "bundle_hashes": "042077d5a0c6bef45bf84a2f6f9e28023ee742e491de64956eaf6cf6803b8a03  /tmp/qos-pi-string-scan-20261031/preflight/qosp-es\na781a45db73152934e7a9bad6b9d7c5d3d1e24628e681c4fe2432bc273a022e4  /tmp/qos-pi-string-scan-20261031/preflight/main.qa\n2f50d045f912bd8a584b55cfee9650904e64111a364fa8bfca071f1082a56e76  /tmp/qos-pi-string-scan-20261031/preflight/Main.disk\n",
+    "production_before": "running pid=22434 restarts=0",
+    "boots": [
+      {
+        "boot": 1,
+        "exit": 0,
+        "signal": 0,
+        "seconds": 91.05913,
+        "user_seconds": 9.286698,
+        "system_seconds": 3.622661,
+        "max_rss_kib": 46068,
+        "peak_temp_millic": 60374,
+        "min_cpu_khz": 600000,
+        "max_cpu_khz": 600000,
+        "timeout": false,
+        "stop_requested": false,
+        "killed": false,
+        "cycles": 2,
+        "samples": 2,
+        "rss_first_kib": 45764,
+        "rss_last_kib": 46516,
+        "rss_min_kib": 45764,
+        "rss_max_kib": 46516
+      },
+      {
+        "boot": 2,
+        "exit": 0,
+        "signal": 0,
+        "seconds": 30.071087,
+        "user_seconds": 3.677311,
+        "system_seconds": 1.433454,
+        "max_rss_kib": 42688,
+        "peak_temp_millic": 59887,
+        "min_cpu_khz": 600000,
+        "max_cpu_khz": 600000,
+        "timeout": false,
+        "stop_requested": true,
+        "killed": false
+      }
+    ],
+    "memory_probe": false,
+    "arena_limit_mib": 256,
+    "harts": 4,
+    "viewport": "1024x600",
+    "pointer_probe": false,
+    "reliability_probe": false,
+    "scope": "isolated Main UI workload and two graceful shutdown paths; residency and optional allocator reservations/root counts, not reachability proof",
+    "production_after": "running pid=22434 restarts=0",
+    "passed": true
+  },
+  "installed": {
+    "final": {
+      "passed": true,
+      "arch": "aarch64",
+      "qos_revision": "4525c8d4ed689439c734746c10f36fcb31e017ee",
+      "fprisc_revision": "1a09f0141c7bdb7ed022d7fcc1876f70666f661d",
+      "state": "running pid=10621 restarts=0",
+      "compiler_state": "running pid=9547 restarts=0",
+      "installed_sha256": {
+        "/usr/bin/qosp": "042077d5a0c6bef45bf84a2f6f9e28023ee742e491de64956eaf6cf6803b8a03",
+        "/usr/share/qosp/app.qa": "a781a45db73152934e7a9bad6b9d7c5d3d1e24628e681c4fe2432bc273a022e4",
+        "/usr/share/qosp/Main.disk": "17e78e173262d24424521d2f5fc0c57719ad0186f6406b3a2ef48fec34fdd98e",
+        "/usr/share/qosp/compiler-sdk.tar.gz": "e62cfeed88983201d8ff0f15317e6aba9cadbe6b0f3e1ce0731e41d27339f409"
+      },
+      "renderer": "V3D",
+      "graphics_markers": [
+        "[gfx] scanout: /dev/dri/card1 1024x600 (frame fullscreen)",
+        "[host] [gfx] scanout: /dev/dri/card1 1024x600 (frame fullscreen)",
+        "[gfx] EGL 1.4 (surfaceless)  V3D 4.2.14 / OpenGL ES 3.1 Mesa 24.0.9",
+        "[host] [gfx] EGL 1.4 (surfaceless)  V3D 4.2.14 / OpenGL ES 3.1 Mesa 24.0.9"
+      ],
+      "normal_writable_disk": "/var/lib/qosp/Main.disk",
+      "configuration_preserved": true,
+      "rollback": "/var/lib/qosp/deployment-pi-string-scan-20261031T092635Z/rollback.sh",
+      "rollback_sha256": "7ce50c2b1ce6a71e188c06fae48dafc5f5930b2411a54fd7371ed51df952229c",
+      "disk_upgrade": {
+        "apps": [
+          "clock",
+          "logs",
+          "browser",
+          "disk",
+          "terminal",
+          "editor"
+        ],
+        "new_generation": 19,
+        "new_head": 1645,
+        "old_apps": [
+          "clock",
+          "logs",
+          "browser",
+          "disk",
+          "terminal",
+          "editor"
+        ],
+        "old_generation": 17,
+        "old_head": 1448,
+        "preserved_records": 7,
+        "reclaimed_app_records": 7
+      },
+      "health": {
+        "boundary": "passive installed Main/compiler observation",
+        "clock_ticks_per_second": 100,
+        "cpu_percent_of_one_core": {
+          "mean_over_interval": 6.8163366696369545,
+          "peak_sample_interval": 6.9814807467465405
+        },
+        "cpu_scale": "100 percent is one fully occupied CPU core",
+        "elapsed_seconds": 60.0029047599528,
+        "frequency_khz": {
+          "max": 600000,
+          "min": 600000
+        },
+        "identities": {
+          "compiler": {
+            "pid": 9547,
+            "starttime_ticks": 147283247,
+            "state": "running pid=9547 restarts=0"
+          },
+          "main": {
+            "pid": 10621,
+            "starttime_ticks": 147285299,
+            "state": "running pid=10621 restarts=0"
+          }
+        },
+        "limitation": "A short observation does not establish long-term memory stability.",
+        "output_directory": "/tmp/qos-pi-string-scan-20261031/install-20261031T092635Z/health",
+        "passed": true,
+        "pss_kib": {
+          "change": 563,
+          "first": 44006,
+          "last": 44569,
+          "max": 44573,
+          "min": 44006
+        },
+        "raw_samples_retained_on_pi": "/tmp/qos-pi-string-scan-20261031/install-20261031T092635Z/health/samples.jsonl",
+        "requested_seconds": 60.0,
+        "rss_kib": {
+          "change": 564,
+          "first": 45504,
+          "last": 46068,
+          "max": 46068,
+          "min": 45504
+        },
+        "samples": 13,
+        "temperature_c": {
+          "max": 59.887,
+          "min": 57.452
+        }
+      }
+    },
+    "baseline": {
+      "boundary": "passive installed Main/compiler observation",
+      "clock_ticks_per_second": 100,
+      "cpu_percent_of_one_core": {
+        "mean_over_interval": 6.999665132736849,
+        "peak_sample_interval": 7.380353041298897
+      },
+      "cpu_scale": "100 percent is one fully occupied CPU core",
+      "elapsed_seconds": 60.00287042814307,
+      "frequency_khz": {
+        "max": 600000,
+        "min": 600000
+      },
+      "identities": {
+        "compiler": {
+          "pid": 21372,
+          "starttime_ticks": 113593712,
+          "state": "running pid=21372 restarts=0"
+        },
+        "main": {
+          "pid": 22434,
+          "starttime_ticks": 113595747,
+          "state": "running pid=22434 restarts=0"
+        }
+      },
+      "limitation": "A short observation does not establish long-term memory stability.",
+      "output_directory": "/tmp/qos-pi-string-scan-20261031/before/health",
+      "passed": true,
+      "pss_kib": {
+        "change": 0,
+        "first": 46349,
+        "last": 46349,
+        "max": 46351,
+        "min": 46349
+      },
+      "raw_samples_retained_on_pi": "/tmp/qos-pi-string-scan-20261031/before/health/samples.jsonl",
+      "requested_seconds": 60.0,
+      "rss_kib": {
+        "change": 0,
+        "first": 47888,
+        "last": 47888,
+        "max": 47888,
+        "min": 47888
+      },
+      "samples": 13,
+      "temperature_c": {
+        "max": 57.939,
+        "min": 56.478
+      }
+    },
+    "previous_sdk": {
+      "format": 1,
+      "arch": "aarch64",
+      "python": "3.12",
+      "compiler_kind": "editor",
+      "entrypoint_sha256": "bab0145a022469b93626627340c9491048a6f8a9b944480fec7f214090350b55",
+      "glibc": "glibc 2.39",
+      "qos_revision": "d1a11db9626370bf7fbddf4780c6a7b595115382",
+      "fprisc_revision": "7d8d2837f8fd007f739248eacf27ea0e54654b12",
+      "qos_dirty": null,
+      "fprisc_dirty": null,
+      "bundled_source_sha256": "5fcd532e58ec2ae5388b833c1ca64b1e80dc7ccfac4c0e2a0b277693ec1a0f14",
+      "compiler_input_sha256": "9ffc1023d905dbd37319fad4df9b9b859e86aff3cbc96ca7238dbbb8277a0408",
+      "compiler_sha256": "8340ac7ae0b12776ade0c33c104cd61d5d8b01c0ca11463efff6255ffe0b2f74"
+    },
+    "history_preservation": {
+      "preserved_records": 7,
+      "source_sha256": "9f782d12a0214638b3d969e61cd418bee20e00aa667b8b7c8b57f1f1b5d077eb",
+      "upgraded_sha256": "2f50d045f912bd8a584b55cfee9650904e64111a364fa8bfca071f1082a56e76"
+    },
+    "space_budget": {
+      "available_bytes": 28344320,
+      "peak_additional_bytes": 19423232,
+      "final_growth_bytes": 2232320,
+      "reserve_bytes": 8388608,
+      "files": [
+        {
+          "target": "/var/lib/qosp/Main.disk",
+          "new_allocation": 8388608,
+          "old_allocation": 7340032,
+          "cumulative_growth": 1048576
+        },
+        {
+          "target": "/usr/share/qosp/Main.disk",
+          "new_allocation": 7340032,
+          "old_allocation": 6291456,
+          "cumulative_growth": 2097152
+        },
+        {
+          "target": "/usr/bin/qosp",
+          "new_allocation": 937984,
+          "old_allocation": 937984,
+          "cumulative_growth": 2097152
+        },
+        {
+          "target": "/usr/share/qosp/app.qa",
+          "new_allocation": 2220032,
+          "old_allocation": 2154496,
+          "cumulative_growth": 2162688
+        },
+        {
+          "target": "/usr/share/qosp/compiler-sdk.tar.gz",
+          "new_allocation": 17260544,
+          "old_allocation": 17190912,
+          "cumulative_growth": 2232320
+        },
+        {
+          "target": "/usr/share/qosp/compiler-sdk.tar.gz.sha256",
+          "new_allocation": 4096,
+          "old_allocation": 4096,
+          "cumulative_growth": 2232320
+        }
+      ]
+    },
+    "first_start": {
+      "automatic_restarts": 0,
+      "main_pid": 9918,
+      "shortcuts": 10,
+      "state": "running pid=9918 restarts=0"
+    },
+    "sdk_selftest": {
+      "check": "ok",
+      "plugin": "QAR2",
+      "plugin_bytes": 203533,
+      "compiler_sha256": "e778d8448e0a59069ab86975906974fc54cb50e8b1b84d54bcdfc27b48146720",
+      "publication": "committed-frozen-stable-updated",
+      "publication_version": "v1.1",
+      "invalid_source": "refused",
+      "target": "native-aarch64"
+    },
+    "compiler_roundtrip": {
+      "compiler_daemon_roundtrip": "ok"
+    },
+    "config_checks": {
+      "config-preserved.json": {
+        "preserved_config_and_service_files": true
+      },
+      "config-after-start.json": {
+        "preserved_config_and_service_files": true
+      },
+      "config-after-health.json": {
+        "preserved_config_and_service_files": true
+      }
+    },
+    "kms_capture_sha256": "e9347449f7152694861620fe748fb6c3156ea1fdd7b8696f6ce36cbb4a14fa09",
+    "kms_capture_header": [
+      "P6",
+      "1024 600",
+      "255"
+    ]
+  },
+  "limits": [
+    "No paired Pi performance benchmark",
+    "No long-duration soak or power-loss test",
+    "No hosted CI run for this deployment",
+    "Owner confirmed desktop visibility; no manual interaction acceptance recorded"
+  ],
+  "status": "deployed and accepted; final independent verification completed after transient connectivity loss",
+  "owner_confirmation": {
+    "statement": "Desktop is visible",
+    "scope": "Owner observation after deployment; no claim of interactive acceptance"
+  },
+  "post_acceptance_connectivity": {
+    "initial": "SSH and ICMP to the Pi timed out while the local gateway answered",
+    "recovery": "Fresh SSH connection succeeded without further device mutation or reboot",
+    "final_verification": "installed hashes, configuration, rollback archive, service identities and KMS readback passed",
+    "same_process_ids": true,
+    "automatic_restarts": 0,
+    "cause": "unknown"
+  }
+}
