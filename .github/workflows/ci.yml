@@ -38,7 +38,7 @@ jobs:
           apt-get update
           apt-get install -y --no-install-recommends git ca-certificates python3 zstd \
             make gcc pkg-config ghc cabal-install libghc-megaparsec-dev \
-            libghc-network-dev libghc-utf8-string-dev libgit2-dev libarchive-dev \
+            libghc-network-dev libghc-utf8-string-dev libgit2-dev libarchive-dev libcurl4-openssl-dev \
             libegl-dev libgl-dev
       - uses: actions/checkout@v4
       - id: lock
@@ -74,7 +74,7 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends git ca-certificates python3 zstd \
-            make gcc libc6-dev pkg-config libgit2-1.9 libarchive13t64 libegl1 libgl1 \
+            make gcc libc6-dev pkg-config libgit2-1.9 libarchive13t64 libcurl4t64 libegl1 libgl1 \
             libgmp10 libffi8 libnuma1 libegl-dev libgl-dev
       - uses: actions/checkout@v4
       - uses: actions/cache/restore@v4
@@ -130,7 +130,7 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends git ca-certificates python3 zstd \
-            make gcc libc6-dev pkg-config libgit2-1.9 libarchive13t64 libegl1 libgl1 \
+            make gcc libc6-dev pkg-config libgit2-1.9 libarchive13t64 libcurl4t64 libegl1 libgl1 \
             libgmp10 libffi8 libnuma1 libegl-dev libgl-dev
       - uses: actions/checkout@v4
       - uses: actions/cache/restore@v4
@@ -225,7 +225,7 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends git ca-certificates python3 zstd \
-            make gcc libc6-dev pkg-config libgit2-1.9 libarchive13t64 libegl1 libgl1 \
+            make gcc libc6-dev pkg-config libgit2-1.9 libarchive13t64 libcurl4t64 libegl1 libgl1 \
             libgmp10 libffi8 libnuma1 gcc-riscv64-unknown-elf picolibc-riscv64-unknown-elf \
             qemu-system-misc
       - uses: actions/checkout@v4
@@ -263,7 +263,7 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends git ca-certificates python3 zstd \
-            make gcc libc6-dev pkg-config libgit2-1.9 libarchive13t64 libegl1 libgl1 \
+            make gcc libc6-dev pkg-config libgit2-1.9 libarchive13t64 libcurl4t64 libegl1 libgl1 \
             libgmp10 libffi8 libnuma1 libegl-dev libgl-dev curl \
             gcc-riscv64-unknown-elf picolibc-riscv64-unknown-elf qemu-system-misc
       - uses: actions/checkout@v4
