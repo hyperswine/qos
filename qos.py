@@ -1676,11 +1676,11 @@ def cmd_clean(a):
 #                              never rebuilt, never written) and
 #                              sdk-version.json (qos + fprisc versions and
 #                              commits, layout).
-#   PREFIX/bin/fpr             -> libexec/qos-fpr/toolchain/fpr  (a symlink:
-#                              the binary finds core/ and std/ beside its
-#                              REAL path -- compiler/Home.hs)
-#   PREFIX/bin/qos             -> libexec/qos-fpr/qos.py
-#   PREFIX/bin/sol             exec fpr sol "$@"
+#   PREFIX/bin/qos             -> libexec/qos-fpr/qos.py  (the only export:
+#                              `fpr`/`sol` on PATH belong to the standalone
+#                              FP-RISC toolchain; qos runs its private
+#                              libexec/qos-fpr/toolchain/fpr, which finds
+#                              core/ and std/ beside its REAL path)
 #
 # Sources of the QOS side ship because it is compiled per program (a .qa
 # links hal/ and qos/appside for the host it runs on).  `--full` installs
@@ -1780,16 +1780,22 @@ def cmd_toolchain_install(a):
     (lib / "sdk-version.json").write_text(json.dumps(stamp, indent=2) + "\n")
     (lib / ".installed").write_text(f"qos-fpr {ver} installed {time.strftime('%Y-%m-%d')} from {ROOT} ({layout} layout)\n")
     bin_.mkdir(parents=True, exist_ok=True)
-    for name, target in (("fpr", lib / "toolchain" / "fpr"), ("qos", lib / "qos.py")):
-        link = bin_ / name
-        link.unlink(missing_ok=True)
-        link.symlink_to(os.path.relpath(target, bin_))
-    sol = bin_ / "sol"
-    sol.write_text('#!/bin/sh\n# sol -- the HostedBytecode profile is a subcommand of fpr\nexec "$(dirname "$0")/fpr" sol "$@"\n')
-    sol.chmod(0o755)
+    # Only `qos` goes on PATH (the QOS Portable 0.2.0 decision): the global
+    # `fpr`/`sol` belong to the standalone FP-RISC toolchain.  qos runs its
+    # private compiler, libexec/qos-fpr/toolchain/fpr, itself.
+    link = bin_ / "qos"
+    link.unlink(missing_ok=True)
+    link.symlink_to(os.path.relpath(lib / "qos.py", bin_))
+    for name in ("fpr", "sol"):  # an older install's exports, only if they are ours
+        old = bin_ / name
+        ours = (old.is_symlink() and os.readlink(old) == os.path.relpath(lib / "toolchain" / "fpr", bin_)) or (
+            old.is_file() and not old.is_symlink() and "the HostedBytecode profile is a subcommand of fpr" in old.read_text(errors="replace"))
+        if ours:
+            old.unlink()
+            say(f"removed {old} (an older qos install's export; use the standalone FP-RISC toolchain for fpr/sol)")
     hosts = [h for h in ("qosp", "qosp-gl") if (lib / "qos" / h).is_file()]
     size = sum(f.stat().st_size for f in lib.rglob("*") if f.is_file() and not f.is_symlink())
-    say(f"installed qos-fpr {ver} ({layout} layout, {size / 1e6:.0f} MB) -> {lib} ({', '.join(['fpr'] + hosts)}); {bin_}/{{fpr,qos,sol}}")
+    say(f"installed qos-fpr {ver} ({layout} layout, {size / 1e6:.0f} MB) -> {lib} ({', '.join(['fpr'] + hosts)}); {bin_}/qos")
     say(f"versions: qos {stamp['qos']['commit'] or '?'}, fprisc {stamp['fprisc']['commit'] or '?'} -> {lib / 'sdk-version.json'}")
     if not a.full:
         say("SDK layout: app new/run/pack/dev; `toolchain install --full` for the whole tree (test, native, release, --on virt)")

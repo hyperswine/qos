@@ -31,7 +31,9 @@ for t in ghc cabal; do
   fi
 done
 [ -x "$QOS" ] || fail "no $QOS"
-[ -x "$PREFIX/bin/fpr" ] || fail "no $PREFIX/bin/fpr"
+[ ! -e "$PREFIX/bin/fpr" ] || fail "$PREFIX/bin/fpr exported (fpr/sol belong to the standalone FP-RISC toolchain)"
+[ ! -e "$PREFIX/bin/sol" ] || fail "$PREFIX/bin/sol exported"
+[ -x "$PREFIX/libexec/qos-fpr/toolchain/fpr" ] || fail "no private compiler at libexec/qos-fpr/toolchain/fpr"
 
 rm -rf "$WORK"
 mkdir -p "$WORK"

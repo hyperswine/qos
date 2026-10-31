@@ -65,7 +65,7 @@ formula exists yet.
 
 ```sh
 ./qos.py toolchain install --prefix ~/qos-sdk        # from the checkout; copies a relocatable toolchain
-export PATH="$HOME/qos-sdk/bin:$PATH"      # qos, fpr, sol
+export PATH="$HOME/qos-sdk/bin:$PATH"      # qos (fpr/sol come from the standalone FP-RISC toolchain)
 cd ~/src                                   # anywhere outside the checkout
 qos new hello --template mvu               # standalone app.fpr (mvu is the default here; `--template desktop` needs QOS Portable's `qos build`)
 qos run hello/app.fpr                      # [qos] app => hello: done count=12 note=hi ...
