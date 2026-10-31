@@ -577,7 +577,32 @@ def cmd_create_disk(a):
         die(str(exc))
 
 
+def desktop_project(start=None):
+    """the nearest qos.toml (cwd and its ancestors) when it declares kind = "desktop", else None"""
+    d = Path(start or Path.cwd()).resolve()
+    for p in (d, *d.parents):
+        m = p / MANIFEST
+        if m.is_file():
+            try:
+                app = parse_toml(m.read_text()).get("app") or {}
+            except Exception:
+                return None
+            return m if isinstance(app, dict) and app.get("kind") == "desktop" else None
+    return None
+
+
+DESKTOP_BUILD_HELP = (
+    "this qos is the contributor/app toolchain (qos run/pack); it cannot build Main desktop apps. "
+    "Install QOS Portable (macOS arm64: brew install hyperswine/tap/qos-portable) and run its `qos build`, "
+    "or start a standalone app here: qos new NAME --template mvu")
+
+
 def cmd_build(a):
+    if a.what is None:
+        m = desktop_project()
+        if m:
+            die(f"{rel(m)}: kind = \"desktop\": {DESKTOP_BUILD_HELP}")
+        a.what = "host"
     t0 = time.time()
     build_fpr()
     if a.what in ("all", "host"):
@@ -1106,6 +1131,11 @@ TEMPLATES = {"min": TPL_MIN, "service": TPL_SERVICE, "mvu": TPL_MVU, "notes": TP
 
 
 def cmd_new(a):
+    if a.template is None:
+        # the desktop template needs QOS Portable's own qos to build; this
+        # qos builds and runs standalone apps, so default to one that works
+        a.template = "mvu"
+        say("template: mvu (standalone; qos run/pack). Main desktop apps: --template desktop, built by QOS Portable's qos")
     if a.template == "desktop":
         sys.path.insert(0, str(ROOT / "tools"))
         from portable_sdk import scaffold
@@ -1113,6 +1143,7 @@ def cmd_new(a):
             scaffold(Path.cwd() / a.name)
         except ValueError as exc:
             die(str(exc))
+        say(f"note: {DESKTOP_BUILD_HELP.split('; ')[0]}; build this project with QOS Portable's qos build")
         return
     tpl = TEMPLATES[a.template]
     name = a.name
@@ -1784,7 +1815,9 @@ def main():
     p.set_defaults(f=cmd_fprisc)
 
     p = sub.add_parser("build", help="bring the toolchain + hosts up to date")
-    p.add_argument("what", nargs="?", default="host", choices=["fpr", "host", "native", "all"])
+    p.add_argument("what", nargs="?", default=None, choices=["fpr", "host", "native", "all"],
+                   help="default host; in a desktop project (qos.toml kind = \"desktop\") refuses and names the desktop SDK")
+    p.add_argument("-v", "--verbose", action="store_true", help="accepted for parity with the desktop SDK's qos build; toolchain builds always print details")
     p.set_defaults(f=cmd_build)
 
     p = sub.add_parser("run", help="compile + run one program (the pipeline)")
@@ -1802,10 +1835,10 @@ def main():
     p.add_argument("--fprd", action="store_true", help="start the host compiler daemon for the run (Sys.compile / CP.plugin)")
     p.set_defaults(f=cmd_run)
 
-    p = sub.add_parser("new", help="create a desktop project in the current directory (or an explicit legacy template)")
+    p = sub.add_parser("new", help="create an app project in the current directory (default template mvu)")
     p.add_argument("name", help="project name and stable app ID")
-    p.add_argument("--template", choices=sorted([*TEMPLATES, "desktop"]), default="desktop",
-                   help="desktop (default, installed SDK) | min | service | mvu | notes (legacy contributor templates)")
+    p.add_argument("--template", choices=sorted([*TEMPLATES, "desktop"]), default=None,
+                   help="mvu (default) | min | service | notes (standalone, qos run/pack) | desktop (Main app; build with QOS Portable's qos)")
     p.set_defaults(f=cmd_new)
 
     p = sub.add_parser("pack", help="package one program into dist/<name>/ (qa + disk + optional host bundle)")
