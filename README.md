@@ -67,7 +67,7 @@ formula exists yet.
 ./qos.py toolchain install --prefix ~/qos-sdk        # from the checkout; copies a relocatable toolchain
 export PATH="$HOME/qos-sdk/bin:$PATH"      # qos, fpr, sol
 cd ~/src                                   # anywhere outside the checkout
-qos new hello --template mvu               # standalone app.fpr; desktop is the default template
+qos new hello --template mvu               # standalone app.fpr (mvu is the default here; `--template desktop` needs QOS Portable's `qos build`)
 qos run hello/app.fpr                      # [qos] app => hello: done count=12 note=hi ...
 qos pack hello/app.fpr --bundle            # dist/hello/{hello.qa,qosp,run.sh}
 dist/hello/run.sh                          # the bundle runs on its own
