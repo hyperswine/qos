@@ -35,7 +35,8 @@ ROOT = Path(__file__).resolve().parent.parent
 MANIFEST_V2 = {"app": ({"id", "name", "version", "kind"}, set()),
                "build": ({"entry", "target"}, {"optimize", "compiler-memory-mb"}),
                "run": (set(), {"display", "disk-mb", "port"}),
-               "sdk": ({"version"}, set())}
+               "sdk": ({"version"}, set()),
+               "platform": (set(), {"override", "c-sources"})}
 # `checks-only` keeps every type, safety and linearity check and turns off
 # the optional optimisations a very large program may not afford.
 OPTIMIZE = {"full": (), "checks-only": ("SPEC", "INLINE", "REUSE", "VEC_PEEK", "VEC_FUSE", "RECEIVE_TURNS")}
@@ -56,6 +57,9 @@ APP_CFLAGS = ("-O2", "-ffreestanding", "-nostdlib", "-fno-stack-protector", "-fn
               "-fno-pic", "-ffixed-x18", "-ffixed-x27", "-ffixed-x28", "-DFPR_POSIX", "-DFPR_QOSAPP",
               f"-DQOS_ARENA_BASE={ARENA_BASE}", "-DFPR_NHARTS=8", "-DFPR_SLAB_SZ=262144", "-DFPR_STACK_SZ=1048560")
 MOVED_DELTA = "0x10000000"  # the 256 MiB displaced link that checks RELOC
+# Platform files another file #includes instead of compiling them itself:
+# overriding one recompiles its includer.
+PLATFORM_INCLUDED_BY = {"hal/net_actor_bridge.c": "appside/hal.c"}
 
 
 def fail(message):
@@ -115,7 +119,7 @@ def load(path):
     identity(app)
     if app["kind"] != "desktop" or build["target"] != "qos-portable":
         fail("SDK v2 supports kind=desktop and target=qos-portable only")
-    return dict(root=path, manifest=1, app=app, build=build, run={}, sdk={}, entry=entry_file(path, build))
+    return dict(root=path, manifest=1, app=app, build=build, run={}, sdk={}, platform={}, entry=entry_file(path, build))
 
 
 def identity(app):
@@ -166,6 +170,7 @@ def load_v2(path, data):
                  + (f" and may set {', '.join(sorted(optional))}" if optional else "")
                  + f"; {'missing ' + ', '.join(sorted(missing)) if missing else 'unknown ' + ', '.join(sorted(extra))}")
     app, build, run, pin = tables["app"], tables["build"], tables.get("run", {}), tables.get("sdk", {})
+    platform = tables.get("platform", {})
     identity(app)
     if not isinstance(app["kind"], str) or app["kind"] not in ("desktop", "app"):
         fail('app.kind must be "desktop" (a Main plugin) or "app" (a standalone process image)')
@@ -182,7 +187,72 @@ def load_v2(path, data):
     positive(run, "port", 0, 65535)  # a TCP port; 0 lets the host pick a free one
     if pin and (not isinstance(pin["version"], str) or not SDK_VERSION.fullmatch(pin["version"])):
         fail('sdk.version must be "X.Y.Z" (that release or a later compatible one) or "=X.Y.Z" (exactly)')
-    return dict(root=path, manifest=2, app=app, build=build, run=run, sdk=pin, entry=entry_file(path, build))
+    if platform and app["kind"] != "app":
+        fail('[platform] applies to kind = "app"; a desktop app links no platform files')
+    override = platform.get("override", {})
+    if not isinstance(override, dict) or not all(isinstance(v, str) for v in override.values()):
+        fail('[platform.override] maps SDK platform file names to project files, e.g. "appside/hal.c" = "native/hal.c"')
+    sources = platform.get("c-sources", [])
+    if not isinstance(sources, list) or not all(isinstance(v, str) for v in sources):
+        fail('platform.c-sources must be a list of project files, e.g. ["native/sensor.c"]')
+    if len(set(sources)) != len(sources) or set(sources) & set(override.values()):
+        fail("each platform file is listed once: no repeated c-sources, and no file is both an override and a c-source")
+    for value in [*override.values(), *sources]:
+        project_file(path, value)
+    return dict(root=path, manifest=2, app=app, build=build, run=run, sdk=pin, platform=platform,
+                entry=entry_file(path, build))
+
+
+def project_file(root, value):
+    """A file the project names in [platform]: relative, inside the project, existing."""
+    if Path(value).is_absolute():
+        fail(f"[platform] {value!r} must be relative to the project")
+    path = (root / value).resolve()
+    if not path.is_relative_to(root) or not path.is_file():
+        fail(f"[platform] {value!r} must be an existing file inside the project")
+    if path.suffix not in (".c", ".S"):
+        fail(f"[platform] {value!r} must be a .c or .S file")
+    return path
+
+
+def platform_choices(root, platform, files):
+    """Explicit overrides and added sources, checked against the SDK's inventory.
+
+    Only names in the inventory can be replaced; headers are the ABI and the
+    linker script is the layout the host loads, so neither can. A file that
+    merely sits in the project never takes part: only listed files do.
+    """
+    overridable = sorted(n for n in files if Path(n).suffix in (".c", ".S"))
+    overrides = {}
+    for name, value in sorted(platform.get("override", {}).items()):
+        if name not in files:
+            fail(f"[platform.override] {name!r} is not an SDK platform file; these can be overridden: {', '.join(overridable)}")
+        if name.endswith(".h"):
+            fail(f"[platform.override] {name} is part of the SDK's ABI and cannot be overridden; a program that needs a different ABI needs a different SDK")
+        if name not in overridable:
+            fail(f"[platform.override] {name} is the image layout the host loads and cannot be overridden")
+        source = project_file(root, value)
+        if source.suffix != Path(name).suffix:
+            fail(f"[platform.override] {name} must be replaced by a {Path(name).suffix} file, not {value!r}")
+        overrides[name] = (value, source)
+    headers = sorted({Path(n).name for n in files if n.endswith(".h")})
+    added = []
+    for value in platform.get("c-sources", []):
+        source = project_file(root, value)
+        # A quoted #include looks beside the source first, so a project copy
+        # of an ABI header there would silently replace the SDK's.
+        for header in headers:
+            if (source.parent / header).exists():
+                fail(f"{(source.parent / header).relative_to(root)} would replace the SDK's {header} for {value}; rename or move it")
+        added.append((value, source))
+    return overrides, added
+
+
+def platform_record(overrides, added):
+    """[[platformOverrides]] tables for the archive manifest (after its top-level keys)."""
+    rows = [dict(kind="override", file=name, source=value, sha256=digest(source)) for name, (value, source) in overrides.items()]
+    rows += [dict(kind="added", source=value, sha256=digest(source)) for value, source in added]
+    return rows
 
 
 def check_sdk_version(pin, meta):
@@ -346,12 +416,16 @@ def platform_inputs(sdk, meta):
     return files
 
 
+def app_flags(triple, platform):
+    return [f"--target={triple}", *APP_CFLAGS,
+            f"-I{platform / 'runtime'}", f"-I{platform / 'appside'}", f"-I{platform / 'hal'}"]
+
+
 def platform_objects(sdk, meta, clang, triple, env, log, verbose):
     """Platform C compiled once per SDK hash, Clang and settings, into the user's cache."""
     version = subprocess.run([clang, "--version"], capture_output=True, text=True, check=True).stdout
     platform = sdk / "platform"
-    flags = [f"--target={triple}", *APP_CFLAGS,
-             f"-I{platform / 'runtime'}", f"-I{platform / 'appside'}", f"-I{platform / 'hal'}"]
+    flags = app_flags(triple, platform)
     identity = dict(platform=meta["platformSha256"], sdk=str(sdk), clang=version, flags=flags, units=PLATFORM_UNITS)
     key = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
     home = cache_home() / "platform"
@@ -377,13 +451,46 @@ def platform_objects(sdk, meta, clang, triple, env, log, verbose):
     return objects
 
 
+def project_platform(sdk, work, cached, overrides, added, clang, triple, command):
+    """Replace overridden platform objects and append added sources.
+
+    An override is compiled from an overlay of the SDK's platform folder, in
+    the SDK file's own place, so it sees exactly the SDK's headers and
+    relative includes. Added sources compile where they are, against the
+    SDK's include paths.
+    """
+    overlay = work / "platform"
+    # Plain copies: the installed SDK is read-only and the overlay must not be.
+    for path in (sdk / "platform").rglob("*"):
+        if path.is_file():
+            name = path.relative_to(sdk / "platform").as_posix()
+            (overlay / name).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(overrides[name][1] if name in overrides else path, overlay / name)
+    rebuild = {PLATFORM_INCLUDED_BY.get(name, name) for name in overrides}
+    objects = list(cached)
+    for i, unit in enumerate(PLATFORM_UNITS):
+        if unit in rebuild:
+            objects[i] = work / ("override-" + unit.replace("/", "-") + ".o")
+            command([clang, *app_flags(triple, overlay), "-c", overlay / unit, "-o", objects[i]])
+    for i, (_value, source) in enumerate(added):
+        obj = work / f"added-{i}-{source.stem}.o"
+        command([clang, *app_flags(triple, sdk / "platform"), "-c", source, "-o", obj])
+        objects.append(obj)
+    return objects
+
+
 def build_app(sdk, meta, fpr, found, verbose):
     """kind = "app": one process image, every input from this SDK revision."""
     root, app, entry = found["root"], found["app"], found["entry"]
     arch, target, _imports_arch, triple = native()
     if arch != "aarch64":
         fail('kind = "app" needs an AArch64 host; this SDK\'s platform files are AArch64')
-    platform_inputs(sdk, meta)
+    files = platform_inputs(sdk, meta)
+    overrides, added = platform_choices(root, found["platform"], files)
+    for name, (value, source) in overrides.items():
+        print(f"qos: platform override: {name} replaced by {value} (sha256 {digest(source)[:16]})")
+    for value, source in added:
+        print(f"qos: platform source added: {value} (sha256 {digest(source)[:16]})")
     out = root / "build"
     if out.is_symlink():
         fail("build/ cannot be a symlink")
@@ -414,6 +521,8 @@ def build_app(sdk, meta, fpr, found, verbose):
             command([clang, f"--target={triple}", "-c", source, "-o", obj])
             program.append(obj)
         platform = platform_objects(sdk, meta, clang, triple, env, log, verbose)
+        if overrides or added:
+            platform = project_platform(sdk, work, platform, overrides, added, clang, triple, command)
         common = [linker, "-T", sdk / "platform" / PLATFORM_LINKER_SCRIPT, "--emit-relocs",
                   "--defsym=_heap_start=_proc_image_end", "--defsym=_heap_end=_proc_image_end"]
         first, image, moved = (work / x for x in ("first.elf", "image.elf", "moved.elf"))
@@ -435,7 +544,11 @@ def build_app(sdk, meta, fpr, found, verbose):
         if found["build"].get("compiler-memory-mb"):
             fields["compilerMemoryMb"] = found["build"]["compiler-memory-mb"]
         manifest = work / "manifest.toml"
-        manifest.write_text("".join(f"{k} = {json.dumps(v, ensure_ascii=False)}\n" for k, v in fields.items()))
+        text = "".join(f"{k} = {json.dumps(v, ensure_ascii=False)}\n" for k, v in fields.items())
+        # Tables go last: hosts read the top-level keys and skip tables they do not know.
+        for row in platform_record(overrides, added):
+            text += "\n[[platformOverrides]]\n" + "".join(f"{k} = {json.dumps(v, ensure_ascii=False)}\n" for k, v in row.items())
+        manifest.write_text(text)
         archive = work / "app.qa"
         command([sys.executable, sdk / "tools/mkqa.py", manifest, image, "-o", archive,
                  "--relocatable", "--check-moved", moved, "--delta", MOVED_DELTA])
@@ -472,6 +585,11 @@ def run_app(where, disk=None, trace=False):
     built = archive_manifest(archive)
     if (built.get("id"), built.get("loadMode"), built.get("abi")) != (app["id"], "process", meta.get("abi")):
         fail(f"{archive} was not built by this SDK for this project; run qos build")
+    for row in built.get("platformOverrides", []):
+        if row.get("kind") == "override":
+            print(f"qos: this image replaces the SDK's {row.get('file')} with {row.get('source')}")
+        else:
+            print(f"qos: this image adds {row.get('source')} to the SDK's platform files")
     host = sdk / "runtime" / DISPLAYS[settings.get("display", "gl")]
     expected = meta.get("runtimeFiles", {}).get(host.name)
     if not expected or not host.is_file() or digest(host) != expected:

@@ -9,8 +9,13 @@ denied and the staged SDK read-only:
    `sol tests/check.sol` game check passes (it launches the game through
    `qos run`);
 2. the archive records loadMode = "process" and this SDK's platform hash;
-3. a copy of the SDK with one platform byte changed is refused by name;
-4. with --baseline (for example the installed 0.2.0), every desktop build
+3. a copy of the SDK with one platform byte changed is refused by name
+   (run last);
+4. on the first project, stray platform copies change nothing; a
+   [platform.override] of appside/hal.c and an added c-source are built,
+   printed, recorded in the archive and run by the game check; an override
+   of qos_abi.h is refused;
+5. with --baseline (for example the installed 0.2.0), every desktop build
    input except the builder equals the baseline's, and a fresh v1 desktop
    project builds byte-identically with the baseline's builder and this one.
 
@@ -85,6 +90,52 @@ def v1_identity(baseline, prefix, out, run, evidence):
     assert old == new, "v1 desktop build differs from the baseline builder's"
     evidence["v1ByteIdentical"] = dict(archiveSha256=hashlib.sha256(new).hexdigest(), baseline=str(base),
                                        inputsCompared=len(pick(base)))
+
+
+def overrides(project, sdk, prefix, run, evidence):
+    """[platform] overrides: stray copies change nothing; listed ones are built,
+    printed, recorded and run; ABI headers are refused."""
+    app = tomllib.loads((project / "qos.toml").read_text())["app"]
+    archive = project / "build" / f'{app["id"]}.qa'
+    original_manifest = (project / "qos.toml").read_text()
+    plain = archive.read_bytes()
+    # A file that merely sits in the project never shadows the SDK's.
+    strays = [project / "platform/appside/hal.c", project / "platform/hal.c", project / "appside/hal.c",
+              project / "hal/net_actor_bridge.c", project / "qos_abi.h"]
+    for stray in strays:
+        stray.parent.mkdir(parents=True, exist_ok=True)
+        stray.write_text("#error a stray copy must never be compiled\n")
+    run([prefix / "bin/qos", "build"], "stray-build.log", cwd=project)
+    assert archive.read_bytes() == plain, "a stray platform copy changed the build"
+    for stray in strays:
+        stray.unlink()
+    native = project / "native"
+    native.mkdir()
+    (native / "hal.c").write_bytes((sdk / "platform/appside/hal.c").read_bytes()
+                                   + b'\n__attribute__((used)) const char qos_override_marker[] = "acceptance hal override";\n')
+    (native / "sensor.c").write_text('#include "fpr.h"\n'
+                                     '__attribute__((used)) const char qos_added_marker[] = "acceptance added source";\n')
+    (project / "qos.toml").write_text(original_manifest + '\n[platform]\nc-sources = ["native/sensor.c"]\n'
+                                      '\n[platform.override]\n"appside/hal.c" = "native/hal.c"\n')
+    printed = run([prefix / "bin/qos", "build"], "override-build.log", cwd=project)
+    assert "platform override: appside/hal.c replaced by native/hal.c" in printed, printed
+    assert "platform source added: native/sensor.c" in printed, printed
+    sec = sections(archive)
+    rows = tomllib.loads(sec["MANIFEST"].decode())["platformOverrides"]
+    assert [(r["kind"], r.get("file"), r["source"], r["sha256"]) for r in rows] == [
+        ("override", "appside/hal.c", "native/hal.c", hashlib.sha256((native / "hal.c").read_bytes()).hexdigest()),
+        ("added", None, "native/sensor.c", hashlib.sha256((native / "sensor.c").read_bytes()).hexdigest())], rows
+    assert b"acceptance hal override" in sec["IMAGE"] and b"acceptance added source" in sec["IMAGE"]
+    run(["sol", "tests/check.sol"], "override-check.log", cwd=project)
+    log = (project / "evidence/game.log").read_text()
+    assert "replaces the SDK's appside/hal.c with native/hal.c" in log, "qos run did not show the override"
+    assert json.loads((project / "evidence/results.json").read_text()).get("passed") is True
+    (project / "qos.toml").write_text(original_manifest + '\n[platform.override]\n"appside/qos_abi.h" = "native/hal.c"\n')
+    refused = run([prefix / "bin/qos", "build"], "abi-override-refused.log", cwd=project, expect=1)
+    assert "part of the SDK's ABI" in refused, refused
+    (project / "qos.toml").write_text(original_manifest)
+    evidence["overrides"] = dict(project=project.name, strayCopiesIgnored=len(strays), recorded=rows,
+                                 gameCheckPassed=True, abiHeaderRefused=True)
 
 
 def main():
@@ -165,6 +216,7 @@ def main():
                                                    manifest=manifest, checks=result.get("checks"))
             for png in (copy / "evidence").glob("*.png"):
                 shutil.copy2(png, out / f"{copy.name}-{png.name}")
+        overrides(copies[0], sdk, prefix, run, evidence)
         assert tree_hashes(prefix) == before, "the SDK changed during the acceptance"
     finally:
         writable(prefix)

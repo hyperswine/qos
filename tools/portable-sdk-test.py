@@ -178,5 +178,76 @@ class ManifestV2(unittest.TestCase):
             sdk.platform_inputs(fake, dict(meta, platformSha256="other"))
 
 
+class PlatformOverrides(unittest.TestCase):
+    FILES = {name: "0" * 64 for name in (*sdk.PLATFORM_UNITS, sdk.PLATFORM_LINKER_SCRIPT, "hal/net_actor_bridge.c",
+                                          "appside/qos_abi.h", "store_abi.h", "runtime/fpr.h")}
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name).resolve() / "game"
+        (self.root / "native").mkdir(parents=True)
+        (self.root / "main.fpr").write_text("main = Unit.\n")
+        for name in ("hal.c", "sensor.c", "ctx.S"):
+            (self.root / "native" / name).write_text("int x;\n")
+        self.manifest = self.root / "qos.toml"
+
+    def load(self, platform):
+        self.manifest.write_text(APP_V2 + platform)
+        found = sdk.load(self.root)
+        return sdk.platform_choices(self.root, found["platform"], self.FILES)
+
+    def test_override_and_added_source(self):
+        overrides, added = self.load('[platform]\nc-sources = ["native/sensor.c"]\n'
+                                     '[platform.override]\n"appside/hal.c" = "native/hal.c"\n'
+                                     '"machine/unix/ctx_a64.S" = "native/ctx.S"\n')
+        self.assertEqual(sorted(overrides), ["appside/hal.c", "machine/unix/ctx_a64.S"])
+        self.assertEqual([v for v, _ in added], ["native/sensor.c"])
+        rows = sdk.platform_record(overrides, added)
+        self.assertEqual([(r["kind"], r.get("file"), r["source"]) for r in rows],
+                         [("override", "appside/hal.c", "native/hal.c"),
+                          ("override", "machine/unix/ctx_a64.S", "native/ctx.S"), ("added", None, "native/sensor.c")])
+        self.assertEqual(rows[0]["sha256"], sdk.digest(self.root / "native/hal.c"))
+
+    def test_included_file_rebuilds_its_includer(self):
+        overrides, _ = self.load('[platform.override]\n"hal/net_actor_bridge.c" = "native/hal.c"\n')
+        self.assertEqual({sdk.PLATFORM_INCLUDED_BY.get(n, n) for n in overrides}, {"appside/hal.c"})
+
+    def test_stray_project_copies_change_nothing(self):
+        (self.root / "platform/appside").mkdir(parents=True)
+        (self.root / "platform/appside/hal.c").write_text("stray")
+        (self.root / "appside").mkdir()
+        (self.root / "appside/hal.c").write_text("stray")
+        self.assertEqual(self.load(""), ({}, []))
+
+    def test_refusals(self):
+        for platform, reason in [
+                ('[platform.override]\n"appside/qos_abi.h" = "native/hal.c"\n', "part of the SDK's ABI"),
+                ('[platform.override]\n"runtime/fpr.h" = "native/hal.c"\n', "part of the SDK's ABI"),
+                ('[platform.override]\n"appside/link-qosapp-a64.ld" = "native/hal.c"\n', "image layout"),
+                ('[platform.override]\n"appside/hall.c" = "native/hal.c"\n', "these can be overridden: appside/entry.c"),
+                ('[platform.override]\n"appside/hal.c" = "native/ctx.S"\n', "must be replaced by a .c file"),
+                ('[platform.override]\n"appside/hal.c" = "native/missing.c"\n', "existing file"),
+                ('[platform.override]\n"appside/hal.c" = "../outside.c"\n', "existing file inside the project"),
+                ('[platform.override]\n"appside/hal.c" = "main.fpr"\n', ".c or .S"),
+                ('[platform.override]\n"appside/hal.c" = 1\n', "maps SDK platform file names"),
+                ('[platform]\nc-sources = "native/sensor.c"\n', "list of project files"),
+                ('[platform]\nc-sources = ["native/sensor.c", "native/sensor.c"]\n', "listed once"),
+                ('[platform]\nc-sources = ["native/hal.c"]\n[platform.override]\n"appside/hal.c" = "native/hal.c"\n', "listed once"),
+                ('[platform]\nunknown = 1\n', "unknown unknown")]:
+            with self.subTest(platform=platform), self.assertRaisesRegex(ValueError, reason):
+                self.load(platform)
+        (self.root / "outside.c").write_text("")
+        (self.root / "native/qos_abi.h").write_text("/* a stale copy */")
+        with self.assertRaisesRegex(ValueError, "would replace the SDK's qos_abi.h"):
+            self.load('[platform]\nc-sources = ["native/sensor.c"]\n')
+
+    def test_desktop_has_no_platform(self):
+        self.manifest.write_text(APP_V2.split("[run]")[0].replace('"app"', '"desktop"')
+                                 + '[platform]\nc-sources = ["native/sensor.c"]\n')
+        with self.assertRaisesRegex(ValueError, "applies to kind"):
+            sdk.load(self.root)
+
+
 if __name__ == "__main__":
     unittest.main()
