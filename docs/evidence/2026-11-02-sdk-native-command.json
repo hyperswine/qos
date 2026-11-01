@@ -1,0 +1,360 @@
+{
+  "date": "2026-11-02",
+  "qosRevision": "ef1cfe833e1601ecfe346e8f8a2752264e67df04",
+  "fpriscRevision": "94f699bc868f49c1e5b5019f9228512e85415993",
+  "qosDirty": false,
+  "dependencies": [
+    "Clang (ELF assembler)"
+  ],
+  "toolchainLld": "LLD 23.1.4 (compatible with GNU linkers)",
+  "toolchainFiles": {
+    "ld.lld": "94932cd93f28f1561641c970ab7bddc46903b4bb9f7306d3e009a4a2f60f04d8"
+  },
+  "parity": {
+    "sdk": "/private/tmp/claude-501/-Users-jasonqin-Documents-GitHub/d399d85f-88c4-4ced-987c-2c355f24d344/scratchpad/stage6",
+    "nativeLinker": "/private/tmp/claude-501/-Users-jasonqin-Documents-GitHub/d399d85f-88c4-4ced-987c-2c355f24d344/scratchpad/parity7/sdk/libexec/qos-portable/toolchain/ld.lld",
+    "pythonLinker": "/opt/homebrew/bin/ld.lld",
+    "builds": {
+      "counter": {
+        "kind": "desktop",
+        "archiveSha256": "013504e264b7892b96a94518499dea5c0673e70d758bd6a67b05c4a97feca2fe",
+        "bytes": 814469
+      },
+      "dungeon": {
+        "kind": "app",
+        "archiveSha256": "ea18bc278e47e4f262a2458af1ae9ea245f94040a6a6ca428729a236cd6b5409",
+        "bytes": 1748174
+      },
+      "terra-ii": {
+        "kind": "app",
+        "archiveSha256": "0b626dcac977d6b7d913bcfbb001886b4f55df91e32e682c7dd7355563ae9a49",
+        "bytes": 1614466
+      }
+    },
+    "disks": {
+      "create": "1a734ca6578642cabd753337e3653d3af2a5d1e125199f5ff8891e84bd8a3243",
+      "install": "ecb8cddffa5325a86e2ac0eeb1f43632fcb17b3e61b52356a5e5fe10df6e3f07",
+      "update": "0cff1c5229cd74be32e551c90776bd838dc6ad9d5dff04b3f797817ff78b32af"
+    },
+    "refusals": {
+      "[run]\ndisplay = \"vga\"": {
+        "python": "qos: run.display must be one of: gl, none",
+        "native": "qos: run.display must be one of: gl, none",
+        "same": true
+      },
+      "[run]\ndisk-mb = 0": {
+        "python": "qos: disk-mb must be an integer of at least 1",
+        "native": "qos: disk-mb must be an integer of at least 1",
+        "same": true
+      },
+      "[run]\nport = 70000": {
+        "python": "qos: port must be an integer from 0 to 65535",
+        "native": "qos: port must be an integer from 0 to 65535",
+        "same": true
+      },
+      "[run]\nport = true": {
+        "python": "qos: port must be an integer from 0 to 65535",
+        "native": "qos: port must be an integer from 0 to 65535",
+        "same": true
+      },
+      "[run]\nbogus = 1": {
+        "python": "qos: [run] needs no keys and may set disk-mb, display, port; unknown bogus",
+        "native": "qos: [run] needs no keys and may set disk-mb, display, port; unknown bogus",
+        "same": true
+      },
+      "[sdk]\nversion = \"1.2\"": {
+        "python": "qos: sdk.version must be \"X.Y.Z\" (that release or a later compatible one) or \"=X.Y.Z\" (exactly)",
+        "native": "qos: sdk.version must be \"X.Y.Z\" (that release or a later compatible one) or \"=X.Y.Z\" (exactly)",
+        "same": true
+      },
+      "[build2]\nx = 1": {
+        "python": "qos: qos.toml v2 has [app] and [build], and optionally [run] and [sdk]; unknown tables are refused: build2",
+        "native": "qos: qos.toml v2 has [app] and [build], and optionally [run] and [sdk]; unknown tables are refused: build2",
+        "same": true
+      },
+      "[platform]\nc-sources = \"x.c\"": {
+        "python": "qos: platform.c-sources must be a list of project files, e.g. [\"native/sensor.c\"]",
+        "native": "qos: platform.c-sources must be a list of project files, e.g. [\"native/sensor.c\"]",
+        "same": true
+      },
+      "[platform]\nc-sources = [\"native/s.c\", \"native/s.c\"]": {
+        "python": "qos: each platform file is listed once: no repeated c-sources, and no file is both an override and a c-source",
+        "native": "qos: each platform file is listed once: no repeated c-sources, and no file is both an override and a c-source",
+        "same": true
+      },
+      "[platform]\nc-sources = [\"/abs.c\"]": {
+        "python": "qos: [platform] '/abs.c' must be relative to the project",
+        "native": "qos: [platform] '/abs.c' must be relative to the project",
+        "same": true
+      },
+      "[platform]\nc-sources = [\"missing.c\"]": {
+        "python": "qos: [platform] 'missing.c' must be an existing file inside the project",
+        "native": "qos: [platform] 'missing.c' must be an existing file inside the project",
+        "same": true
+      },
+      "[platform]\nc-sources = [\"src/main.fpr\"]": {
+        "python": "qos: [platform] 'src/main.fpr' must be a .c or .S file",
+        "native": "qos: [platform] 'src/main.fpr' must be a .c or .S file",
+        "same": true
+      },
+      "[platform.override]\n\"appside/hal.c\" = \"native/hal.c\"\n[platform]\nc-sources = [\"native/hal.c\"]": {
+        "python": "qos: each platform file is listed once: no repeated c-sources, and no file is both an override and a c-source",
+        "native": "qos: each platform file is listed once: no repeated c-sources, and no file is both an override and a c-source",
+        "same": true
+      },
+      "[platform.override]\n\"nope.c\" = \"native/hal.c\"": {
+        "python": "qos: [platform.override] 'nope.c' is not an SDK platform file; these can be overridden: appside/entry.c, appside/hal.c, appside/support.c, hal/net_actor_bridge.c, loader/qaimg.c, machine/unix/ctx_a64.S, portable/sha256.c, runtime/actors.c, runtime/bits.c, runtime/buddy.c, runtime/i32.c, runtime/mod.c, runtime/runtime.c, runtime/sstr.c, runtime/vec.c",
+        "native": "qos: [platform.override] 'nope.c' is not an SDK platform file; these can be overridden: appside/entry.c, appside/hal.c, appside/support.c, hal/net_actor_bridge.c, loader/qaimg.c, machine/unix/ctx_a64.S, portable/sha256.c, runtime/actors.c, runtime/bits.c, runtime/buddy.c, runtime/i32.c, runtime/mod.c, runtime/runtime.c, runtime/sstr.c, runtime/vec.c",
+        "same": true
+      },
+      "[platform.override]\n\"appside/qos_abi.h\" = \"native/hal.c\"": {
+        "python": "qos: [platform.override] appside/qos_abi.h is part of the SDK's ABI and cannot be overridden; a program that needs a different ABI needs a different SDK",
+        "native": "qos: [platform.override] appside/qos_abi.h is part of the SDK's ABI and cannot be overridden; a program that needs a different ABI needs a different SDK",
+        "same": true
+      },
+      "[platform.override]\n\"appside/link-qosapp-a64.ld\" = \"native/hal.c\"": {
+        "python": "qos: [platform.override] appside/link-qosapp-a64.ld is the image layout the host loads and cannot be overridden",
+        "native": "qos: [platform.override] appside/link-qosapp-a64.ld is the image layout the host loads and cannot be overridden",
+        "same": true
+      },
+      "[platform.override]\n\"machine/unix/ctx_a64.S\" = \"native/hal.c\"": {
+        "python": "qos: [platform.override] machine/unix/ctx_a64.S must be replaced by a .S file, not 'native/hal.c'",
+        "native": "qos: [platform.override] machine/unix/ctx_a64.S must be replaced by a .S file, not 'native/hal.c'",
+        "same": true
+      },
+      "[platform.override]\n\"appside/hal.c\" = 3": {
+        "python": "qos: [platform.override] maps SDK platform file names to project files, e.g. \"appside/hal.c\" = \"native/hal.c\"",
+        "native": "qos: [platform.override] maps SDK platform file names to project files, e.g. \"appside/hal.c\" = \"native/hal.c\"",
+        "same": true
+      },
+      "compiler-memory-mb = 0": {
+        "python": "qos: compiler-memory-mb must be an integer of at least 1",
+        "native": "qos: compiler-memory-mb must be an integer of at least 1",
+        "same": true
+      },
+      "[platform]\nc-sources = [\"native/x/s.c\"]": {
+        "python": "qos: native/x/qos_abi.h would replace the SDK's qos_abi.h for native/x/s.c; rename or move it",
+        "native": "qos: native/x/qos_abi.h would replace the SDK's qos_abi.h for native/x/s.c; rename or move it",
+        "same": true
+      },
+      "[build]\noptimize = \"fast\"": {
+        "python": "qos: Cannot declare ('build',) twice (at line 10, column 7)",
+        "native": "qos: qos.toml: line 10: table [build] is defined twice",
+        "same": false
+      },
+      "x = 1.5": {
+        "python": "qos: [build] needs entry, target and may set compiler-memory-mb, optimize; unknown x",
+        "native": "qos: qos.toml: line 10: unsupported value 1.5: this file takes strings, integers, booleans, arrays and tables (no floats or dates)",
+        "same": false
+      },
+      "x = 1\nx = 2": {
+        "python": "qos: Cannot overwrite a value (at line 11, column 6)",
+        "native": "qos: qos.toml: line 11: key x is defined twice",
+        "same": false
+      }
+    }
+  },
+  "appAcceptance": {
+    "sdk": "/private/tmp/claude-501/-Users-jasonqin-Documents-GitHub/d399d85f-88c4-4ced-987c-2c355f24d344/scratchpad/stage6",
+    "platformSha256": "f08df86549285fee3a46893ec02cf0ffbaecc42488b3dd131553e42607830ea2",
+    "compilerSha256": "b20b50c46d2b19bb6664e9c4b390f725c23d2b06b8bdeb41d1027a4ca756065b",
+    "denied": [
+      "/Users/jasonqin/Documents/GitHub/qos",
+      "/Users/jasonqin/Documents/GitHub/fprisc-pin",
+      "/Users/jasonqin/Documents/GitHub",
+      "/Users/jasonqin/.ghcup",
+      "/Users/jasonqin/.cabal",
+      "/private/tmp/claude-501/-Users-jasonqin-Documents-GitHub/d399d85f-88c4-4ced-987c-2c355f24d344/scratchpad/games/dungeon",
+      "/private/tmp/claude-501/-Users-jasonqin-Documents-GitHub/d399d85f-88c4-4ced-987c-2c355f24d344/scratchpad/games/terra-ii"
+    ],
+    "projects": {
+      "dungeon": {
+        "archiveSha256": "ea18bc278e47e4f262a2458af1ae9ea245f94040a6a6ca428729a236cd6b5409",
+        "manifest": {
+          "name": "Dungeon",
+          "id": "dungeon",
+          "version": "1.0.0",
+          "entry": "n/a",
+          "loadMode": "process",
+          "abi": "22.137",
+          "architecture": "aarch64",
+          "sdkPlatformSha256": "f08df86549285fee3a46893ec02cf0ffbaecc42488b3dd131553e42607830ea2",
+          "sdkCompilerSha256": "b20b50c46d2b19bb6664e9c4b390f725c23d2b06b8bdeb41d1027a4ca756065b",
+          "optimize": "full"
+        },
+        "checks": [
+          "upstream pure rule suite",
+          "original 3D title",
+          "start game",
+          "movement",
+          "PNG snapshots",
+          "clean quit"
+        ]
+      },
+      "terra-ii": {
+        "archiveSha256": "714c62dc1ffa15b9d988a981559e32e248e6cd1c778f3f7226d3c2efe67158a3",
+        "manifest": {
+          "name": "Terra II",
+          "id": "terra-ii",
+          "version": "1.0.0",
+          "entry": "n/a",
+          "loadMode": "process",
+          "abi": "22.137",
+          "architecture": "aarch64",
+          "sdkPlatformSha256": "f08df86549285fee3a46893ec02cf0ffbaecc42488b3dd131553e42607830ea2",
+          "sdkCompilerSha256": "b20b50c46d2b19bb6664e9c4b390f725c23d2b06b8bdeb41d1027a4ca756065b",
+          "optimize": "checks-only",
+          "compilerMemoryMb": 2048
+        },
+        "checks": [
+          "original 3D title",
+          "new game",
+          "cursor/card/turn input",
+          "PNG snapshots",
+          "clean quit"
+        ]
+      }
+    },
+    "pythonOnPath": false,
+    "toolchainLld": "LLD 23.1.4 (compatible with GNU linkers)",
+    "pathTools": [
+      "cat",
+      "cc",
+      "clang",
+      "fpr",
+      "sol"
+    ],
+    "overrides": {
+      "project": "dungeon",
+      "strayCopiesIgnored": 5,
+      "recorded": [
+        {
+          "kind": "override",
+          "file": "appside/hal.c",
+          "source": "native/hal.c",
+          "sha256": "30a31d9b250ad1d068284c159d90fb758908b9f1cfb42690d71b9536382f2415"
+        },
+        {
+          "kind": "added",
+          "source": "native/sensor.c",
+          "sha256": "ee79715d71a0a0d344c220b5e999becd4b72bcf79813e8fd695a5958df8b8aef"
+        }
+      ],
+      "gameCheckPassed": true,
+      "abiHeaderRefused": true
+    },
+    "v1ByteIdentical": {
+      "archiveSha256": "284c50e9de13f511cfe1a0f209e4ebb84c2e62abbe59ddf8da77193715197e8b",
+      "baseline": "/opt/homebrew/Cellar/qos-portable/0.2.0/libexec/qos-portable",
+      "inputsCompared": 306,
+      "stagedLinker": "toolchain/ld.lld",
+      "baselineLinker": "/opt/homebrew/bin/ld.lld"
+    },
+    "tamperedPlatformRefused": true
+  },
+  "desktopAcceptance": {
+    "result": "passed",
+    "os": "darwin",
+    "architecture": "aarch64",
+    "sourceAccess": "denied by sandbox-exec",
+    "absentTools": [
+      "ghc",
+      "cabal",
+      "make"
+    ],
+    "readOnlySdkUnchanged": true,
+    "app": {
+      "name": "External Counter",
+      "id": "counter-example",
+      "version": "1.2.4",
+      "entry": "fpr_modtab",
+      "loadMode": "plugin",
+      "abi": "22.137",
+      "architecture": "aarch64",
+      "desktopSession": "qos.app-session/5",
+      "desktopApi": "qos.desktop/2"
+    },
+    "archiveSha256": "03663d33834114fd175e90e19a8aad7101d9407ae3d12ac5a88ae40b826091d0",
+    "sessionHarts": [
+      1,
+      4
+    ],
+    "clockEffect": true,
+    "graphicalMain": true,
+    "offlineInstallUpdate": true,
+    "persistentAppStore": true,
+    "storeSurvivesAppReplacement": true,
+    "storeSurvivesHostRestart": true,
+    "isolatedAppIdentities": true,
+    "closeDrainsPendingSave": true,
+    "unrelatedRecordsPreserved": true,
+    "hostInstallerExclusion": true,
+    "sdk": {
+      "format": 1,
+      "abi": "22.137",
+      "desktopApi": "qos.desktop/2",
+      "desktopSession": "qos.app-session/5",
+      "architecture": "aarch64",
+      "os": "darwin",
+      "portableAbi": "22",
+      "compilerSha256": "b20b50c46d2b19bb6664e9c4b390f725c23d2b06b8bdeb41d1027a4ca756065b",
+      "qosRevision": "ef1cfe833e1601ecfe346e8f8a2752264e67df04",
+      "fpriscRevision": "94f699bc868f49c1e5b5019f9228512e85415993",
+      "qosDirty": false,
+      "fpriscDirty": false,
+      "dependencies": [
+        "Clang (ELF assembler)"
+      ],
+      "platformFiles": {
+        "appside/entry.c": "84fce9293d93d9eda827c1698e7d7911addcaf451c01847af78fc30319628789",
+        "appside/hal.c": "a07ee28caf876c6a93693c5acd48803f075419d83e2babe7858ff99c4d3c7415",
+        "appside/link-qosapp-a64.ld": "b922f06bd8a4d9a094f66f70381da31e30e6af4ee18873c53adf241d5a03b769",
+        "appside/qos_abi.h": "0936504a19ce56d4166ceaf8d170a3e7163fea73f4b65c1ade8b41e234228c23",
+        "appside/support.c": "0fc1366b9035673c15956c5e56c8d87510e3d56cdb67303a1bda13379dca34b1",
+        "hal/net_actor_bridge.c": "521ee3f334ce478ed296adaddd881c393c0712ed2d964ed0c7a78689926f0d98",
+        "loader/qaimg.c": "2a2734f3759a11db82afc32741b17b8dac1d6f7e265ed0a39ccadf68675df0c2",
+        "machine/unix/ctx_a64.S": "34969dd2ddd52374f85300d895f35c422e9cf7635991d69b5ff07c5150c1c451",
+        "portable/sha256.c": "67f51109d73dce4720e5140b139e010b3efc30b15f32352d81a88072cb2725f7",
+        "runtime/actors.c": "9e791aa2b5d428d0932bd18dd2c651132ba33712effbcaac42e7047dbd1c94c2",
+        "runtime/bits.c": "70b29db5f31d7f92c6c418c9470ef6e622a88f9108a16359b89aef771bb68111",
+        "runtime/buddy.c": "8c8fecc5399a4ce1eea346bd2d83a95b2f530a1416343bf44b69f778b6c2d4f7",
+        "runtime/fpr.h": "265a4a3f77a47bc9f33730eb48b61c0107a2b5a22d0a379aa1c2c9ec6b653bd5",
+        "runtime/i32.c": "a9d59f4c8c7713e61e275410c234c519aae5b2e2fb9498dfcf56bfe27aeceee4",
+        "runtime/i32.h": "1aebe94f294c233df1c6b376a48d0c2189b1a1f9842d09c43315162f527be6e6",
+        "runtime/mod.c": "9e0fd8b79c3302d7ec47ccfcf76473d525b2adb5bbc4f9f33a5849d757fc55ce",
+        "runtime/runtime.c": "fa9984f4398715c7047f910e18acb7a3825bc84416d349724349d587e98a9560",
+        "runtime/sstr.c": "6235f9af5d7e1caf19021e5c3e767fa20aa7b05539a3b4c0ff58328a6e5c500b",
+        "runtime/vec.c": "3bef189c7f2195f74e2b8defe02ba917b74622d05fd94a74ad7ea01ffabfadde",
+        "runtime/vec_layout.h": "c58dc8eb8e6af7bba31d78ac8ddb0ad3878be8ff8769165c599925d72b3dfbc9",
+        "store_abi.h": "57ac896e5e611fb8e582310f2e403ad889a938f3c6bb3adcfe55cea4cb1bc623"
+      },
+      "platformSha256": "f08df86549285fee3a46893ec02cf0ffbaecc42488b3dd131553e42607830ea2",
+      "toolchainFiles": {
+        "ld.lld": "94932cd93f28f1561641c970ab7bddc46903b4bb9f7306d3e009a4a2f60f04d8"
+      },
+      "toolchainLld": "LLD 23.1.4 (compatible with GNU linkers)",
+      "profileFiles": {
+        "browser.qa": "3a7d62c0ccc007b488eff4ae41a40556f096752fb407dbeafafb7f03cdab5eb0",
+        "clock.qa": "d78f52557a4933ee150dcfa48f7d2e405c85c3ea3c88f1308d05341c3fd1bb2f",
+        "disk.qa": "9203555170f617e5b8ead08b5b9839a4449a57d689ae470ed1673449b2205b15",
+        "editor.qa": "b8e687aeea9c00ec51eb800cf0470413a967cb8d6d50ecfb45c0496332fbc37b",
+        "logs.qa": "7d51cc8f234a19fc4f7c15fbac48b625d79d12ad5bb6ff624eb734e0a9872185",
+        "main.qa": "3551dc19708af2efe18244384b9b8709a0756e00e0eb9e61a9fdc64e8709ac1d",
+        "terminal.qa": "7390f3d88fcec33ae7b7a8817bed713494f2de054605e98be9a61e0f67c642d8"
+      },
+      "profileApps": [
+        "browser.qa",
+        "clock.qa",
+        "disk.qa",
+        "editor.qa",
+        "logs.qa",
+        "terminal.qa"
+      ],
+      "runtimeFiles": {
+        "qosp": "ff26cfddb4b1e53894e62819995910ae7e7f7b390557c911c1ecf79952811e84",
+        "qosp-gl": "611ce30e52cf4fd6405d8b73e2150dbe214a6785fc66f2c3f574e6e5f9f4cbe4"
+      },
+      "diskLockContract": 1
+    }
+  }
+}
