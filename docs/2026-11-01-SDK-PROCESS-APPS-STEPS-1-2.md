@@ -180,8 +180,8 @@ and `"0.4.0"`. See the [evidence](evidence/2026-11-01-sdk-process-apps.json).
 
 ## Not done
 
-- Overrides and `c-sources` (step 3). `platformFiles` is the inventory an
-  override will be checked against.
+- Overrides and `c-sources` (step 3): done later the same day, see
+  [SDK-PLATFORM-OVERRIDES.md](2026-11-01-SDK-PLATFORM-OVERRIDES.md).
 - The Python-free `qos` command and a shipped `lld` (step 4).
 - `qos new` has no `kind = "app"` template.
 - No release, Homebrew formula or tap change.

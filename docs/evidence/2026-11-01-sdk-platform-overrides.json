@@ -1,0 +1,95 @@
+{
+  "date": "2026-11-01",
+  "host": "macOS ARM64",
+  "runner": "tools/portable-app-check.py",
+  "stagedFrom": {
+    "qosRevision": "a1c06d00ca781eb170bded2c1f9caf308741c86e",
+    "qosDirty": false,
+    "fpriscRevision": "94f699bc868f49c1e5b5019f9228512e85415993",
+    "fpriscDirty": false
+  },
+  "platformSha256": "f08df86549285fee3a46893ec02cf0ffbaecc42488b3dd131553e42607830ea2",
+  "compilerSha256": "b20b50c46d2b19bb6664e9c4b390f725c23d2b06b8bdeb41d1027a4ca756065b",
+  "denied": [
+    "/Users/jasonqin/Documents/GitHub/qos",
+    "/Users/jasonqin/Documents/GitHub/fprisc-pin",
+    "/Users/jasonqin/Documents/GitHub",
+    "/Users/jasonqin/.ghcup",
+    "/Users/jasonqin/.cabal",
+    "/Users/jasonqin/Documents/GitHub/dungeon",
+    "/Users/jasonqin/Documents/GitHub/terra-ii"
+  ],
+  "projects": {
+    "dungeon": {
+      "archiveSha256": "ea18bc278e47e4f262a2458af1ae9ea245f94040a6a6ca428729a236cd6b5409",
+      "manifest": {
+        "name": "Dungeon",
+        "id": "dungeon",
+        "version": "1.0.0",
+        "entry": "n/a",
+        "loadMode": "process",
+        "abi": "22.137",
+        "architecture": "aarch64",
+        "sdkPlatformSha256": "f08df86549285fee3a46893ec02cf0ffbaecc42488b3dd131553e42607830ea2",
+        "sdkCompilerSha256": "b20b50c46d2b19bb6664e9c4b390f725c23d2b06b8bdeb41d1027a4ca756065b",
+        "optimize": "full"
+      },
+      "checks": [
+        "upstream pure rule suite",
+        "original 3D title",
+        "start game",
+        "movement",
+        "PNG snapshots",
+        "clean quit"
+      ]
+    },
+    "terra-ii": {
+      "archiveSha256": "714c62dc1ffa15b9d988a981559e32e248e6cd1c778f3f7226d3c2efe67158a3",
+      "manifest": {
+        "name": "Terra II",
+        "id": "terra-ii",
+        "version": "1.0.0",
+        "entry": "n/a",
+        "loadMode": "process",
+        "abi": "22.137",
+        "architecture": "aarch64",
+        "sdkPlatformSha256": "f08df86549285fee3a46893ec02cf0ffbaecc42488b3dd131553e42607830ea2",
+        "sdkCompilerSha256": "b20b50c46d2b19bb6664e9c4b390f725c23d2b06b8bdeb41d1027a4ca756065b",
+        "optimize": "checks-only",
+        "compilerMemoryMb": 2048
+      },
+      "checks": [
+        "original 3D title",
+        "new game",
+        "cursor/card/turn input",
+        "PNG snapshots",
+        "clean quit"
+      ]
+    }
+  },
+  "overrides": {
+    "project": "dungeon",
+    "strayCopiesIgnored": 5,
+    "recorded": [
+      {
+        "kind": "override",
+        "file": "appside/hal.c",
+        "source": "native/hal.c",
+        "sha256": "30a31d9b250ad1d068284c159d90fb758908b9f1cfb42690d71b9536382f2415"
+      },
+      {
+        "kind": "added",
+        "source": "native/sensor.c",
+        "sha256": "ee79715d71a0a0d344c220b5e999becd4b72bcf79813e8fd695a5958df8b8aef"
+      }
+    ],
+    "gameCheckPassed": true,
+    "abiHeaderRefused": true
+  },
+  "v1ByteIdentical": {
+    "archiveSha256": "0b9f376d5c274bdd685b556b7480751d94952c88d287c9f87f54394a9952d232",
+    "baseline": "/opt/homebrew/Cellar/qos-portable/0.2.0/libexec/qos-portable",
+    "inputsCompared": 309
+  },
+  "tamperedPlatformRefused": true
+}
