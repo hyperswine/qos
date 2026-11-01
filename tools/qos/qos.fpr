@@ -150,6 +150,14 @@ newDisk path size = case H.exists path of
           _ = C.say "Created {path} ({size} MiB)";
           Ok Unit).
 
+# A bundled profile archive, checked as tools/qos_archive.py read it: a desktop
+# plugin, or with --main the Main entry process image.
+inspect archive abi main = B.native Unit |>? (fn nat -> case nat of (arch, _, _, _) ->
+  C.readFile archive |>? (fn raw ->
+  Q.read raw { abi = abi, architecture = arch, session = C.session, api = C.api, desktop = (case main of True -> False | False -> True), bundled = True } |>? (fn app ->
+  _ = C.say "{app.id} {app.sha256}";
+  Ok Unit))).
+
 # ---- the command line --------------------------------------------------------------------
 version sdk = B.sdkMeta sdk |>? (fn meta ->
   _ = C.say "QOS Portable {C.textOr "development" "release" meta} ({C.api}, {C.session})";
@@ -189,6 +197,11 @@ command sdk args = case args of
         | False -> (case O.isSome (value a "--disk") or flag a ("--trace" :: Nil) of
             True -> Err "--disk and --trace apply to qos run PROJECT (kind = \"app\")"
           | False -> I.runMain sdk target)))
+  # for the SDK stager: check a profile archive against an ABI, print "ID SHA256"
+  | "inspect" :: rest -> withArgs rest ("--abi" :: Nil) ("--main" :: Nil) 1 (fn a ->
+      case (a.positional, value a "--abi") of
+        (archive :: Nil, O.Some abi) -> inspect archive abi (flag a ("--main" :: Nil))
+      | _ -> usageError "usage: qos inspect ARCHIVE --abi ABI [--main]")
   | c :: _ -> usageError "argument command: invalid choice: '{c}' (choose from 'new', 'build', 'disk', 'install', 'run')".
 
 main = case sdkRoot Unit of
