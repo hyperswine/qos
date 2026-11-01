@@ -36,7 +36,7 @@ The command reads files and runs Clang, the compiler and the linker through
 std/os (`Os.run`). It is built with `fpr build tools/qos/qos.fpr --with
 tools/qos/host.c`.
 
-- **Who builds it.** `tools/stage-portable-sdk.py` builds it with the SDK's
+- **Who builds it.** The stager (now `tools/stage-portable-sdk.sol`) builds it with the SDK's
   own compiler and the FP-RISC tree that compiler comes from (`--fprisc`).
   It goes to `libexec/qos-portable/tools/qos`; `bin/qos` is a relative
   symlink to it, and the command finds the SDK from its own resolved path.
@@ -45,9 +45,47 @@ tools/qos/host.c`.
   `qos_archive.py`, `qos_disk.py` and `desktop_install.py` are gone from it.
   The packager now refuses a `.py` file and checks that `tools/qos` is a
   native binary.
-- **The Python files stay in this tree.** They are the reference that
-  `tools/qos-parity-check.py` and the v1 identity check compare against.
-  The stager and packager are contributor tools and are still Python.
+- **The Python builder files stay in this tree.** They are the reference
+  that `tools/qos-parity-check.py` and the v1 identity check compare against.
+
+## The stager and packager, in Sol
+
+Later the same day, `tools/stage-portable-sdk.sol` and
+`tools/package-portable-sdk.sol` replaced the Python stager and packager,
+with shared helpers in `tools/sdk/sdk.sol`. Run them from inside the checkout:
+
+```sh
+sol tools/stage-portable-sdk.sol --fprisc ../fprisc-pin --compiler FPR \
+  --profile PROFILE --lld LD.LLD --output PREFIX
+sol tools/package-portable-sdk.sol --sdk PREFIX --version 0.3.0 \
+  --compiler-licenses DIR --output DIR
+```
+
+- **Same checks and outputs.** A stage from the Sol stager has the same 342
+  files as one from the Python stager, byte for byte, `sdk.json` and the
+  inventory included. Both packagers, run on that stage, produced packages
+  with the same 378 files and the same formula apart from the tarball's
+  hash.
+  - Their `sdk.json` and `release.json` are equal as JSON. The only
+    textual difference is that Sol's renderer writes a tab in an
+    `otool -L` line as `\u0009` where Python's writes `\t`.
+  - The tarballs differ as files, because bsdtar and Python's `tarfile`
+    write different headers.
+  - The packager refuses a stage from another commit, as before.
+- **Every file operation is immediate.** That means streams, digest streams,
+  and `cp`, `ln`, `chmod`, `find` and `tar` run as processes. One run builds a
+  tree and then hashes it; a transactional read of that tree would make Sol
+  retry the whole script when the tree changed.
+- **Profile archives are checked by the staged command.**
+  `qos inspect ARCHIVE --abi ABI [--main]` reads a bundled plugin, or the
+  Main entry with `--main`, using the `qos_archive.py` checks, and prints
+  `ID SHA256`. It agrees with `qos_archive.py` on all seven 0.2.0 profile
+  archives.
+- **Two Sol rules the tools follow.**
+  - A recursive function, and every caller of one, needs a `: unsafe`
+    signature.
+  - A lambda's body takes in the following `;` bindings, so blocks go in
+    named helpers.
 
 ## The linker
 
@@ -67,7 +105,7 @@ Apple's tools cannot link ELF, and the Command Line Tools have no lld.
 - **The result.** LLD 23.1.4, about 96 MB stripped, linking only
   `libSystem`, `libc++` and `libz` from `/usr/lib`, with no rpaths. A first
   build with every target and every lld flavour was 191 MB.
-- **Shipping it.** `stage-portable-sdk.py --lld PATH` refuses a linker that
+- **Shipping it.** The stager's `--lld PATH` refuses a linker that
   links anything outside the system. It ships it as `toolchain/ld.lld` with
   LLVM's licence (`toolchain/LICENSE-LLVM.txt`, from `packaging/llvm/`). It
   records `toolchainFiles` (the hash) and `toolchainLld` (the version) in
@@ -84,7 +122,8 @@ builder never links through Clang, it runs `ld.lld` itself.
 
 ## Evidence
 
-Run from an SDK staged at QOS `ef1cfe8` (clean) and FP-RISC `94f699b`, with the
+Run from an SDK staged (by the Python stager, before the Sol one replaced it)
+at QOS `ef1cfe8` (clean) and FP-RISC `94f699b`, with the
 0.2.0 compiler and Main profile and `--lld` from `build-sdk-lld.sh`. See the
 [evidence](evidence/2026-11-02-sdk-native-command.json).
 
@@ -119,9 +158,9 @@ Run from an SDK staged at QOS `ef1cfe8` (clean) and FP-RISC `94f699b`, with the
 
 ## Not done
 
-- **The stager and packager are still Python.** They are contributor tools
-  and do not reach a user's machine; the proposal also asked for the
-  packager to be rewritten.
+- **The acceptance and parity runners are still Python**
+  (`portable-app-check.py`, `portable-sdk-check.py`, `qos-parity-check.py`).
+  So is the reference builder they compare against.
 - **The Python builder files are still in the tree.** Delete them once a
   release has carried the native command and nothing compares against them.
 - **Two kinds of build are not reproducible bit for bit.**
