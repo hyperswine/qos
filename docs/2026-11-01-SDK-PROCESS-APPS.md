@@ -1,8 +1,8 @@
 # Proposal: standalone apps in the SDK, with the app-side HAL hidden
 
 Status: proposal, 1 November 2026. Nothing here is shipped. It goes with
-FP-RISC `docs/2026-11-01-TOOLCHAIN-MANAGER.md`, which proposes installing SDK
-versions side by side under `~/.fpr/qos-portable/VERSION`.
+FP-RISC `docs/2026-11-01-TOOLCHAIN-MANAGER.md`, which proposes a `qosmeta`
+manager that installs SDK versions side by side under `~/.qos/VERSION`.
 
 ## The problem
 
@@ -75,7 +75,7 @@ display = "gl"          # runtime/qosp-gl; "none" for runtime/qosp
 disk-mb = 32            # data/<id>.disk, created by `qos run` if missing
 
 [sdk]
-version = "0.3.0"       # oldest compatible SDK; read by the toolchain manager
+version = "0.3.0"       # oldest compatible SDK; "=0.3.0" pins exactly. Read by qosmeta's launcher
 ```
 
 For `kind = "app"`:
@@ -145,8 +145,8 @@ c-sources = ["native/sensor_bridge.c"]  # extra C linked into the image
   writer is `tools/mkqa.py`. terra-ii already contains an ELF/QAR2 writer in
   Sol (`scripts/elf.sol`) that needs no Python, objcopy or readelf. That
   shows the SDK's command and packager can be rewritten in Sol or FP-RISC
-  and shipped as a binary. The Python requirement then goes, and the
-  toolchain manager can install a QOS SDK as easily as an FP-RISC
+  and shipped as a binary. The Python requirement then goes, and `qosmeta`
+  can install a QOS SDK as easily as `fprmeta` installs an FP-RISC
   toolchain.
 - **`lld` shipped.** Apple's tools cannot link ELF. So the SDK ships
   `ld.lld` (statically linked; LLVM's licence permits it) and drives Clang
@@ -197,4 +197,4 @@ read-only:
 2. Migrate terra-ii and dungeon. This removes the mixed-release build now.
 3. Overrides and `c-sources`.
 4. Rewrite the command and packager in Sol or FP-RISC, and ship `lld`. This
-   is what the toolchain manager needs.
+   is what `qosmeta` needs.
