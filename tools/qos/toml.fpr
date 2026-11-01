@@ -1,0 +1,307 @@
+# toml.fpr -- the TOML that qos.toml and archive manifests use, read into
+# std/json's Value: tables are Objects, arrays Sequences, strings Text,
+# integers Integer, booleans Boolean.
+#
+#   Toml.parse text            Ok (Object ...) or Err "line N: why"
+#
+# Supported: comments; [table] and [[array.of.tables]] headers; bare, quoted
+# and dotted keys; basic and literal strings (one line); decimal and 0x/0o/0b
+# integers with underscores; true/false; arrays (over several lines, trailing
+# comma); one-line inline tables.  Refused by name, never misread: floats,
+# dates and times, multi-line strings.  A key or table defined twice is an
+# error, as TOML requires.
+unsafe base.
+
+J = use "std/json".
+M = use "std/map".
+O = use "std/option".
+S = use "std/string".
+
+parse : String -> Result J.Value String .
+parse s = doc s 0 Nil (J.Object (M.empty S.compare)) Nil.
+
+lineOf s i = lineGo s 0 i 1.
+lineGo s k i n | k >= i = n.
+lineGo s k i n | charAt s k == 10 = lineGo s (k + 1) i (n + 1).
+lineGo s k i n = lineGo s (k + 1) i n.
+
+fail s i why = Err "line {lineOf s i}: {why}".
+
+at s i = case i >= strlen s of True -> 0 | False -> charAt s i.
+
+# spaces and tabs
+blank s i | at s i == 32 = blank s (i + 1).
+blank s i | at s i == 9 = blank s (i + 1).
+blank s i = i.
+toEol s i | i >= strlen s = i.
+toEol s i | charAt s i == 10 = i.
+toEol s i = toEol s (i + 1).
+# blank lines and comment lines
+gap s i =
+  j = blank s i;
+  c = at s j;
+  case c == 35 of
+    True -> gap s (toEol s j)
+  | False -> (case c == 10 or c == 13 of True -> gap s (j + 1) | False -> j).
+# after a value: blanks, an optional comment, then a newline or the end
+lineEnd s i =
+  j = blank s i;
+  k = (case at s j == 35 of True -> toEol s j | False -> j);
+  case k >= strlen s of
+    True -> Ok k
+  | False -> (case charAt s k == 10 of
+        True -> Ok (k + 1)
+      | False -> (case charAt s k == 13 and at s (k + 1) == 10 of
+            True -> Ok (k + 2)
+          | False -> fail s k "expected the end of the line")).
+
+# ---- the document ---------------------------------------------------------------
+# path: the current table; defined: header paths seen ([a.b] once each)
+doc s i path root defined =
+  j = gap s i;
+  case j >= strlen s of
+    True -> Ok root
+  | False -> (case charAt s j == 91 of
+        True -> header s j root defined
+      | False -> pair s j path root defined).
+
+header s i root defined = case at s (i + 1) == 91 of
+    True -> (case keyPath s (blank s (i + 2)) Nil of
+        Err e -> Err e
+      | Ok (ks, k) -> (case at s k == 93 and at s (k + 1) == 93 of
+            False -> fail s k "expected ']]'"
+          | True -> (case lineEnd s (k + 2) of
+              Err e -> Err e
+            | Ok next -> (case update root ks (appendTable s i ks) of
+                Err e -> fail s i e
+              | Ok r -> doc s next ks r defined))))
+  | False -> (case keyPath s (blank s (i + 1)) Nil of
+        Err e -> Err e
+      | Ok (ks, k) -> (case at s k == 93 of
+            False -> fail s k "expected ']'"
+          | True -> (case lineEnd s (k + 1) of
+              Err e -> Err e
+            | Ok next -> (case member (S.join "." ks) defined of
+                True -> fail s i "table [{S.join "." ks}] is defined twice"
+              | False -> (case update root ks (openTable ks) of
+                  Err e -> fail s i e
+                | Ok r -> doc s next ks r (S.join "." ks :: defined)))))).
+
+member x xs = case xs of Nil -> False | y :: r -> (case x == y of True -> True | False -> member x r).
+
+# [[a]]: a new table at the end of the array a
+appendTable s i ks old = case old of
+    O.None -> Ok (J.Sequence (J.Object (M.empty S.compare) :: Nil))
+  | O.Some (J.Sequence xs) -> Ok (J.Sequence (snoc xs (J.Object (M.empty S.compare))))
+  | O.Some _ -> Err "{S.join "." ks} is not an array of tables".
+snoc xs x = case xs of Nil -> x :: Nil | y :: r -> y :: snoc r x.
+
+# [a]: the table a, created if missing (it may already exist implicitly)
+openTable ks old = case old of
+    O.None -> Ok (J.Object (M.empty S.compare))
+  | O.Some (J.Object m) -> Ok (J.Object m)
+  | O.Some _ -> Err "{S.join "." ks} is not a table".
+
+pair s i path root defined = case keyPath s i Nil of
+    Err e -> Err e
+  | Ok (ks, k) -> (case at s k == 61 of
+      False -> fail s k "expected '=' after the key"
+    | True -> (case value s (blank s (k + 1)) of
+        Err e -> Err e
+      | Ok (v, after) -> (case lineEnd s after of
+          Err e -> Err e
+        | Ok next -> (case update root (append path ks) (fresh ks v) of
+            Err e -> fail s i e
+          | Ok r -> doc s next path r defined)))).
+
+append xs ys = case xs of Nil -> ys | x :: r -> x :: append r ys.
+
+fresh ks v old = case old of
+    O.None -> Ok v
+  | O.Some _ -> Err "key {S.join "." ks} is defined twice".
+
+# Update the value at a key path; f sees the old value, if any.  The tables
+# on the way are created; the last table of an array of tables is entered.
+update : unsafe J.Value -> List String -> (O.Option J.Value -> Result J.Value String) -> Result J.Value String .
+update t ks f = case t of
+    J.Object m -> (case ks of
+        Nil -> Err "empty key"
+      | k :: Nil -> (case f (M.get k m) of Err e -> Err e | Ok v -> Ok (J.Object (M.insert k v m)))
+      | k :: rest -> (case M.get k m of
+          O.None -> into m k (J.Object (M.empty S.compare)) rest f
+        | O.Some (J.Object c) -> into m k (J.Object c) rest f
+        | O.Some (J.Sequence xs) -> (case lastSplit xs of
+            O.None -> Err "{k} is an empty array"
+          | O.Some (front, J.Object c) -> (case update (J.Object c) rest f of
+              Err e -> Err e
+            | Ok v -> Ok (J.Object (M.insert k (J.Sequence (append front (v :: Nil))) m)))
+          | O.Some _ -> Err "{k} is not a table")
+        | O.Some _ -> Err "{k} is not a table"))
+  | _ -> Err "not a table".
+into m k child rest f = case update child rest f of
+    Err e -> Err e
+  | Ok v -> Ok (J.Object (M.insert k v m)).
+lastSplit xs = case xs of
+    Nil -> O.None
+  | x :: Nil -> O.Some (Nil, x)
+  | x :: r -> (case lastSplit r of O.None -> O.None | O.Some (front, l) -> O.Some (x :: front, l)).
+
+# ---- keys -------------------------------------------------------------------------
+keyPath s i acc = case keyPart s i of
+    Err e -> Err e
+  | Ok (k, j) ->
+      n = blank s j;
+      (case at s n == 46 of
+        True -> keyPath s (blank s (n + 1)) (k :: acc)
+      | False -> Ok (rev (k :: acc) Nil, n)).
+rev xs acc = case xs of Nil -> acc | x :: r -> rev r (x :: acc).
+
+keyPart s i = case at s i of
+    34 -> basicString s (i + 1) Nil
+  | 39 -> literalString s (i + 1)
+  | _ ->
+      j = bareEnd s i;
+      (case j == i of
+        True -> fail s i "expected a key"
+      | False -> Ok (substr s i (j - i), j)).
+bareEnd s i | bareChar (at s i) = bareEnd s (i + 1).
+bareEnd s i = i.
+bareChar c = (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or (c >= 48 and c <= 57) or c == 95 or c == 45.
+
+# ---- values -----------------------------------------------------------------------
+value s i = case at s i of
+    34 -> (case at s (i + 1) == 34 and at s (i + 2) == 34 of
+        True -> fail s i "multi-line strings are not supported in this file"
+      | False -> (case basicString s (i + 1) Nil of Err e -> Err e | Ok (t, j) -> Ok (J.Text t, j)))
+  | 39 -> (case at s (i + 1) == 39 and at s (i + 2) == 39 of
+        True -> fail s i "multi-line strings are not supported in this file"
+      | False -> (case literalString s (i + 1) of Err e -> Err e | Ok (t, j) -> Ok (J.Text t, j)))
+  | 91 -> items s (gapIn s (i + 1)) Nil
+  | 123 -> inline s (blank s (i + 1)) (J.Object (M.empty S.compare)) True
+  | _ -> scalar s i.
+
+# inside an array: blanks, newlines and comments
+gapIn s i =
+  j = blank s i;
+  c = at s j;
+  case c == 35 of
+    True -> gapIn s (toEol s j)
+  | False -> (case c == 10 or c == 13 of True -> gapIn s (j + 1) | False -> j).
+
+items s i acc = case at s i == 93 of
+    True -> Ok (J.Sequence (rev acc Nil), i + 1)
+  | False -> (case i >= strlen s of
+      True -> fail s i "unterminated array"
+    | False -> (case value s i of
+        Err e -> Err e
+      | Ok (v, j) ->
+          k = gapIn s j;
+          (case at s k of
+            44 -> items s (gapIn s (k + 1)) (v :: acc)
+          | 93 -> Ok (J.Sequence (rev (v :: acc) Nil), k + 1)
+          | _ -> fail s k "expected ',' or ']' in the array"))).
+
+inline s i t first = case at s i == 125 of
+    True -> (case first of True -> Ok (t, i + 1) | False -> fail s i "expected a key after ','")
+  | False -> (case keyPath s i Nil of
+      Err e -> Err e
+    | Ok (ks, k) -> (case at s k == 61 of
+        False -> fail s k "expected '=' after the key"
+      | True -> (case value s (blank s (k + 1)) of
+          Err e -> Err e
+        | Ok (v, j) -> (case update t ks (fresh ks v) of
+            Err e -> fail s i e
+          | Ok t2 ->
+              n = blank s j;
+              (case at s n of
+                44 -> inline s (blank s (n + 1)) t2 False
+              | 125 -> Ok (t2, n + 1)
+              | _ -> fail s n "expected ',' or '}' in the inline table"))))).
+
+# after the opening quote
+basicString s i acc = case i >= strlen s of
+    True -> fail s i "unterminated string"
+  | False -> (case charAt s i of
+      34 -> Ok (S.concat (rev acc Nil), i + 1)
+    | 10 -> fail s i "unterminated string"
+    | 92 -> (case escape s (i + 1) of
+        Err e -> Err e
+      | Ok (t, j) -> basicString s j (t :: acc))
+    | c -> (case c < 32 and c != 9 of
+        True -> fail s i "control character in a string"
+      | False ->
+          j = plainEnd s i;
+          basicString s j (substr s i (j - i) :: acc))).
+plainEnd s i | i >= strlen s = i.
+plainEnd s i | charAt s i == 34 or charAt s i == 92 or (charAt s i < 32 and charAt s i != 9) = i.
+plainEnd s i = plainEnd s (i + 1).
+
+escape s i = case at s i of
+    98 -> Ok (chr 8, i + 1)
+  | 116 -> Ok (chr 9, i + 1)
+  | 110 -> Ok (chr 10, i + 1)
+  | 102 -> Ok (chr 12, i + 1)
+  | 114 -> Ok (chr 13, i + 1)
+  | 101 -> Ok (chr 27, i + 1)
+  | 34 -> Ok ("\"", i + 1)
+  | 92 -> Ok ("\\", i + 1)
+  | 117 -> unicode s (i + 1) 4
+  | 85 -> unicode s (i + 1) 8
+  | _ -> fail s i "invalid escape in a string".
+unicode s i n = case hexValue s i n 0 of
+    O.None -> fail s i "invalid \\u escape"
+  | O.Some cp -> (case cp > 1114111 or (cp >= 55296 and cp <= 57343) of
+      True -> fail s i "invalid code point"
+    | False -> Ok (J.utf8 cp, i + n)).
+hexValue s i n acc | n == 0 = O.Some acc.
+hexValue s i n acc = case hexDigit (at s i) of
+    O.None -> O.None
+  | O.Some d -> hexValue s (i + 1) (n - 1) (acc * 16 + d).
+hexDigit c | c >= 48 and c <= 57 = O.Some (c - 48).
+hexDigit c | c >= 97 and c <= 102 = O.Some (c - 87).
+hexDigit c | c >= 65 and c <= 70 = O.Some (c - 55).
+hexDigit c = O.None.
+
+literalString s i = litGo s i i.
+litGo s start i | i >= strlen s = fail s i "unterminated string".
+litGo s start i | charAt s i == 39 = Ok (substr s start (i - start), i + 1).
+litGo s start i | charAt s i == 10 = fail s i "unterminated string".
+litGo s start i = litGo s start (i + 1).
+
+scalar s i =
+  j = tokenEnd s i;
+  t = substr s i (j - i);
+  case t of
+    "true" -> Ok (J.Boolean True, j)
+  | "false" -> Ok (J.Boolean False, j)
+  | "" -> fail s i "expected a value"
+  | _ -> (case integer t of
+      O.Some n -> Ok (J.Integer n, j)
+    | O.None -> fail s i "unsupported value {t}: this file takes strings, integers, booleans, arrays and tables (no floats or dates)").
+tokenEnd s i | i >= strlen s = i.
+tokenEnd s i | tokenChar (charAt s i) = tokenEnd s (i + 1).
+tokenEnd s i = i.
+tokenChar c = bareChar c or c == 43 or c == 46 or c == 58.
+
+# TOML integers: [+-]digits with single underscores between digits and no
+# leading zero; 0x 0o 0b unsigned forms
+integer t | strlen t == 0 = O.None.
+integer t | S.startsWith "0x" t = radix (substr t 2 (strlen t - 2)) 16.
+integer t | S.startsWith "0o" t = radix (substr t 2 (strlen t - 2)) 8.
+integer t | S.startsWith "0b" t = radix (substr t 2 (strlen t - 2)) 2.
+integer t | charAt t 0 == 45 = O.map (fn n -> 0 - n) (decimal (substr t 1 (strlen t - 1))).
+integer t | charAt t 0 == 43 = decimal (substr t 1 (strlen t - 1)).
+integer t = decimal t.
+decimal t | strlen t == 0 = O.None.
+decimal t | strlen t > 1 and charAt t 0 == 48 = O.None.
+decimal t = radix t 10.
+radix t base | strlen t == 0 = O.None.
+radix t base | charAt t 0 == 95 or charAt t (strlen t - 1) == 95 = O.None.
+radix t base = radixGo t 0 base 0 False.
+radixGo t i base acc under | i >= strlen t = O.Some acc.
+radixGo t i base acc under | charAt t i == 95 = (case under of True -> O.None | False -> radixGo t (i + 1) base acc True).
+radixGo t i base acc under = case hexDigit (charAt t i) of
+    O.None -> O.None
+  | O.Some d -> (case d >= base or acc > 230584300921369395 of
+      True -> O.None
+    | False -> radixGo t (i + 1) base (acc * base + d) False).

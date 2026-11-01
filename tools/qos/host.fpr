@@ -1,0 +1,56 @@
+# host.fpr -- the host calls of tools/qos/host.c, beside std/os.
+unsafe base.
+
+Qos.sha256       : String -> String .
+Qos.sha256File   : String -> Result String String .
+Qos.realpath     : String -> Result String String .
+Qos.kind         : String -> Int .
+Qos.setEnv       : String -> String -> Unit .
+Qos.unsetEnv     : String -> Unit .
+Qos.envNames     : Unit -> List String .
+Qos.lock         : String -> Result Int String .
+Qos.createSparse : String -> Int -> Result Unit String .
+Qos.tempFile     : String -> Result (Int, String) String .
+Qos.tempDir      : String -> Result String String .
+Qos.removeTree   : String -> Unit .
+Qos.pread        : Int -> Int -> Int -> Result String String .
+Qos.pwrite       : Int -> Int -> String -> Result Unit String .
+Qos.fullSync     : Int -> Result Unit String .
+Qos.fdSize       : Int -> Result Int String .
+Qos.truncate     : Int -> Int -> Result Unit String .
+Qos.link         : String -> String -> Result Unit String .
+Qos.syncDir      : String -> Result Unit String .
+Qos.chmod        : String -> Int -> Result Unit String .
+Qos.machine      : Unit -> String .
+Qos.system       : Unit -> String .
+Qos.zeros        : Int -> String .
+Qos.differences  : String -> String -> List Int .
+
+sha256 s = Qos.sha256 s.
+sha256File p = Qos.sha256File p.
+realpath p = Qos.realpath p.
+# -1 missing, 0 file, 1 directory, 2 symlink, 3 other (a final symlink is not followed)
+kind p = Qos.kind p.
+isFile p = Qos.kind p == 0.
+isDir p = Qos.kind p == 1.
+exists p = Qos.kind p >= 0.
+setEnv n v = Qos.setEnv n v.
+unsetEnv n = Qos.unsetEnv n.
+envNames u = Qos.envNames u.
+lock p = Qos.lock p.
+createSparse p n = Qos.createSparse p n.
+tempFile t = Qos.tempFile t.
+tempDir t = Qos.tempDir t.
+removeTree p = Qos.removeTree p.
+pread fd off n = Qos.pread fd off n.
+pwrite fd off b = Qos.pwrite fd off b.
+fullSync fd = Qos.fullSync fd.
+fdSize fd = Qos.fdSize fd.
+truncate fd n = Qos.truncate fd n.
+link a b = Qos.link a b.
+syncDir p = Qos.syncDir p.
+chmod p m = Qos.chmod p m.
+machine u = Qos.machine u.
+system u = Qos.system u.
+zeros n = Qos.zeros n.
+differences a b = Qos.differences a b.

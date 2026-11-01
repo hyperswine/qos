@@ -60,18 +60,22 @@ def writable(prefix):
             p.chmod(p.stat().st_mode | 0o200)
 
 
-# What a v1 desktop build reads, apart from the builder (tools/portable_sdk.py).
-DESKTOP_INPUTS = ("compiler/", "modules/", "support/", "tools/desktop-adapter.fpr.in",
-                  "tools/desktop-counter.fpr", "tools/mkimports.py", "tools/mkqa.py", "tools/qos_archive.py")
+# What a v1 desktop build reads, apart from the builder. The builder was
+# tools/portable_sdk.py with mkimports.py, mkqa.py and qos_archive.py; since
+# step 4 it is the native tools/qos, and the SDK ships no Python.
+DESKTOP_INPUTS = ("compiler/", "modules/", "support/", "tools/desktop-adapter.fpr.in", "tools/desktop-counter.fpr")
+BASELINE_BUILDER = ("portable_sdk.py", "mkimports.py", "mkqa.py", "qos_archive.py", "qos_disk.py", "desktop_install.py")
 
 
-def v1_identity(baseline, prefix, out, run, evidence):
+def v1_identity(baseline, prefix, out, run, evidence, baseline_env):
     """A v1 desktop project builds byte-identically with the baseline builder and this one.
 
     The compiler's unit order depends on where the SDK is installed, so two
     SDKs at different paths can emit different bytes from identical inputs
     (0.2.0 does this too). The check therefore requires every other input
-    to equal the baseline's, and runs both builders from one SDK location.
+    to equal the baseline's, and runs both builders from one SDK location:
+    this SDK's native `qos` (with its own ld.lld when it ships one), then the
+    baseline's Python builder copied beside it (with lld from PATH).
     """
     base = baseline / "libexec/qos-portable"
     staged = prefix / "libexec/qos-portable"
@@ -84,12 +88,16 @@ def v1_identity(baseline, prefix, out, run, evidence):
     run([sdk / "bin/qos", "new", "identity"], "v1-scaffold.log")
     run([sdk / "bin/qos", "build"], "v1-staged.log", cwd=out / "identity")
     new = (out / "identity/build/identity.qa").read_bytes()
-    shutil.copy2(base / "tools/portable_sdk.py", sdk / "libexec/qos-portable/tools/portable_sdk.py")
-    run([sdk / "bin/qos", "build"], "v1-baseline.log", cwd=out / "identity")
+    for name in BASELINE_BUILDER:
+        shutil.copy2(base / "tools" / name, sdk / "libexec/qos-portable/tools" / name)
+    run([sys.executable, sdk / "libexec/qos-portable/tools/portable_sdk.py", "build"], "v1-baseline.log",
+        cwd=out / "identity", env=baseline_env)
     old = (out / "identity/build/identity.qa").read_bytes()
     assert old == new, "v1 desktop build differs from the baseline builder's"
     evidence["v1ByteIdentical"] = dict(archiveSha256=hashlib.sha256(new).hexdigest(), baseline=str(base),
-                                       inputsCompared=len(pick(base)))
+                                       inputsCompared=len(pick(base)),
+                                       stagedLinker="toolchain/ld.lld" if (staged / "toolchain/ld.lld").is_file() else "PATH",
+                                       baselineLinker=shutil.which("ld.lld", path=baseline_env["PATH"]))
 
 
 def overrides(project, sdk, prefix, run, evidence):
@@ -155,10 +163,14 @@ def main():
     restricted = out / "path"
     restricted.mkdir()
     # sol runs the projects' own checks; fpr and cc build dungeon's host rule suite; the harness sends keys with cat.
-    for name in ("python3", "clang", "ld.lld", "sol", "fpr", "cc", "cat"):
+    # No Python: the SDK's `qos` is native. lld only when the SDK ships none.
+    ships_lld = (sdk / "toolchain/ld.lld").is_file()
+    for name in ("clang", "sol", "fpr", "cc", "cat") + (() if ships_lld else ("ld.lld",)):
         found = shutil.which(name)
         assert found, name
         (restricted / name).symlink_to(Path(found).resolve())
+    assert not [p for p in sdk.rglob("*.py")], "the SDK ships Python files"
+    assert (sdk / "tools/qos").read_bytes()[:4] in (b"\xcf\xfa\xed\xfe", b"\x7fELF"), "bin/qos is not a native binary"
     env = {k: v for k, v in os.environ.items()
            if not k.startswith(("FPR", "QOS", "PYTHON", "GHC")) and k not in ("HOME", "PATH", "XDG_CACHE_HOME")}
     env.update(PATH=f"{prefix / 'bin'}:{restricted}", HOME=str(out / "home"),
@@ -171,9 +183,10 @@ def main():
         f'(deny file-read* file-write* (subpath {json.dumps(str(path))}))\n' for path in blocked))
     guard = ["/usr/bin/sandbox-exec", "-f", str(policy)]
     evidence = dict(sdk=str(prefix), platformSha256=meta["platformSha256"], compilerSha256=meta["compilerSha256"],
-                    denied=list(map(str, blocked)), projects={})
+                    denied=list(map(str, blocked)), projects={}, pythonOnPath=False,
+                    toolchainLld=meta.get("toolchainLld"), pathTools=sorted(p.name for p in restricted.iterdir()))
 
-    def run(command, log, cwd=out, expect=0, timeout=900):
+    def run(command, log, cwd=out, expect=0, timeout=900, env=env):
         result = subprocess.run(guard + list(map(str, command)), cwd=cwd, env=env,
                                 capture_output=True, text=True, timeout=timeout)
         (out / log).write_text(result.stdout + result.stderr)
@@ -182,10 +195,12 @@ def main():
 
     probe = ('import pathlib, shutil; '
              'assert shutil.which("ghc") is None and shutil.which("cabal") is None; '
+             'assert shutil.which("python3") is None and shutil.which("python") is None; '
+             + ('assert shutil.which("ld.lld") is None; ' if ships_lld else '') +
              f'paths={list(map(str, [ROOT / "README.md", args.fprisc.resolve() / "core/prelude.fpr", *(p.resolve() / "qos.toml" for p in args.project)]))!r}; '
              '\nfor p in paths:\n try: pathlib.Path(p).read_bytes()\n except PermissionError: pass\n else: raise AssertionError(p)\n'
-             'print("checkout access denied; GHC/Cabal absent from PATH")')
-    run([restricted / "python3", "-c", probe], "access-probe.log")
+             'print("checkout access denied; GHC, Cabal and Python absent from PATH")')
+    run([sys.executable, "-c", probe], "access-probe.log")
 
     copies = []
     for checkout in args.project:
@@ -222,7 +237,11 @@ def main():
         writable(prefix)
 
     if args.baseline:
-        v1_identity(args.baseline.resolve(), prefix, out, run, evidence)
+        # the baseline builder is Python and needs lld on PATH
+        lld = shutil.which("ld.lld")
+        assert lld, "the baseline builder needs ld.lld on PATH"
+        baseline_env = dict(env, PATH=f"{Path(lld).parent}:{restricted}")
+        v1_identity(args.baseline.resolve(), prefix, out, run, evidence, baseline_env)
 
     # One changed platform byte is refused by name; nothing is linked from it.
     tampered = out / "tampered"

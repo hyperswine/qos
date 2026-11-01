@@ -1,0 +1,252 @@
+unsafe base.
+
+C = use "common".
+H = use "host".
+Q = use "qa".
+T = use "toml".
+J = use "std/json".
+L = use "std/list".
+M = use "std/map".
+O = use "std/option".
+S = use "std/string".
+
+empty = J.Object (M.empty S.compare).
+keys v = case v of J.Object m -> M.keys m | _ -> Nil.
+isTable v = case v of J.Object _ -> True | _ -> False.
+get k v = O.withDefault J.Null (J.field k v).
+has k v = O.isSome (J.field k v).
+text k v = C.textField k v.
+isText k v want = case text k v of O.Some t -> t == want | O.None -> False.
+optIs d k v want = case textOr d k v of O.Some t -> t == want | O.None -> False.
+textOr d k v = case J.field k v of
+    O.None -> O.Some d
+  | O.Some (J.Text t) -> O.Some t
+  | O.Some _ -> O.None.
+
+sameSet a b = L.length a == L.length b and L.all (fn x -> L.member x b) a.
+minus a b = L.filter (fn x -> not (L.member x b)) a.
+not b = case b of True -> False | False -> True.
+sorted xs = L.sortWith S.compare xs.
+commas xs = S.join ", " (sorted xs).
+
+findRoot where = case H.realpath where of
+    Err _ -> Err "no qos.toml in this directory or its parents; use qos new NAME"
+  | Ok p -> rootGo (case H.isFile p of True -> C.parent p | False -> p).
+rootGo p = case H.isFile (C.join p "qos.toml") of
+    True -> Ok p
+  | False -> (case p == "/" of
+      True -> Err "no qos.toml in this directory or its parents; use qos new NAME"
+    | False -> rootGo (C.parent p)).
+
+load where = findRoot where |>? (fn root ->
+  C.readFile (C.join root "qos.toml") |>? (fn raw ->
+  T.parse raw |> mapErr (fn e -> "qos.toml: {e}") |>? (fn data ->
+  case has "manifest" data of
+    True -> loadV2 root data
+  | False -> loadV1 root data))).
+mapErr f r = case r of Ok v -> Ok v | Err e -> Err (f e).
+
+loadV1 root data = case sameSet (keys data) ("app" :: "build" :: Nil) of
+    False -> Err "qos.toml v1 requires only [app] and [build]"
+  | True ->
+      app = get "app" data;
+      build = get "build" data;
+      (case isTable app and isTable build of
+        False -> Err "[app] and [build] must be TOML tables"
+      | True -> (case sameSet (keys app) ("id" :: "name" :: "version" :: "kind" :: Nil) and sameSet (keys build) ("entry" :: "target" :: Nil) of
+          False -> Err "qos.toml v1 requires app.id/name/version/kind and build.entry/target; unknown keys are refused"
+        | True -> identity app |>? (fn u ->
+            case isText "kind" app "desktop" and isText "target" build "qos-portable" of
+              False -> Err "SDK v2 supports kind=desktop and target=qos-portable only"
+            | True -> entryFile root build |>? (fn entry ->
+                Ok { root = root, manifest = 1, app = app, build = build, run = empty, sdk = empty, platform = empty, entry = entry })))).
+
+identity app = case Q.validId (O.withDefault "" (text "id" app)) of
+    False -> Err "invalid app.id (archive ID rules; maximum 64 ASCII bytes)"
+  | True -> C.each (fn f -> case text f app of
+        O.Some t -> (case strlen t > 0 and Q.plainChars t 0 of True -> Ok Unit | False -> Err "app.{f} must be a nonempty single-line string")
+      | O.None -> Err "app.{f} must be a nonempty single-line string") ("name" :: "version" :: Nil).
+
+entryFile root build = case text "entry" build of
+    O.None -> Err "build.entry must be a relative .fpr file inside the project"
+  | O.Some e -> (case C.isAbsolute e of
+      True -> Err "build.entry must be a relative .fpr file inside the project"
+    | False -> (case H.realpath (C.join root e) of
+        Err _ -> Err "build.entry must be an existing .fpr file inside the project"
+      | Ok entry -> (case C.inside root entry and H.isFile entry and C.suffix entry == ".fpr" of
+          False -> Err "build.entry must be an existing .fpr file inside the project"
+        | True -> (case L.any (fn n -> C.baseName n != ".gitkeep") (C.walk (C.join root "assets")) of
+            True -> Err "asset packaging is not supported by desktop SDK v2"
+          | False -> Ok entry)))).
+
+# ---- v2 --------------------------------------------------------------------------------
+# table -> (required, optional)
+v2Tables = ("app", ("id" :: "name" :: "version" :: "kind" :: Nil, Nil)) ::
+           ("build", ("entry" :: "target" :: Nil, "optimize" :: "compiler-memory-mb" :: Nil)) ::
+           ("run", (Nil, "display" :: "disk-mb" :: "port" :: Nil)) ::
+           ("sdk", ("version" :: Nil, Nil)) ::
+           ("platform", (Nil, "override" :: "c-sources" :: Nil)) :: Nil.
+tableNames = L.map (fn t -> case t of (n, _) -> n) v2Tables.
+rules name = case L.find (fn t -> case t of (n, _) -> n == name) v2Tables of
+    O.Some (_, r) -> r
+  | O.None -> (Nil, Nil).
+
+# `checks-only` keeps every type, safety and linearity check and turns off
+# the optional optimisations a very large program may not afford
+optimizeFlags o = case o of
+    "checks-only" -> "SPEC" :: "INLINE" :: "REUSE" :: "VEC_PEEK" :: "VEC_FUSE" :: "RECEIVE_TURNS" :: Nil
+  | _ -> Nil.
+displays = ("gl", "qosp-gl") :: ("none", "qosp") :: Nil.
+hostOf d = case L.find (fn p -> case p of (k, _) -> k == d) displays of O.Some (_, h) -> h | O.None -> "qosp-gl".
+
+loadV2 root data = case get "manifest" data of
+    J.Integer 2 -> v2Tables2 root data
+  | _ -> Err "this SDK reads qos.toml manifest = 2 (or v1, which has no manifest key)".
+v2Tables2 root data =
+  names = minus (keys data) ("manifest" :: Nil);
+  unknown = minus names tableNames;
+  case (case unknown of Nil -> False | _ -> True) or not (L.member "app" names and L.member "build" names) of
+    True -> Err (case unknown of
+        Nil -> "qos.toml v2 requires [app] and [build]"
+      | _ -> "qos.toml v2 has [app] and [build], and optionally [run] and [sdk]; unknown tables are refused: {commas unknown}")
+  | False -> C.each (fn n -> tableKeys n (get n data)) names |>? (fn u -> v2Values root data).
+
+tableKeys name table = case isTable table of
+    False -> Err "[{name}] must be a TOML table"
+  | True -> (case rules name of
+      (required, optional) ->
+        missing = minus required (keys table);
+        extra = minus (minus (keys table) required) optional;
+        (case L.isEmpty missing and L.isEmpty extra of
+          True -> Ok Unit
+        | False -> Err (S.concat ("[{name}] needs " :: (case required of Nil -> "no keys" | _ -> commas required) ::
+                                  (case optional of Nil -> "" | _ -> " and may set {commas optional}") :: "; " ::
+                                  (case missing of Nil -> "unknown {commas extra}" | _ -> "missing {commas missing}") :: Nil)))).
+
+positive table key low high = case J.field key table of
+    O.None -> Ok O.None
+  | O.Some (J.Integer n) -> (case n >= low and (high < 0 or n <= high) of
+      True -> Ok (O.Some n)
+    | False -> Err (bound key low high))
+  | O.Some _ -> Err (bound key low high).
+bound key low high = case high < 0 of
+    True -> "{key} must be an integer of at least {low}"
+  | False -> "{key} must be an integer from {low} to {high}".
+
+v2Values root data =
+  app = get "app" data;
+  build = get "build" data;
+  run = O.withDefault empty (J.field "run" data);
+  pin = O.withDefault empty (J.field "sdk" data);
+  platform = O.withDefault empty (J.field "platform" data);
+  identity app |>? (fn u1 ->
+  C.check (isText "kind" app "desktop" or isText "kind" app "app") "app.kind must be \"desktop\" (a Main plugin) or \"app\" (a standalone process image)" |>? (fn u2 ->
+  C.check (isText "target" build "qos-portable") "build.target must be \"qos-portable\"" |>? (fn u3 ->
+  C.check (optIs "full" "optimize" build "full" or optIs "full" "optimize" build "checks-only") "build.optimize must be one of: full, checks-only" |>? (fn u4 ->
+  positive build "compiler-memory-mb" 1 (0 - 1) |>? (fn m ->
+  C.check (L.isEmpty (keys run) or isText "kind" app "app") "[run] applies to kind = \"app\"; a desktop app runs inside Main (qos run DISK)" |>? (fn u5 ->
+  C.check (optIs "gl" "display" run "gl" or optIs "gl" "display" run "none") "run.display must be one of: gl, none" |>? (fn u6 ->
+  positive run "disk-mb" 1 (0 - 1) |>? (fn d ->
+  positive run "port" 0 65535 |>? (fn p ->
+  C.check (L.isEmpty (keys pin) or sdkPin (text "version" pin)) "sdk.version must be \"X.Y.Z\" (that release or a later compatible one) or \"=X.Y.Z\" (exactly)" |>? (fn u7 ->
+  C.check (L.isEmpty (keys platform) or isText "kind" app "app") "[platform] applies to kind = \"app\"; a desktop app links no platform files" |>? (fn u8 ->
+  platformLists root platform |>? (fn u9 ->
+  entryFile root build |>? (fn entry ->
+  Ok { root = root, manifest = 2, app = app, build = build, run = run, sdk = pin, platform = platform, entry = entry }))))))))))))).
+
+sdkPin v = case v of O.Some t -> O.isSome (version t) | O.None -> False.
+# "=X.Y.Z" or "X.Y.Z" -> Some (exact, (x, y, z))
+version t =
+  exact = S.startsWith "=" t;
+  body = (case exact of True -> substr t 1 (strlen t - 1) | False -> t);
+  case S.split "." body of
+    a :: b :: c :: Nil -> (case Q.nat a and Q.nat b and Q.nat c of
+        True -> O.Some (exact, (Q.toNat a, Q.toNat b, Q.toNat c))
+      | False -> O.None)
+  | _ -> O.None.
+
+overrideOf platform = case J.field "override" platform of
+    O.None -> Ok Nil
+  | O.Some (J.Object m) -> (case L.all (fn kv -> case kv of (_, J.Text _) -> True | _ -> False) (M.entries m) of
+      True -> Ok (C.textMap m)
+    | False -> Err "[platform.override] maps SDK platform file names to project files, e.g. \"appside/hal.c\" = \"native/hal.c\"")
+  | O.Some _ -> Err "[platform.override] maps SDK platform file names to project files, e.g. \"appside/hal.c\" = \"native/hal.c\"".
+sourcesOf platform = case J.field "c-sources" platform of
+    O.None -> Ok Nil
+  | O.Some (J.Sequence xs) -> (case L.all (fn x -> case x of J.Text _ -> True | _ -> False) xs of
+      True -> Ok (L.map (fn x -> case x of J.Text t -> t | _ -> "") xs)
+    | False -> Err "platform.c-sources must be a list of project files, e.g. [\"native/sensor.c\"]")
+  | O.Some _ -> Err "platform.c-sources must be a list of project files, e.g. [\"native/sensor.c\"]".
+
+platformLists root platform = overrideOf platform |>? (fn overrides ->
+  sourcesOf platform |>? (fn sources ->
+  values = L.map (fn kv -> case kv of (_, v) -> v) overrides;
+  C.check (L.length (L.unique sources) == L.length sources and not (L.any (fn s -> L.member s values) sources))
+    "each platform file is listed once: no repeated c-sources, and no file is both an override and a c-source" |>? (fn u ->
+  C.each (fn v -> projectFile root v) (L.append values sources)))).
+
+# a file the project names in [platform]: relative, inside the project, existing
+projectFile root value = case C.isAbsolute value of
+    True -> Err "[platform] '{value}' must be relative to the project"
+  | False -> (case H.realpath (C.join root value) of
+      Err _ -> Err "[platform] '{value}' must be an existing file inside the project"
+    | Ok path -> (case C.inside root path and H.isFile path of
+        False -> Err "[platform] '{value}' must be an existing file inside the project"
+      | True -> (case C.suffix path == ".c" or C.suffix path == ".S" of
+          False -> Err "[platform] '{value}' must be a .c or .S file"
+        | True -> Ok path))).
+
+# Explicit overrides and added sources, checked against the SDK's inventory.
+# Only names in it can be replaced; headers are the ABI and the linker
+# script the layout the host loads, so neither can.  A file that merely sits
+# in the project never takes part.  -> (overrides [(name, value, path)], added [(value, path)])
+platformChoices root platform files = overrideOf platform |>? (fn overrides ->
+  sourcesOf platform |>? (fn sources ->
+  overridable = sorted (L.filter (fn n -> C.suffix n == ".c" or C.suffix n == ".S") files);
+  C.mapR (fn kv -> case kv of (name, value) -> chooseOverride root files overridable name value) (L.sortWith (fn a b -> case a of (x, _) -> (case b of (y, _) -> S.compare x y)) overrides) |>? (fn chosen ->
+  headers = L.unique (sorted (L.map C.baseName (L.filter (fn n -> S.endsWith ".h" n) files)));
+  C.mapR (fn value -> projectFile root value |>? (fn source ->
+      clash = L.find (fn h -> H.exists (C.join (C.parent source) h)) headers;
+      case clash of
+        O.Some h -> Err "{C.relativeTo root (C.join (C.parent source) h)} would replace the SDK's {h} for {value}; rename or move it"
+      | O.None -> Ok (value, source))) sources |>? (fn added ->
+  Ok (chosen, added))))).
+chooseOverride root files overridable name value = case L.member name files of
+    False -> Err "[platform.override] '{name}' is not an SDK platform file; these can be overridden: {S.join ", " overridable}"
+  | True -> (case S.endsWith ".h" name of
+      True -> Err "[platform.override] {name} is part of the SDK's ABI and cannot be overridden; a program that needs a different ABI needs a different SDK"
+    | False -> (case L.member name overridable of
+        False -> Err "[platform.override] {name} is the image layout the host loads and cannot be overridden"
+      | True -> projectFile root value |>? (fn source ->
+          case C.suffix source == C.suffix name of
+            False -> Err "[platform.override] {name} must be replaced by a {C.suffix name} file, not '{value}'"
+          | True -> Ok (name, value, source)))).
+
+checkSdkVersion pin meta = case text "version" pin of
+    O.None -> Ok Unit
+  | O.Some wanted -> (case version wanted of
+      O.None -> Err "sdk.version must be \"X.Y.Z\" (that release or a later compatible one) or \"=X.Y.Z\" (exactly)"
+    | O.Some (exact, w) -> (case C.textField "release" meta of
+        O.None ->
+          _ = C.say "qos: this is a development SDK with no release number; sdk.version = '{wanted}' is not checked";
+          Ok Unit
+      | O.Some release -> (case version release of
+          O.None -> Err "SDK release '{release}' is not X.Y.Z"
+        | O.Some (True, _) -> Err "SDK release '{release}' is not X.Y.Z"
+        | O.Some (False, have) -> compareVersions exact w have release))).
+compareVersions exact w have release = case (w, have) of
+    ((a, b, c), (x, y, z)) -> (case exact of
+        True -> (case a == x and b == y and c == z of
+            True -> Ok Unit
+          | False -> Err "qos.toml pins SDK ={a}.{b}.{c}; this is QOS Portable {release}")
+      | False -> (case a == x and (y > b or (y == b and z >= c)) of
+          True -> Ok Unit
+        | False -> Err "qos.toml needs SDK {a}.{b}.{c} or a later {a}.x; this is QOS Portable {release}")).
+
+# the strings of a project's tables
+appText k p = O.withDefault "" (text k p.app).
+optimize p = O.withDefault "full" (textOr "full" "optimize" p.build).
+memoryMb p = case J.field "compiler-memory-mb" p.build of O.Some (J.Integer n) -> n | _ -> 0.
+display p = O.withDefault "gl" (textOr "gl" "display" p.run).
+diskMb p = case J.field "disk-mb" p.run of O.Some (J.Integer n) -> n | _ -> 32.
+port p = case J.field "port" p.run of O.Some (J.Integer n) -> n | _ -> 0.

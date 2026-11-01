@@ -1,0 +1,378 @@
+# elf.fpr -- what the SDK reads from an ELF64 image: its loadable bytes, its
+# symbols and its relocations.  The FP-RISC form of tools/mkqa.py's reader,
+# tools/mkimports.py and tools/mkexports.py; the generated assembly is the
+# same text byte for byte, so the images are the same.
+#
+# Only little-endian ELF64 is read: every QOS app target is.
+unsafe base.
+
+H = use "host".
+L = use "std/list".
+O = use "std/option".
+S = use "std/string".
+Ord = use "std/order".
+
+u8 s o = charAt s o.
+u16 s o = charAt s o + charAt s (o + 1) * 256.
+u32 s o = u16 s o + u16 s (o + 2) * 65536.
+# a 64-bit field; values at or above 2^62 do not fit an Int and are refused
+u64 s o = case u32 s (o + 4) >= 1073741824 of
+    True -> Err "an ELF field at 0x{hex o} is too large"
+  | False -> Ok (u32 s o + u32 s (o + 4) * 4294967296).
+u64z s o = case u64 s o of Ok v -> v | Err _ -> 0 - 1.
+
+hex n = case n < 16 of
+    True -> hexDigit n
+  | False -> strcat (hex (n / 16)) (hexDigit (n - (n / 16) * 16)).
+hexDigit d = substr "0123456789abcdef" d 1.
+
+within s o n = o >= 0 and n >= 0 and o + n <= strlen s.
+
+ptLoad = 1.
+pfX = 1.
+pfW = 2.
+shtSymtab = 2.
+shtRela = 4.
+shfAlloc = 2.
+shnUndef = 0.
+shnAbs = 65521.
+stbGlobal = 1.
+stbWeak = 2.
+
+header s = case strlen s >= 64 and substr s 0 4 == "\x7fELF" of
+    False -> Err "mkqa: not an ELF image"
+  | True -> (case u8 s 4 == 2 of
+      False -> Err "mkqa: only ELF64 (the QOS app targets are all 64-bit)"
+    | True -> (case u8 s 5 == 1 of
+        False -> Err "mkqa: only little-endian ELF"
+      | True -> Ok Unit)).
+
+machine s = u16 s 18.
+architecture m = case m of
+    183 -> Ok "aarch64"
+  | 62 -> Ok "x86_64"
+  | 243 -> Ok "riscv64"
+  | _ -> Err "mkqa: unsupported ELF machine {m}".
+
+# ---- program headers: the flattened image ------------------------------------------
+segments s = case u64 s 32 of
+    Err e -> Err e
+  | Ok phoff ->
+      size = u16 s 54;
+      count = u16 s 56;
+      (case within s phoff (size * count) and (count == 0 or size >= 56) of
+        False -> Err "mkqa: program headers outside the file"
+      | True -> segGo s phoff size 0 count Nil).
+segGo s phoff size i count acc | i >= count = Ok (L.reverse acc).
+segGo s phoff size i count acc =
+  o = phoff + i * size;
+  (case u32 s o == ptLoad of
+    False -> segGo s phoff size (i + 1) count acc
+  | True -> (case segment s o of
+      Err e -> Err e
+    | Ok seg -> (case seg.memsz == 0 of
+        True -> segGo s phoff size (i + 1) count acc
+      | False -> (case within s seg.offset seg.filesz and seg.filesz <= seg.memsz of
+          False -> Err "mkqa: a ptLoad segment lies outside the file"
+        | True -> segGo s phoff size (i + 1) count (seg :: acc))))).
+segment s o = case (u64 s (o + 8), u64 s (o + 16), u64 s (o + 32), u64 s (o + 40)) of
+    (Ok off, Ok vaddr, Ok filesz, Ok memsz) -> Ok { flags = u32 s (o + 4), offset = off, vaddr = vaddr, filesz = filesz, memsz = memsz }
+  | _ -> Err "mkqa: a ptLoad field is too large".
+
+byVaddr a b = case a.vaddr < b.vaddr of
+    True -> Ord.Less
+  | False -> (case a.vaddr == b.vaddr of True -> Ord.Equal | False -> Ord.Greater).
+
+maxOf xs d = case xs of Nil -> d | x :: r -> maxOf r (case x > d of True -> x | False -> d).
+minOf xs d = case xs of Nil -> d | x :: r -> minOf r (case x < d of True -> x | False -> d).
+
+# ELF64 PT_LOADs -> { base, entry, execsz, rwoff, image, memsz }: the bytes up
+# to the last file byte; the bss tail past it is the loader's to zero
+flatten s = case header s of
+    Err e -> Err e
+  | Ok _ -> (case segments s of
+      Err e -> Err e
+    | Ok Nil -> Err "mkqa: ELF has no ptLoad segments"
+    | Ok unsorted -> (case u64 s 24 of
+        Err e -> Err e
+      | Ok entry -> flatSorted s (L.sortWith byVaddr unsorted) entry)).
+flatSorted s segs entry = case segs of
+    Nil -> Err "mkqa: ELF has no ptLoad segments"
+  | first :: _ ->
+      base = first.vaddr;
+      memsz = maxOf (L.map (fn g -> g.vaddr + g.memsz) segs) 0 - base;
+      filed = L.filter (fn g -> g.filesz > 0) segs;
+      imagesz = maxOf (L.map (fn g -> g.vaddr + g.filesz) filed) base - base;
+      execsz = maxOf (L.map (fn g -> g.vaddr + g.filesz - base) (L.filter (fn g -> band g.flags pfX != 0) segs)) 0;
+      rwoff = minOf (L.map (fn g -> g.vaddr - base) (L.filter (fn g -> band g.flags pfW != 0) segs)) memsz;
+      (case entry >= base and entry < base + memsz of
+        False -> Err "mkqa: e_entry outside the loadable span"
+      | True -> (case pieces s filed base 0 Nil of
+          Err e -> Err e
+        | Ok parts -> Ok { base = base, entry = entry - base, execsz = execsz, rwoff = rwoff,
+                           image = strJoin "" parts, memsz = memsz })).
+# file bytes in address order, gaps zero-filled (segments do not overlap)
+pieces s segs base cursor acc = case segs of
+    Nil -> Ok (L.reverse acc)
+  | g :: rest ->
+      at = g.vaddr - base;
+      (case at < cursor of
+        True -> Err "mkqa: ptLoad segments overlap"
+      | False -> pieces s rest base (at + g.filesz) (substr s g.offset g.filesz :: H.zeros (at - cursor) :: acc)).
+
+# ---- sections and symbols -------------------------------------------------------------
+sections s = case u64 s 40 of
+    Err e -> Err e
+  | Ok shoff ->
+      size = u16 s 58;
+      count = u16 s 60;
+      (case within s shoff (size * count) and (count == 0 or size >= 64) of
+        False -> Err "mkqa: section headers outside the file"
+      | True -> secGo s shoff size 0 count Nil).
+secGo s shoff size i count acc | i >= count = Ok (L.reverse acc).
+secGo s shoff size i count acc =
+  o = shoff + i * size;
+  case (u64 s (o + 8), u64 s (o + 16), u64 s (o + 24), u64 s (o + 32), u64 s (o + 56)) of
+    (Ok flags, Ok addr, Ok off, Ok sz, Ok entsz) ->
+      typ = u32 s (o + 4);
+      (case typ != 8 and not (within s off sz) of
+        True -> Err "mkqa: section {i} lies outside the file"
+      | False -> secGo s shoff size (i + 1) count ({ typ = typ, flags = flags, addr = addr, off = off, size = sz,
+                                                      link = u32 s (o + 40), info = u32 s (o + 44), entsz = entsz } :: acc))
+  | _ -> Err "mkqa: a section header field is too large".
+
+not b = case b of True -> False | False -> True.
+
+nth xs i = case xs of
+    Nil -> O.None
+  | x :: r -> (case i == 0 of True -> O.Some x | False -> nth r (i - 1)).
+
+# every symbol of the static symbol tables: { name, value, size, shndx, bind }
+symbols s = case header s of
+    Err e -> Err e
+  | Ok _ -> (case sections s of
+      Err e -> Err e
+    | Ok secs -> symTables s secs secs Nil).
+symTables s secs rest acc = case rest of
+    Nil -> Ok (L.concat (L.reverse acc))
+  | sec :: more -> (case sec.typ == shtSymtab of
+      False -> symTables s secs more acc
+    | True -> (case nth secs sec.link of
+        O.None -> Err "mkqa: a symbol table names a missing string table"
+      | O.Some strtab -> (case sec.entsz < 24 of
+          True -> Err "mkqa: invalid symbol table entry size"
+        | False -> (case symGo s sec strtab 0 (sec.size / sec.entsz) Nil of
+            Err e -> Err e
+          | Ok syms -> symTables s secs more (syms :: acc))))).
+symGo s sec strtab k n acc | k >= n = Ok (L.reverse acc).
+symGo s sec strtab k n acc =
+  o = sec.off + k * sec.entsz;
+  start = strtab.off + u32 s o;
+  stop = strIndexFrom "\x00" s start;
+  case (u64 s (o + 8), u64 s (o + 16)) of
+    (Ok value, Ok size) -> (case stop < 0 or start >= strtab.off + strtab.size of
+        True -> Err "mkqa: a symbol name lies outside its string table"
+      | False -> symGo s sec strtab (k + 1) n ({ name = substr s start (stop - start), value = value, size = size,
+                                                 shndx = u16 s (o + 6), bind = u8 s (o + 4) / 16 } :: acc))
+  | _ -> Err "mkqa: a symbol field is too large".
+
+# ---- relocations ------------------------------------------------------------------------
+# Per machine: the absolute 64-bit address relocation, and the types whose
+# effect does not depend on where the image lands (PC-relative, symbol
+# differences, page offsets -- the image moves by a multiple of 64 KiB --
+# and bookkeeping).  Anything else binds the image to its link address.
+rules m = case m of
+    243 -> O.Some ("RISC-V", 2, 0 :: 16 :: 17 :: 18 :: 19 :: 23 :: 24 :: 25 :: 33 :: 34 :: 35 :: 36 :: 37 :: 38 :: 39 :: 40 ::
+                   43 :: 44 :: 45 :: 51 :: 52 :: 53 :: 54 :: 55 :: 56 :: 57 :: Nil)
+  | 183 -> O.Some ("AArch64", 257, 0 :: 260 :: 261 :: 262 :: 273 :: 274 :: 275 :: 276 :: 277 :: 278 :: 284 :: 285 :: 286 :: 299 ::
+                   279 :: 280 :: 282 :: 283 :: Nil)
+  | 62 -> O.Some ("x86-64", 1, 0 :: 2 :: 4 :: 24 :: Nil)
+  | _ -> O.None.
+
+intMember x xs = case xs of Nil -> False | y :: r -> (case x == y of True -> True | False -> intMember x r).
+
+# the offsets (from base) of every 64-bit word holding an absolute address
+# inside the image, from an ELF linked with --emit-relocs
+relocations s base imagesz = case rules (machine s) of
+    O.None -> Err "mkqa: --relocatable knows no relocation rules for ELF machine {machine s}"
+  | O.Some (arch, abs64, free) -> (case sections s of
+      Err e -> Err e
+    | Ok secs -> relocSecs s secs secs base imagesz abs64 free Nil 0 0 0 Nil
+        |> relocDone arch).
+relocDone arch r = case r of
+    Err e -> Err e
+  | Ok (offs, refused, first, kinds) -> (case refused == 0 of
+      True -> Ok (uniqueSorted (L.sortWith intOrder offs))
+    | False -> Err "mkqa: {refused} relocation(s) bind this image to its link address ({arch} types {S.join ", " (L.map str (uniqueSorted (L.sortWith strOrderInt kinds)))}; first at 0x{hex first}) -- it cannot be moved").
+
+intOrder a b = Ord.int a b.
+# Python sorts the refused kinds as strings
+strOrderInt a b = Ord.string (str a) (str b).
+uniqueSorted xs = case xs of
+    a :: b :: r -> (case a == b of True -> uniqueSorted (b :: r) | False -> a :: uniqueSorted (b :: r))
+  | _ -> xs.
+
+relocSecs s secs rest base imagesz abs64 free offs refused first n kinds = case rest of
+    Nil -> Ok (offs, refused, first, kinds)
+  | sec :: more -> (case sec.typ == shtRela of
+      False -> relocSecs s secs more base imagesz abs64 free offs refused first n kinds
+    | True -> (case (nth secs sec.info, nth secs sec.link) of
+        (O.Some target, O.Some symtab) -> (case band target.flags shfAlloc == 0 of
+            True -> relocSecs s secs more base imagesz abs64 free offs refused first n kinds
+          | False -> (case sec.entsz < 24 or symtab.entsz < 24 of
+              True -> Err "mkqa: invalid relocation or symbol entry size"
+            | False -> (case relocGo s sec symtab 0 (sec.size / sec.entsz) base imagesz abs64 free offs refused first kinds of
+                Err e -> Err e
+              | Ok (o2, r2, f2, k2) -> relocSecs s secs more base imagesz abs64 free o2 r2 f2 n k2)))
+      | _ -> Err "mkqa: a relocation section names a missing section")).
+
+relocGo s sec symtab k n base imagesz abs64 free offs refused first kinds | k >= n = Ok (offs, refused, first, kinds).
+relocGo s sec symtab k n base imagesz abs64 free offs refused first kinds =
+  o = sec.off + k * sec.entsz;
+  rtype = u32 s (o + 8);
+  rsym = u32 s (o + 12);
+  so = symtab.off + rsym * symtab.entsz + 6;
+  case u64 s o of
+    Err e -> Err e
+  | Ok roffset -> (case within s so 2 of
+      False -> Err "mkqa: a relocation names a missing symbol"
+    | True ->
+        shndx = u16 s so;
+        (case intMember rtype free or shndx == shnAbs of
+          True -> relocGo s sec symtab (k + 1) n base imagesz abs64 free offs refused first kinds
+        | False -> (case rtype == abs64 and shndx != shnUndef of
+            True ->
+              at = roffset - base;
+              (case at >= 0 and at <= imagesz - 8 of
+                False -> Err "mkqa: an address word at 0x{hex roffset} lies outside the image's file bytes"
+              | True -> relocGo s sec symtab (k + 1) n base imagesz abs64 free (at :: offs) refused first kinds)
+          | False -> relocGo s sec symtab (k + 1) n base imagesz abs64 free offs (refused + 1)
+                       (case refused == 0 of True -> roffset | False -> first) (rtype :: kinds)))).
+
+# The same image linked `delta` higher must differ from this one at exactly
+# the relocated words, by exactly delta: the list is complete.
+checkMoved image relocs other delta = case strlen other == strlen image of
+    False -> Err "mkqa: --check-moved: the two links differ in size"
+  | True -> (case uncovered (H.differences image other) relocs of
+      O.Some o -> Err "mkqa: --check-moved: the byte at 0x{hex o} moves with the link address but is not in a relocated word"
+    | O.None -> movedBy image other relocs delta).
+# both lists ascending; relocated words are 8 bytes from each offset
+uncovered diffs relocs = case diffs of
+    Nil -> O.None
+  | d :: rest -> (case relocs of
+      Nil -> O.Some d
+    | r :: more -> (case d < r of
+        True -> O.Some d
+      | False -> (case d < r + 8 of True -> uncovered rest relocs | False -> uncovered diffs more))).
+movedBy image other relocs delta = case relocs of
+    Nil -> Ok Unit
+  | o :: rest -> (case (u64 image o, u64 other o) of
+      (Ok a, Ok b) -> (case b - a == delta of
+          True -> movedBy image other rest delta
+        | False -> Err "mkqa: --check-moved: the word at 0x{hex o} moved by {b - a}, not {delta}")
+    | _ -> Err "mkqa: --check-moved: a relocated word is too large").
+
+# ---- imports (a Portable plugin's, tools/mkimports.py) ------------------------------
+dataSize name = case name == "fpr_true" or name == "fpr_false" or name == "fpr_unit" of
+    True -> O.Some 8
+  | False -> (case name == "fpr_g_tlsoff" of
+      True -> O.Some 8
+    | False -> (case S.startsWith "fpr_g_" name and not (callSuffix name) of
+        True -> O.Some 32
+      | False -> O.None)).
+# "..._call<digits>"
+callSuffix name = callGo name (strlen name - 1) False.
+callGo name i digits | i < 0 = False.
+callGo name i digits | charAt name i >= 48 and charAt name i <= 57 = callGo name (i - 1) True.
+callGo name i digits = digits and i >= 4 and substr name (i - 4) 5 == "_call".
+
+symbolName n = strlen n > 0 and symStart (charAt n 0) and symRest n 1.
+symStart c = (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or c == 95.
+symRest n i | i >= strlen n = True.
+symRest n i | symStart (charAt n i) or (charAt n i >= 48 and charAt n i <= 57) or charAt n i == 46 or charAt n i == 36 = symRest n (i + 1).
+symRest n i = False.
+
+stub arch n = case arch of
+    "a64" -> "    adrp x16, __qosimp_c_{n}" :: "    ldr x16, [x16, :lo12:__qosimp_c_{n}]" :: "    br x16" :: Nil
+  | "x64" -> "    jmp *__qosimp_c_{n}(%rip)" :: Nil
+  | _ -> "    lla t0, __qosimp_c_{n}" :: "    ld t0, 0(t0)" :: "    jr t0" :: Nil.
+
+strOrder a b = Ord.string a b.
+uniqueStrings xs = case xs of
+    a :: b :: r -> (case a == b of True -> uniqueStrings (b :: r) | False -> a :: uniqueStrings (b :: r))
+  | _ -> xs.
+
+# the import stubs' assembly, from a first link's undefined symbols
+importStubs arch s = case symbols s of
+    Err e -> Err e
+  | Ok syms ->
+      names = uniqueStrings (L.sortWith strOrder (L.map (fn y -> y.name)
+                (L.filter (fn y -> y.shndx == shnUndef and strlen y.name > 0 and y.bind != stbWeak) syms)));
+      stubLines arch names ("# generated by tools/mkimports.py: the plugin's imports, completed by" ::
+                            "# the loader from the app's export table (docs/2026-10-01-IMPORT-TABLE.md)" :: Nil).
+stubLines arch names acc = case names of
+    Nil -> Ok (strcat (S.join "\n" acc) "\n")
+  | n :: rest -> (case symbolName n of
+      False -> Err "mkimports: cannot stub the symbol '{n}'"
+    | True -> (case dataSize n of
+        O.None -> (case S.startsWith "fpr_" n of
+            False -> Err "mkimports: the plugin needs {n}, which is not part of the runtime an app exports"
+          | True -> stubLines arch rest (L.append acc (L.append
+                ("    .section .text.qosimp,\"ax\",@progbits" :: "    .balign 4" :: "    .globl {n}" :: "{n}:" :: Nil)
+                (L.append (stub arch n)
+                  ("    .section .data.qosimp,\"aw\",@progbits" :: "    .balign 8" :: "    .globl __qosimp_c_{n}" ::
+                   "__qosimp_c_{n}:" :: "    .quad 0" :: Nil)))))
+      | O.Some size -> stubLines arch rest (L.append acc
+            ("    .section .data.qosimp,\"aw\",@progbits" :: "    .balign 8" :: "    .globl {n}" ::
+             "    .globl __qosimp_d{size}_{n}" :: "{n}:" :: "__qosimp_d{size}_{n}:" :: "    .zero {size}" :: Nil)))).
+
+# the IMPORT section rows, from the final link's __qosimp_ markers
+importRows s base = case symbols s of
+    Err e -> Err e
+  | Ok syms -> rowsGo (L.filter (fn y -> S.startsWith "__qosimp_" y.name and y.shndx != shnUndef) syms) base Nil.
+rowsGo syms base acc = case syms of
+    Nil -> Ok (L.map (fn r -> case r of (_, row) -> row) (uniqueRows (L.sortWith rowOrder acc)))
+  | y :: rest ->
+      tail = substr y.name 9 (strlen y.name - 9);
+      cut = strIndexOf "_" tail;
+      kind = (case cut < 0 of True -> tail | False -> substr tail 0 cut);
+      sym = (case cut < 0 of True -> "" | False -> substr tail (cut + 1) (strlen tail - cut - 1));
+      (case kind == "c" of
+        True -> rowsGo rest base ((sym, "c {y.value - base} 8 {sym}") :: acc)
+      | False -> (case strlen kind > 1 and charAt kind 0 == 100 and allDigits kind 1 of
+          True -> rowsGo rest base ((sym, "d {y.value - base} {substr kind 1 (strlen kind - 1)} {sym}") :: acc)
+        | False -> Err "mkqa: unknown import marker {y.name}")).
+allDigits t i | i >= strlen t = True.
+allDigits t i | charAt t i >= 48 and charAt t i <= 57 = allDigits t (i + 1).
+allDigits t i = False.
+rowOrder a b = case (a, b) of
+    ((na, ra), (nb, rb)) -> (case strOrder na nb of Ord.Equal -> strOrder ra rb | o -> o).
+uniqueRows xs = case xs of
+    a :: b :: r -> (case a of (_, ra) -> (case b of (_, rb) -> (case ra == rb of
+        True -> uniqueRows (b :: r)
+      | False -> a :: uniqueRows (b :: r))))
+  | _ -> xs.
+
+# ---- exports (a Portable app's, tools/mkexports.py) ----------------------------------
+exported name = S.startsWith "fpr_" name and not (S.startsWith "fpr_fn_" name) and not (S.startsWith "fpr_obj_" name)
+  and name != "fpr_modtab" and name != "fpr_contab".
+
+exportTable s = case symbols s of
+    Err e -> Err e
+  | Ok syms ->
+      chosen = L.filter (fn y -> y.bind == stbGlobal and y.shndx != shnUndef and y.shndx != shnAbs and exported y.name) syms;
+      # one row a name; a later symbol of the same name wins, as in a dict
+      rows = lastByName (L.sortWith (fn a b -> case a of (na, ia, _) -> (case b of (nb, ib, _) -> (case strOrder na nb of Ord.Equal -> intOrder ia ib | o -> o)))
+                          (L.indexedMap (fn i y -> (y.name, i, y.size)) chosen));
+      count = L.length rows;
+      head = "# generated by tools/mkexports.py: the runtime this app exports to plugins" ::
+             "    .section .rodata.qos_exports,\"a\",@progbits" :: "    .balign 8" :: "    .globl qos_exports" ::
+             "qos_exports:" :: "    .quad {count}" :: Nil;
+      entries = L.concat (L.indexedMap (fn i r -> case r of (n, _, size) -> "    .quad .Lqx{i}" :: "    .quad {n}" :: "    .quad {size}" :: Nil) rows);
+      names = L.concat (L.indexedMap (fn i r -> case r of (n, _, _) -> ".Lqx{i}:" :: "    .asciz \"{n}\"" :: Nil) rows);
+      Ok (strcat (S.join "\n" (L.concat (head :: entries :: names :: Nil))) "\n").
+lastByName xs = case xs of
+    a :: b :: r -> (case a of (na, _, _) -> (case b of (nb, _, _) -> (case na == nb of
+        True -> lastByName (b :: r)
+      | False -> a :: lastByName (b :: r))))
+  | _ -> xs.

@@ -1,0 +1,202 @@
+unsafe base.
+
+B = use "build".
+C = use "common".
+H = use "host".
+I = use "install".
+P = use "project".
+Q = use "qa".
+J = use "std/json".
+L = use "std/list".
+M = use "std/map".
+O = use "std/option".
+S = use "std/string".
+OS = use "std/os".
+
+# the SDK: this binary is <sdk>/tools/qos
+sdkRoot u = case OS.exePath Unit of
+    Err e -> Err "cannot find the SDK: {e}"
+  | Ok exe -> (case H.realpath exe of
+      Err e -> Err "cannot find the SDK: {e}"
+    | Ok real -> Ok (C.parent (C.parent real))).
+
+usage = "usage: qos [-h] [--version] \{new,build,disk,install,run} ...\n".
+helpText = S.concat (usage :: "\nInstalled QOS Portable SDK: scaffold, desktop plugin and standalone app builder.\n\n" ::
+  "commands:\n" ::
+  "  new DEST                         a desktop app project\n" ::
+  "  build [PROJECT] [-v]             build build/ID.qa (kind = \"desktop\" or \"app\")\n" ::
+  "  disk create DEST [--size MIB]    a Main disk with the SDK's bundled apps\n" ::
+  "  install APP.qa DISK              install or update a desktop app on a Main disk\n" ::
+  "  run [PROJECT|DISK] [--disk D] [--trace]\n" ::
+  "                                   run a kind = \"app\" project (default: this directory), or Main on DISK\n" ::
+  "\noptions:\n  -h, --help  show this help message and exit\n  --version   show installed release and API versions\n" :: Nil).
+
+usageError why =
+  _ = Sys.stderr (strcat usage "qos: error: {why}\n");
+  Sys.exit 2.
+
+# argv -> { positional, values : [(option, value)], flags : [option] }
+# valued: the options that take a value
+parseArgs args valued flags = argGo args valued flags Nil Nil Nil.
+argGo args valued flags pos vals seen = case args of
+    Nil -> Ok { positional = L.reverse pos, values = vals, flags = seen }
+  | a :: rest -> (case L.member a valued of
+      True -> (case rest of
+          v :: more -> argGo more valued flags pos ((a, v) :: vals) seen
+        | Nil -> Err "argument {a}: expected one argument")
+    | False -> (case L.member a flags of
+        True -> argGo rest valued flags pos vals (a :: seen)
+      | False -> (case S.startsWith "--" a and strIndexOf "=" a > 0 and L.member (substr a 0 (strIndexOf "=" a)) valued of
+          True -> argGo rest valued flags pos ((substr a 0 (strIndexOf "=" a), substr a (strIndexOf "=" a + 1) (strlen a)) :: vals) seen
+        | False -> (case S.startsWith "-" a and strlen a > 1 of
+            True -> Err "unrecognized arguments: {a}"
+          | False -> argGo rest valued flags (a :: pos) vals seen)))).
+value parsed name = case L.find (fn kv -> case kv of (k, _) -> k == name) parsed.values of
+    O.Some (_, v) -> O.Some v
+  | O.None -> O.None.
+flag parsed names = L.any (fn n -> L.member n parsed.flags) names.
+
+# argparse's contract: a usage error exits 2
+withArgs args valued flags most body = case parseArgs args valued flags of
+    Err e -> usageError e
+  | Ok a -> (case atMost most a of
+      Err e -> usageError e
+    | Ok _ -> body a).
+
+atMost n parsed = case L.length parsed.positional > n of
+    True -> Err "unrecognized arguments: {S.join " " (L.drop n parsed.positional)}"
+  | False -> Ok parsed.
+nthArg parsed i = O.withDefault "" (O.map (fn x -> x) (L.get i parsed.positional)).
+argOr parsed i d = O.withDefault d (L.get i parsed.positional).
+
+# str.title for ASCII: a letter after a non-letter is upper case, others lower
+title t = titleGo t 0 False Nil.
+titleGo t i prev acc | i >= strlen t = S.concat (L.reverse acc).
+titleGo t i prev acc =
+  c = charAt t i;
+  letter = (c >= 65 and c <= 90) or (c >= 97 and c <= 122);
+  out = (case letter of
+    False -> c
+  | True -> (case prev of
+      True -> (case c >= 65 and c <= 90 of True -> c + 32 | False -> c)
+    | False -> (case c >= 97 and c <= 122 of True -> c - 32 | False -> c)));
+  titleGo t (i + 1) letter (chr out :: acc).
+
+trimSlashes p = case strlen p > 1 and S.endsWith "/" p of True -> trimSlashes (substr p 0 (strlen p - 1)) | False -> p.
+
+scaffold sdk destination =
+  dest = trimSlashes destination;
+  name = C.baseName dest;
+  case Q.validId name of
+    False -> Err "app ID: use 1-64 ASCII letters, digits, underscores, dots or hyphens; start with a letter, digit or underscore; no '..'"
+  | True -> (case H.exists dest of
+      True -> Err "{dest} already exists"
+    | False ->
+        t = title (S.replace "_" " " (S.replace "-" " " name));
+        C.mkdirs dest |>? (fn u1 ->
+        C.mkdirs (C.join dest "assets") |>? (fn u2 ->
+        C.writeFile (C.join dest "assets/.gitkeep") "" |>? (fn u3 ->
+        C.copyFile (C.join sdk "tools/desktop-counter.fpr") (C.join dest "main.fpr") |>? (fn u4 ->
+        C.writeFile (C.join dest ".gitignore") "/build/\n" |>? (fn u5 ->
+        C.writeFile (C.join dest "qos.toml") (S.concat ("[app]\nid = " :: C.jsonStr name :: "\nname = " :: C.jsonStr t ::
+          "\nversion = \"0.1.0\"\nkind = \"desktop\"\n\n[build]\nentry = \"main.fpr\"\ntarget = \"qos-portable\"\n" :: Nil)) |>? (fn u6 ->
+        _ = C.say "Created {dest}; cd there and run qos build";
+        Ok Unit))))))).
+
+# ---- qos run PROJECT ---------------------------------------------------------------------
+overrideLine row = case C.textField "kind" row of
+    O.Some "override" -> "qos: this image replaces the SDK's {C.textOr "None" "file" row} with {C.textOr "None" "source" row}"
+  | _ -> "qos: this image adds {C.textOr "None" "source" row} to the SDK's platform files".
+
+# A kind = "app" image on its own disk; the host replaces this process.
+runApp sdk where disk trace = B.sdkMeta sdk |>? (fn meta ->
+  P.load where |>? (fn p ->
+  C.check (P.appText "kind" p == "app") "qos run PROJECT runs kind = \"app\"; a desktop app runs inside Main: qos run DISK" |>? (fn u1 ->
+  archive = C.join p.root (C.join "build" "{P.appText "id" p}.qa");
+  C.check (H.isFile archive) "{archive} does not exist; run qos build first" |>? (fn u2 ->
+  C.readFile archive |>? (fn raw ->
+  (case Q.manifestOf raw of
+    Err _ -> Err "{archive} is not a QOS app archive; rebuild with qos build"
+  | Ok m -> Ok m) |>? (fn built ->
+  C.check (C.textIs "id" built (P.appText "id" p) and C.textIs "loadMode" built "process" and C.textIs "abi" built (C.textOr "" "abi" meta))
+    "{archive} was not built by this SDK for this project; run qos build" |>? (fn u3 ->
+  _ = L.map (fn row -> C.say (overrideLine row)) (O.withDefault Nil (C.listField "platformOverrides" built));
+  hostName = P.hostOf (P.display p);
+  host = C.join sdk (C.join "runtime" hostName);
+  expected = (case C.objectField "runtimeFiles" meta of O.Some m -> (case M.get hostName m of O.Some (J.Text t) -> t | _ -> "") | O.None -> "");
+  C.check (strlen expected > 0 and H.isFile host and I.hashMatches (H.sha256File host) expected)
+    "matching prebuilt host {hostName} missing or changed; reinstall SDK" |>? (fn u4 ->
+  path = O.withDefault (C.join p.root (C.join "data" "{P.appText "id" p}.disk")) disk;
+  newDisk path (P.diskMb p) |>? (fn u5 ->
+  H.realpath path |>? (fn real ->
+  case H.lock real of
+    Err "in use" -> Err "{real} is in use by another QOS process"
+  | Err e -> Err "{real}: {e}"
+  | Ok fd ->
+      # The host takes over this locked open file (hal/unix/blk_raw.c), so
+      # nothing can open the disk between this check and the launch.
+      _ = H.setEnv "FPR_DISK" real;
+      _ = H.setEnv "FPR_DISK_LOCK_FD" (str fd);
+      _ = H.setEnv "FPR_PORT" (str (P.port p));
+      OS.exec (host :: "--yes" :: L.append (case trace of True -> "--trace" :: Nil | False -> Nil) (archive :: Nil)))))))))))).
+
+# sparse and unformatted, as the host makes one
+newDisk path size = case H.exists path of
+    True -> Ok Unit
+  | False -> C.mkdirs (C.parent (C.absolute path)) |>? (fn u ->
+      case H.createSparse path (size * 1048576) of
+        Err e -> Err "{path}: {e}"
+      | Ok _ ->
+          _ = C.say "Created {path} ({size} MiB)";
+          Ok Unit).
+
+# ---- the command line --------------------------------------------------------------------
+version sdk = B.sdkMeta sdk |>? (fn meta ->
+  _ = C.say "QOS Portable {C.textOr "development" "release" meta} ({C.api}, {C.session})";
+  Ok Unit).
+
+command sdk args = case args of
+    Nil -> usageError "choose a command (see --help)"
+  | "-h" :: _ -> Ok (C.say helpText)
+  | "--help" :: _ -> Ok (C.say helpText)
+  | "--version" :: _ -> version sdk
+  | "new" :: rest -> withArgs rest Nil Nil 1 (fn a ->
+      case a.positional of
+        dest :: Nil -> scaffold sdk dest
+      | _ -> usageError "the following arguments are required: destination")
+  | "build" :: rest -> withArgs rest ("--compiler" :: Nil) ("-v" :: "--verbose" :: Nil) 1 (fn a ->
+      B.build sdk (argOr a 0 ".") (value a "--compiler") (flag a ("-v" :: "--verbose" :: Nil)) |>? (fn d -> Ok Unit))
+  | "disk" :: "create" :: rest -> withArgs rest ("--profile" :: "--size" :: Nil) Nil 1 (fn a ->
+      case (a.positional, value a "--profile", value a "--size") of
+        (dest :: Nil, prof, size) -> (case O.withDefault "main" prof == "main" of
+            False -> usageError "argument --profile: invalid choice: '{O.withDefault "" prof}' (choose from 'main')"
+          | True -> (case S.toInt (O.withDefault "32" size) of
+              Ok n -> I.create sdk dest n
+            | Err _ -> usageError "argument --size: invalid int value: '{O.withDefault "" size}'"))
+      | _ -> usageError "the following arguments are required: destination")
+  | "disk" :: _ -> usageError "argument disk_command: invalid choice (choose from 'create')"
+  | "install" :: rest -> withArgs rest ("--prefix" :: Nil) Nil 2 (fn a ->
+      case value a "--prefix" of
+        O.Some _ -> Err "toolchain installation moved to qos toolchain install --prefix (contributor CLI)"
+      | O.None -> (case a.positional of
+          archive :: dest :: Nil -> I.install sdk archive dest
+        | _ -> Err "usage: qos install APP.qa DISK"))
+  | "run" :: rest -> withArgs rest ("--disk" :: Nil) ("--trace" :: Nil) 1 (fn a ->
+      case a.positional of
+        Nil -> runApp sdk "." (value a "--disk") (flag a ("--trace" :: Nil))
+      | target :: _ -> (case H.isDir target of
+          True -> runApp sdk target (value a "--disk") (flag a ("--trace" :: Nil))
+        | False -> (case O.isSome (value a "--disk") or flag a ("--trace" :: Nil) of
+            True -> Err "--disk and --trace apply to qos run PROJECT (kind = \"app\")"
+          | False -> I.runMain sdk target)))
+  | c :: _ -> usageError "argument command: invalid choice: '{c}' (choose from 'new', 'build', 'disk', 'install', 'run')".
+
+main = case sdkRoot Unit of
+    Err e ->
+      _ = C.warn "qos: {e}";
+      Sys.exit 1
+  | Ok sdk -> (case command sdk (Sys.args Unit) of
+      Ok _ -> Sys.exit 0
+    | Err e ->
+        _ = C.warn "qos: {e}";
+        Sys.exit 1).

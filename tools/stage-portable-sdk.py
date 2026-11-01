@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """Contributor packaging step: stage a native binary desktop SDK (no rebuilding).
 
-The installed builder needs Python >=3.11, Clang and lld on PATH. The release
-packager supplies matching prebuilt Main/hosts separately via --profile.
+The installed `qos` command is FP-RISC (tools/qos/), compiled here by the
+SDK's own compiler; the SDK ships no Python. It needs Clang on PATH, and lld
+unless --lld gives the static ld.lld the SDK ships (tools/build-sdk-lld.sh).
+The release packager supplies matching prebuilt Main/hosts via --profile.
 """
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import shutil
@@ -50,6 +53,16 @@ def platform_sources(fprisc):
     return files
 
 
+def build_command(compiler, fprisc, destination):
+    """tools/qos/qos.fpr + host.c -> the SDK's `qos` binary."""
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    env = {k: v for k, v in os.environ.items() if not k.startswith("FPR_") and k not in ("FPRISC_ROOT", "GHCRTS")}
+    env["FPR_HOME"] = str(fprisc)
+    env["FPR_NO_RUN_CACHE"] = "1"
+    subprocess.run([str(compiler), "build", str(ROOT / "tools/qos/qos.fpr"), "--with", str(ROOT / "tools/qos/host.c"),
+                    "-o", str(destination)], env=env, check=True, cwd=ROOT / "tools/qos")
+
+
 def revision(tree):
     return subprocess.check_output(["git", "-C", str(tree), "rev-parse", "HEAD"], text=True).strip()
 
@@ -60,6 +73,7 @@ def main():
     ap.add_argument("--compiler", type=Path)
     ap.add_argument("--output", type=Path, required=True, help="fresh installation prefix")
     ap.add_argument("--profile", type=Path, help="prebuilt Main profile directory to include")
+    ap.add_argument("--lld", type=Path, help="a static ld.lld to ship as toolchain/ld.lld (tools/build-sdk-lld.sh)")
     args = ap.parse_args()
     prefix = args.output.resolve()
     if prefix.exists():
@@ -82,8 +96,20 @@ def main():
     for folder in ("core", "std", "programs/mods", ".fpr"):
         modules(ROOT / folder, sdk / "modules" / folder)
     modules(ROOT / "sdk", sdk / "modules")
-    for name in ("portable_sdk.py", "desktop-adapter.fpr.in", "desktop-counter.fpr", "mkimports.py", "mkexports.py", "mkqa.py", "mkdisk.py", "qos_archive.py", "qos_disk.py", "desktop_install.py"):
+    for name in ("desktop-adapter.fpr.in", "desktop-counter.fpr"):
         copy(ROOT / "tools" / name, sdk / "tools" / name)
+    # The command itself: FP-RISC with a small C host file, built by the SDK's
+    # own compiler and runtime, so the SDK needs no Python.
+    build_command(compiler, fprisc, sdk / "tools/qos")
+    toolchain = {}
+    if args.lld:
+        lld = args.lld.resolve()
+        linkage = subprocess.check_output(["otool", "-L", str(lld)], text=True).splitlines()[1:]
+        if any("/opt/homebrew" in line or "/usr/local" in line or "@rpath" in line for line in linkage):
+            ap.error(f"{lld} links libraries outside the system; build it with tools/build-sdk-lld.sh")
+        copy(lld, sdk / "toolchain/ld.lld")
+        copy(ROOT / "packaging/llvm/LICENSE.TXT", sdk / "toolchain/LICENSE-LLVM.txt")
+        toolchain["ld.lld"] = hashlib.sha256((sdk / "toolchain/ld.lld").read_bytes()).hexdigest()
     copy(ROOT / "qos/appside/link-qosplug.ld", sdk / "support/link-qosplug.ld")
     platform_files = {}
     for name, source in sorted(platform_sources(fprisc).items()):
@@ -98,8 +124,11 @@ def main():
                 qosRevision=revision(ROOT), fpriscRevision=revision(fprisc),
                 qosDirty=bool(subprocess.check_output(["git", "-C", str(ROOT), "status", "--porcelain"], text=True)),
                 fpriscDirty=bool(subprocess.check_output(["git", "-C", str(fprisc), "status", "--porcelain"], text=True)),
-                dependencies=["Python >=3.11", "Clang (ELF assembler)", "lld (ELF linker)"],
+                dependencies=["Clang (ELF assembler)"] + ([] if toolchain else ["lld (ELF linker)"]),
                 platformFiles=platform_files, platformSha256=platform_digest(platform_files))
+    if toolchain:
+        meta["toolchainFiles"] = toolchain
+        meta["toolchainLld"] = subprocess.check_output([str(sdk / "toolchain/ld.lld"), "--version"], text=True).strip()
     if args.profile:
         for artifact in args.profile.glob("*.qa"):
             if artifact.is_file():
@@ -126,14 +155,13 @@ def main():
     binaries.mkdir()
     # Since 0.2.0 the package exports only `qos`: `qos build` selects the private,
     # hash-matched compiler, and global `fpr` belongs to the FP-RISC toolchain.
-    launcher = binaries / "qos"
-    launcher.write_text('#!/bin/sh\nbindir=${0%/*}\nPYTHONDONTWRITEBYTECODE=1 exec python3 "$bindir/../libexec/qos-portable/tools/portable_sdk.py" "$@"\n')
-    launcher.chmod(0o755)
+    (binaries / "qos").symlink_to("../libexec/qos-portable/tools/qos")
     # A hash inventory helps release packaging verify the exact staged inputs.
     inventory = {str(p.relative_to(sdk)): hashlib.sha256(p.read_bytes()).hexdigest()
                  for p in sorted(sdk.rglob("*")) if p.is_file()}
     (sdk / "files.sha256.json").write_text(json.dumps(inventory, indent=2) + "\n")
-    print(f"Staged {prefix}; SDK requires Python >=3.11, Clang and lld on PATH")
+    needs = "Clang on PATH" if toolchain else "Clang and lld on PATH"
+    print(f"Staged {prefix}; SDK requires {needs}")
 
 
 if __name__ == "__main__":

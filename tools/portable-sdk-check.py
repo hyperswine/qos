@@ -51,10 +51,20 @@ def main():
     shutil.copy2(args.driver, out / "driver.qa")
     restricted = out / "path"
     restricted.mkdir()
-    for name in ("python3", "clang", "ld.lld"):
+    # The SDK's `qos` is a native binary: no Python on PATH. lld only when the
+    # SDK ships none of its own.
+    ships_lld = (sdk / "toolchain/ld.lld").is_file()
+    for name in ("clang",) + (() if ships_lld else ("ld.lld",)):
         found = shutil.which(name)
         assert found, name
         (restricted / name).symlink_to(Path(found).resolve())
+    assert not [p for p in sdk.rglob("*.py")], "the SDK ships Python files"
+    assert (sdk / "tools/qos").read_bytes()[:4] in (b"\xcf\xfa\xed\xfe", b"\x7fELF"), "bin/qos is not a native binary"
+    # The harness's own disk helpers, outside the denied checkout.
+    harness = out / "harness"
+    harness.mkdir()
+    for name in ("qos_disk.py", "qos_archive.py"):
+        shutil.copy2(ROOT / "tools" / name, harness / name)
     # Installed SDK must remain read-only, including bytecode/module caches.
     before = tree_hashes(prefix)
     for p in sorted(prefix.rglob("*"), reverse=True):
@@ -84,10 +94,12 @@ def main():
     probe = ('import pathlib, shutil; '
              'assert shutil.which("ghc") is None and shutil.which("cabal") is None; '
              'assert shutil.which("make") is None; '
+             'assert shutil.which("python3") is None and shutil.which("python") is None; '
+             + ('assert shutil.which("ld.lld") is None; ' if ships_lld else '') +
              f'paths={list(map(str, [ROOT / "README.md", args.fprisc.resolve() / "core/prelude.fpr"]))!r}; '
              '\nfor p in paths:\n try: pathlib.Path(p).read_bytes()\n except PermissionError: pass\n else: raise AssertionError(p)\n'
              'print("checkout access denied; GHC/Cabal/make absent from PATH")')
-    run([restricted / "python3", "-c", probe], "access-probe.log")
+    run([sys.executable, "-c", probe], "access-probe.log")
     run([prefix / "bin/qos", "new", "counter-example"], "scaffold.log")
     project = out / "counter-example"
     # Both directory and source filename can change without changing identity.
@@ -121,15 +133,15 @@ view viewport ready = (D.text viewport "Clock effect" "" Nil, Nil,
     run([prefix / "bin/qos", "build"], "clock-build.log", cwd=clock)
     disk = out / "counter.disk"
     run([prefix / "bin/qos", "disk", "create", disk, "--profile", "main", "--size", "32"], "disk-create.log")
-    tools = str(sdk / "tools")
+    tools = str(harness)
     seed = (f"import sys;sys.path.insert(0,{tools!r});import qos_disk as d;"
             f"\nwith d.locked({str(disk)!r}) as fd: d.append(fd,d.metadata(fd),[(b'user/note',b'keep this'),(b'user/history',b'unchanged')])")
-    run([restricted / "python3", "-c", seed], "user-record-seed.log")
+    run([sys.executable, "-c", seed], "user-record-seed.log")
 
     def values(log):
         probe = (f"import sys,json,hashlib;sys.path.insert(0,{tools!r});import qos_disk as d;"
                  f"\nwith d.locked({str(disk)!r}) as fd: print(json.dumps({{k.decode():hashlib.sha256(v.read(fd)).hexdigest() for k,v in d.scan(fd,d.metadata(fd)).items()}},sort_keys=True))")
-        return json.loads(run([restricted / "python3", "-c", probe], log))
+        return json.loads(run([sys.executable, "-c", probe], log))
 
     original_records = values("before-install-values.json")
     run([prefix / "bin/qos", "install", archive, disk], "counter-install.log")

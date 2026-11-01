@@ -1,0 +1,347 @@
+# qa.fpr -- QAR2 app archives (docs/2026-07-19-QA-FORMAT.md): written from a
+# manifest and an ELF as tools/mkqa.py writes them, byte for byte, and read
+# back with tools/qos_archive.py's checks.
+unsafe base.
+
+E = use "elf".
+H = use "host".
+T = use "toml".
+J = use "std/json".
+L = use "std/list".
+M = use "std/map".
+O = use "std/option".
+S = use "std/string".
+B = use "std/binary".
+
+# ---- writing ------------------------------------------------------------------------
+# opts: { relocatable : Bool, moved : O.Option String, delta : Int, imports : Bool }
+write manifest elf opts = case E.flatten elf of
+    Err e -> Err e
+  | Ok img -> (case E.architecture (E.machine elf) of
+      Err e -> Err e
+    | Ok arch -> (case declared manifest arch of
+        Err e -> Err e
+      | Ok man -> (case opts.relocatable of
+          False -> Ok (assemble man img False "" False "")
+        | True -> (case img.base == 0 of
+            False -> Err "mkqa: --relocatable expects an image linked at 0"
+          | True -> (case E.relocations elf img.base (strlen img.image) of
+              Err e -> Err e
+            | Ok relocs -> (case importsOf opts elf img.base of
+                Err e -> Err e
+              | Ok imps -> (case movedOk opts img.image relocs of
+                  Err e -> Err e
+                | Ok _ -> Ok (assemble man img True (strJoin "" (L.map B.putU32le relocs))
+                                opts.imports (strJoin "" (L.map (fn r -> strcat r "\n") imps)))))))))).
+
+importsOf opts elf base = case opts.imports of
+    True -> E.importRows elf base
+  | False -> Ok Nil.
+movedOk opts image relocs = case opts.moved of
+    O.None -> Ok Unit
+  | O.Some other -> (case E.flatten other of
+      Err e -> Err e
+    | Ok o -> E.checkMoved image relocs o.image opts.delta).
+
+# The architecture is a packaging fact from the ELF: a manifest that states
+# it must agree, one that does not gets it as its first line.
+declared manifest arch =
+  top = topPart manifest;
+  found = L.filter (fn l -> archLine l) (S.split "\n" top);
+  case found of
+    Nil -> Ok (strcat "architecture = \"{arch}\"\n" manifest)
+  | l :: Nil -> (case archValue l == arch of
+      True -> Ok manifest
+    | False -> Err "mkqa: manifest architecture differs from the ELF image")
+  | _ -> Err "mkqa: manifest architecture differs from the ELF image".
+# the text before the first line that opens a table
+topPart m = topGo m 0.
+topGo m i | i >= strlen m = m.
+topGo m i = case tableLine m i of
+    True -> substr m 0 i
+  | False ->
+      n = strIndexFrom "\n" m i;
+      (case n < 0 of True -> m | False -> topGo m (n + 1)).
+tableLine m i | i >= strlen m = False.
+tableLine m i | charAt m i == 32 or charAt m i == 9 or charAt m i == 13 = tableLine m (i + 1).
+tableLine m i = charAt m i == 91.
+archLine l = S.startsWith "architecture" l and archEq l 12.
+archEq l i | i >= strlen l = False.
+archEq l i | charAt l i == 32 or charAt l i == 9 = archEq l (i + 1).
+archEq l i = charAt l i == 61.
+# `architecture = "x"` exactly, with optional spaces; anything else is no value
+archValue l =
+  rest = S.trim (substr l (strIndexOf "=" l + 1) (strlen l));
+  case strlen rest >= 2 and charAt rest 0 == 34 and charAt rest (strlen rest - 1) == 34 of
+    True -> substr rest 1 (strlen rest - 2)
+  | False -> "".
+
+assemble man img relocatable reloc withImports imports =
+  load = S.concat ("base {img.base}\nentry {img.entry}\nexecsz {img.execsz}\n" ::
+                   "rwoff {img.rwoff}\nimagesz {strlen img.image}\nmemsz {img.memsz}\n" ::
+                   "sha {H.sha256 img.image}\n" ::
+                   (case relocatable of True -> "relsha {H.sha256 (strcat reloc imports)}\n" | False -> "") :: Nil);
+  parts = ("MANIFEST", man) :: ("LOAD", load) :: ("IMAGE", img.image) ::
+          L.append (case relocatable of True -> ("RELOC", reloc) :: Nil | False -> Nil)
+                   (case withImports of True -> ("IMPORT", imports) :: Nil | False -> Nil);
+  table = tableRows parts 0 Nil;
+  strJoin "" ("QAR2\n" :: S.join "\n" table :: "\n\n" :: L.map (fn p -> case p of (_, b) -> b) parts).
+tableRows parts off acc = case parts of
+    Nil -> L.reverse acc
+  | (name, blob) :: rest -> tableRows rest (off + strlen blob) ("{name} {off} {strlen blob}" :: acc).
+
+# ---- reading ------------------------------------------------------------------------
+require ok why = case ok of True -> Ok Unit | False -> Err why.
+
+# archive ID rules: 1-64 ASCII bytes of [A-Za-z0-9_.-], not starting with . or -, no ".."
+validId v = strlen v > 0 and strlen v <= 64 and idStart (charAt v 0) and idRest v 1 and strIndexOf ".." v < 0.
+idStart c = (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or (c >= 48 and c <= 57) or c == 95.
+idRest v i | i >= strlen v = True.
+idRest v i | idStart (charAt v i) or charAt v i == 46 or charAt v i == 45 = idRest v (i + 1).
+idRest v i = False.
+
+nat t = strlen t > 0 and digitsOnly t 0 and (strlen t == 1 or charAt t 0 != 48).
+digitsOnly t i | i >= strlen t = True.
+digitsOnly t i | charAt t i >= 48 and charAt t i <= 57 = digitsOnly t (i + 1).
+digitsOnly t i = False.
+toNat t = case S.toInt t of Ok n -> n | Err _ -> 0 - 1.
+
+# the section table: name -> bytes, checked as tools/qos_archive.py checks it
+sections raw = case S.startsWith "QAR2\n" raw of
+    False -> Err "not a QAR2 archive"
+  | True ->
+      cut = strIndexOf "\n\n" raw;
+      (case cut < 0 of
+        True -> Err "not a QAR2 archive"
+      | False ->
+        payload = substr raw (cut + 2) (strlen raw - cut - 2);
+        rows = L.drop 1 (S.split "\n" (substr raw 0 cut));
+        sectionGo rows payload 0 (M.empty S.compare)).
+sectionGo rows payload cursor m = case rows of
+    Nil -> (case cursor == strlen payload of
+        False -> Err "archive has unclaimed trailing bytes"
+      | True -> (case M.member "MANIFEST" m and M.member "LOAD" m and M.member "IMAGE" m and M.member "RELOC" m of
+          True -> Ok m
+        | False -> Err "archive lacks a required image/relocation section"))
+  | row :: rest -> (case S.split " " row of
+      name :: off :: size :: Nil -> (case sectionName name and nat off and nat size of
+          False -> Err "invalid QAR2 section table"
+        | True -> (case not (M.member name m) and toNat off == cursor and toNat size <= strlen payload - toNat off of
+            False -> Err "duplicate, overlapping or out-of-range archive section"
+          | True -> sectionGo rest payload (cursor + toNat size) (M.insert name (substr payload cursor (toNat size)) m)))
+    | _ -> Err "invalid QAR2 section table").
+sectionName n = strlen n > 0 and charAt n 0 >= 65 and charAt n 0 <= 90 and nameRest n 1.
+nameRest n i | i >= strlen n = True.
+nameRest n i | (charAt n i >= 65 and charAt n i <= 90) or (charAt n i >= 48 and charAt n i <= 57) or charAt n i == 95 = nameRest n (i + 1).
+nameRest n i = False.
+not b = case b of True -> False | False -> True.
+
+part m name = M.getOr "" name m.
+
+# the manifest of a QAR2 archive, without the other checks (qos run)
+manifestOf raw = case sections raw of
+    Err e -> Err e
+  | Ok m -> T.parse (part m "MANIFEST").
+
+text v k = case J.field k v of O.Some (J.Text t) -> O.Some t | _ -> O.None.
+textIs v k want = case text v k of O.Some t -> t == want | O.None -> False.
+plainField v k = case text v k of
+    O.Some t -> strlen t > 0 and plainChars t 0
+  | O.None -> False.
+plainChars t i | i >= strlen t = True.
+plainChars t i | charAt t i < 32 or charAt t i == 34 or charAt t i == 92 = False.
+plainChars t i = plainChars t (i + 1).
+
+# want: { abi, architecture, session, api, desktop : Bool, bundled : Bool }
+# answers { raw, manifest, id, version, sha256 }
+read raw want = case sections raw of
+    Err e -> Err e
+  | Ok parts -> (case T.parse (part parts "MANIFEST") of
+      Err e -> Err "invalid archive manifest: {e}"
+    | Ok man -> (case checks man want of
+        Err e -> Err e
+      | Ok _ -> (case loadFields (part parts "LOAD") of
+          Err e -> Err e
+        | Ok f -> (case imageChecks parts f want of
+            Err e -> Err e
+          | Ok _ -> Ok { raw = raw, manifest = man, id = O.withDefault "" (text man "id"),
+                         version = O.withDefault "" (text man "version"), sha256 = H.sha256 raw })))).
+
+checks man want =
+  r1 = require (case text man "id" of O.Some i -> validId i | O.None -> False) "invalid archive manifest ID";
+  r2 = require (plainField man "name") "invalid archive name";
+  r3 = require (plainField man "version") "invalid archive version";
+  r4 = require (textIs man "abi" want.abi) "incompatible ABI; rebuild for {want.abi}";
+  r5 = (case want.desktop of
+    True -> (case require (textIs man "loadMode" "plugin" and textIs man "entry" "fpr_modtab") "Main desktop apps must be plugins with entry=fpr_modtab" of
+        Err e -> Err e
+      | Ok _ -> Ok Unit)
+  | False -> require (textIs man "loadMode" "process") "Main entry must be a process archive");
+  r6 = contract man "architecture" want.architecture want.bundled;
+  r7 = contract man "desktopSession" want.session want.bundled;
+  r8 = contract man "desktopApi" want.api want.bundled;
+  r9 = require (noPermissions man) "desktop SDK does not support archive permission declarations";
+  firstErr (r1 :: r2 :: r3 :: r4 :: r5 :: r6 :: r7 :: r8 :: r9 :: Nil).
+firstErr rs = case rs of
+    Nil -> Ok Unit
+  | Err e :: _ -> Err e
+  | Ok _ :: rest -> firstErr rest.
+# Legacy onboard plugins come from the pinned profile with verified hashes;
+# external archives carry the whole desktop contract.
+contract man field expected bundled =
+  missing = O.isNone (J.field field man);
+  require ((bundled and field != "architecture" and missing) or textIs man field expected)
+          "incompatible/missing {field}; rebuild with this installed SDK".
+noPermissions man = case J.field "permissions" man of
+    O.None -> True
+  | O.Some (J.Object m) -> M.isEmpty m
+  | O.Some (J.Sequence Nil) -> True
+  | O.Some (J.Boolean False) -> True
+  | O.Some (J.Integer 0) -> True
+  | O.Some (J.Text "") -> True
+  | O.Some J.Null -> True
+  | O.Some _ -> False.
+
+loadFields text = loadGo (S.lines text) (M.empty S.compare).
+loadGo rows m = case rows of
+    Nil -> (case allKeys m ("base" :: "entry" :: "execsz" :: "rwoff" :: "imagesz" :: "memsz" :: "sha" :: "relsha" :: Nil) of
+        True -> Ok m
+      | False -> Err "incomplete LOAD section")
+  | row :: rest -> (case S.split " " row of
+      key :: value :: Nil -> (case M.member key m of
+          True -> Err "invalid/duplicate LOAD field"
+        | False -> (case key == "sha" or key == "relsha" of
+            True -> (case hex64 value of
+                True -> loadGo rest (M.insert key (J.Text value) m)
+              | False -> Err "invalid LOAD hash")
+          | False -> (case loadKey key and nat value of
+              False -> Err "invalid LOAD number"
+            | True -> (case strlen value > 18 or toNat value > 4611686018427387903 of
+                True -> Err "LOAD number exceeds the runtime Int range"
+              | False -> loadGo rest (M.insert key (J.Integer (toNat value)) m)))))
+    | _ -> Err "invalid/duplicate LOAD field").
+loadKey k = L.member k ("base" :: "entry" :: "execsz" :: "rwoff" :: "imagesz" :: "memsz" :: "nativeabi" :: "planeactors" :: "planememory" :: Nil).
+allKeys m ks = L.all (fn k -> M.member k m) ks.
+hex64 v = strlen v == 64 and hexChars v 0.
+hexChars v i | i >= strlen v = True.
+hexChars v i | (charAt v i >= 48 and charAt v i <= 57) or (charAt v i >= 97 and charAt v i <= 102) = hexChars v (i + 1).
+hexChars v i = False.
+num f k = case M.get k f of O.Some (J.Integer n) -> n | _ -> 0 - 1.
+hashOf f k = case M.get k f of O.Some (J.Text t) -> t | _ -> "".
+
+imageChecks parts f want =
+  image = part parts "IMAGE";
+  rel = part parts "RELOC";
+  imp = part parts "IMPORT";
+  spans = num f "base" == 0 and 0 <= num f "entry" and num f "entry" < num f "execsz" and num f "execsz" <= strlen image
+    and strlen image == num f "imagesz" and num f "imagesz" <= num f "memsz" and 0 <= num f "rwoff" and num f "rwoff" <= num f "memsz";
+  case require spans "inconsistent LOAD image spans" of
+    Err e -> Err e
+  | Ok _ -> (case require (H.sha256 image == hashOf f "sha") "IMAGE sha256 mismatch" of
+      Err e -> Err e
+    | Ok _ -> (case require (H.sha256 (strcat rel imp) == hashOf f "relsha") "RELOC/IMPORT sha256 mismatch" of
+        Err e -> Err e
+      | Ok _ -> (case require (strlen rel - (strlen rel / 4) * 4 == 0) "invalid RELOC byte length" of
+          Err e -> Err e
+        | Ok _ ->
+            offsets = relocOffsets rel 0 Nil;
+            (case relocChecks offsets image (num f "memsz") (0 - 1) of
+              Err e -> Err e
+            | Ok _ -> (case importSpans imp image of
+                Err e -> Err e
+              | Ok sp -> (case spansApart (L.sortWith (fn a b -> case a of (x, _) -> (case b of (y, _) -> E.intOrder x y)) sp) offsets of
+                  Err e -> Err e
+                | Ok _ -> (case want.desktop of
+                    True -> checkEntry image (num f "entry") (num f "execsz") offsets
+                  | False -> Ok Unit))))))).
+
+relocOffsets rel i acc | i >= strlen rel = L.reverse acc.
+relocOffsets rel i acc = relocOffsets rel (i + 4) (E.u32 rel i :: acc).
+relocChecks offs image memsz prev = case offs of
+    Nil -> Ok Unit
+  | at :: rest -> (case at > prev of
+      False -> Err "duplicate/unsorted RELOC offsets"
+    | True -> (case at - (at / 8) * 8 == 0 and at + 8 <= strlen image of
+        False -> Err "out-of-range/unaligned RELOC word"
+      | True -> (case E.u64 image at of
+          Ok p -> (case p <= memsz of True -> relocChecks rest image memsz at | False -> Err "RELOC pointer outside image")
+        | Err _ -> Err "RELOC pointer outside image"))).
+
+importSpans imp image = spanGo (S.lines imp) image Nil.
+spanGo rows image acc = case rows of
+    Nil -> Ok acc
+  | row :: rest -> (case S.split " " row of
+      kind :: at :: size :: name :: Nil -> (case (kind == "c" or kind == "d") and nat at and nat size and importName name of
+          False -> Err "invalid IMPORT row"
+        | True ->
+            a = toNat at;
+            n = toNat size;
+            expected = E.dataSize name;
+            (case (kind == "c" and n == 8 and O.isNone expected) or (kind == "d" and O.withDefault (0 - 1) expected == n) of
+              False -> Err "invalid IMPORT object kind/size"
+            | True -> (case a - (a / 8) * 8 == 0 and n > 0 and a + n <= strlen image of
+                False -> Err "out-of-range IMPORT slot"
+              | True -> spanGo rest image ((a, a + n) :: acc))))
+    | _ -> Err "invalid IMPORT row").
+importName n = S.startsWith "fpr_" n and strlen n > 4 and impRest n 4.
+impRest n i | i >= strlen n = True.
+impRest n i | E.symStart (charAt n i) or (charAt n i >= 48 and charAt n i <= 57) or charAt n i == 46 or charAt n i == 36 = impRest n (i + 1).
+impRest n i = False.
+spansApart sp offsets = case overlapping sp of
+    True -> Err "overlapping IMPORT slots"
+  | False -> (case L.any (fn s -> case s of (a, b) -> L.any (fn o -> a < o + 8 and o < b) offsets) sp of
+      True -> Err "IMPORT overlaps RELOC"
+    | False -> Ok Unit).
+overlapping sp = case sp of
+    (_, b) :: (c, d) :: rest -> b > c or overlapping ((c, d) :: rest)
+  | _ -> False.
+
+# the native module entry table a desktop plugin starts from
+words image at count = case at - (at / 8) * 8 == 0 and at >= 0 and at <= strlen image - 8 * count of
+    False -> Err "module table pointer outside IMAGE"
+  | True -> wordGo image at count Nil.
+wordGo image at count acc | count == 0 = Ok (L.reverse acc).
+wordGo image at count acc = case E.u64 image at of
+    Ok w -> wordGo image (at + 8) (count - 1) (w :: acc)
+  | Err _ -> Err "module table pointer outside IMAGE".
+moduleString image at = case words image at 2 of
+    Err e -> Err e
+  | Ok (header :: size :: Nil) -> (case header == 9000 and size <= strlen image - at - 16 of
+      True -> Ok (substr image (at + 16) size)
+    | False -> Err "invalid module string")
+  | Ok _ -> Err "invalid module string".
+
+checkEntry image entry executable relocs = case words image entry 3 of
+    Err e -> Err e
+  | Ok (magic :: schema :: rootAt :: Nil) -> (case magic == 1179669069 and schema == 1 of
+      False -> Err "unsupported module table schema"
+    | True -> (case L.member (entry + 16) relocs of
+        False -> Err "unrelocated module root"
+      | True -> (case moduleString image rootAt of
+          Err e -> Err e
+        | Ok root -> (case root == "" of
+            True -> Err "missing root module identity"
+          | False -> rowsGo image (entry + 24) root executable relocs 0))))
+  | Ok _ -> Err "unsupported module table schema".
+rowsGo image at root executable relocs found = case words image at 1 of
+    Err e -> Err e
+  | Ok (0 :: Nil) -> (case found == 1 of True -> Ok Unit | False -> Err "desktop archive needs exactly one root appMain export")
+  | Ok _ -> (case words image at 4 of
+      Err e -> Err e
+    | Ok (scope :: name :: pap :: iface :: Nil) -> (case L.all (fn i -> L.member (at + i * 8) relocs) (0 :: 1 :: 2 :: 3 :: Nil) of
+        False -> Err "unrelocated module table row"
+      | True -> (case (moduleString image scope, moduleString image name, moduleString image iface) of
+          (Ok rowScope, Ok rowName, Ok _) -> (case words image pap 4 of
+              Err e -> Err e
+            | Ok (header :: code :: arity :: nargs :: Nil) -> (case header == 9001 and code < executable and arity > 0 and nargs == 0 and L.member (pap + 8) relocs of
+                False -> Err "invalid module function closure"
+              | True -> (case rowScope == root and rowName == "appMain" of
+                  True -> (case arity == 1 of
+                      False -> Err "appMain must take one actor argument"
+                    | True -> rowsGo image (at + 32) root executable relocs (found + 1))
+                | False -> rowsGo image (at + 32) root executable relocs found))
+            | Ok _ -> Err "invalid module function closure")
+        | (Err e, _, _) -> Err e
+        | (_, Err e, _) -> Err e
+        | (_, _, Err e) -> Err e))
+    | Ok _ -> Err "module table pointer outside IMAGE").

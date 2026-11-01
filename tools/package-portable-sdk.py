@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Package a verified, clean staged macOS ARM64 SDK and generate its Brew formula.
 
+A contributor tool: the SDK it packages needs no Python (its `qos` is native).
+
 This contributor tool never publishes, rebuilds, or reads user disks. Run the
 installed SDK acceptance before publication. The tarball is the release unit:
 compiler, SDK, hosts and Main are pinned together in sdk.json and the inventory.
@@ -59,13 +61,24 @@ def package(prefix, version, output, compiler_licenses):
     for path in sdk.rglob('*'):
         # C sources ship only as the private kind = "app" platform inputs.
         relative = path.relative_to(sdk)
-        if (path.suffix in ('.disk', '.hs') or path.name == '.git'
+        if (path.suffix in ('.disk', '.hs', '.py') or path.name == '.git'
                 or (path.suffix == '.c' and relative.parts[0] != 'platform')):
             raise ValueError(f'unexpected release file: {path}')
     # Do not advertise older systems than the binaries actually target.
     minos = []
     libraries = {}
-    for relative in ('compiler/fpr', 'runtime/qosp', 'runtime/qosp-gl'):
+    # 0.3.0+: `qos` is a native binary and the SDK may ship its own ld.lld; both
+    # must link only system libraries (or the compiler's declared ones).
+    if not (sdk / 'tools/qos').is_file() or (sdk / 'tools/qos').read_bytes()[:4] != b'\xcf\xfa\xed\xfe':
+        raise ValueError('stage has no native tools/qos; restage with this tree')
+    binaries = ['compiler/fpr', 'runtime/qosp', 'runtime/qosp-gl', 'tools/qos']
+    if (sdk / 'toolchain/ld.lld').is_file():
+        binaries.append('toolchain/ld.lld')
+        if meta.get('toolchainFiles', {}).get('ld.lld') != digest(sdk / 'toolchain/ld.lld'):
+            raise ValueError('toolchain/ld.lld does not match sdk.json')
+        if not (sdk / 'toolchain/LICENSE-LLVM.txt').is_file():
+            raise ValueError('toolchain/ld.lld ships without the LLVM license')
+    for relative in binaries:
         binary = sdk / relative
         load = subprocess.check_output(['vtool', '-show-build', binary], text=True)
         minos.append(re.search(r'\bminos\s+(\S+)', load)[1])
@@ -101,7 +114,9 @@ def package(prefix, version, output, compiler_licenses):
     (output / 'SHA256SUMS').write_text(f'{sha}  {archive.name}\n')
     (output / 'release.json').write_text(json.dumps(meta, indent=2) + '\n')
     template = (ROOT / 'packaging/homebrew/qos-portable.rb.in').read_text()
-    formula = template.replace('__VERSION__', version).replace('__ARCHIVE__', archive.name).replace('__SHA256__', sha)
+    lld_dependency = '' if (sdk / 'toolchain/ld.lld').is_file() else '  depends_on "lld"\n'
+    formula = (template.replace('__VERSION__', version).replace('__ARCHIVE__', archive.name).replace('__SHA256__', sha)
+               .replace('__LLD_DEPENDENCY__\n', lld_dependency))
     (output / 'qos-portable.rb').write_text(formula)
     print(archive)
     print(f'SHA256 {sha}')

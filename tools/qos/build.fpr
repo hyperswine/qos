@@ -1,0 +1,350 @@
+unsafe base.
+
+C = use "common".
+E = use "elf".
+H = use "host".
+P = use "project".
+Q = use "qa".
+J = use "std/json".
+L = use "std/list".
+M = use "std/map".
+O = use "std/option".
+S = use "std/string".
+OS = use "std/os".
+
+# kind = "app": the platform units in link order, and their build settings.
+# Both are part of the platform cache key.
+platformUnits = "appside/entry.c" :: "appside/hal.c" :: "appside/support.c" ::
+  "runtime/runtime.c" :: "runtime/i32.c" :: "runtime/actors.c" :: "runtime/bits.c" ::
+  "runtime/vec.c" :: "runtime/sstr.c" :: "runtime/mod.c" :: "runtime/buddy.c" ::
+  "loader/qaimg.c" :: "portable/sha256.c" :: "machine/unix/ctx_a64.S" :: Nil.
+platformLinkerScript = "appside/link-qosapp-a64.ld".
+# macOS reserves 0x180000000-0x7000000000 in every process, so Darwin hosts
+# and their apps sit at 1 TiB (qos-app.mk, qos_abi.h)
+arenaBase u = case H.system Unit == "darwin" of True -> "0x10000000000ul" | False -> "0x400000000ul".
+appCflags u = "-O2" :: "-ffreestanding" :: "-nostdlib" :: "-fno-stack-protector" :: "-fno-asynchronous-unwind-tables" ::
+  "-fno-pic" :: "-ffixed-x18" :: "-ffixed-x27" :: "-ffixed-x28" :: "-DFPR_POSIX" :: "-DFPR_QOSAPP" ::
+  "-DQOS_ARENA_BASE={arenaBase Unit}" :: "-DFPR_NHARTS=8" :: "-DFPR_SLAB_SZ=262144" :: "-DFPR_STACK_SZ=1048560" :: Nil.
+movedDelta = "0x10000000".
+movedDeltaInt = 268435456.
+# platform files another file #includes instead of compiling them itself
+includedBy name = case name of "hal/net_actor_bridge.c" -> "appside/hal.c" | _ -> name.
+
+# (arch, target, importsArch, triple)
+native u = case H.machine Unit of
+    "arm64" -> Ok ("aarch64", "qa64", "a64", "aarch64-none-elf")
+  | "aarch64" -> Ok ("aarch64", "qa64", "a64", "aarch64-none-elf")
+  | "x86_64" -> Ok ("x86_64", "qx64", "x64", "x86_64-none-elf")
+  | "amd64" -> Ok ("x86_64", "qx64", "x64", "x86_64-none-elf")
+  | m -> Err "desktop SDK v2 does not support {m}".
+
+sdkMeta sdk = C.readFile (C.join sdk "sdk.json") |>? (fn raw -> case J.parse raw of
+    Ok v -> Ok v
+  | Err e -> Err "sdk.json: {e}").
+
+# Do not inherit checkout/module overrides from a contributor's shell.
+environment sdk =
+  _ = L.map (fn n -> case S.startsWith "FPR_" n or n == "FPRISC_ROOT" of True -> H.unsetEnv n | False -> Unit) (H.envNames Unit);
+  _ = H.setEnv "FPR_HOME" (C.join sdk "modules");
+  _ = H.setEnv "FPR_PATH" (C.join sdk "compiler");
+  _ = H.setEnv "FPR_FOREIGN" (C.join sdk "modules/core/foreign.fpr");
+  H.setEnv "LC_ALL" "C.UTF-8".
+
+# qos.toml v2 [build] settings; the compiler's environment is never the interface
+compilerSettings p =
+  _ = H.unsetEnv "GHCRTS";
+  _ = L.map (fn n -> H.setEnv "FPR_NO_{n}" "1") (P.optimizeFlags (P.optimize p));
+  case P.memoryMb p > 0 of
+    True -> H.setEnv "GHCRTS" "-M{P.memoryMb p}M -A32M"
+  | False -> Unit.
+
+# The SDK's own ld.lld (toolchain/ld.lld, hash-checked) when it ships one, else PATH's.
+tools sdk meta = case C.which "clang" of
+    O.None -> Err "install Clang and lld and add their bin directories to PATH"
+  | O.Some clang -> linker sdk meta |>? (fn ld -> Ok (clang, ld)).
+linker sdk meta = case C.objectField "toolchainFiles" meta of
+    O.Some files -> (case M.get "ld.lld" files of
+        O.Some (J.Text expected) ->
+          ld = C.join sdk "toolchain/ld.lld";
+          (case H.sha256File ld of
+            Ok h -> (case h == expected of True -> Ok ld | False -> Err "SDK linker changed; install a matching release set")
+          | Err _ -> Err "SDK linker missing; install a matching release set")
+      | _ -> pathLinker Unit)
+  | O.None -> pathLinker Unit.
+pathLinker u = case C.which "ld.lld" of
+    O.Some ld -> Ok ld
+  | O.None -> Err "install Clang and lld and add their bin directories to PATH".
+
+compatible meta arch =
+  case C.textIs "desktopApi" meta C.api and C.textIs "desktopSession" meta C.session
+       and C.textIs "os" meta (H.system Unit) and C.textIs "architecture" meta arch
+       and (case C.intField "format" meta of O.Some 1 -> True | _ -> False) of
+    True -> Ok Unit
+  | False -> Err "incompatible SDK: install a matching native QOS Portable SDK".
+
+build sdk where compiler verbose = native Unit |>? (fn nat -> case nat of (arch, target, importsArch, triple) ->
+  sdkMeta sdk |>? (fn meta ->
+  compatible meta arch |>? (fn u1 ->
+  H.realpath (C.join sdk "compiler/fpr") |> P.mapErr (fn e -> "SDK compiler missing; install a matching release set") |>? (fn fpr ->
+  sameCompiler compiler fpr |>? (fn u2 ->
+  C.digest fpr |>? (fn h ->
+  C.check (C.textIs "compilerSha256" meta h) "SDK compiler changed; install a matching release set" |>? (fn u3 ->
+  P.load where |>? (fn p ->
+  P.checkSdkVersion p.sdk meta |>? (fn u4 ->
+  case P.appText "kind" p == "app" of
+    True -> buildApp sdk meta fpr p verbose nat
+  | False -> buildDesktop sdk meta fpr p verbose nat))))))))).
+
+sameCompiler compiler fpr = case compiler of
+    O.None -> Ok Unit
+  | O.Some c -> (case H.realpath c of
+      Ok r -> C.check (r == fpr) "the selected fpr and SDK differ; build with this SDK's `qos build`"
+    | Err _ -> Err "the selected fpr and SDK differ; build with this SDK's `qos build`").
+
+outDir p =
+  out = C.join p.root "build";
+  case H.kind out == 2 of
+    True -> Err "build/ cannot be a symlink"
+  | False -> C.mkdirs out |>? (fn u -> Ok out).
+
+# A unique intermediate directory, removed afterwards; the archive is moved
+# into build/ only when every step succeeded.
+withWork out prefix verbose body = case H.tempDir (C.join out "{prefix}XXXXXX") of
+    Err e -> Err "{out}: {e}"
+  | Ok work -> (case C.openLog (C.join out "qos-build.log") verbose of
+      Err e ->
+        _ = H.removeTree work;
+        Err e
+    | Ok log ->
+        result = body work log;
+        _ = C.closeLog log;
+        _ = H.removeTree work;
+        result).
+
+lines text = L.filter (fn l -> strlen l > 0) (S.lines text).
+
+compileUnits log clang triple work asm = C.readFile (strcat asm ".units") |>? (fn units ->
+  sources = asm :: lines units;
+  C.mapR (fn iv -> case iv of (i, source) ->
+      obj = C.join work "unit-{i}.o";
+      C.run log (clang :: "--target={triple}" :: "-c" :: source :: "-o" :: obj :: Nil) "" |>? (fn u -> Ok obj))
+    (L.indexed sources)).
+
+abiOf meta asm = C.readFile (strcat asm ".abirev") |>? (fn rev ->
+  abi = "{C.textOr "" "portableAbi" meta}.{S.trim rev}";
+  case C.textIs "abi" meta abi of
+    True -> Ok abi
+  | False -> Err "SDK compiler/profile ABI mismatch; reinstall a matching SDK").
+
+manifestLine kv = case kv of (k, v) -> "{k} = {v}\n".
+
+buildDesktop sdk meta fpr p verbose nat = case nat of (arch, target, importsArch, triple) ->
+  C.check (not (L.any (fn c -> strIndexOf c p.entry >= 0) ("\"" :: "\\" :: "\n" :: "\r" :: Nil))) "project path cannot contain quotes, backslashes or newlines" |>? (fn u0 ->
+  outDir p |>? (fn out ->
+  _ = environment sdk;
+  _ = (case p.manifest == 2 of True -> compilerSettings p | False -> Unit);
+  tools sdk meta |>? (fn tl -> case tl of (clang, ld) ->
+  withWork out ".desktop-" verbose (fn work log ->
+    adapter = C.join work "entry.fpr";
+    asm = C.join work "app.s";
+    C.readFile (C.join sdk "tools/desktop-adapter.fpr.in") |>? (fn template ->
+    C.writeFile adapter (S.replace "__ENTRY__" (C.withoutSuffix p.entry) template) |>? (fn u1 ->
+    C.run log (fpr :: "compile" :: "--target={target}" :: "--plugin" :: "--prelude={C.join sdk "compiler/core/prelude.fpr"}" :: adapter :: asm :: Nil) "" |>? (fn u2 ->
+    compileUnits log clang triple work asm |>? (fn objects ->
+    common = ld :: "-T" :: C.join sdk "support/link-qosplug.ld" :: "--emit-relocs" :: "--no-relax" :: Nil;
+    first = C.join work "first.elf";
+    image = C.join work "image.elf";
+    moved = C.join work "moved.elf";
+    C.run log (L.concat (common :: ("--defsym=PLUG_BASE=0" :: "--unresolved-symbols=ignore-all" :: Nil) :: objects :: ("-o" :: first :: Nil) :: Nil)) "" |>? (fn u3 ->
+    stub = C.join work "imports.s";
+    C.readFile first |>? (fn firstElf ->
+    E.importStubs importsArch firstElf |>? (fn stubText ->
+    C.writeFile stub stubText |>? (fn u4 ->
+    _ = C.logWrite log "mkimports: wrote {stub}\n";
+    stubObj = C.join work "imports.o";
+    C.run log (clang :: "--target={triple}" :: "-c" :: stub :: "-o" :: stubObj :: Nil) "" |>? (fn u5 ->
+    C.each (fn bd -> case bd of (base, dest) ->
+        C.run log (L.concat (common :: ("--defsym=PLUG_BASE={base}" :: Nil) :: objects :: (stubObj :: "-o" :: dest :: Nil) :: Nil)) "")
+      (("0", image) :: ("0x10000000", moved) :: Nil) |>? (fn u6 ->
+    abiOf meta asm |>? (fn abi ->
+    fields = ("name", C.jsonStr (P.appText "name" p)) :: ("id", C.jsonStr (P.appText "id" p)) ::
+             ("version", C.jsonStr (P.appText "version" p)) :: ("entry", C.jsonStr "fpr_modtab") ::
+             ("loadMode", C.jsonStr "plugin") :: ("abi", C.jsonStr abi) :: ("architecture", C.jsonStr arch) ::
+             ("desktopSession", C.jsonStr C.session) :: ("desktopApi", C.jsonStr C.api) :: Nil;
+    archive sdk work log (S.concat (L.map manifestLine fields)) image moved True |>? (fn qa ->
+    publish qa out p)))))))))))))))).
+
+archive sdk work log manifest image moved imports =
+  _ = C.writeFile (C.join work "manifest.toml") manifest;
+  C.readFile image |>? (fn elf ->
+  C.readFile moved |>? (fn other ->
+  case Q.write manifest elf { relocatable = True, moved = O.Some other, delta = movedDeltaInt, imports = imports } of
+    Err e ->
+      _ = C.logWrite log (strcat e "\n");
+      Err e
+  | Ok bytes ->
+      qa = C.join work "app.qa";
+      _ = C.logWrite log "mkqa: wrote {qa}: {strlen bytes}B total\n";
+      C.writeFile qa bytes |>? (fn u -> Ok qa))).
+
+publish qa out p =
+  destination = C.join out "{P.appText "id" p}.qa";
+  case OS.rename qa destination of
+    Err e -> Err "{destination}: {e}"
+  | Ok _ ->
+      _ = C.say "Built {destination}";
+      Ok destination.
+
+# ---- kind = "app" ------------------------------------------------------------------------
+platformDigest files = H.sha256 (S.concat (L.map (fn kv -> case kv of (name, sha) -> "{sha}  {name}\n") (L.sortWith (fn a b -> case a of (x, _) -> (case b of (y, _) -> S.compare x y)) files))).
+
+# the verified platform inventory; a changed or missing file is refused by name
+platformInputs sdk meta = case C.objectField "platformFiles" meta of
+    O.None -> Err "this SDK has no kind = \"app\" platform files; install QOS Portable 0.3.0 or later"
+  | O.Some m ->
+      files = C.textMap m;
+      (case C.textIs "platformSha256" meta (platformDigest files) and L.length files == M.size m of
+        False -> Err "this SDK has no kind = \"app\" platform files; install QOS Portable 0.3.0 or later"
+      | True ->
+          names = L.map (fn kv -> case kv of (n, _) -> n) files;
+          C.each (fn n -> C.check (L.member n names) "SDK platform inventory lacks {n}; reinstall a matching SDK") (L.append platformUnits (platformLinkerScript :: Nil)) |>? (fn u ->
+          C.each (fn kv -> case kv of (name, expected) -> (case H.sha256File (C.join sdk (C.join "platform" name)) of
+              Ok h -> C.check (h == expected and H.isFile (C.join sdk (C.join "platform" name))) "SDK platform file {name} changed; reinstall a matching SDK"
+            | Err _ -> Err "SDK platform file {name} changed; reinstall a matching SDK")) files |>? (fn u2 ->
+          Ok names))).
+
+appFlags triple platform = L.concat (("--target={triple}" :: Nil) :: appCflags Unit ::
+  ("-I{C.join platform "runtime"}" :: "-I{C.join platform "appside"}" :: "-I{C.join platform "hal"}" :: Nil) :: Nil).
+
+cacheHome u = C.join (case C.env "XDG_CACHE_HOME" of
+    O.Some d -> (case d == "" of True -> C.join (O.withDefault "" (C.env "HOME")) ".cache" | False -> d)
+  | O.None -> C.join (O.withDefault "" (C.env "HOME")) ".cache") "qos-portable".
+
+objName unit = strcat (S.replace "/" "-" unit) ".o".
+
+# Platform C compiled once per SDK hash, Clang and settings, into the user's cache.
+platformObjects sdk meta clang triple log = case OS.run (clang :: "--version" :: Nil) "" "" Nil 0 of
+    Err e -> Err "clang: {e}"
+  | Ok (_, clangVersion, _) ->
+      platform = C.join sdk "platform";
+      flags = appFlags triple platform;
+      identity = S.concat ("\{\n  \"clang\": " :: C.jsonStr clangVersion :: ",\n  \"flags\": [" ::
+                           S.join ", " (L.map C.jsonStr flags) :: "],\n  \"platform\": " ::
+                           C.jsonStr (C.textOr "" "platformSha256" meta) :: ",\n  \"sdk\": " :: C.jsonStr sdk ::
+                           ",\n  \"units\": [" :: S.join ", " (L.map C.jsonStr platformUnits) :: "]\n}\n" :: Nil);
+      home = C.join (cacheHome Unit) "platform";
+      done = C.join home (H.sha256 identity);
+      objects = L.map (fn unit -> C.join done (objName unit)) platformUnits;
+      (case H.isFile (C.join done "identity.json") and L.all H.isFile objects of
+        True -> Ok objects
+      | False -> C.mkdirs home |>? (fn u -> case H.tempDir (C.join home ".build-XXXXXX") of
+          Err e -> Err "{home}: {e}"
+        | Ok work ->
+            made = C.each (fn unit -> C.run log (L.concat (("{clang}" :: Nil) :: flags :: ("-c" :: C.join platform unit :: "-o" :: C.join work (objName unit) :: Nil) :: Nil)) "") platformUnits
+              |>? (fn u2 -> C.writeFile (C.join work "identity.json") identity)
+              |>? (fn u3 -> case OS.rename work done of
+                  Ok _ -> Ok Unit
+                | Err e -> (case H.isFile (C.join done "identity.json") of
+                    # another build published the same key first; its objects are equivalent
+                    True -> Ok Unit
+                  | False -> Err "{done}: {e}"));
+            _ = H.removeTree work;
+            made |>? (fn u4 ->
+              _ = C.say "Compiled SDK platform objects into {done}";
+              Ok objects))).
+
+# Replace overridden platform objects and append added sources.  An override
+# compiles from an overlay of the SDK's platform folder, in the SDK file's own
+# place, so it sees exactly the SDK's headers and relative includes.
+projectPlatform sdk work cached overrides added clang triple log =
+  overlay = C.join work "platform";
+  platform = C.join sdk "platform";
+  C.each (fn name ->
+      dest = C.join overlay name;
+      source = (case L.find (fn o -> case o of (n, _, _) -> n == name) overrides of O.Some (_, _, path) -> path | O.None -> C.join platform name);
+      C.mkdirs (C.parent dest) |>? (fn u -> C.copyFile source dest)) (C.walk platform) |>? (fn u1 ->
+  rebuild = L.map (fn o -> case o of (n, _, _) -> includedBy n) overrides;
+  C.mapR (fn iu -> case iu of (i, unit) -> (case L.member unit rebuild of
+      False -> Ok (O.withDefault "" (E.nth cached i))
+    | True ->
+        obj = C.join work (strcat "override-" (objName unit));
+        C.run log (L.concat ((clang :: Nil) :: appFlags triple overlay :: ("-c" :: C.join overlay unit :: "-o" :: obj :: Nil) :: Nil)) "" |>? (fn u -> Ok obj)))
+    (L.indexed platformUnits) |>? (fn objects ->
+  C.mapR (fn ia -> case ia of (i, (value, source)) ->
+      obj = C.join work "added-{i}-{C.stem source}.o";
+      C.run log (L.concat ((clang :: Nil) :: appFlags triple platform :: ("-c" :: source :: "-o" :: obj :: Nil) :: Nil)) "" |>? (fn u -> Ok obj))
+    (L.indexed added) |>? (fn extra ->
+  Ok (L.append objects extra)))).
+
+short h = substr h 0 16.
+
+# [[platformOverrides]] tables for the archive manifest, after its top-level keys
+platformRecord overrides added =
+  rows = L.append
+    (L.map (fn o -> case o of (name, value, source) -> ("override" :: Nil, name, value, source)) overrides)
+    (L.map (fn a -> case a of (value, source) -> (Nil, "", value, source)) added);
+  C.mapR (fn r -> case r of (kind, name, value, source) -> C.digest source |>? (fn h ->
+      Ok (case kind of
+        Nil -> "\n[[platformOverrides]]\nkind = \"added\"\nsource = {C.jsonStr value}\nsha256 = {C.jsonStr h}\n"
+      | _ -> "\n[[platformOverrides]]\nkind = \"override\"\nfile = {C.jsonStr name}\nsource = {C.jsonStr value}\nsha256 = {C.jsonStr h}\n"))) rows
+  |>? (fn texts -> Ok (S.concat texts)).
+
+announce overrides added =
+  C.each (fn o -> case o of (name, value, source) -> C.digest source |>? (fn h ->
+      _ = C.say "qos: platform override: {name} replaced by {value} (sha256 {short h})"; Ok Unit)) overrides |>? (fn u ->
+  C.each (fn a -> case a of (value, source) -> C.digest source |>? (fn h ->
+      _ = C.say "qos: platform source added: {value} (sha256 {short h})"; Ok Unit)) added).
+
+buildApp sdk meta fpr p verbose nat = case nat of (arch, target, importsArch, triple) ->
+  C.check (arch == "aarch64") "kind = \"app\" needs an AArch64 host; this SDK's platform files are AArch64" |>? (fn u0 ->
+  platformInputs sdk meta |>? (fn files ->
+  P.platformChoices p.root p.platform files |>? (fn choice -> case choice of (overrides, added) ->
+  announce overrides added |>? (fn u1 ->
+  outDir p |>? (fn out ->
+  _ = environment sdk;
+  # an app may use the onboard programs' modules (mods/...), as Main does
+  _ = H.setEnv "FPR_PATH" "{C.join sdk "compiler"}:{C.join sdk "modules/programs"}";
+  _ = compilerSettings p;
+  tools sdk meta |>? (fn tl -> case tl of (clang, ld) ->
+  withWork out ".app-" verbose (fn work log ->
+    asm = C.join work "app.s";
+    # relative imports (../models/...) resolve from the project, as with fpr
+    C.run log (fpr :: "compile" :: "--target={target}" :: "--prelude={C.join sdk "compiler/core/prelude.fpr"}" :: p.entry :: asm :: Nil) p.root |>? (fn u2 ->
+    abiOf meta asm |>? (fn abi ->
+    compileUnits log clang triple work asm |>? (fn program ->
+    platformObjects sdk meta clang triple log |>? (fn cached ->
+    (case L.isEmpty overrides and L.isEmpty added of
+      True -> Ok cached
+    | False -> projectPlatform sdk work cached overrides added clang triple log) |>? (fn platform ->
+    common = ld :: "-T" :: C.join sdk (C.join "platform" platformLinkerScript) :: "--emit-relocs" ::
+             "--defsym=_heap_start=_proc_image_end" :: "--defsym=_heap_end=_proc_image_end" :: Nil;
+    first = C.join work "first.elf";
+    image = C.join work "image.elf";
+    moved = C.join work "moved.elf";
+    # two links: the first learns the runtime's symbols, the export table
+    # plugins import from by name is generated, and the real link has it
+    C.run log (L.concat (common :: ("--defsym=QOS_SLOT_BASE=0" :: "--unresolved-symbols=ignore-all" :: Nil) :: program :: platform :: ("-o" :: first :: Nil) :: Nil)) "" |>? (fn u3 ->
+    exports = C.join work "exports.s";
+    C.readFile first |>? (fn firstElf ->
+    E.exportTable firstElf |>? (fn table ->
+    C.writeFile exports table |>? (fn u4 ->
+    _ = C.logWrite log "mkexports: wrote {exports}\n";
+    exportsObj = C.join work "exports.o";
+    C.run log (clang :: "--target={triple}" :: "-c" :: exports :: "-o" :: exportsObj :: Nil) "" |>? (fn u5 ->
+    C.each (fn bd -> case bd of (base, dest) ->
+        C.run log (L.concat (common :: ("--defsym=QOS_SLOT_BASE={base}" :: Nil) :: program :: platform :: (exportsObj :: "-o" :: dest :: Nil) :: Nil)) "")
+      (("0", image) :: (movedDelta, moved) :: Nil) |>? (fn u6 ->
+    # the archive records what built it, so a build can be repeated
+    fields = L.concat ((("name", C.jsonStr (P.appText "name" p)) :: ("id", C.jsonStr (P.appText "id" p)) ::
+             ("version", C.jsonStr (P.appText "version" p)) :: ("entry", C.jsonStr "n/a") ::
+             ("loadMode", C.jsonStr "process") :: ("abi", C.jsonStr abi) :: ("architecture", C.jsonStr arch) ::
+             ("sdkPlatformSha256", C.jsonStr (C.textOr "" "platformSha256" meta)) ::
+             ("sdkCompilerSha256", C.jsonStr (C.textOr "" "compilerSha256" meta)) ::
+             ("optimize", C.jsonStr (P.optimize p)) :: Nil) ::
+             (case C.textField "release" meta of O.Some r -> ("sdkRelease", C.jsonStr r) :: Nil | O.None -> Nil) ::
+             (case P.memoryMb p > 0 of True -> ("compilerMemoryMb", str (P.memoryMb p)) :: Nil | False -> Nil) :: Nil);
+    platformRecord overrides added |>? (fn tables ->
+    archive sdk work log (strcat (S.concat (L.map manifestLine fields)) tables) image moved False |>? (fn qa ->
+    publish qa out p)))))))))))))))))))).
+
+not b = case b of True -> False | False -> True.

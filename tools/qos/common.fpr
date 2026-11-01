@@ -1,0 +1,186 @@
+# common.fpr -- paths, files, text and processes for the `qos` command.
+unsafe base.
+
+H = use "host".
+J = use "std/json".
+L = use "std/list".
+M = use "std/map".
+O = use "std/option".
+S = use "std/string".
+OS = use "std/os".
+
+session = "qos.app-session/5".
+api = "qos.desktop/2".
+
+# ---- results ------------------------------------------------------------------------
+check ok why = case ok of True -> Ok Unit | False -> Err why.
+not b = case b of True -> False | False -> True.
+each f xs = case xs of
+    Nil -> Ok Unit
+  | x :: rest -> (case f x of Err e -> Err e | Ok _ -> each f rest).
+mapR f xs = mapGo f xs Nil.
+mapGo f xs acc = case xs of
+    Nil -> Ok (L.reverse acc)
+  | x :: rest -> (case f x of Err e -> Err e | Ok v -> mapGo f rest (v :: acc)).
+
+# ---- paths --------------------------------------------------------------------------
+join a b = case a == "" of
+    True -> b
+  | False -> (case S.endsWith "/" a of True -> strcat a b | False -> "{a}/{b}").
+lastSlash p i | i < 0 = 0 - 1.
+lastSlash p i | charAt p i == 47 = i.
+lastSlash p i = lastSlash p (i - 1).
+parent p =
+  n = lastSlash p (strlen p - 1);
+  case n < 0 of
+    True -> "."
+  | False -> (case n == 0 of True -> "/" | False -> substr p 0 n).
+baseName p =
+  n = lastSlash p (strlen p - 1);
+  substr p (n + 1) (strlen p - n - 1).
+# ".c" of "a/b.c"; "" when the name has no dot (a leading dot is not a suffix)
+suffix p =
+  b = baseName p;
+  d = lastDot b (strlen b - 1);
+  case d <= 0 of True -> "" | False -> substr b d (strlen b - d).
+lastDot b i | i < 0 = 0 - 1.
+lastDot b i | charAt b i == 46 = i.
+lastDot b i = lastDot b (i - 1).
+stem p =
+  b = baseName p;
+  substr b 0 (strlen b - strlen (suffix p)).
+withoutSuffix p = substr p 0 (strlen p - strlen (suffix p)).
+isAbsolute p = S.startsWith "/" p.
+# p is root or below it (both resolved)
+inside root p = p == root or (S.startsWith (join root "") p and strlen p > strlen root).
+relativeTo root p = case S.startsWith (join root "") p of
+    True -> substr p (strlen (join root "")) (strlen p - strlen (join root ""))
+  | False -> p.
+
+absolute p = case isAbsolute p of True -> p | False -> join (OS.cwd Unit) p.
+
+mkdirs p = case H.isDir p or p == "" or p == "/" of
+    True -> Ok Unit
+  | False -> (case mkdirs (parent p) of
+      Err e -> Err e
+    | Ok _ -> (case OS.mkdir p of
+        Ok _ -> Ok Unit
+      | Err e -> (case H.isDir p of True -> Ok Unit | False -> Err "{p}: {e}"))).
+
+# every regular file under dir, as paths relative to it, sorted
+walk dir = walkGo dir "" |> (fn names -> L.sortWith S.compare names).
+walkGo dir rel =
+  here = (case rel == "" of True -> dir | False -> join dir rel);
+  case OS.listDir here of
+    Err _ -> Nil
+  | Ok names -> L.concatMap (fn n ->
+      r = (case rel == "" of True -> n | False -> join rel n);
+      p = join dir r;
+      (case H.kind p of
+        0 -> r :: Nil
+      | 1 -> walkGo dir r
+      | _ -> Nil)) names.
+
+# ---- files --------------------------------------------------------------------------
+readFile p = case OS.readFile p of
+    Ok t -> Ok t
+  | Err e -> Err "{p}: {e}".
+writeFile p bytes = case fileWrite p bytes of
+    Ok _ -> Ok Unit
+  | Err e -> Err "{p}: {e}".
+copyFile from to = readFile from |>? (fn b -> writeFile to b).
+digest p = case H.sha256File p of
+    Ok h -> Ok h
+  | Err e -> Err "{p}: {e}".
+
+say t = print t.
+warn t = Sys.stderr (strcat t "\n").
+
+# ---- text ---------------------------------------------------------------------------
+# json.dumps of a string with ensure_ascii=False (what manifests are written with)
+jsonStr t = strJoin "" ("\"" :: jsonGo t 0 (strlen t) 0 Nil).
+jsonGo t start i n acc | i >= n = L.reverse ("\"" :: substr t start (i - start) :: acc).
+jsonGo t start i n acc = case jsonEscape (charAt t i) of
+    O.None -> jsonGo t start (i + 1) n acc
+  | O.Some e -> jsonGo t (i + 1) (i + 1) n (e :: substr t start (i - start) :: acc).
+jsonEscape c = case c of
+    34 -> O.Some "\\\""
+  | 92 -> O.Some "\\\\"
+  | 10 -> O.Some "\\n"
+  | 13 -> O.Some "\\r"
+  | 9 -> O.Some "\\t"
+  | 8 -> O.Some "\\b"
+  | 12 -> O.Some "\\f"
+  | _ -> (case c < 32 of True -> O.Some "\\u00{hex2 c}" | False -> O.None).
+hex2 c = strcat (hexDigit (c / 16)) (hexDigit (c - (c / 16) * 16)).
+hexDigit d = substr "0123456789abcdef" d 1.
+
+# shlex.join, for the build log
+shellWord w = case strlen w > 0 and safeChars w 0 of
+    True -> w
+  | False -> strcat "'" (strcat (S.replace "'" "'\"'\"'" w) "'").
+safeChars w i | i >= strlen w = True.
+safeChars w i | safeChar (charAt w i) = safeChars w (i + 1).
+safeChars w i = False.
+safeChar c = (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or (c >= 48 and c <= 57)
+  or c == 64 or c == 37 or c == 43 or c == 61 or c == 58 or c == 44 or c == 46 or c == 47 or c == 45 or c == 95.
+shellJoin args = S.join " " (L.map shellWord args).
+
+lastLines n text =
+  ls = S.lines text;
+  S.join "\n" (L.drop (L.length ls - n) ls).
+
+# ---- the environment -----------------------------------------------------------------
+env name = case Sys.env name of Ok v -> O.Some v | Err _ -> O.None.
+
+# the first executable of that name on PATH
+which name = whichGo name (S.split ":" (O.withDefault "" (env "PATH"))).
+whichGo name dirs = case dirs of
+    Nil -> O.None
+  | d :: rest ->
+      p = join (case d == "" of True -> "." | False -> d) name;
+      (case H.isFile p or (H.kind p == 2 and H.isFile (O.withDefault "" (O.fromResult (H.realpath p)))) of
+        True -> O.Some p
+      | False -> whichGo name rest).
+
+# ---- commands and the build log ----------------------------------------------------------
+# log: { fd, path, verbose }
+openLog path verbose = case OS.open path "w" of
+    Err e -> Err "{path}: {e}"
+  | Ok fd -> Ok { fd = fd, path = path, verbose = verbose }.
+logWrite log t = writeAll log.fd t.
+writeAll fd t = case strlen t == 0 of
+    True -> Unit
+  | False -> (case OS.write fd t of
+      Ok n -> (case n >= strlen t of True -> Unit | False -> writeAll fd (substr t n (strlen t - n)))
+    | Err _ -> Unit).
+closeLog log = OS.close log.fd.
+
+# run a tool; its output goes to the log, and on failure its tail to stderr
+run log args cwd = case args of
+    Nil -> Err "no command"
+  | tool :: _ ->
+      line = strcat "+ " (shellJoin args);
+      _ = logWrite log (strcat line "\n");
+      _ = (case log.verbose of True -> say line | False -> Unit);
+      (case OS.run args cwd "" Nil 0 of
+        Err e -> Err "{baseName tool}: {e}"
+      | Ok (code, out, err) ->
+          output = strcat out err;
+          _ = logWrite log output;
+          _ = (case log.verbose and strlen output > 0 of True -> writeAll 1 output | False -> Unit);
+          (case code == 0 of
+            True -> Ok Unit
+          | False ->
+              _ = (case log.verbose of True -> Unit | False -> warn (lastLines 60 output));
+              Err "{baseName tool} failed; see {log.path}")).
+
+# ---- sdk.json ----------------------------------------------------------------------------
+field k v = J.field k v.
+textField k v = case J.field k v of O.Some (J.Text t) -> O.Some t | _ -> O.None.
+textOr d k v = O.withDefault d (textField k v).
+textIs k v want = case textField k v of O.Some t -> t == want | O.None -> False.
+intField k v = case J.field k v of O.Some (J.Integer n) -> O.Some n | _ -> O.None.
+objectField k v = case J.field k v of O.Some (J.Object m) -> O.Some m | _ -> O.None.
+listField k v = case J.field k v of O.Some (J.Sequence xs) -> O.Some xs | _ -> O.None.
+textMap m = M.fold (fn acc k v -> case v of J.Text t -> (k, t) :: acc | _ -> acc) Nil m |> L.reverse.
