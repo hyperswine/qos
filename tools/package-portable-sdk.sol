@@ -70,7 +70,7 @@ compareParts a b = case (a, b) of
   | (_, []) -> 1
   | (x :: xs, y :: ys) -> if x == y then compareParts xs ys else (if x < y then 0 - 1 else 1).
 
-linked path = List.map Str.trim (List.drop 1 (K.lines (K.command ["/usr/bin/otool", "-L", path]))).
+linked path = List.drop 1 (K.lines (K.command ["/usr/bin/otool", "-L", path])).
 
 package : unsafe String -> String -> String -> String -> String -> Unit .
 package root prefix version output licenses =
