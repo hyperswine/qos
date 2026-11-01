@@ -10,8 +10,9 @@ denied and the staged SDK read-only:
    `qos run`);
 2. the archive records loadMode = "process" and this SDK's platform hash;
 3. a copy of the SDK with one platform byte changed is refused by name;
-4. with --baseline, a fresh v1 desktop project builds byte-identically with
-   the baseline SDK (for example the installed 0.2.0) and the staged one.
+4. with --baseline (for example the installed 0.2.0), every desktop build
+   input except the builder equals the baseline's, and a fresh v1 desktop
+   project builds byte-identically with the baseline's builder and this one.
 
 Stages no software itself.
 """
@@ -52,6 +53,38 @@ def writable(prefix):
     for p in prefix.rglob("*"):
         if not p.is_symlink():
             p.chmod(p.stat().st_mode | 0o200)
+
+
+# What a v1 desktop build reads, apart from the builder (tools/portable_sdk.py).
+DESKTOP_INPUTS = ("compiler/", "modules/", "support/", "tools/desktop-adapter.fpr.in",
+                  "tools/desktop-counter.fpr", "tools/mkimports.py", "tools/mkqa.py", "tools/qos_archive.py")
+
+
+def v1_identity(baseline, prefix, out, run, evidence):
+    """A v1 desktop project builds byte-identically with the baseline builder and this one.
+
+    The compiler's unit order depends on where the SDK is installed, so two
+    SDKs at different paths can emit different bytes from identical inputs
+    (0.2.0 does this too). The check therefore requires every other input
+    to equal the baseline's, and runs both builders from one SDK location.
+    """
+    base = baseline / "libexec/qos-portable"
+    staged = prefix / "libexec/qos-portable"
+    pick = lambda tree: {k: v for k, v in tree_hashes(tree).items() if k.startswith(DESKTOP_INPUTS)}
+    assert pick(base) == pick(staged), "staged desktop inputs differ from the baseline SDK's"
+    for key in ("abi", "portableAbi", "compilerSha256", "desktopApi", "desktopSession"):
+        assert json.loads((base / "sdk.json").read_text())[key] == json.loads((staged / "sdk.json").read_text())[key], key
+    sdk = out / "v1-sdk"
+    shutil.copytree(prefix, sdk, symlinks=True)
+    run([sdk / "bin/qos", "new", "identity"], "v1-scaffold.log")
+    run([sdk / "bin/qos", "build"], "v1-staged.log", cwd=out / "identity")
+    new = (out / "identity/build/identity.qa").read_bytes()
+    shutil.copy2(base / "tools/portable_sdk.py", sdk / "libexec/qos-portable/tools/portable_sdk.py")
+    run([sdk / "bin/qos", "build"], "v1-baseline.log", cwd=out / "identity")
+    old = (out / "identity/build/identity.qa").read_bytes()
+    assert old == new, "v1 desktop build differs from the baseline builder's"
+    evidence["v1ByteIdentical"] = dict(archiveSha256=hashlib.sha256(new).hexdigest(), baseline=str(base),
+                                       inputsCompared=len(pick(base)))
 
 
 def main():
@@ -132,17 +165,12 @@ def main():
                                                    manifest=manifest, checks=result.get("checks"))
             for png in (copy / "evidence").glob("*.png"):
                 shutil.copy2(png, out / f"{copy.name}-{png.name}")
-        if args.baseline:
-            run([args.baseline.resolve() / "bin/qos", "new", "identity"], "v1-scaffold.log")
-            run([args.baseline.resolve() / "bin/qos", "build"], "v1-baseline.log", cwd=out / "identity")
-            old = (out / "identity/build/identity.qa").read_bytes()
-            run([prefix / "bin/qos", "build"], "v1-staged.log", cwd=out / "identity")
-            new = (out / "identity/build/identity.qa").read_bytes()
-            assert old == new, "v1 desktop build differs from the baseline SDK"
-            evidence["v1ByteIdentical"] = hashlib.sha256(new).hexdigest()
         assert tree_hashes(prefix) == before, "the SDK changed during the acceptance"
     finally:
         writable(prefix)
+
+    if args.baseline:
+        v1_identity(args.baseline.resolve(), prefix, out, run, evidence)
 
     # One changed platform byte is refused by name; nothing is linked from it.
     tampered = out / "tampered"

@@ -138,10 +138,22 @@ terra-ii 39 s (compiler peak 557 MB), dungeon 26 s.
 holding the checkouts, both projects, the FP-RISC pin, GHC and Cabal denied,
 and the staged SDK read-only. For each project it copies the tracked files
 (and refuses a `support/` folder), runs `qos build`, checks the archive's
-manifest, and runs the project's own `sol tests/check.sol`. Then it builds a
-fresh v1 desktop project with a baseline SDK and with the staged SDK in the
-same folder and requires identical bytes, checks the SDK did not change, and
-checks that a copy of the SDK with one byte added to `hal.c` is refused.
+manifest, and runs the project's own `sol tests/check.sol`. It checks the
+SDK did not change, then does the v1 identity check (below), and checks that
+a copy of the SDK with one byte added to `hal.c` is refused.
+
+**The v1 identity check holds the SDK's location fixed.** The compiler's
+unit order depends on where the SDK is installed: the same compiler and
+modules at another path emit the same units in a different order, so the
+image differs. SDK 0.2.0 does this too; it is not caused by this change.
+Measured: a v1 project built by the 0.2.0 builder and by this builder from
+the same staged SDK gives identical bytes (`3889a2b2…`), while the installed
+0.2.0 keg gives `f7b2ff28…` for the same project. So the check requires
+every desktop input except the builder (`compiler/`, `modules/`,
+`support/`, the adapter, `mkimports.py`, `mkqa.py`, `qos_archive.py`, and
+the ABI and compiler hash in `sdk.json`) to equal the baseline SDK's, then
+builds with this builder and with the baseline's `portable_sdk.py` from one
+copy of the staged SDK and requires identical bytes.
 
 ```sh
 # fprisc-pin at 94f699b; the compiler is the 0.2.0 package's (b20b50c4...)
@@ -155,7 +167,16 @@ python3 tools/portable-app-check.py --sdk STAGE --project ../dungeon --project .
 PROFILE_DIR held the installed 0.2.0 profile archives, and `qos/qosp`,
 `qos/qosp-gl` in this tree are byte-identical to 0.2.0's.
 
-Result: see [evidence](evidence/2026-11-01-sdk-process-apps.json).
+Result, from an SDK staged at QOS `2307391` (clean) and FP-RISC `94f699b`:
+passed. dungeon's rule suite and game check and terra-ii's game check pass
+inside the sandbox; the v1 check compared 309 desktop inputs with the
+installed 0.2.0 keg and got identical bytes from both builders; the
+tampered `hal.c` was refused. The desktop acceptance
+(`tools/portable-sdk-check.py --gui`, which uses `qos run DISK`) also holds
+on the same stage. A dry run of `tools/package-portable-sdk.py` packaged the
+stage (with `platform/*.c`) locally, and the packaged copy, which has
+`release = "0.3.0"`, accepted `version = "0.3.0"` and refused `"=0.2.0"`
+and `"0.4.0"`. See the [evidence](evidence/2026-11-01-sdk-process-apps.json).
 
 ## Not done
 
@@ -163,6 +184,7 @@ Result: see [evidence](evidence/2026-11-01-sdk-process-apps.json).
   override will be checked against.
 - The Python-free `qos` command and a shipped `lld` (step 4).
 - `qos new` has no `kind = "app"` template.
-- `tools/portable-sdk-check.py` (the desktop acceptance) was not rerun; the
-  v1 byte-identity check above covers the desktop build path.
 - No release, Homebrew formula or tap change.
+- Builds are not reproducible across install locations (above). That is a
+  compiler matter for FP-RISC (unit order should not depend on paths); it
+  matters for `qosmeta`, which installs SDKs under `~/.qos/VERSION`.
