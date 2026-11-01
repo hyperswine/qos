@@ -500,8 +500,10 @@ FPR_FN(fpr_g_timeNow, h_timeNow, 1);
 FPR_FN(fpr_g_glSavePpm, h_glSavePpm, 1);
 FPR_FN(fpr_g_inputPoll, h_inputPoll, 1);
 
-/* Shared actor binding; Portable uses its socket transport inside the actor. */
-#include "../../hal/net_actor_bridge.c"
+/* Shared actor binding; Portable uses its socket transport inside the actor.
+ * Found by -I (QOS: hal/; the installed SDK: platform/hal/), so an image
+ * build never has to copy this tree's folder layout. */
+#include "net_actor_bridge.c"
 
 /* ---- Sys.captureConsole / takeConsole / releaseConsole -------------------
  * (the capture above; declared in core/foreign.fpr) */

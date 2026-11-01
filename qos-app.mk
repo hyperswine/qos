@@ -38,7 +38,7 @@ $(BUILD)/qosapp-prog.s: fprc $(SOURCE) $(FPRISC_ROOT)/core/prelude.fpr FORCE
 QOSAPP_X64_LINK = gcc -O2 -Wall -Wextra -ffreestanding -nostdlib -nostartfiles -static \
 	  -fno-stack-protector -fno-asynchronous-unwind-tables -fno-pic -mcmodel=large \
 	  -DFPR_POSIX -DFPR_QOSAPP -DFPR_NHARTS=$(QOSHARTS) -DFPR_SLAB_SZ=$(QOSSLAB) -DFPR_STACK_SZ=$(QOSSTACK) $(QOSCFLAGS_EXTRA) \
-	  -I$(FRUNTIME) -I$(QOS)/appside \
+	  -I$(FRUNTIME) -I$(QOS)/appside -I$(HAL) \
 	  -T $(QOS)/appside/link-qosapp.ld -Wl,--emit-relocs \
 	  -Wl,--defsym=_heap_start=_proc_image_end -Wl,--defsym=_heap_end=_proc_image_end \
 	  -Wl,--build-id=none -Wl,-z,noexecstack \
@@ -75,7 +75,7 @@ QOSAPP_A64_LINK = clang --target=aarch64-none-elf -fuse-ld=lld -O2 -Wall -Wextra
 	  -ffreestanding -nostdlib -nostartfiles -fno-stack-protector \
 	  -fno-asynchronous-unwind-tables -fno-pic -ffixed-x18 -ffixed-x27 -ffixed-x28 \
 	  -DFPR_POSIX -DFPR_QOSAPP $(QOS_BASE_FLAG) -DFPR_NHARTS=$(QOSHARTS) -DFPR_SLAB_SZ=$(QOSSLAB) -DFPR_STACK_SZ=$(QOSSTACK) $(QOSCFLAGS_EXTRA) \
-	  -I$(FRUNTIME) -I$(QOS)/appside \
+	  -I$(FRUNTIME) -I$(QOS)/appside -I$(HAL) \
 	  -T $(QOS)/appside/link-qosapp-a64.ld -Wl,--emit-relocs \
 	  -Wl,--defsym=_heap_start=_proc_image_end -Wl,--defsym=_heap_end=_proc_image_end \
 	  $(BUILD)/qosapp-a64.s $$(cat $(BUILD)/qosapp-a64.s.units) \
@@ -207,7 +207,7 @@ $(BUILD)/qosapp-rv64.s: fprc $(SOURCE) $(FPRISC_ROOT)/core/prelude.fpr FORCE
 
 QOSAPP_RV64_LINK = $(QOS_RV64_CC) $(RV64_IMAGE_FLAGS) \
   -DFPR_POSIX -DFPR_QOSAPP -DFPR_NHARTS=$(QOSHARTS) -DFPR_SLAB_SZ=$(QOSSLAB) \
-  -DFPR_STACK_SZ=$(QOSSTACK) $(QOSCFLAGS_EXTRA) -I$(FRUNTIME) -I$(QOS)/appside \
+  -DFPR_STACK_SZ=$(QOSSTACK) $(QOSCFLAGS_EXTRA) -I$(FRUNTIME) -I$(QOS)/appside -I$(HAL) \
   -T $(QOS)/appside/link-qosapp-rv64.ld \
   -Wl,--defsym=_heap_start=_proc_image_end -Wl,--defsym=_heap_end=_proc_image_end \
   $(BUILD)/qosapp-rv64.s $$(cat $(BUILD)/qosapp-rv64.s.units) \

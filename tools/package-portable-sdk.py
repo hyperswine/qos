@@ -57,7 +57,10 @@ def package(prefix, version, output, compiler_licenses):
     if (prefix / 'bin/fpr').exists() or (prefix / 'bin/fpr').is_symlink():
         raise ValueError('stage exports bin/fpr; restage with this tree (only bin/qos is exported)')
     for path in sdk.rglob('*'):
-        if path.suffix in ('.disk', '.hs', '.c') or path.name == '.git':
+        # C sources ship only as the private kind = "app" platform inputs.
+        relative = path.relative_to(sdk)
+        if (path.suffix in ('.disk', '.hs') or path.name == '.git'
+                or (path.suffix == '.c' and relative.parts[0] != 'platform')):
             raise ValueError(f'unexpected release file: {path}')
     # Do not advertise older systems than the binaries actually target.
     minos = []

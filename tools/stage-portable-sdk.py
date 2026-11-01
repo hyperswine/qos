@@ -14,7 +14,7 @@ import subprocess
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from portable_sdk import API, SESSION, native
+from portable_sdk import API, SESSION, native, platform_digest
 import qos_archive
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -30,6 +30,24 @@ def modules(source, destination):
         for p in sorted(source.rglob("*")):
             if p.is_file() and (p.suffix in (".fpr", ".txt") or p.name == "versions.db"):
                 copy(p, destination / p.relative_to(source))
+
+
+# kind = "app" build inputs (docs/2026-11-01-SDK-PROCESS-APPS.md): private,
+# hashed, and never a public interface. Installed path -> source path. The
+# runtime C and context switch come from the same FP-RISC tree as the
+# compiler, so an image never mixes two releases.
+def platform_sources(fprisc):
+    files = {f"appside/{name}": ROOT / "qos/appside" / name
+             for name in ("entry.c", "hal.c", "support.c", "qos_abi.h", "link-qosapp-a64.ld")}
+    files.update({"store_abi.h": ROOT / "qos/store_abi.h",  # entry.c: "../store_abi.h"
+                  "portable/sha256.c": ROOT / "qos/portable/sha256.c",
+                  "loader/qaimg.c": ROOT / "loader/qaimg.c",
+                  "hal/net_actor_bridge.c": ROOT / "hal/net_actor_bridge.c",
+                  "machine/unix/ctx_a64.S": fprisc / "machine/unix/ctx_a64.S"})
+    for name in ("runtime.c", "i32.c", "actors.c", "bits.c", "vec.c", "sstr.c", "mod.c", "buddy.c",
+                 "fpr.h", "i32.h", "vec_layout.h"):
+        files[f"runtime/{name}"] = fprisc / "runtime" / name
+    return files
 
 
 def revision(tree):
@@ -64,9 +82,15 @@ def main():
     for folder in ("core", "std", "programs/mods", ".fpr"):
         modules(ROOT / folder, sdk / "modules" / folder)
     modules(ROOT / "sdk", sdk / "modules")
-    for name in ("portable_sdk.py", "desktop-adapter.fpr.in", "desktop-counter.fpr", "mkimports.py", "mkqa.py", "mkdisk.py", "qos_archive.py", "qos_disk.py", "desktop_install.py"):
+    for name in ("portable_sdk.py", "desktop-adapter.fpr.in", "desktop-counter.fpr", "mkimports.py", "mkexports.py", "mkqa.py", "mkdisk.py", "qos_archive.py", "qos_disk.py", "desktop_install.py"):
         copy(ROOT / "tools" / name, sdk / "tools" / name)
     copy(ROOT / "qos/appside/link-qosplug.ld", sdk / "support/link-qosplug.ld")
+    platform_files = {}
+    for name, source in sorted(platform_sources(fprisc).items()):
+        if not source.is_file():
+            ap.error(f"platform input missing: {source}")
+        copy(source, sdk / "platform" / name)
+        platform_files[name] = hashlib.sha256((sdk / "platform" / name).read_bytes()).hexdigest()
     abi = re.search(r"#define\s+QOS_ABI_VERSION\s+(\d+)", (ROOT / "qos/appside/qos_abi.h").read_text())[1]
     codegen = re.search(r"^codegenRev = (\d+)", (fprisc / "compiler/Codegen.hs").read_text(), re.M)[1]
     meta = dict(format=1, abi=f"{abi}.{codegen}", desktopApi=API, desktopSession=SESSION, architecture=arch,
@@ -74,7 +98,8 @@ def main():
                 qosRevision=revision(ROOT), fpriscRevision=revision(fprisc),
                 qosDirty=bool(subprocess.check_output(["git", "-C", str(ROOT), "status", "--porcelain"], text=True)),
                 fpriscDirty=bool(subprocess.check_output(["git", "-C", str(fprisc), "status", "--porcelain"], text=True)),
-                dependencies=["Python >=3.11", "Clang (ELF assembler)", "lld (ELF linker)"])
+                dependencies=["Python >=3.11", "Clang (ELF assembler)", "lld (ELF linker)"],
+                platformFiles=platform_files, platformSha256=platform_digest(platform_files))
     if args.profile:
         for artifact in args.profile.glob("*.qa"):
             if artifact.is_file():
