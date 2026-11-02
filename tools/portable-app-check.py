@@ -157,6 +157,8 @@ def main():
                     help="additional source/worktree root to deny during qualification")
     ap.add_argument("--repin-projects", action="store_true",
                     help="explicitly repin only the temporary project copies to this release")
+    ap.add_argument("--host-toolchain", type=Path,
+                    help="installed FP-RISC prefix for the projects' Sol checks and native rule tests")
     ap.add_argument("--output", type=Path, required=True)
     args = ap.parse_args()
     if sys.platform != "darwin":
@@ -171,7 +173,7 @@ def main():
     # No Python: the SDK's `qos` is native. lld only when the SDK ships none.
     ships_lld = (sdk / "toolchain/ld.lld").is_file()
     for name in ("clang", "sol", "fpr", "cc", "cat") + (() if ships_lld else ("ld.lld",)):
-        found = shutil.which(name)
+        found = (args.host_toolchain / "bin" / name) if args.host_toolchain and name in ("fpr", "sol") else shutil.which(name)
         assert found, name
         (restricted / name).symlink_to(Path(found).resolve())
     assert not [p for p in sdk.rglob("*.py")], "the SDK ships Python files"
@@ -190,6 +192,7 @@ def main():
     guard = ["/usr/bin/sandbox-exec", "-f", str(policy)]
     evidence = dict(sdk=str(prefix), platformSha256=meta["platformSha256"], compilerSha256=meta["compilerSha256"],
                     denied=list(map(str, blocked)), projects={}, pythonOnPath=False,
+                    hostToolchain=str(args.host_toolchain.resolve()) if args.host_toolchain else None,
                     toolchainLld=meta.get("toolchainLld"), pathTools=sorted(p.name for p in restricted.iterdir()))
 
     def run(command, log, cwd=out, expect=0, timeout=900, env=env):
