@@ -41,6 +41,8 @@ def main():
     ap.add_argument("--driver", type=Path, required=True)
     ap.add_argument("--fprisc", type=Path, default=ROOT.parent / "fprisc")
     ap.add_argument("--output", type=Path, required=True)
+    ap.add_argument("--deny-source", type=Path, action="append", default=[],
+                    help="additional source/worktree root to deny during qualification")
     ap.add_argument("--gui", action="store_true")
     args = ap.parse_args()
     if sys.platform != "darwin":
@@ -77,7 +79,8 @@ def main():
                XDG_CACHE_HOME=str(out / "cache"), PYTHONDONTWRITEBYTECODE="1")
     (out / "home").mkdir()
     # The folder holding the checkouts also covers sibling worktrees and the main checkouts.
-    blocked = [ROOT, args.fprisc.resolve(), ROOT.parent, Path.home() / ".ghcup", Path.home() / ".cabal"]
+    blocked = [ROOT, args.fprisc.resolve(), ROOT.parent, Path.home() / ".ghcup", Path.home() / ".cabal",
+               *(p.resolve() for p in args.deny_source)]
     policy = out / "source-free.sb"
     policy.write_text('(version 1)\n(allow default)\n' + ''.join(
         f'(deny file-read* file-write* (subpath {json.dumps(str(path))}))\n' for path in blocked))
