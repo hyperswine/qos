@@ -67,6 +67,12 @@ resolve this gate before promotion, rather than publish around it.
 
 [Machine-readable evidence](evidence/2026-11-02-portable-sdk-0.4.0-release.json)
 retains the complete service results and diagnostic logs. The candidate is
-preserved on `sdk-0.4.0-candidate`; main retains its previously qualified compiler
+preserved on `sdk-0.4.0-candidate`; main retains its previous compiler
 pin until the candidate is admitted. All testing here is hosted macOS ARM64,
 not a new Pi deployment or an automatic native-disk migration.
+
+During final sync, FP-RISC main also gained independent list-fusion and fuel-tick
+changes. The tested compiler pin is retained on FP-RISC's
+`qos-sdk-0.4.0-compiler` branch. Refresh the candidate to the then-current main
+and requalify it before promotion; the evidence here belongs to the frozen
+compiler above.
