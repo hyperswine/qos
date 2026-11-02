@@ -719,5 +719,7 @@
     "unmodifiedPriorPairFailureLog": "blk: /private/tmp/qos-0.4.0-release-work/preferences-original-baseline.disk created, 2048 pages of 4096 bytes\nqosp: hosting preferences (1 harts, abi v22)\n[host] blk: /private/tmp/qos-0.4.0-release-work/preferences-original-baseline.disk created, 2048 pages of 4096 bytes\n[host] qosp: hosting preferences (1 harts, abi v22)\n[ERR] preferences: preference endpoint retention\n\n*** FPRISC PANIC [actor 0]: preferences: preference endpoint retention ***\n",
     "unmodifiedPriorPairExit": 1,
     "preexistingFailureConfirmed": true
-  }
+  },
+  "candidateCompilerBranch": "qos-sdk-0.4.0-compiler",
+  "syncNote": "FP-RISC main gained independent list-fusion and fuel-tick changes during qualification. The frozen candidate pin is preserved on its own branch; refresh and requalify it before eventual promotion."
 }
