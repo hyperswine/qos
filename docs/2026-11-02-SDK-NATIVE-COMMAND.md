@@ -177,3 +177,26 @@ at QOS `ef1cfe8` (clean) and FP-RISC `94f699b`, with the
 - **`qos run DISK` replaces itself with the host,** as `qos run PROJECT`
   does; the Python builder waited for it. The exit status is the host's
   either way.
+
+## Pin policy and reproducibility follow-up (2 November)
+
+The native and reference builders now agree with the managers: compatible
+`0.x` pins stay within their minor series; stable pins exclude prereleases;
+exact pins include the complete tag. Explicit prerelease pins opt in to tagged
+versions and numeric identifiers sort numerically. The installed SDK's next
+release must carry this change; manager updates cannot change SDK 0.3.0's
+already packaged builder. Development stages without a release number retain
+their explicit unchecked-pin warning.
+
+An exact `[sdk] version` pin selects the SDK and its private compiler. It does
+not pin host Clang or the system SDK, remove environment overrides, or fix
+install/source/output paths. The fixed-path upgrade check is not a hermetic
+or cross-machine reproducibility guarantee. The install-location and linker
+build-path differences above remain open. See FP-RISC's
+[packaging contract corrections](https://github.com/hyperswine/fprisc/blob/main/docs/2026-11-02-PACKAGING-CONTRACT-FIXES.md)
+for the shared signing, install recovery and reproducibility contracts.
+
+Native/reference pin parity can be run by building `tools/qos-pin-check.fpr`
+with `tools/qos/host.c` and setting `QOS_PIN_TEST_BINARY` when running
+`python3 tools/portable-sdk-test.py`. This exercises 20 version combinations,
+including prerelease tags, exact pins and incompatible minor upgrades.

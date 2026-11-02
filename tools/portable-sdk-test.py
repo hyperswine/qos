@@ -3,6 +3,8 @@
 from pathlib import Path
 import tempfile
 import json
+import os
+import subprocess
 from unittest.mock import patch
 import unittest
 import portable_sdk as sdk
@@ -142,15 +144,41 @@ class ManifestV2(unittest.TestCase):
 
     def test_sdk_pin(self):
         pin = {"version": "0.3.0"}
-        for release in ("0.3.0", "0.3.1", "0.4.0"):
+        for release in ("0.3.0", "0.3.1"):
             sdk.check_sdk_version(pin, {"release": release})
-        for release in ("0.2.0", "1.0.0"):
+        for release in ("0.2.0", "0.4.0", "1.0.0", "0.3.2-dev"):
             with self.assertRaises(ValueError):
                 sdk.check_sdk_version(pin, {"release": release})
         sdk.check_sdk_version({"version": "=0.3.0"}, {"release": "0.3.0"})
         with self.assertRaisesRegex(ValueError, "pins SDK =0.3.0"):
             sdk.check_sdk_version({"version": "=0.3.0"}, {"release": "0.3.1"})
         sdk.check_sdk_version(pin, {})  # a development stage says so and builds
+
+    def test_prerelease_policy_and_native_parity(self):
+        cases = [
+            ("0.3.0", "0.3.0", True), ("0.3.0", "0.3.1", True),
+            ("0.3.0", "0.4.0", False), ("0.3.0", "0.3.1-dev", False),
+            ("=0.3.0", "0.3.0-rc.1", False), ("=0.3.0-rc.1", "0.3.0", False),
+            ("=0.3.0-rc.1", "0.3.0-rc.1", True), ("0.3.0-rc.2", "0.3.0-rc.10", True),
+            ("0.3.0-rc.10", "0.3.0-rc.2", False), ("0.3.0-rc.2", "0.3.0", True),
+            ("0.3.0-rc.2", "0.3.1-dev", True), ("1.2.0", "1.3.0", True),
+            ("1.2.0", "2.0.0", False), ("0.3.0-rc.1000000000000000000000", "0.3.0-rc.999999999999999999999", False),
+            ("00.3.0", "0.3.0", False), ("0.3.0", "00.3.0", False),
+            ("0.3", "0.3.0", False), ("0.3.0-", "0.3.0", False),
+            ("0.3.0-a", "0.3.0-00", False), ("0.3.0", "999999999999999999999.3.0", False),
+        ]
+        native = os.environ.get("QOS_PIN_TEST_BINARY")
+        for wanted, release, expected in cases:
+            with self.subTest(wanted=wanted, release=release):
+                accepted = True
+                try:
+                    sdk.check_sdk_version({"version": wanted}, {"release": release})
+                except ValueError:
+                    accepted = False
+                self.assertEqual(accepted, expected)
+                if native:
+                    result = subprocess.run([native, wanted, release], capture_output=True, text=True, check=True)
+                    self.assertEqual(result.stdout.strip(), "accepted" if expected else "refused")
 
     def test_compiler_settings(self):
         env = {"GHCRTS": "-M1M", "PATH": "/bin"}

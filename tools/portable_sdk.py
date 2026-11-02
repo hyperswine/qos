@@ -41,7 +41,13 @@ MANIFEST_V2 = {"app": ({"id", "name", "version", "kind"}, set()),
 # the optional optimisations a very large program may not afford.
 OPTIMIZE = {"full": (), "checks-only": ("SPEC", "INLINE", "REUSE", "VEC_PEEK", "VEC_FUSE", "RECEIVE_TURNS")}
 DISPLAYS = {"gl": "qosp-gl", "none": "qosp"}
-SDK_VERSION = re.compile(r"(=?)(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)")
+SDK_VERSION = re.compile(r"(=?)(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*))?")
+
+def sdk_version(text):
+    match = SDK_VERSION.fullmatch(text)
+    if match and all(int(n) <= 4611686018427387903 for n in match.group(2, 3, 4)):
+        return match
+    return None
 
 # kind = "app": the platform units, in link order, and the build settings
 # they are compiled with. Both are part of the platform cache key.
@@ -185,7 +191,7 @@ def load_v2(path, data):
         fail(f"run.display must be one of: {', '.join(DISPLAYS)}")
     positive(run, "disk-mb", 1)
     positive(run, "port", 0, 65535)  # a TCP port; 0 lets the host pick a free one
-    if pin and (not isinstance(pin["version"], str) or not SDK_VERSION.fullmatch(pin["version"])):
+    if pin and (not isinstance(pin["version"], str) or not sdk_version(pin["version"])):
         fail('sdk.version must be "X.Y.Z" (that release or a later compatible one) or "=X.Y.Z" (exactly)')
     if platform and app["kind"] != "app":
         fail('[platform] applies to kind = "app"; a desktop app links no platform files')
@@ -258,19 +264,28 @@ def platform_record(overrides, added):
 def check_sdk_version(pin, meta):
     if not pin:
         return
-    exact, *wanted = SDK_VERSION.fullmatch(pin["version"]).groups()
+    match = sdk_version(pin["version"])
+    if not match:
+        fail("invalid SDK version pin")
+    exact, *parts = match.groups()
+    wanted, wanted_tag = tuple(map(int, parts[:3])), parts[3] or ""
     release = meta.get("release")
     if not release:
         print(f"qos: this is a development SDK with no release number; sdk.version = {pin['version']!r} is not checked")
         return
-    have = SDK_VERSION.fullmatch(release)
+    have = sdk_version(release)
     if not have or have[1]:
         fail(f"SDK release {release!r} is not X.Y.Z")
-    have, wanted = tuple(map(int, have.groups()[1:])), tuple(map(int, wanted))
-    if exact and have != wanted:
-        fail(f"qos.toml pins SDK ={'.'.join(map(str, wanted))}; this is QOS Portable {release}")
-    if not exact and (have[0] != wanted[0] or have < wanted):
-        fail(f"qos.toml needs SDK {'.'.join(map(str, wanted))} or a later {wanted[0]}.x; this is QOS Portable {release}")
+    actual, actual_tag = tuple(map(int, have.groups()[1:4])), have[5] or ""
+    def series(v):
+        return v[:2] if v[0] == 0 else v[:1]
+    def tag_key(tag):
+        return (1,) if not tag else (0, tuple((0, int(p)) if p.isdigit() else (1, p) for p in tag.split(".")))
+    if exact and (actual, actual_tag) != (wanted, wanted_tag):
+        fail(f"qos.toml pins SDK {pin['version']}; this is QOS Portable {release}")
+    if not exact and (series(actual) != series(wanted) or (actual_tag and not wanted_tag)
+                      or (actual, tag_key(actual_tag)) < (wanted, tag_key(wanted_tag))):
+        fail(f"qos.toml needs SDK {pin['version']} or a later compatible release; this is QOS Portable {release}")
 
 
 def digest(path):

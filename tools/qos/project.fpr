@@ -9,6 +9,7 @@ L = use "std/list".
 M = use "std/map".
 O = use "std/option".
 S = use "std/string".
+V = use "version".
 
 empty = J.Object (M.empty S.compare).
 keys v = case v of J.Object m -> M.keys m | _ -> Nil.
@@ -154,16 +155,7 @@ v2Values root data =
   entryFile root build |>? (fn entry ->
   Ok { root = root, manifest = 2, app = app, build = build, run = run, sdk = pin, platform = platform, entry = entry }))))))))))))).
 
-sdkPin v = case v of O.Some t -> O.isSome (version t) | O.None -> False.
-# "=X.Y.Z" or "X.Y.Z" -> Some (exact, (x, y, z))
-version t =
-  exact = S.startsWith "=" t;
-  body = (case exact of True -> substr t 1 (strlen t - 1) | False -> t);
-  case S.split "." body of
-    a :: b :: c :: Nil -> (case Q.nat a and Q.nat b and Q.nat c of
-        True -> O.Some (exact, (Q.toNat a, Q.toNat b, Q.toNat c))
-      | False -> O.None)
-  | _ -> O.None.
+sdkPin v = case v of O.Some t -> (case V.parsePin t of Ok _ -> True | Err _ -> False) | O.None -> False.
 
 overrideOf platform = case J.field "override" platform of
     O.None -> Ok Nil
@@ -224,24 +216,17 @@ chooseOverride root files overridable name value = case L.member name files of
 
 checkSdkVersion pin meta = case text "version" pin of
     O.None -> Ok Unit
-  | O.Some wanted -> (case version wanted of
-      O.None -> Err "sdk.version must be \"X.Y.Z\" (that release or a later compatible one) or \"=X.Y.Z\" (exactly)"
-    | O.Some (exact, w) -> (case C.textField "release" meta of
+  | O.Some wanted -> (case V.parsePin wanted of
+      Err _ -> Err "sdk.version must be \"X.Y.Z\" (that release or a later compatible one) or \"=X.Y.Z\" (exactly)"
+    | Ok pin -> (case C.textField "release" meta of
         O.None ->
           _ = C.say "qos: this is a development SDK with no release number; sdk.version = '{wanted}' is not checked";
           Ok Unit
-      | O.Some release -> (case version release of
-          O.None -> Err "SDK release '{release}' is not X.Y.Z"
-        | O.Some (True, _) -> Err "SDK release '{release}' is not X.Y.Z"
-        | O.Some (False, have) -> compareVersions exact w have release))).
-compareVersions exact w have release = case (w, have) of
-    ((a, b, c), (x, y, z)) -> (case exact of
-        True -> (case a == x and b == y and c == z of
-            True -> Ok Unit
-          | False -> Err "qos.toml pins SDK ={a}.{b}.{c}; this is QOS Portable {release}")
-      | False -> (case a == x and (y > b or (y == b and z >= c)) of
-          True -> Ok Unit
-        | False -> Err "qos.toml needs SDK {a}.{b}.{c} or a later {a}.x; this is QOS Portable {release}")).
+      | O.Some release -> (case V.parse release of
+          Err _ -> Err "SDK release '{release}' is not X.Y.Z"
+        | Ok have -> if V.satisfies pin have then Ok Unit
+          else if pin.exact then Err "qos.toml pins SDK {wanted}; this is QOS Portable {release}"
+          else Err "qos.toml needs SDK {wanted} or a later compatible release; this is QOS Portable {release}"))).
 
 # the strings of a project's tables
 appText k p = O.withDefault "" (text k p.app).

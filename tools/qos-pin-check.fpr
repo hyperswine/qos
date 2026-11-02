@@ -1,0 +1,11 @@
+# Native half of portable-sdk-test.py's version policy parity check.
+unsafe base.
+P = use "qos/project".
+J = use "std/json".
+Program = use "std/program".
+main = case Program.args Unit of
+    wanted :: release :: Nil ->
+      (case P.checkSdkVersion (J.object [("version", J.Text wanted)]) (J.object [("release", J.Text release)]) of
+          Ok _ -> print "accepted"
+        | Err _ -> print "refused")
+  | _ -> Program.fail 2 "usage: qos-pin-check PIN RELEASE".
