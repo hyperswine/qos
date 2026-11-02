@@ -248,6 +248,46 @@ class Installer(unittest.TestCase):
                 install.install(self.sdk, self.qa, self.path)
             self.assertEqual(self.path.read_bytes(), before)
 
+    # Ported from the unmerged portable-install branch (2026-11-02): the three
+    # refusals it covered that this suite did not.
+
+    def test_pending_qos_operation_refused_without_writes(self):
+        # A newer valid seal whose write/commit flags say QOS was mid-compaction.
+        for w, c in ((1, 0), (2, 0)):
+            with self.subTest(w=w, c=c):
+                self.path.write_bytes(self.original)
+                pending = disk.replace(self.old_meta, w=w, c=0, generation=self.old_meta.generation + 1)
+                with open(self.path, 'r+b') as f:
+                    f.seek(0 if pending.generation % 2 == 0 else len(self.original) - disk.PAGE)
+                    f.write(pending.page())
+                before = self.path.read_bytes()
+                with self.assertRaisesRegex(ValueError, 'pending disk operation'):
+                    install.install(self.sdk, self.qa, self.path)
+                self.assertEqual(self.path.read_bytes(), before)
+
+    def test_legacy_disk_refused_without_writes(self):
+        legacy = self.base / 'legacy.disk'
+        subprocess.run([sys.executable, Path(install.__file__).parent / 'mkdisk.py', legacy, '1',
+                        self.sdk / 'profile/seed.qa'], check=True, capture_output=True)
+        before = legacy.read_bytes()
+        with self.assertRaisesRegex(ValueError, 'no valid durable QLOG v3'):
+            install.install(self.sdk, self.qa, legacy)
+        self.assertEqual(legacy.read_bytes(), before)
+
+    def test_run_refused_while_disk_in_use(self):
+        marker = self.base / 'host-started'
+        host = self.sdk / 'runtime/qosp-gl'
+        host.parent.mkdir()
+        host.write_text(f'#!/bin/sh\ntouch {marker}\n')
+        host.chmod(0o755)
+        meta = dict(self.meta, runtimeFiles={'qosp-gl': hashlib.sha256(host.read_bytes()).hexdigest()})
+        (self.sdk / 'sdk.json').write_text(json.dumps(meta))
+        with disk.locked(self.path):
+            with self.assertRaisesRegex(ValueError, 'in use'):
+                install.run(self.sdk, self.path)
+        self.assertFalse(marker.exists())
+        self.assertEqual(self.path.read_bytes(), self.original)
+
 
 class ArchiveStructure(unittest.TestCase):
     def read(self, raw):
