@@ -26,6 +26,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -152,6 +153,10 @@ def main():
     ap.add_argument("--project", type=Path, action="append", required=True, help="kind = \"app\" git checkout")
     ap.add_argument("--baseline", type=Path, help="older SDK prefix for the v1 byte-identity check")
     ap.add_argument("--fprisc", type=Path, default=ROOT.parent / "fprisc")
+    ap.add_argument("--deny-source", type=Path, action="append", default=[],
+                    help="additional source/worktree root to deny during qualification")
+    ap.add_argument("--repin-projects", action="store_true",
+                    help="explicitly repin only the temporary project copies to this release")
     ap.add_argument("--output", type=Path, required=True)
     args = ap.parse_args()
     if sys.platform != "darwin":
@@ -178,6 +183,7 @@ def main():
     (out / "home").mkdir()
     blocked = [ROOT, args.fprisc.resolve(), ROOT.parent, Path.home() / ".ghcup", Path.home() / ".cabal"]
     blocked += [p.resolve() for p in args.project]
+    blocked += [p.resolve() for p in args.deny_source]
     policy = out / "source-free.sb"
     policy.write_text('(version 1)\n(allow default)\n' + ''.join(
         f'(deny file-read* file-write* (subpath {json.dumps(str(path))}))\n' for path in blocked))
@@ -203,6 +209,7 @@ def main():
     run([sys.executable, "-c", probe], "access-probe.log")
 
     copies = []
+    repinned = {}
     for checkout in args.project:
         checkout = checkout.resolve()
         files = subprocess.check_output(["git", "-C", checkout, "ls-files", "-z"], text=True).split("\0")
@@ -211,7 +218,22 @@ def main():
             (copy / name).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(checkout / name, copy / name)
         assert not (copy / "support").exists(), f"{checkout.name} still vendors support/"
+        if args.repin_projects:
+            release = meta.get("release")
+            assert release, "repinning requires a numbered release SDK"
+            manifest = copy / "qos.toml"
+            original = manifest.read_text()
+            old = tomllib.loads(original).get("sdk", {}).get("version")
+            assert old, f"{checkout.name} has no SDK pin to update"
+            changed, count = re.subn(
+                r'(?ms)(^\[sdk\][^\n]*\n(?:(?!^\[).)*?^version\s*=\s*)[\'\"][^\'\"\n]*[\'\"]',
+                lambda m: m.group(1) + json.dumps(release), original)
+            assert count == 1, f"{checkout.name}: expected one SDK version assignment"
+            assert tomllib.loads(changed)["sdk"]["version"] == release
+            manifest.write_text(changed)
+            repinned[checkout.name] = {"from": old, "to": release}
         copies.append(copy)
+    evidence["repinnedProjectCopies"] = repinned
 
     before = tree_hashes(prefix)
     read_only(prefix)
