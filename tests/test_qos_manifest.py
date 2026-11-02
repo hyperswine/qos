@@ -102,7 +102,7 @@ class Manifest(unittest.TestCase):
     def test_desktop_project_requires_desktop_builder(self):
         d = self.write('[app]\nid = "counter"\nkind = "desktop"\n[build]\nentry = "app.fpr"\n')
         with patch.object(self.cli, "die", side_effect=lambda text: (_ for _ in ()).throw(SystemExit(text))):
-            with self.assertRaisesRegex(SystemExit, "fpr build --target=qos-portable"):
+        with self.assertRaisesRegex(SystemExit, "installed desktop SDK: qos build"):
                 self.cli.find_project(str(d))
 
     def test_directory_without_manifest_dies(self):
