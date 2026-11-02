@@ -86,7 +86,7 @@ def main():
             if not clang.exists():
                 clang.symlink_to(shutil.which("clang"))
             env["PATH"] = str(toolpath)
-        run("pin-" + label, [qos, "build"], cwd=project, refused=None if accepted else "pin")
+        run("pin-" + label, [qos, "build"], cwd=project, refused=None if accepted else "SDK")
     assert args.prior_disk.read_bytes() == original, "original disk changed"
     evidence = dict(status="passed", fromRelease=old["release"], toRelease=version,
                     fromAbi=old["abi"], toAbi=meta["abi"], steps=steps,
