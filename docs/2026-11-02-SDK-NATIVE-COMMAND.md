@@ -183,9 +183,9 @@ at QOS `ef1cfe8` (clean) and FP-RISC `94f699b`, with the
 The native and reference builders now agree with the managers: compatible
 `0.x` pins stay within their minor series; stable pins exclude prereleases;
 exact pins include the complete tag. Explicit prerelease pins opt in to tagged
-versions and numeric identifiers sort numerically. The installed SDK's next
-release must carry this change; manager updates cannot change SDK 0.3.0's
-already packaged builder. Development stages without a release number retain
+versions and numeric identifiers sort numerically. This change is published in
+[SDK 0.3.1](2026-11-02-PORTABLE-SDK-0.3.1-RELEASE.md); manager updates cannot
+change SDK 0.3.0's already packaged builder. Development stages without a release number retain
 their explicit unchecked-pin warning.
 
 An exact `[sdk] version` pin selects the SDK and its private compiler. It does
