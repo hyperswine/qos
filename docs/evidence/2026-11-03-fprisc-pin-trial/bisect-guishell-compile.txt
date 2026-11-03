@@ -1,0 +1,7 @@
+8f90b76 Add benchmark results for list fusion with let bindi: exit=0 secs=49 /priv
+ccb735b Merge pull request #50 from hyperswine/test/list-fus: exit=0 secs=54 /priv
+f05f089 Add 81 MHz Tang Nano 20K preset metadata: exit=0 secs=51 /priv
+830fd11 Tail Recursion Modulo Cons (B2, FPR_NO_TRMC): exit=0 secs=50 /priv
+cf59f43 The builtin TRMC gate is not a one-line win: exit=124 secs=200 ty
+392edc7 TRMC on the typed IR: where B2 has to live: exit=124 secs=200 ty
+bd45ece Type specialization on builtin (C2) and interval/sha: exit=124 secs=200 ty

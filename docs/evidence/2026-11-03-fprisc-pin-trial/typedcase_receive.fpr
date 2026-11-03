@@ -1,0 +1,11 @@
+# typed case tests trust a static nominal type that `receive` cannot promise
+Q = Type (PA Int | PB Int).
+main =
+  me = myself 0;
+  _ = send me ("x", "y");
+  m = receive me;
+  r = case m of
+      PA x -> "PA (wrong: a tuple matched a constructor)"
+    | PB x -> "PB (wrong)"
+    | _ -> "other (right)";
+  print r.
