@@ -32,3 +32,9 @@ FPRC := $(FPRISC_ROOT)/fpr
 # in THIS tree is the QOS HAL
 FRUNTIME := $(FPRISC_ROOT)/runtime
 FMACHINE := $(FPRISC_ROOT)/machine
+
+# Compiler and C runtime must select the same layout, including rollback.
+ifeq ($(FPR_COMPACT_CELLS),0)
+FPR_LAYOUT_CFLAGS := -DFPR_LEGACY_CELLS
+QOSCFLAGS_EXTRA += $(FPR_LAYOUT_CFLAGS)
+endif

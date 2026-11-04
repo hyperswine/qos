@@ -69,14 +69,21 @@ static sw qos_store_call_grow(sw (*call)(uw, const char *, uw, char *, uw),
   for (int tries = 0; r == QOS_SYS_ENEED && tries < 4; tries++) {
     if (!need || need > QOS_KV_REPLY_MAX) break;
     uw cap = need < QOS_SYS_NEED_MIN ? QOS_SYS_NEED_MIN : (uw)need;
-    str_t *s = (str_t *)fpr_alloc((V)(sizeof(str_t) + cap));
-    s->tid = T_STR; s->var = 0; s->len = 0;
-    s->bytes[0] = 0;
-    r = call(tag, pay, plen, (char *)s->bytes, cap);
-    if (r >= 0) { s->len = (uw)r; *big = s; return r; }
-    if (r != QOS_SYS_ENEED) { *big = s; return r; }
-    need = qos_store_need((const char *)s->bytes, cap);
-    fpr_free((V)s);
+    /* The syscall may return fewer bytes than requested. Opaque capacity
+     * must not become a managed String with a shorter derived extent. */
+    char *buffer = (char *)fpr_alloc_raw(cap);
+    buffer[0] = 0;
+    r = call(tag, pay, plen, buffer, cap);
+    if (r != QOS_SYS_ENEED) {
+      uw length = r >= 0 ? (uw)r : 0;
+      if (r < 0) while (length < cap && buffer[length]) length++;
+      if (length > cap) fpr_cpanic("storage: reply exceeds supplied capacity");
+      *big = fpr_mkstr((const uint8_t *)buffer, length);
+      fpr_free_raw((V)buffer);
+      return r;
+    }
+    need = qos_store_need(buffer, cap);
+    fpr_free_raw((V)buffer);
   }
   if (r == QOS_SYS_ENEED) {
     const char *why = "storage: reply exceeds the " QOS_KV_REPLY_LIMIT_TEXT " limit";

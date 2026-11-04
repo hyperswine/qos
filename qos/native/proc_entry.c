@@ -50,7 +50,7 @@ static V h_sys_store_req(V tagv, V payv) {
   /* a reply larger than the scratch comes back as -6 + its size and lands in
    * a String that large (store_abi.h); it used to be truncated silently */
   str_t *big;
-  char *out = (char *)fpr_alloc((V)QOS_STORE_SCRATCH); /* this call's own */
+  char *out = (char *)fpr_alloc_raw((V)QOS_STORE_SCRATCH); /* this call's own */
   sw r = qos_store_call_grow(g_syscall, (uw)UNTAG(tagv), (const char *)s->bytes, s->len,
                              out, QOS_STORE_SCRATCH, &big);
   const char *why = big ? (const char *)big->bytes : out;
@@ -59,7 +59,7 @@ static V h_sys_store_req(V tagv, V payv) {
         : r == -3 ? fpr_mkresult(1, "storage: unknown request tag")
         : fpr_mkresult(1, why[0] ? why : "storage error"); /* the reason, as the kernel wrote it */
   if (big && r < 0) fpr_free((V)big);
-  fpr_free((V)out);
+  fpr_free_raw((V)out);
   return res;
 }
 FPR_FN(fpr_g_Sys_x2estoreReq, h_sys_store_req, 2);
@@ -166,6 +166,12 @@ V fpr_process_entry(void *heap_base, uw heap_size, fpr_grant_t (*grow)(uw want_b
     if (sb->refused) { sb->root = 0; return (V)&fpr_unit; }
     fpr_plane_actors = sb->actors;
     fpr_plane_memory = sb->memory;
+#ifdef FPR_COMPACT_CELLS
+    if (fpr_layout_register(0)) {
+      sb->refused = "constructor layout metadata rejected";
+      sb->root = 0; return (V)&fpr_unit;
+    }
+#endif
     /* OUR OWN statics window: the shared span (heap_lo..heap_hi)
      * covers the slot this image is loaded into, but our code/rodata/
      * data/bss cells have no alloc preheaders -- register the window
@@ -184,12 +190,13 @@ V fpr_process_entry(void *heap_base, uw heap_size, fpr_grant_t (*grow)(uw want_b
      * ~250 MB.  tp still points at the CALLER's hart here, so this
      * allocates from the launcher actor's pool, exactly where a spawn
      * argument written in System.qa's own code would live. */
-    pap0_t *root = (pap0_t *)fpr_alloc(sizeof(pap0_t));
+    pap0_t *root = (pap0_t *)fpr_alloc(sizeof(pap0_t) + sizeof(V));
     root->tid = T_PAP;
     root->var = 0;
     root->fn = (uw)proc_root;
     root->arity = 1;
     root->nargs = 0;
+    *(V *)((char *)root + sizeof(pap0_t)) = 0;
     sb->root = (void *)fpr_plane_actors->spawn_pid((V)root, sb->pid);
     return (V)&fpr_unit; /* launched; the result arrives as a message */
   }
@@ -206,7 +213,7 @@ V fpr_process_entry(void *heap_base, uw heap_size, fpr_grant_t (*grow)(uw want_b
     sl->owner = &h->pool;
     sl->escaped = 0;
     sl->holds = 0;
-    sl->hp = (char *)(sl + 1);
+    sl->hp = fpr_slab_start(sl);
     sl->end = (char *)heap_base + heap_size;
     h->pool.cur = sl;
     /* buckets are OUT-OF-LINE since the reclamation refactor (fpr.h:
@@ -238,6 +245,9 @@ V fpr_process_entry(void *heap_base, uw heap_size, fpr_grant_t (*grow)(uw want_b
   fpr_is_process = 1;
   fpr_process_done = 0;
 
+#ifdef FPR_COMPACT_CELLS
+  if (fpr_layout_register(0)) fpr_cpanic("constructor layout metadata rejected");
+#endif
   fpr_actors_init(); /* spawns actor 0 (main), enqueues it on hart 0 */
   fpr_hart_main(0);  /* runs hart_loop; returns when actor 0 finishes
                        * (fpr_is_process routes the exit through

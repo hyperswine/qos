@@ -136,7 +136,7 @@ RT_CORE = $(FRUNTIME)/runtime.c $(FRUNTIME)/actors.c $(FRUNTIME)/bits.c \
 RT_VIRT = $(FMACHINE)/virt/crt0.S $(FMACHINE)/virt/ctx.S $(FMACHINE)/virt/ctx_fab.c \
           $(FMACHINE)/virt/hal.c $(FMACHINE)/virt/memshim.c
 ARCHFLAGS = -march=rv64imafdc_zicsr -mabi=lp64 -mcmodel=medany
-CFLAGS = $(ARCHFLAGS) -DFPR_NHARTS=$(HARTS) \
+CFLAGS = $(FPR_LAYOUT_CFLAGS) $(ARCHFLAGS) -DFPR_NHARTS=$(HARTS) \
          -ffreestanding -nostdlib -nostartfiles -O2 -Wall -Wextra \
          -fno-builtin -fno-stack-protector
 

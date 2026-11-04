@@ -368,7 +368,7 @@ static V h_sys_compile(V profv, V srcv) {
   str_t *prof = (str_t *)profv;
   str_t *src = (str_t *)srcv;
   uint64_t plen = prof->len + 1 + src->len;
-  char *req = (char *)fpr_alloc(plen);
+  char *req = (char *)fpr_alloc_raw(plen);
   for (uw i = 0; i < prof->len; i++) req[i] = (char)prof->bytes[i];
   req[prof->len] = '\n';
   for (uw i = 0; i < src->len; i++) req[prof->len + 1 + i] = (char)src->bytes[i];
@@ -403,7 +403,7 @@ static V h_sys_store_req(V tagv, V payv) {
    * in a String that large (store_abi.h): a big replay is data, not an
    * "output capacity exceeded" error */
   str_t *big;
-  char *out = (char *)fpr_alloc((V)QOS_STORE_SCRATCH); /* this call's own */
+  char *out = (char *)fpr_alloc_raw((V)QOS_STORE_SCRATCH); /* this call's own */
   sw r = qos_store_call_grow((sw (*)(uw, const char *, uw, char *, uw))g_syscall,
                              (uw)UNTAG(tagv), (const char *)s->bytes, s->len,
                              out, QOS_STORE_SCRATCH, &big);
@@ -413,7 +413,7 @@ static V h_sys_store_req(V tagv, V payv) {
         : r == -5 ? fpr_mkresult(1, "storage outcome unknown")
         : fpr_mkresult(1, why[0] ? why : "storage error"); /* the host's reason, as on native */
   if (big && r < 0) fpr_free((V)big);
-  fpr_free((V)out);
+  fpr_free_raw((V)out);
   return res;
 }
 FPR_FN(fpr_g_Sys_x2estoreReq, h_sys_store_req, 2);
@@ -501,7 +501,7 @@ int64_t qos_app_entry(const qos_boot_t *boot, char *result_out,
     sl->owner = &h->pool;
     sl->escaped = 0;
     sl->holds = 0;
-    sl->hp = (char *)(sl + 1);
+    sl->hp = fpr_slab_start(sl);
     sl->end = (char *)sl + buddy_block_usable_size(sl);
     h->pool.cur = sl;
   }
@@ -550,6 +550,9 @@ int64_t qos_app_entry(const qos_boot_t *boot, char *result_out,
     hi->fuel = 0;
   }
 
+#ifdef FPR_COMPACT_CELLS
+  if (fpr_layout_register(0)) fpr_cpanic("constructor layout metadata rejected");
+#endif
   fpr_actors_init(); /* actor 0 (main) onto hart 0 */
   for (uw i = 1; i < live; i++)
     if (qos_hal->start_hart(i, qos_hart_thread))

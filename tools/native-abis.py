@@ -4,7 +4,7 @@
 Header text can contain several conditional definitions. Preprocess with the
 same RV64 integer ABI as build-process-app.sh instead of taking the first one.
 """
-import argparse,re,subprocess
+import argparse,re,subprocess,os
 from pathlib import Path
 
 def main():
@@ -13,6 +13,7 @@ def main():
     args=ap.parse_args()
     header=args.fprisc.resolve()/'runtime/fpr.h'
     result=subprocess.run(['riscv64-unknown-elf-gcc','-march=rv64imafdc_zicsr','-mabi=lp64',
+                           *(['-DFPR_LEGACY_CELLS'] if os.environ.get('FPR_COMPACT_CELLS')=='0' else []),
                            '-DFPR_NHARTS=1','-ffreestanding','-dM','-E','-x','c','-include',str(header),'-'],
                           input='',capture_output=True,text=True,check=True,timeout=30)
     values=[]

@@ -15,6 +15,8 @@
 # The ELFs built here are toolchain intermediates.
 
 set -euo pipefail
+LAYOUT_FLAGS=(-DFPR_COMPACT_CELLS)
+if [[ "${FPR_COMPACT_CELLS:-1}" == 0 ]]; then LAYOUT_FLAGS=(-DFPR_LEGACY_CELLS); fi
 APP_FPR="$1"; MANIFEST="$2"; OUT_QA="$3"; TARGET="${4:-rv64}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
@@ -45,7 +47,7 @@ VIRT_FPR="build/virt-clint.s $MACHINE/virt/rawunit.c build/qos-plic.s build/qos-
 
 RT="$VIRT_FPR $QOS/native/proc_entry.c $MACHINE/virt/ctx.S $MACHINE/virt/ctx_fab.c $RUNTIME/runtime.c $RUNTIME/i32.c $MACHINE/virt/hal.c $MACHINE/virt/memshim.c $RUNTIME/actors.c $RUNTIME/buddy.c $RUNTIME/mod.c $RUNTIME/bits.c $RUNTIME/vec.c $RUNTIME/sstr.c"
 link() { # link <base> <out.elf>
-  riscv64-unknown-elf-gcc $ARCHFLAGS -DFPR_NHARTS=1 -ffreestanding -nostdlib -nostartfiles -O2 \
+  riscv64-unknown-elf-gcc "${LAYOUT_FLAGS[@]}" $ARCHFLAGS -DFPR_NHARTS=1 -ffreestanding -nostdlib -nostartfiles -O2 \
     -Wl,--defsym=PROC_IMAGE_BASE=$1 -Wl,--emit-relocs -Wl,--no-relax -Wl,--no-warn-rwx-segments \
     -Wl,--defsym=_heap_start=_proc_image_end \
     -Wl,--defsym=_heap_end=_proc_image_end -Wl,--defsym=_proc_arena_end=_proc_image_end \
