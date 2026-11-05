@@ -1,0 +1,1080 @@
+fn main () -> val entry b0
+b0():
+  stackcheck
+  safepoint
+  v0: int = const 0
+  v1: val = tag v0
+  v2: val = call myself@foreign:fpr_g_myself_call1 :: val -> val(v1)
+  v3: val = nullary 2 0
+  safepoint
+  v13: val = make 1089158883:0(v1, v1, v1, v1, v3)
+  v14: val = call shortcuts@c5473a4cf01fe848@import ::  -> val()
+  v15: val = string "bad"
+  v17: val = string "refused"
+  v19: int = const 100
+  v20: int = arith - v0, v19
+  safepoint
+  v22: val = tag v20
+  v23: val = make 2025316943:0(v15, v15, v17, v22)
+  v24: val = string "x"
+  v29: int = arith - v0, v19
+  safepoint
+  v31: val = tag v29
+  v32: val = make 2025316943:0(v24, v24, v17, v31)
+  v33: val = string "last"
+  v38: int = arith - v0, v19
+  safepoint
+  v40: val = tag v38
+  v41: val = make 2025316943:0(v33, v33, v17, v40)
+  v43: val = call Cons :: val val -> val(v41, v3)
+  v44: val = call Cons :: val val -> val(v32, v43)
+  v45: val = call Cons :: val val -> val(v23, v44)
+  v46: val = call cat@c5473a4cf01fe848@import :: val val -> val(v14, v45)
+  v53: val = make 11:0(v13, v46, v1, v1, v1)
+  v54: val = call init@c5473a4cf01fe848@import :: val -> val(v53)
+  v57: val = call $callPend@foreign:fpr_g__x24callPend_call1 :: val -> val(v1)
+  v58: val = call retention :: val val val -> val(v2, v53, v54)
+  v59: val = call $callLeave@foreign:fpr_g__x24callLeave_call2 :: val val -> val(v57, v58)
+  v61: val = tag v19
+  v62: val = call page@c5473a4cf01fe848@import :: val val val -> val(v53, v54, v61)
+  v63: val = field 14 v62
+  v64: int = const 1
+  v65: val = tag v64
+  v66: pred = eqval v63, v65
+  condbr v66 -> b1() | b2()
+b1():
+  v67: val = field 19 v62
+  v68: int = const 6
+  v69: val = tag v68
+  v70: pred = eqval v67, v69
+  v73: val = boolof v70
+  br b3(v73)
+b2():
+  v71: val = nullary 1 0
+  br b3(v71)
+b3(v72: val):
+  safepoint
+  v75: pred = truth v72
+  condbr v75 -> b4() | b5()
+b5():
+  v77: pred = truth v72
+  v78: pred = not v77
+  condbr v78 -> b6() | b7()
+b7():
+  unreachable "no matching clause for check"
+b4():
+  v76: val = nullary 0 0
+  br b8(v76)
+b6():
+  v79: val = string "guishell: invariant failed"
+  v80: val = call error@foreign:fpr_prim_fn_error :: val -> val(v79)
+  br b8(v80)
+b8(v81: val):
+  v82: int = const 0
+  v83: int = const 10
+  v84: int = arith - v82, v83
+  v85: val = tag v84
+  v86: val = call page@c5473a4cf01fe848@import :: val val val -> val(v53, v54, v85)
+  v87: val = field 14 v86
+  v89: val = tag v82
+  v90: pred = eqval v87, v89
+  safepoint
+  condbr v90 -> b9() | b10()
+b10():
+  v93: pred = not v90
+  condbr v93 -> b11() | b12()
+b12():
+  unreachable "no matching clause for check"
+b9():
+  v92: val = nullary 0 0
+  br b13(v92)
+b11():
+  v94: val = string "guishell: invariant failed"
+  v95: val = call error@foreign:fpr_prim_fn_error :: val -> val(v94)
+  br b13(v95)
+b13(v96: val):
+  v97: int = const 2
+  v98: int = const 450
+  v99: int = const 350
+  v100: int = const 1
+  v103: val = tag v100
+  v104: val = tag v98
+  v105: val = tag v99
+  v106: val = call pointerEvent@c5473a4cf01fe848@import :: val val val val val -> val(v53, v103, v104, v105, v62)
+  v107: val = tag v97
+  v110: val = call pointerEvent@c5473a4cf01fe848@import :: val val val val val -> val(v53, v107, v104, v105, v106)
+  v111: val = field 19 v110
+  v112: int = const 6
+  v113: val = tag v112
+  v114: pred = eqval v111, v113
+  condbr v114 -> b14() | b15()
+b14():
+  v115: pred = tagtest 266318405 7 v110
+  condbr v115 -> b16() | b17()
+b17():
+  v117: pred = tagtest 146028852 23 v110
+  condbr v117 -> b18() | b19()
+b19():
+  unreachable "no shape with field .active matched"
+b16():
+  v116: val = field 1 v110
+  br b20(v116)
+b18():
+  v118: val = field 0 v110
+  br b20(v118)
+b20(v119: val):
+  v120: int = const 0
+  v121: val = tag v120
+  v122: pred = eqval v119, v121
+  v125: val = boolof v122
+  br b21(v125)
+b15():
+  v123: val = nullary 1 0
+  br b21(v123)
+b21(v124: val):
+  safepoint
+  v127: pred = truth v124
+  condbr v127 -> b22() | b23()
+b23():
+  v129: pred = truth v124
+  v130: pred = not v129
+  condbr v130 -> b24() | b25()
+b25():
+  unreachable "no matching clause for check"
+b22():
+  v128: val = nullary 0 0
+  br b26(v128)
+b24():
+  v131: val = string "guishell: invariant failed"
+  v132: val = call error@foreign:fpr_prim_fn_error :: val -> val(v131)
+  br b26(v132)
+b26(v133: val):
+  v134: int = const 2
+  v135: int = const 330
+  v136: int = const 180
+  v137: int = const 1
+  v140: val = tag v137
+  v141: val = tag v135
+  v142: val = tag v136
+  v143: val = call pointerEvent@c5473a4cf01fe848@import :: val val val val val -> val(v53, v140, v141, v142, v54)
+  v144: val = tag v134
+  v147: val = call pointerEvent@c5473a4cf01fe848@import :: val val val val val -> val(v53, v144, v141, v142, v143)
+  v148: val = field 19 v147
+  v149: int = const 0
+  v150: val = tag v149
+  v151: pred = eqval v148, v150
+  condbr v151 -> b27() | b28()
+b27():
+  v152: pred = tagtest 266318405 7 v147
+  condbr v152 -> b29() | b30()
+b30():
+  v154: pred = tagtest 146028852 23 v147
+  condbr v154 -> b31() | b32()
+b32():
+  unreachable "no shape with field .active matched"
+b29():
+  v153: val = field 1 v147
+  br b33(v153)
+b31():
+  v155: val = field 0 v147
+  br b33(v155)
+b33(v156: val):
+  v157: int = const 0
+  v158: val = tag v157
+  v159: pred = eqval v156, v158
+  v162: val = boolof v159
+  br b34(v162)
+b28():
+  v160: val = nullary 1 0
+  br b34(v160)
+b34(v161: val):
+  safepoint
+  v164: pred = truth v161
+  condbr v164 -> b35() | b36()
+b36():
+  v166: pred = truth v161
+  v167: pred = not v166
+  condbr v167 -> b37() | b38()
+b38():
+  unreachable "no matching clause for check"
+b35():
+  v165: val = nullary 0 0
+  br b39(v165)
+b37():
+  v168: val = string "guishell: invariant failed"
+  v169: val = call error@foreign:fpr_prim_fn_error :: val -> val(v168)
+  br b39(v169)
+b39(v170: val):
+  v171: int = const 2
+  v172: int = const 80
+  v173: int = const 180
+  v174: int = const 1
+  v177: val = tag v174
+  v178: val = tag v172
+  v179: val = tag v173
+  v180: val = call pointerEvent@c5473a4cf01fe848@import :: val val val val val -> val(v53, v177, v178, v179, v54)
+  v181: val = tag v171
+  v184: val = call pointerEvent@c5473a4cf01fe848@import :: val val val val val -> val(v53, v181, v178, v179, v180)
+  v185: pred = tagtest 266318405 7 v184
+  condbr v185 -> b40() | b41()
+b41():
+  v187: pred = tagtest 146028852 23 v184
+  condbr v187 -> b42() | b43()
+b43():
+  unreachable "no shape with field .active matched"
+b40():
+  v186: val = field 1 v184
+  br b44(v186)
+b42():
+  v188: val = field 0 v184
+  br b44(v188)
+b44(v189: val):
+  v190: int = const 0
+  v191: int = const 1
+  v192: int = arith - v190, v191
+  v193: val = tag v192
+  v194: pred = eqval v189, v193
+  safepoint
+  condbr v194 -> b45() | b46()
+b46():
+  v197: pred = not v194
+  condbr v197 -> b47() | b48()
+b48():
+  unreachable "no matching clause for check"
+b45():
+  v196: val = nullary 0 0
+  br b49(v196)
+b47():
+  v198: val = string "guishell: invariant failed"
+  v199: val = call error@foreign:fpr_prim_fn_error :: val -> val(v198)
+  br b49(v199)
+b49(v200: val):
+  v201: int = const 2
+  v202: int = const 800
+  v203: int = const 550
+  v204: int = const 1
+  v207: val = tag v204
+  v208: val = tag v202
+  v209: val = tag v203
+  v210: val = call pointerEvent@c5473a4cf01fe848@import :: val val val val val -> val(v53, v207, v208, v209, v184)
+  v211: val = tag v201
+  v214: val = call pointerEvent@c5473a4cf01fe848@import :: val val val val val -> val(v53, v211, v208, v209, v210)
+  v215: pred = tagtest 266318405 7 v214
+  condbr v215 -> b50() | b51()
+b51():
+  v217: pred = tagtest 146028852 23 v214
+  condbr v217 -> b52() | b53()
+b53():
+  unreachable "no shape with field .active matched"
+b50():
+  v216: val = field 1 v214
+  br b54(v216)
+b52():
+  v218: val = field 0 v214
+  br b54(v218)
+b54(v219: val):
+  v220: int = const 0
+  v221: val = tag v220
+  v222: pred = eqval v219, v221
+  safepoint
+  condbr v222 -> b55() | b56()
+b56():
+  v225: pred = not v222
+  condbr v225 -> b57() | b58()
+b58():
+  unreachable "no matching clause for check"
+b55():
+  v224: val = nullary 0 0
+  br b59(v224)
+b57():
+  v226: val = string "guishell: invariant failed"
+  v227: val = call error@foreign:fpr_prim_fn_error :: val -> val(v226)
+  br b59(v227)
+b59(v228: val):
+  v229: val = field 0 v54
+  v230: val = field 1 v54
+  v231: val = field 2 v54
+  v232: val = field 3 v54
+  v233: val = field 4 v54
+  v234: val = field 5 v54
+  v235: val = field 6 v54
+  v236: val = field 7 v54
+  v237: val = field 8 v54
+  v238: val = field 9 v54
+  v239: val = field 10 v54
+  v240: val = field 11 v54
+  v241: val = field 12 v54
+  v242: val = field 13 v54
+  v243: val = field 14 v54
+  v244: val = field 15 v54
+  v245: val = field 16 v54
+  v246: val = field 17 v54
+  v247: val = field 18 v54
+  v248: int = const 4
+  v249: val = tag v248
+  v250: val = field 20 v54
+  v251: val = field 21 v54
+  v252: val = field 22 v54
+  v253: val = make 146028852:23(v229, v230, v231, v232, v233, v234, v235, v236, v237, v238, v239, v240, v241, v242, v243, v244, v245, v246, v247, v249, v250, v251, v252)
+  v254: val = call openTile@c5473a4cf01fe848@import :: val val -> val(v53, v253)
+  v255: pred = tagtest 266318405 7 v254
+  condbr v255 -> b60() | b61()
+b61():
+  v257: pred = tagtest 146028852 23 v254
+  condbr v257 -> b62() | b63()
+b63():
+  unreachable "no shape with field .active matched"
+b60():
+  v256: val = field 1 v254
+  br b64(v256)
+b62():
+  v258: val = field 0 v254
+  br b64(v258)
+b64(v259: val):
+  v260: int = const 0
+  v261: val = tag v260
+  v262: pred = eqval v259, v261
+  condbr v262 -> b65() | b66()
+b65():
+  v263: val = field 21 v254
+  v265: pred = isint v263
+  condbr v265 -> b68() | b69()
+b69():
+  v266: pred = tagtest 9000 0 v263
+  condbr v266 -> b70() | b68()
+b70():
+  v267: addr = address v263
+  v268: int = load TInt v267+8
+  br b67(v268)
+b68():
+  v269: val = call strlen@foreign:fpr_g_strlen_call1 :: val -> val(v263)
+  v270: int = untag v269
+  br b67(v270)
+b67(v264: int):
+  v271: int = const 0
+  v272: pred = cmp > v264, v271
+  v275: val = boolof v272
+  br b71(v275)
+b66():
+  v273: val = nullary 1 0
+  br b71(v273)
+b71(v274: val):
+  safepoint
+  v277: pred = truth v274
+  condbr v277 -> b72() | b73()
+b73():
+  v279: pred = truth v274
+  v280: pred = not v279
+  condbr v280 -> b74() | b75()
+b75():
+  unreachable "no matching clause for check"
+b72():
+  v278: val = nullary 0 0
+  br b76(v278)
+b74():
+  v281: val = string "guishell: invariant failed"
+  v282: val = call error@foreign:fpr_prim_fn_error :: val -> val(v281)
+  br b76(v282)
+b76(v283: val):
+  v284: int = const 0
+  v285: val = tag v284
+  v286: val = call $callPend@foreign:fpr_g__x24callPend_call1 :: val -> val(v285)
+  v289: val = call logRows :: val -> val(v285)
+  v290: val = call $callLeave@foreign:fpr_g__x24callLeave_call2 :: val val -> val(v286, v289)
+  v291: val = field 0 v54
+  v292: val = field 1 v54
+  v293: val = field 2 v54
+  v294: val = field 3 v54
+  v295: val = field 4 v54
+  v296: val = field 5 v54
+  v297: val = field 6 v54
+  v298: val = field 7 v54
+  v299: val = field 8 v54
+  v300: val = field 9 v54
+  v301: val = field 10 v54
+  v302: val = field 11 v54
+  v303: val = field 12 v54
+  v304: val = field 13 v54
+  v305: val = field 14 v54
+  v306: val = field 15 v54
+  v307: val = field 16 v54
+  v308: val = field 17 v54
+  v309: val = field 18 v54
+  v310: int = const 2
+  v311: val = tag v310
+  v312: val = field 20 v54
+  v313: val = field 21 v54
+  v314: val = field 22 v54
+  v315: val = make 146028852:23(v291, v292, v293, v294, v295, v296, v297, v298, v299, v300, v301, v302, v303, v304, v305, v306, v307, v308, v309, v311, v312, v313, v314)
+  v316: val = call openTile@c5473a4cf01fe848@import :: val val -> val(v53, v315)
+  v317: val = field 0 v316
+  v318: val = field 1 v316
+  v319: val = field 2 v316
+  v320: val = field 3 v316
+  v321: val = field 4 v316
+  v322: val = nullary 2 0
+  v323: val = field 6 v316
+  v324: val = field 7 v316
+  v325: val = field 8 v316
+  v326: val = field 9 v316
+  v327: val = field 10 v316
+  v328: val = field 11 v316
+  v329: val = field 12 v316
+  v330: val = field 13 v316
+  v331: val = field 14 v316
+  v332: val = field 15 v316
+  v333: val = field 0 v332
+  v334: val = field 1 v332
+  v335: val = nullary 1050762516 2
+  v336: val = field 3 v332
+  v339: val = call $callPend@foreign:fpr_g__x24callPend_call1 :: val -> val(v285)
+  safepoint
+  safepoint
+  v342: int = const 3
+  v345: val = tag v342
+  v347: val = call logAsk@import :: val val val -> val(v345, v285, v322)
+  v348: val = call wrapLines@0a0d3fd5fbd71380@import :: val -> val(v347)
+  v349: val = call $callLeave@foreign:fpr_g__x24callLeave_call2 :: val val -> val(v339, v348)
+  v350: val = field 5 v332
+  v351: val = field 6 v332
+  v352: val = field 7 v332
+  v353: val = make 42645740:8(v333, v334, v335, v336, v349, v350, v351, v352)
+  v354: val = field 16 v316
+  v355: val = field 17 v316
+  v356: val = field 18 v316
+  v357: val = field 19 v316
+  v358: val = field 20 v316
+  v359: val = field 21 v316
+  v360: val = field 22 v316
+  v361: val = make 146028852:23(v317, v318, v319, v320, v321, v322, v323, v324, v325, v326, v327, v328, v329, v330, v331, v353, v354, v355, v356, v357, v358, v359, v360)
+  v362: val = field 15 v361
+  v363: val = field 5 v362
+  v366: pred = eqval v363, v285
+  safepoint
+  condbr v366 -> b77() | b78()
+b78():
+  v369: pred = not v366
+  condbr v369 -> b79() | b80()
+b80():
+  unreachable "no matching clause for check"
+b77():
+  v368: val = nullary 0 0
+  br b81(v368)
+b79():
+  v370: val = string "guishell: invariant failed"
+  v371: val = call error@foreign:fpr_prim_fn_error :: val -> val(v370)
+  br b81(v371)
+b81(v372: val):
+  safepoint
+  v374: int = const 108
+  v375: val = tag v374
+  v376: val = call decode@f564130052f7b0a6@import :: val -> val(v375)
+  v377: val = call routeInput@c5473a4cf01fe848@import :: val val val -> val(v53, v376, v361)
+  v378: val = field 15 v377
+  v379: val = field 5 v378
+  v380: int = const 1
+  v381: val = tag v380
+  v382: pred = eqval v379, v381
+  safepoint
+  condbr v382 -> b82() | b83()
+b83():
+  v385: pred = not v382
+  condbr v385 -> b84() | b85()
+b85():
+  unreachable "no matching clause for check"
+b82():
+  v384: val = nullary 0 0
+  br b86(v384)
+b84():
+  v386: val = string "guishell: invariant failed"
+  v387: val = call error@foreign:fpr_prim_fn_error :: val -> val(v386)
+  br b86(v387)
+b86(v388: val):
+  safepoint
+  v390: int = const 109
+  v391: val = tag v390
+  v392: val = call decode@f564130052f7b0a6@import :: val -> val(v391)
+  v393: val = call routeInput@c5473a4cf01fe848@import :: val val val -> val(v53, v392, v361)
+  v394: val = field 15 v393
+  v395: val = field 5 v394
+  v396: int = const 9
+  v397: val = tag v396
+  v398: pred = eqval v395, v397
+  safepoint
+  condbr v398 -> b87() | b88()
+b88():
+  v401: pred = not v398
+  condbr v401 -> b89() | b90()
+b90():
+  unreachable "no matching clause for check"
+b87():
+  v400: val = nullary 0 0
+  br b91(v400)
+b89():
+  v402: val = string "guishell: invariant failed"
+  v403: val = call error@foreign:fpr_prim_fn_error :: val -> val(v402)
+  br b91(v403)
+b91(v404: val):
+  safepoint
+  v406: int = const 107
+  v407: val = tag v406
+  v408: val = call decode@f564130052f7b0a6@import :: val -> val(v407)
+  v409: val = call routeInput@c5473a4cf01fe848@import :: val val val -> val(v53, v408, v361)
+  safepoint
+  v411: int = const 108
+  v412: val = tag v411
+  v413: val = call decode@f564130052f7b0a6@import :: val -> val(v412)
+  v414: val = call routeInput@c5473a4cf01fe848@import :: val val val -> val(v53, v413, v409)
+  v415: val = field 15 v409
+  v416: val = field 5 v415
+  v417: val = field 15 v393
+  v418: val = field 5 v417
+  v419: int = untag v416
+  v420: int = untag v418
+  v421: pred = cmp > v419, v420
+  condbr v421 -> b92() | b93()
+b92():
+  v422: val = field 15 v414
+  v423: val = field 5 v422
+  v424: val = field 15 v409
+  v425: val = field 5 v424
+  v426: pred = eqval v423, v425
+  v429: val = boolof v426
+  br b94(v429)
+b93():
+  v427: val = nullary 1 0
+  br b94(v427)
+b94(v428: val):
+  safepoint
+  v431: pred = truth v428
+  condbr v431 -> b95() | b96()
+b96():
+  v433: pred = truth v428
+  v434: pred = not v433
+  condbr v434 -> b97() | b98()
+b98():
+  unreachable "no matching clause for check"
+b95():
+  v432: val = nullary 0 0
+  br b99(v432)
+b97():
+  v435: val = string "guishell: invariant failed"
+  v436: val = call error@foreign:fpr_prim_fn_error :: val -> val(v435)
+  br b99(v436)
+b99(v437: val):
+  safepoint
+  v439: int = const 102
+  v440: val = tag v439
+  v441: val = call decode@f564130052f7b0a6@import :: val -> val(v440)
+  v442: val = call routeInput@c5473a4cf01fe848@import :: val val val -> val(v53, v441, v409)
+  safepoint
+  v444: int = const 103
+  v445: val = tag v444
+  v446: val = call decode@f564130052f7b0a6@import :: val -> val(v445)
+  v447: val = call routeInput@c5473a4cf01fe848@import :: val val val -> val(v53, v446, v442)
+  v448: val = field 15 v447
+  v449: val = field 5 v448
+  v450: int = const 0
+  v451: val = tag v450
+  v452: pred = eqval v449, v451
+  safepoint
+  condbr v452 -> b100() | b101()
+b101():
+  v455: pred = not v452
+  condbr v455 -> b102() | b103()
+b103():
+  unreachable "no matching clause for check"
+b100():
+  v454: val = nullary 0 0
+  br b104(v454)
+b102():
+  v456: val = string "guishell: invariant failed"
+  v457: val = call error@foreign:fpr_prim_fn_error :: val -> val(v456)
+  br b104(v457)
+b104(v458: val):
+  v459: int = const 0
+  v460: int = const 10
+  v461: int = arith - v459, v460
+  safepoint
+  v463: val = tag v461
+  v465: val = tag v459
+  v466: val = make 807050226:4(v463, v465)
+  v467: val = call update@c5473a4cf01fe848@import :: val val val val -> val(v2, v53, v466, v361)
+  v468: pred = tagtest 4 0 v467
+  condbr v468 -> b105() | b106()
+b105():
+  v469: val = field 0 v467
+  v470: val = field 15 v469
+  v471: val = field 5 v470
+  v472: int = const 3
+  v473: val = tag v472
+  v474: pred = eqval v471, v473
+  safepoint
+  condbr v474 -> b107() | b108()
+b108():
+  v477: pred = not v474
+  condbr v477 -> b109() | b110()
+b110():
+  unreachable "no matching clause for check"
+b107():
+  v476: val = nullary 0 0
+  br b111(v476)
+b109():
+  v478: val = string "guishell: invariant failed"
+  v479: val = call error@foreign:fpr_prim_fn_error :: val -> val(v478)
+  br b111(v479)
+b111(v480: val):
+  v481: int = const 1
+  v482: int = const 890
+  v483: int = const 469
+  v484: val = tag v481
+  v485: val = tag v482
+  v486: val = tag v483
+  v487: val = call pointerEvent@c5473a4cf01fe848@import :: val val val val val -> val(v53, v484, v485, v486, v361)
+  v488: val = field 15 v487
+  v489: val = field 5 v488
+  v490: val = field 15 v409
+  v491: val = field 5 v490
+  v492: pred = eqval v489, v491
+  condbr v492 -> b112() | b113()
+b112():
+  v493: pred = tagtest 266318405 7 v487
+  condbr v493 -> b114() | b115()
+b115():
+  v495: pred = tagtest 146028852 23 v487
+  condbr v495 -> b116() | b117()
+b117():
+  unreachable "no shape with field .active matched"
+b114():
+  v494: val = field 1 v487
+  br b118(v494)
+b116():
+  v496: val = field 0 v487
+  br b118(v496)
+b118(v497: val):
+  v498: pred = tagtest 266318405 7 v361
+  condbr v498 -> b119() | b120()
+b120():
+  v500: pred = tagtest 146028852 23 v361
+  condbr v500 -> b121() | b122()
+b122():
+  unreachable "no shape with field .active matched"
+b119():
+  v499: val = field 1 v361
+  br b123(v499)
+b121():
+  v501: val = field 0 v361
+  br b123(v501)
+b123(v502: val):
+  v503: pred = eqval v497, v502
+  v506: val = boolof v503
+  br b124(v506)
+b113():
+  v504: val = nullary 1 0
+  br b124(v504)
+b124(v505: val):
+  safepoint
+  v508: pred = truth v505
+  condbr v508 -> b125() | b126()
+b126():
+  v510: pred = truth v505
+  v511: pred = not v510
+  condbr v511 -> b127() | b128()
+b128():
+  unreachable "no matching clause for check"
+b125():
+  v509: val = nullary 0 0
+  br b129(v509)
+b127():
+  v512: val = string "guishell: invariant failed"
+  v513: val = call error@foreign:fpr_prim_fn_error :: val -> val(v512)
+  br b129(v513)
+b129(v514: val):
+  v515: val = funvalue source
+  v516: int = const 2
+  v517: val = tag v516
+  v518: int = const 0
+  v519: int = const 400
+  v520: int = arith - v518, v519
+  v521: val = tag v520
+  v522: int = const 120
+  v523: val = tag v522
+  v524: val = make 5:0(v517, v521, v523)
+  v525: int = const 3
+  v526: val = tag v525
+  v527: int = const 1
+  v528: val = tag v527
+  v530: val = tag v518
+  v531: val = make 5:0(v526, v528, v530)
+  v538: val = make 5:0(v526, v528, v530)
+  v545: val = make 5:0(v526, v530, v530)
+  v552: val = make 5:0(v526, v528, v530)
+  v555: int = const 5000
+  v556: val = tag v555
+  v559: val = make 5:0(v517, v556, v556)
+  v560: int = const 7
+  v561: val = tag v560
+  v562: int = const 80
+  v563: val = tag v562
+  v564: int = const 180
+  v565: val = tag v564
+  v566: val = make 5:0(v561, v563, v565)
+  v573: val = make 5:0(v526, v530, v530)
+  v580: val = make 5:0(v526, v528, v530)
+  v581: val = nullary 2 0
+  v582: val = call Cons :: val val -> val(v580, v581)
+  v583: val = call Cons :: val val -> val(v573, v582)
+  v584: val = call Cons :: val val -> val(v566, v583)
+  v585: val = call Cons :: val val -> val(v559, v584)
+  v586: val = call Cons :: val val -> val(v552, v585)
+  v587: val = call Cons :: val val -> val(v545, v586)
+  v588: val = call Cons :: val val -> val(v538, v587)
+  v589: val = call Cons :: val val -> val(v531, v588)
+  v590: val = call Cons :: val val -> val(v524, v589)
+  v591: val = apply v515(v590)
+  v592: val = call spawn@foreign:fpr_g_spawn_call1 :: val -> val(v591)
+  v593: val = funvalue input@c5473a4cf01fe848
+  v594: int = const 960
+  v595: val = tag v594
+  v596: int = const 600
+  v597: val = tag v596
+  v598: val = apply v593(v592, v595, v597)
+  v599: val = call spawn@foreign:fpr_g_spawn_call1 :: val -> val(v598)
+  safepoint
+  safepoint
+  v604: val = make 1239449883:2(v530)
+  v605: val = call svcCall@ada75ecb0feb1fec@import :: val val val -> val(v2, v599, v604)
+  v606: pred = tagtest 5 0 v605
+  condbr v606 -> b130() | b131()
+b130():
+  v607: val = field 0 v605
+  v608: val = field 1 v605
+  v610: int = const 4
+  v611: val = tag v610
+  v612: pred = eqval v607, v611
+  condbr v612 -> b132() | b133()
+b132():
+  v613: val = call moveBase@f564130052f7b0a6@import ::  -> val()
+  safepoint
+  v615: int = untag v613
+  v616: int = const 180
+  v617: val = call stride@f564130052f7b0a6@import ::  -> val()
+  v618: int = untag v617
+  v619: int = arith * v616, v618
+  v620: int = arith + v615, v619
+  v621: int = const 80
+  v622: int = arith + v620, v621
+  v623: val = tag v622
+  v624: pred = eqval v608, v623
+  v627: val = boolof v624
+  br b134(v627)
+b133():
+  v625: val = nullary 1 0
+  br b134(v625)
+b134(v626: val):
+  safepoint
+  v629: pred = truth v626
+  condbr v629 -> b135() | b136()
+b136():
+  v631: pred = truth v626
+  v632: pred = not v631
+  condbr v632 -> b137() | b138()
+b138():
+  unreachable "no matching clause for check"
+b135():
+  v630: val = nullary 0 0
+  br b139(v630)
+b137():
+  v633: val = string "guishell: invariant failed"
+  v634: val = call error@foreign:fpr_prim_fn_error :: val -> val(v633)
+  br b139(v634)
+b139(v635: val):
+  safepoint
+  safepoint
+  v638: int = const 0
+  v639: val = tag v638
+  v640: val = make 1239449883:2(v639)
+  v641: val = call svcCall@ada75ecb0feb1fec@import :: val val val -> val(v2, v599, v640)
+  v642: pred = tagtest 5 0 v641
+  condbr v642 -> b140() | b141()
+b140():
+  v644: val = field 1 v641
+  v646: val = call downBase@f564130052f7b0a6@import ::  -> val()
+  safepoint
+  v648: int = untag v646
+  v649: int = const 180
+  v650: val = call stride@f564130052f7b0a6@import ::  -> val()
+  v651: int = untag v650
+  v652: int = arith * v649, v651
+  v653: int = arith + v648, v652
+  v654: int = const 80
+  v655: int = arith + v653, v654
+  v656: val = tag v655
+  v657: pred = eqval v644, v656
+  safepoint
+  condbr v657 -> b142() | b143()
+b143():
+  v660: pred = not v657
+  condbr v660 -> b144() | b145()
+b145():
+  unreachable "no matching clause for check"
+b142():
+  v659: val = nullary 0 0
+  br b146(v659)
+b144():
+  v661: val = string "guishell: invariant failed"
+  v662: val = call error@foreign:fpr_prim_fn_error :: val -> val(v661)
+  br b146(v662)
+b146(v663: val):
+  safepoint
+  safepoint
+  v666: int = const 0
+  v667: val = tag v666
+  v668: val = make 1239449883:2(v667)
+  v669: val = call svcCall@ada75ecb0feb1fec@import :: val val val -> val(v2, v599, v668)
+  v670: pred = tagtest 5 0 v669
+  condbr v670 -> b147() | b148()
+b147():
+  v673: val = field 2 v669
+  v674: int = const 0
+  v675: val = tag v674
+  v676: pred = eqval v673, v675
+  safepoint
+  condbr v676 -> b149() | b150()
+b150():
+  v679: pred = not v676
+  condbr v679 -> b151() | b152()
+b152():
+  unreachable "no matching clause for check"
+b149():
+  v678: val = nullary 0 0
+  br b153(v678)
+b151():
+  v680: val = string "guishell: invariant failed"
+  v681: val = call error@foreign:fpr_prim_fn_error :: val -> val(v680)
+  br b153(v681)
+b153(v682: val):
+  safepoint
+  safepoint
+  v685: int = const 0
+  v686: val = tag v685
+  v687: val = make 1239449883:2(v686)
+  v688: val = call svcCall@ada75ecb0feb1fec@import :: val val val -> val(v2, v599, v687)
+  safepoint
+  safepoint
+  v693: val = make 1239449883:2(v686)
+  v694: val = call svcCall@ada75ecb0feb1fec@import :: val val val -> val(v2, v599, v693)
+  v695: pred = tagtest 5 0 v694
+  condbr v695 -> b154() | b155()
+b154():
+  v697: val = field 1 v694
+  v699: pred = eqval v697, v644
+  safepoint
+  condbr v699 -> b156() | b157()
+b157():
+  v702: pred = not v699
+  condbr v702 -> b158() | b159()
+b159():
+  unreachable "no matching clause for check"
+b156():
+  v701: val = nullary 0 0
+  br b160(v701)
+b158():
+  v703: val = string "guishell: invariant failed"
+  v704: val = call error@foreign:fpr_prim_fn_error :: val -> val(v703)
+  br b160(v704)
+b160(v705: val):
+  safepoint
+  safepoint
+  v708: int = const 0
+  v709: val = tag v708
+  v710: val = make 1239449883:2(v709)
+  v711: val = call svcCall@ada75ecb0feb1fec@import :: val val val -> val(v2, v599, v710)
+  v712: pred = tagtest 5 0 v711
+  condbr v712 -> b161() | b162()
+b161():
+  v714: val = field 1 v711
+  v716: val = call moveBase@f564130052f7b0a6@import ::  -> val()
+  safepoint
+  v718: int = untag v716
+  v719: int = const 0
+  v720: val = call stride@f564130052f7b0a6@import ::  -> val()
+  v721: int = untag v720
+  v722: int = arith * v719, v721
+  v723: int = arith + v718, v722
+  v724: int = const 959
+  v725: int = arith + v723, v724
+  v726: val = tag v725
+  v727: pred = eqval v714, v726
+  safepoint
+  condbr v727 -> b163() | b164()
+b164():
+  v730: pred = not v727
+  condbr v730 -> b165() | b166()
+b166():
+  unreachable "no matching clause for check"
+b163():
+  v729: val = nullary 0 0
+  br b167(v729)
+b165():
+  v731: val = string "guishell: invariant failed"
+  v732: val = call error@foreign:fpr_prim_fn_error :: val -> val(v731)
+  br b167(v732)
+b167(v733: val):
+  safepoint
+  safepoint
+  v736: int = const 0
+  v737: val = tag v736
+  v738: val = make 1239449883:2(v737)
+  v739: val = call svcCall@ada75ecb0feb1fec@import :: val val val -> val(v2, v599, v738)
+  v740: pred = tagtest 5 0 v739
+  condbr v740 -> b168() | b169()
+b168():
+  v742: val = field 1 v739
+  v744: val = call moveBase@f564130052f7b0a6@import ::  -> val()
+  safepoint
+  v746: int = untag v744
+  v747: int = const 180
+  v748: val = call stride@f564130052f7b0a6@import ::  -> val()
+  v749: int = untag v748
+  v750: int = arith * v747, v749
+  v751: int = arith + v746, v750
+  v752: int = const 80
+  v753: int = arith + v751, v752
+  v754: val = tag v753
+  v755: pred = eqval v742, v754
+  safepoint
+  condbr v755 -> b170() | b171()
+b171():
+  v758: pred = not v755
+  condbr v758 -> b172() | b173()
+b173():
+  unreachable "no matching clause for check"
+b170():
+  v757: val = nullary 0 0
+  br b174(v757)
+b172():
+  v759: val = string "guishell: invariant failed"
+  v760: val = call error@foreign:fpr_prim_fn_error :: val -> val(v759)
+  br b174(v760)
+b174(v761: val):
+  safepoint
+  safepoint
+  v764: int = const 0
+  v765: val = tag v764
+  v766: val = make 1239449883:2(v765)
+  v767: val = call svcCall@ada75ecb0feb1fec@import :: val val val -> val(v2, v599, v766)
+  safepoint
+  safepoint
+  v772: val = make 1239449883:2(v765)
+  v773: val = call svcCall@ada75ecb0feb1fec@import :: val val val -> val(v2, v599, v772)
+  v774: pred = tagtest 5 0 v773
+  condbr v774 -> b175() | b176()
+b175():
+  v776: val = field 1 v773
+  v778: pred = eqval v776, v644
+  safepoint
+  condbr v778 -> b177() | b178()
+b178():
+  v781: pred = not v778
+  condbr v781 -> b179() | b180()
+b180():
+  unreachable "no matching clause for check"
+b177():
+  v780: val = nullary 0 0
+  br b181(v780)
+b179():
+  v782: val = string "guishell: invariant failed"
+  v783: val = call error@foreign:fpr_prim_fn_error :: val -> val(v782)
+  br b181(v783)
+b181(v784: val):
+  v785: val = call shortcuts@c5473a4cf01fe848@import ::  -> val()
+  safepoint
+  v787: val = call width@c5473a4cf01fe848@import ::  -> val()
+  v788: val = call height@c5473a4cf01fe848@import ::  -> val()
+  v789: val = call layout@4ec9c12dcd05c4c8@import :: val val -> val(v787, v788)
+  v790: val = call count@c5473a4cf01fe848@import :: val -> val(v785)
+  v791: val = call pages@4ec9c12dcd05c4c8@import :: val val -> val(v789, v790)
+  v792: int = const 1
+  v793: val = tag v792
+  v794: pred = eqval v791, v793
+  safepoint
+  condbr v794 -> b182() | b183()
+b183():
+  v797: pred = not v794
+  condbr v797 -> b184() | b185()
+b185():
+  unreachable "no matching clause for check"
+b182():
+  v796: val = nullary 0 0
+  br b186(v796)
+b184():
+  v798: val = string "guishell: invariant failed"
+  v799: val = call error@foreign:fpr_prim_fn_error :: val -> val(v798)
+  br b186(v799)
+b186(v800: val):
+  v801: val = funvalue $typed_lifted_0.4.main
+  v802: val = call spawn@foreign:fpr_g_spawn_call1 :: val -> val(v801)
+  v803: int = const 20000
+  v804: val = tag v803
+  v805: val = call Sys.sleepUs@foreign:fpr_g_Sys_x2esleepUs_call1 :: val -> val(v804)
+  v806: val = funvalue input@c5473a4cf01fe848
+  v807: int = const 960
+  v808: val = tag v807
+  v809: int = const 600
+  v810: val = tag v809
+  v811: val = apply v806(v802, v808, v810)
+  v812: val = call spawn@foreign:fpr_g_spawn_call1 :: val -> val(v811)
+  safepoint
+  v814: int = const 0
+  v815: val = tag v814
+  v816: val = make 1239449883:2(v815)
+  v817: val = make 4:0(v2, v816)
+  v818: val = call sendAwait@201a0e9bf98a5154@import :: val val val -> val(v2, v812, v817)
+  v819: pred = vartest 1 v818
+  condbr v819 -> b187() | b188()
+b187():
+  v820: val = field 0 v818
+  v821: val = string "dead actor"
+  v822: pred = eqval v820, v821
+  v826: val = boolof v822
+  br b189(v826)
+b188():
+  v824: val = nullary 1 0
+  br b189(v824)
+b189(v825: val):
+  safepoint
+  v828: pred = truth v825
+  condbr v828 -> b190() | b191()
+b191():
+  v830: pred = truth v825
+  v831: pred = not v830
+  condbr v831 -> b192() | b193()
+b193():
+  unreachable "no matching clause for check"
+b190():
+  v829: val = nullary 0 0
+  br b194(v829)
+b192():
+  v832: val = string "guishell: invariant failed"
+  v833: val = call error@foreign:fpr_prim_fn_error :: val -> val(v832)
+  br b194(v833)
+b194(v834: val):
+  v835: val = string "guishell: HOLDS"
+  ret v835
+b176():
+  unreachable "let pattern: no match; pattern was PTup [PVar \"k7\",PVar \"absolutePress\",PVar \"v7\"]"
+b169():
+  unreachable "let pattern: no match; pattern was PTup [PVar \"k6\",PVar \"absolute\",PVar \"v6\"]"
+b162():
+  unreachable "let pattern: no match; pattern was PTup [PVar \"k5\",PVar \"bounded\",PVar \"v5\"]"
+b155():
+  unreachable "let pattern: no match; pattern was PTup [PVar \"k4\",PVar \"again\",PVar \"v4\"]"
+b148():
+  unreachable "let pattern: no match; pattern was PTup [PVar \"k3\",PVar \"noRepeat\",PVar \"v3\"]"
+b141():
+  unreachable "let pattern: no match; pattern was PTup [PVar \"k2\",PVar \"press\",PVar \"v2\"]"
+b131():
+  unreachable "let pattern: no match; pattern was PTup [PVar \"k\",PVar \"code\",PVar \"v\"]"
+b106():
+  unreachable "let pattern: no match; pattern was PTup [PVar \"wheel\",PWild]"
