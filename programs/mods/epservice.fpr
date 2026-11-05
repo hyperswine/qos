@@ -20,6 +20,10 @@ nsReceive : unsafe Int -> NsSt -> a .
 nsReceive me st =
   m = receive me;
   (from, id, q) = m;
+  # the request dies here, as every received message does once read (its
+  # children stay readable until this actor's next receive); the compiler
+  # inserted this drop until 2026-10-24 (fprisc docs/2026-10-24-REGIONS-STAGE1.md)
+  _ = drop m;
   nsMsg me st (from, id) from q.
 nsMsg : unsafe Int -> NsSt -> (Int, Int) -> Int -> EP.Ns -> a .
 nsMsg me st ret from q =
@@ -77,6 +81,7 @@ lsReceive : unsafe Int -> Int -> List (Int, String) -> Int -> AC.Tidy -> a .
 lsReceive ns me hs next tidy =
   m = receive me;
   (from, id, q) = m;
+  _ = drop m;
   lsMsg ns me hs next tidy (from, id) q.
 lsMsg : unsafe Int -> Int -> List (Int, String) -> Int -> AC.Tidy -> (Int, Int) -> EP.Ep -> a .
 lsMsg ns me hs next tidy ret q = case q of
@@ -89,7 +94,7 @@ lsOpen : unsafe Int -> Int -> List (Int, String) -> Int -> AC.Tidy -> (Int, Int)
 lsOpen ns me hs next tidy ret url = case EP.endsSlash url of
     False -> AC.reply ret (Refused "not a listing: {url}") >> lsLoop ns me hs next tidy
   | True -> AC.reply ret (Opened next) >> lsLoop ns me ((next, strcat url "") :: hs) (next + 1) tidy.
-lsRead : Int -> Int -> String -> Result EP.IoV String .
+lsRead : unsafe Int -> Int -> String -> Result EP.IoV String .
 lsRead ns me pre = case strlen pre == 0 of
     True -> Err "no such handle"
   | False -> (case AC.call me ns (NsList pre) of
@@ -110,6 +115,7 @@ sReceive : unsafe _ -> _ -> Int -> List (Int, String, Int) -> Int -> AC.Tidy -> 
 sReceive rd wr me hs next tidy =
   m = receive me;
   (from, id, q) = m;
+  _ = drop m;
   sMsg rd wr me hs next tidy (from, id) from q.
 sMsg : unsafe _ -> _ -> Int -> List (Int, String, Int) -> Int -> AC.Tidy -> (Int, Int) -> Int -> EP.Ep -> a .
 sMsg rd wr me hs next tidy ret from q = case q of
@@ -126,6 +132,7 @@ sMsg rd wr me hs next tidy ret from q = case q of
 Sys.alive : Int -> Bool .
 Lease = Type (Lease Int String Int Int).
 simpleUntil rd wr me = _ = Sys.loop (Nil, 1) (untilStep rd wr me); Unit.
+untilStep : unsafe _ -> _ -> Int -> (List Lease, Int) -> (Bool, (List Lease, Int)) .
 untilStep rd wr me state =
   (handles, next) = state;
   m = receive me;
@@ -137,6 +144,7 @@ untilStep rd wr me state =
   | stale -> (live, next);
   _ = drop m;
   (True, fresh).
+untilDispatch : unsafe _ -> _ -> Int -> List Lease -> Int -> (Int, Int) -> Int -> EP.Ep -> (List Lease, Int) .
 untilDispatch rd wr me handles next ret from command = case command of
     EP.Open url mode -> if leaseCount handles >= 64 or strlen url > 2048 then
       _ = AC.reply ret (EP.Refused "endpoint: handle budget exhausted"); (handles, next)
@@ -147,6 +155,7 @@ untilDispatch rd wr me handles next ret from command = case command of
       _ = AC.reply ret (Err "endpoint: deadline exceeded before execution"); (handles, next)
       else untilOperation rd wr until me handles next ret from q
   | other -> untilOperation rd wr (AC.nowUs Unit + 10000000) me handles next ret from other.
+untilOperation : unsafe _ -> _ -> Int -> Int -> List Lease -> Int -> (Int, Int) -> Int -> EP.Ep -> (List Lease, Int) .
 untilOperation rd wr until me handles next ret from command = case command of
     EP.Read h n -> (url, client) = findLease handles h;
       _ = AC.reply ret (if client != from or url == "" then Err "no such handle" else rd until me client url);
@@ -156,13 +165,17 @@ untilOperation rd wr until me handles next ret from command = case command of
       (handles, next)
   | EP.Close h -> _ = AC.reply ret (Ok 0); (removeLease handles h from, next)
   | other -> _ = AC.reply ret (Err "endpoint: invalid timed operation"); (handles, next).
+liveLeases : unsafe Int -> List Lease -> List Lease .
 liveLeases now Nil = Nil.
 liveLeases now (Lease h url client until :: rest) =
   tail = liveLeases now rest;
   if now >= until or not (Sys.alive client) then tail else Lease h url client until :: tail.
+leaseCount : unsafe List Lease -> Int .
 leaseCount Nil = 0.
 leaseCount (_ :: rest) = 1 + leaseCount rest.
+findLease : unsafe List Lease -> Int -> (String, Int) .
 findLease Nil h = ("", 0).
 findLease (Lease id url client until :: rest) h = if id == h then (url, client) else findLease rest h.
+removeLease : unsafe List Lease -> Int -> Int -> List Lease .
 removeLease Nil h from = Nil.
 removeLease (Lease id url client until :: rest) h from = if id == h and client == from then rest else Lease id url client until :: removeLease rest h from.
