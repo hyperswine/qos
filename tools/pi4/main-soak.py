@@ -14,6 +14,7 @@ import shlex
 import struct
 import subprocess
 import time
+import tomllib
 
 from soak import mappings
 
@@ -41,6 +42,8 @@ def main():
     ap.add_argument('--known-hosts', required=True)
     ap.add_argument('--host-key-alias')
     ap.add_argument('--remote-dir', required=True)
+    ap.add_argument('--expected-shortcuts', type=int,
+                    help='launcher count for a custom or historical disk (default: current Main profile)')
     ap.add_argument('--viewport', help='force an isolated logical surface, e.g. 1024x600')
     ap.add_argument('--pointer-probe', action='store_true', help='test primary touch tap/cancel through FPR_POINTER_EVDEV')
     ap.add_argument('--harts', type=int, choices=(1, 4), default=4)
@@ -55,6 +58,12 @@ def main():
                     help='require tests/mainmemory.fpr as main.qa; sample its F12 allocator probe')
     ap.add_argument('--output', type=Path, required=True)
     a = ap.parse_args()
+    if a.expected_shortcuts is None:
+        profile = Path(__file__).resolve().parents[2] / 'profiles/Main.toml'
+        # Main always starts with its four built-in tiles before discovered apps.
+        a.expected_shortcuts = 4 + len(tomllib.loads(profile.read_text())['apps'])
+    if a.expected_shortcuts < 1:
+        ap.error('expected shortcut count must be positive')
     if a.seconds < 60 or a.interval <= 0 or a.max_growth_mib < 0 or a.arena_mib < 64:
         ap.error('seconds must be >=60, interval positive, growth nonnegative, arena >=64 MiB')
     if a.viewport:
@@ -82,7 +91,7 @@ def main():
     ssh('set -e\nmkdir '+quote(work)+' '+quote(store)+'\ncp '+quote(base+'/Main.disk')+' '+quote(store+'/Main.disk'))
     result = {'remote_dir': base, 'work': work, 'store': store, 'bundle_hashes': hashes,
               'production_before': production, 'boots': [], 'memory_probe': a.memory_probe,
-              'arena_limit_mib': a.arena_mib, 'harts': a.harts, 'viewport': a.viewport, 'pointer_probe': a.pointer_probe,
+              'arena_limit_mib': a.arena_mib, 'expected_shortcuts': a.expected_shortcuts, 'harts': a.harts, 'viewport': a.viewport, 'pointer_probe': a.pointer_probe,
               'reliability_probe': a.reliability_probe, 'scope':
               'isolated Main UI workload and two graceful shutdown paths; residency and optional allocator reservations/root counts, not reachability proof'}
     (a.output/'started.json').write_text(json.dumps(result, indent=2)+'\n')
@@ -121,7 +130,7 @@ def main():
                    + ' '+quote(base+'/qosp-es')+' --yes '+quote(base+'/main.qa')
                    + ' > '+quote(work+f'/boot{boot}.json')+' 2> '+quote(work+f'/boot{boot}.err')+' < /dev/null &')
         ssh(command)
-        wait_log(boot, 'Main Profile ready (8 shortcuts,')
+        wait_log(boot, f'Main Profile ready ({a.expected_shortcuts} shortcuts,')
         return int(ssh('cat '+quote(ready)))
 
     def collect(boot):

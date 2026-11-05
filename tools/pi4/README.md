@@ -115,7 +115,7 @@ python3 tools/pi4/main-soak.py \
 ```
 
 The directory must contain matching `runner`, `qosp-es`, `main.qa` and a
-32 MiB `Main.disk` seeded with the standard eight-shortcut Main profile.
+32 MiB `Main.disk` seeded with the standard Main profile (four built-in tiles plus the apps in `profiles/Main.toml`).
 This driver preserves the installed service and copies only the candidate's
 seed disk. It checks UI log acknowledgements on every cycle, unchanged test
 PID/service state, sampled RSS growth (default 16 MiB allowance), normal quit
