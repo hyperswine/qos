@@ -1,0 +1,164 @@
+== sweep verdicts: injected failures must fail the sweep ==	PASS
+== fprc ==	PASS
+== Linux RV64 lowering, cache isolation and QOS TLS ==	PASS
+== DRM scanout: RGB, orientation, pitch and full-screen scaling ==	PASS
+== STAR64 console ownership with optional QOS autostart ==	PASS
+== baseline compile gates: graphics-independent, explicit LiveView safety and dynamic-slot refusal ==	PASS
+== disk suspension: one-hart progress, abandoned requests and copied buffers ==	PASS
+== virtio raw policy: register programming and full-word deadlines against C ==	PASS
+== native block service: configurable budgets and failure isolation ==	PASS
+== block lifecycle: cancellation, drain and bounded reusable helpers ==	PASS
+== Qlog and bootstrap block routing ==	PASS
+== Storage deadlines, late replies and finite service budgets ==	PASS
+== Storage operation types, compatibility and live schema ==	PASS
+== Bootstrap missing-only storage fallbacks ==	PASS
+== Qlog scratch reclamation, binary reads and two-boot persistence ==	PASS
+== Portable durable storage: barriers, dual metadata and staged recovery ==	PASS
+== Portable compatibility KV durability and torn-tail recovery ==	PASS
+== the compile bridge: worker-backed, a reply past the old 256 KiB whole, no server, a silent server, an abandoned request (sanitizers) ==	PASS
+== Portable compatibility KV application ABI and uncertain outcomes ==	PASS
+== Files quiesce, block drain and final flush ==	PASS
+== Portable bounded graceful shutdown ==	PASS
+== Buildroot service supervision and finite restart ==	PASS
+== Buildroot persistent state directory installation ==	PASS
+== Pi quiet boot splash and vector rendering ==	PASS
+== disk hardening: deadlines, stalled devices, reset, offline refusal, overload refusal (native + Portable) ==	PASS
+== native image integrity: corrupt sections and missing digests refuse before allocation ==	PASS
+== opt-in inbox admission: native process-plane ownership and reclamation ==	PASS
+== initial memory admission: routed native process, refusal and reclamation ==	PASS
+== the mailbox contract as a loaded process: Static refuses through the plane's actors table ==	PASS
+== error in a loaded process ends that actor, not the machine (S8) ==	PASS
+== native runtime ABI parser: missing, malformed, duplicate and oversized declarations ==	PASS
+== audit failure injections: native TX stall/orphan, full console pipe, native process storage refusal and fail-stop ==	PASS
+== stdcheck ==	PASS
+== stdcheck: the REAL std library (lifted lambdas) ==	PASS
+== Native instruction ratchet: system.fpr selected segments and runtime call sites ==	FAIL
+== BareMetal ==	PASS
+== Wide ABI: arity 24, wide TCO, Tup4..8 ==	PASS
+== Floats: F64/F32 in the AOT tier ==	PASS
+== F64 fast paths: C-reference IEEE edges, literal splices and x64 backend ==	PASS
+== Float columns: declared layout + specialized float loops ==	PASS
+== Literal suffixes: 2f / 1.5f F32, 1.5 / 1.5d / 1e3 F64 ==	PASS
+== Floats: F64/F32 raw-bits, IEEE, dtoa, refusal guard ==	PASS
+== buddy: alloc/realloc/dealloc proven on the host ==	PASS
+== verification slice: PBT (Hypothesis over buddy.c via ctypes) + SPIN (SPSC channel model); CBMC opt-in ==	PASS
+== dedup ratchet: the frontend un-forking must not regress ==	FAIL
+== spans: diagnostics carry file:line[:col] anchors (steps 1-3) ==	PASS
+== versions: every pin is a committed version, fpr.lock current ==	PASS
+== QOSPortable app ==	PASS
+== QOSPortable host+run ==	PASS
+== clause groups: a function split by another definition is still one function ==	PASS
+== the mailbox contract: Static refuses and says so, Dynamic grows in order, the ARC table grows (<tree>/tests/mailbox.fpr, <tree>/docs/MAILBOX.md) ==	PASS
+== Memory.qa stage 1: one actor owns the buddy; 100 workers' blocks come home, on qosp and on the bare-metal kernel (<tree>/tests/memory.fpr, <tree>/docs/MEMORY.md) ==	PASS
+== apps: two app images from the disk, each under its own pid, memory home when they exit (tests/apps.fpr) ==	PASS
+== MVU: the elm surface (App / Ev / subs) on the engine ==	PASS
+== MVU: LV.server -- the LiveView wire over the socket tier ==	PASS
+== FPRLive: POS v2 over a real websocket, functional + adversarial ==	SKIP
+== liveboard: std/live end to end -- sessions, deltas, client state, commands, subscriptions, durable fields, replay ==	PASS
+== liveboard: LiveReload -- a broken edit keeps the old program serving, a good one is rebuilt and becomes the server, state intact ==	PASS
+== POS v1: the shop as one log, websocket registers, the adversarial legs (docs/2026-09-07-POS1.md) ==	SKIP
+== actor runtime: cross-hart wake stress (pingpong) + 40-sender fan-in through one hub ==	PASS
+== MVU: input/display service-roundtrip latency (mvulat, headless) ==	PASS
+== std.compile: the fpr compiler behind a unix socket (editor loop) ==	PASS
+== sysdisk: the disk IS the system (loader + sys/live replay across two boots) ==	PASS
+== endpoints: a new service claims a url with no central edit; open/read/write/close direct, listing, refusals, cancel, grants (tests/epecho.fpr) ==	PASS
+== the Svc surface over the namespace: display, clock, keyboard, diskless storage, unknown url, wrong shape (tests/svcurl.fpr) ==	PASS
+== Large KV replies: Portable and Native replay intact ==	PASS
+== Files.qa: two application prefixes, two boots and owner-death refusal ==	PASS
+== Graphics.qa: real Terra II + dungeon, focused input, close/restart and captured pixels ==	FAIL
+== Main Profile: paged GUI shell, onboard .qa apps, refusals and two boots ==	PASS
+== Graphics.qa: two programs on one display, focus, close and restart, a dead program never holds it (tests/gfxshare.fpr, headless) ==	PASS
+== the keyboard endpoint over UART.qa: a held read, bytes queued before the first poll one per poll, an empty poll (tests/kbdread.fpr) ==	PASS
+== qsys: namespace and plugins persist across two boots ==	PASS
+== plugin imports: one plugin build under two shell builds, bound by name; a missing import refused by name ==	PASS
+== storage RPC: mixed traffic, refusal and death ==	PASS
+== failure honesty: publication, contracts and atomic writes ==	PASS
+== qsys failure paths: refused and ended services are answers; a refused write leaves the file as the disk has it (tests/qsysfail.fpr) ==	PASS
+== loader: a load whose sys/live record fails is rolled back (tests/loaderfail.fpr) ==	PASS
+== selfhost: on-QOS edit -> package (fprd plugin op) -> store -> hot-swap ==	PASS
+== endpoint state: linear ownership, close retries, uncertainty and app memory ==	PASS
+== Editor policies: live run budgets, file grants and existing-process confinement ==	PASS
+== Editor state: named types, live prompt transitions and lifecycle ==	PASS
+== Editor and Terminal live preferences and restart persistence ==	FAIL
+== hosted timers: linear owners, checked durations, cancellation, stale ticks, backpressure and owner death ==	PASS
+== the Editor's Run: packaged by the host compiler, started as a process of its own, its console captured, its end seen; a compile holds no hart (tests/runprog.fpr, one hart) ==	PASS
+== the Editor's buffer: edits, selections, find, indentation (tests/editbuf.fpr) ==	PASS
+== dtree: histogram decision tree, F64 columns, == GHC reference ==	PASS
+== F64 transcendentals: freestanding log/log2/exp/pow/sin/cos ==	PASS
+== Memory: big blocks come back (the bigfree LIFO) ==	PASS
+== big frames: 300-slot function, 12-bit imm rule retired ==	PASS
+== linear PAPs: partials + lambdas may hold linear values ==	PASS
+== linearity: unannotated misuse refused (the closed audit hole) ==	PASS
+== ergonomics: arm/lambda bindings + negative literals ==	PASS
+== termination measures: declared, verified, unsafe retired ==	PASS
+== std.uart: linear phase-typed handle over UART.qa (bare metal, IRQ tx+rx) ==	PASS
+== std.uart on QOS Portable (same protocol, synchronous backend) ==	PASS
+== /services/uart: the Svc-funnel route to UART.qa (capability-gated) ==	PASS
+== std.uart safety: write-before-arm and handle reuse REFUSED ==	PASS
+== Timer.qa: aux-hart CLINT bridge (native) + sleeper fallback (qosp) + /services/timer route ==	PASS
+== linearity: wildcard discard of a linear value REFUSED ==	PASS
+== development publication: real saves, checked packages, durable QOS reload ==	PASS
+== publication: immutable archives, storage failures, owned watchers and two boots ==	PASS
+== MVU reload: real plugin replacements and failure paths, one/four harts ==	PASS
+== first-class paths: @Shape literals + schema tier + refusals (<tree>/docs/PATHS.md) ==	PASS
+== pathnotes: value-space iteration on the Notes app (paths + port + livereload) ==	PASS
+== sketch tier: FPR programs INTERPRETED (actors + MVU + paths under fpr sol) ==	PASS
+== QAR2 integrity: a flipped byte in IMAGE or in RELOC refused before copy ==	PASS
+== Log plane: host lines land in the app's /logs/host ring (ABI v4) ==	PASS
+== Log plane: panic last words persist (sys/panic kv record) ==	PASS
+== Log plane: echo rate limit (rings never limited) ==	PASS
+== Grow attribution: the counted gateway names its callers ==	PASS
+== QOS-aarch64: x28 hart discipline (no TLS, Darwin-proof) ==	SKIP
+== program-carried meshes: the CoScad tank (STL -> mkmesh -> glMesh) drawn by the walker ==	SKIP
+== the walker's text pass: the SDF face, discs and corners (tests/gltext.fpr) ==	SKIP
+== the 2D layer's box treatments: glass, rings, corners, a menu over a layer (tests/gl2d.fpr) ==	SKIP
+== Terra II: the card game on the GLES walker, a scripted game under Xvfb (and the MP3 music channel) ==	SKIP
+== equality is DEEP: tuples, lists, records, constructors compared by content (<tree>/tests/eq.fpr, <tree>/runtime/runtime.c veq) ==	PASS
+== dungeon rules: a turn is a pure function, so a whole game is a fold (tests/dungeon.fpr, docs/2026-09-08-DUNGEON.md) ==	PASS
+== the dungeon: the Java crawler as an MVU game on the GLES walker, played to a win under Xvfb ==	SKIP
+== the tree as a toolchain: qos.py install to a prefix, then qos/fpr/sol from an empty directory (<tree>/docs/2026-09-10-INSTALL.md) ==	FAIL
+== Desktop GL: GLFW window + synthetic-evdev keys (Xvfb) ==	SKIP
+== QOSNative kernel ==	PASS
+== QAR2 process load: build, seed, launch, exit ==	PASS
+== Transparent ACBs: process spawn/steal across harts, pid-tagged ==	PASS
+== typed vectors: type-changing output layouts on Portable and Native ==	PASS
+== native process images: buddy blocks, relocated; two at once, each held until its process has ended, memory back ==	PASS
+== a loaded process reaches the namespace: granted urls open, an ungranted one is refused, its own storage stream round-trips (tests/epproc.fpr) ==	PASS
+== Numeric: ONE surface number, VNum/JD underneath, 3 tiers agree ==	PASS
+== ONE grammar, two profiles (both.sol) ==	PASS
+== Memory: linear frames (Arc-flat) ==	PASS
+== send triad: sendLinear relay + sendArc share + refusals ==	PASS
+== Memory: autodrop (the drop law, compiler-discharged) ==	PASS
+== Memory: ARC.qa audit ==	PASS
+== fpr commit / store resolution ==	PASS
+== THE FOLD, COMPLETE: one parser, VM as a target ==	PASS
+== Vec dispatch lattice: GPU/JIT/interp agree ==	PASS
+== Sol ML pipeline: range fill, GPU uniform captures, record-SoA JIT folds, 3 tiers identical ==	PASS
+== Sol NN: feed-forward + backprop over Matrix-on-Vec ==	FAIL
+== Sol plot: SVG/SMIL backend (charts + animations as text) ==	PASS
+== auto-tabling: gated, correct, braked ==	PASS
+== Mat4*Vec4: operator -> axpb column loops, EXECUTED ==	PASS
+== Vec.filter: eager COMPACTION in place (the decision, tested) ==	PASS
+== Vec fusion: adjacent maps -> ONE column loop ==	FAIL
+== Vec fixpoint + write-back fold: 3-chain collapses, fold-of-map fuses ==	FAIL
+== Vec record folds: named fns dualize; declines stay NAMED; x64 the same (its tier is on since fprisc 28dcacc) ==	PASS
+== RVV: --rvv links (COMDAT enable shim) and runs under -cpu v=true ==	PASS
+== Vec edges: SoA<->AoS, lenses, chains, wide records, empty, SIMD prims ==	PASS
+== operator sugar: + / - on Str and List (prelude-backed) ==	PASS
+== std/ui on std/view: components over Elem, delta vs reshape ==	PASS
+== typed holes: ?name refuses w/ type, ?? runs-then-traps ==	PASS
+== txn: the SCRIPT is the transaction (abort is total) ==	PASS
+== sol txn hygiene 2: run-overlap refused, binary honest, shq fail-open files, actor warning ==	PASS
+== operators on user types: + - * resolve by the operand type ==	PASS
+== sol Ok/Err tier + txn hygiene: Try.*, |>?, honest receipts ==	FAIL
+== Sol structured processes + typed Git wrapper ==	PASS
+== Sol general-purpose scripts ==	PASS
+== Sol purity + filesystem + lock + retry-actor safety ==	PASS
+== Sol transactional properties: panic rollback, retry-once, race serialization, fenced commands; railway/builtin/proc specs ==	PASS
+== operators are the default: % ^ on numbers, + - on strings/lists, + - * on Vec/Matrix (dot, matmul, matvec), user structs; same on the AOT profile ==	PASS
+== Sol JSON + CSV: parse, reshape, render, both directions, round trips are the identity ==	PASS
+== native JIT tier (hand-rolled x86-64/A64, no LLVM) == interpreter: f64 + i64 lattice ==	PASS
+== native JIT: A64 backend executes every dumped kernel under qemu-user, bit-identical to x86-64 ==	PASS
+== sol as a text tool: grep/sed/awk/sort/uniq/regex/pipe/sh in Sol over one sample (<tree>/sol/scripts/text, <tree>/docs/SOL-TEXT.md) ==	PASS
+== HostedBytecode (sol) ==	PASS
+SWEEP: 145 passed, 9 failed, 9 skipped (of 163 legs)

@@ -1,0 +1,7 @@
+  * <qos aac3edc>/.fpr/store/e8bce05a1ddf73db.fpr:159: liveLeases@e8bce05a1ddf73db is unsafe (recursive) but has no explicit `liveLeases@e8bce05a1ddf73db : unsafe ...` signature
+  * <qos aac3edc>/.fpr/store/e8bce05a1ddf73db.fpr:163: leaseCount@e8bce05a1ddf73db is unsafe (recursive) but has no explicit `leaseCount@e8bce05a1ddf73db : unsafe ...` signature
+  * <qos aac3edc>/.fpr/store/e8bce05a1ddf73db.fpr:165: findLease@e8bce05a1ddf73db is unsafe (recursive) but has no explicit `findLease@e8bce05a1ddf73db : unsafe ...` signature
+  * <qos aac3edc>/.fpr/store/e8bce05a1ddf73db.fpr:167: removeLease@e8bce05a1ddf73db is unsafe (recursive) but has no explicit `removeLease@e8bce05a1ddf73db : unsafe ...` signature
+  * <qos aac3edc>/programs/mods/appsep.fpr:66: read@b721f8e9d5e0aa31 is unsafe (calls an unsafe-marked function) but has no explicit `read@b721f8e9d5e0aa31 : unsafe ...` signature
+  * <qos aac3edc>/programs/system.fpr:45: getc is unsafe (calls an unsafe-marked function) but has no explicit `getc : unsafe ...` signature
+  * <qos aac3edc>/programs/system.fpr:364: epOf is unsafe (calls an unsafe-marked function) but has no explicit `epOf : unsafe ...` signature

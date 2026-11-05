@@ -1,0 +1,42 @@
+== sweep verdicts: injected failures must fail the sweep ==	PASS
+== fprc ==	PASS
+== Linux RV64 lowering, cache isolation and QOS TLS ==	PASS
+== DRM scanout: RGB, orientation, pitch and full-screen scaling ==	PASS
+== STAR64 console ownership with optional QOS autostart ==	PASS
+== baseline compile gates: graphics-independent, explicit LiveView safety and dynamic-slot refusal ==	PASS
+== disk suspension: one-hart progress, abandoned requests and copied buffers ==	PASS
+== virtio raw policy: register programming and full-word deadlines against C ==	PASS
+== native block service: configurable budgets and failure isolation ==	PASS
+== block lifecycle: cancellation, drain and bounded reusable helpers ==	PASS
+== Qlog and bootstrap block routing ==	FAIL
+== Storage deadlines, late replies and finite service budgets ==	PASS
+== Storage operation types, compatibility and live schema ==	PASS
+== Bootstrap missing-only storage fallbacks ==	PASS
+== Qlog scratch reclamation, binary reads and two-boot persistence ==	PASS
+== Portable durable storage: barriers, dual metadata and staged recovery ==	PASS
+== Portable compatibility KV durability and torn-tail recovery ==	PASS
+== the compile bridge: worker-backed, a reply past the old 256 KiB whole, no server, a silent server, an abandoned request (sanitizers) ==	PASS
+== Portable compatibility KV application ABI and uncertain outcomes ==	PASS
+== Files quiesce, block drain and final flush ==	PASS
+== Portable bounded graceful shutdown ==	PASS
+== Buildroot service supervision and finite restart ==	PASS
+== Buildroot persistent state directory installation ==	PASS
+== Pi quiet boot splash and vector rendering ==	PASS
+== disk hardening: deadlines, stalled devices, reset, offline refusal, overload refusal (native + Portable) ==	PASS
+== native image integrity: corrupt sections and missing digests refuse before allocation ==	PASS
+== opt-in inbox admission: native process-plane ownership and reclamation ==	PASS
+== initial memory admission: routed native process, refusal and reclamation ==	PASS
+== the mailbox contract as a loaded process: Static refuses through the plane's actors table ==	PASS
+== error in a loaded process ends that actor, not the machine (S8) ==	PASS
+== native runtime ABI parser: missing, malformed, duplicate and oversized declarations ==	PASS
+== audit failure injections: native TX stall/orphan, full console pipe, native process storage refusal and fail-stop ==	PASS
+== stdcheck ==	PASS
+== stdcheck: the REAL std library (lifted lambdas) ==	PASS
+== Native instruction ratchet: system.fpr selected segments and runtime call sites ==	FAIL
+== BareMetal ==	PASS
+== Wide ABI: arity 24, wide TCO, Tup4..8 ==	PASS
+== Floats: F64/F32 in the AOT tier ==	PASS
+== F64 fast paths: C-reference IEEE edges, literal splices and x64 backend ==	PASS
+== Float columns: declared layout + specialized float loops ==	PASS
+== Literal suffixes: 2f / 1.5f F32, 1.5 / 1.5d / 1e3 F64 ==	PASS
+== Floats: F64/F32 raw-bits, IEEE, dtoa, refusal guard ==	PASS

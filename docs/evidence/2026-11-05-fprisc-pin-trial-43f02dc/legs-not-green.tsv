@@ -1,0 +1,22 @@
+leg	2026-11-03:1a09f01/qos0bf8bee	1a09f01/qos0bf8bee	43f02dc/qos19e15cf
+== Storage deadlines, late replies and finite service budgets ==	PASS	PASS	FAIL
+== Native instruction ratchet: system.fpr selected segments and runtime call sites ==	FAIL	FAIL	FAIL
+== dedup ratchet: the frontend un-forking must not regress ==	FAIL	FAIL	FAIL
+== FPRLive: POS v2 over a real websocket, functional + adversarial ==	SKIP	SKIP	SKIP
+== liveboard: std/live end to end -- sessions, deltas, client state, commands, subscriptions, durable fields, replay ==	PASS	PASS	FAIL
+== POS v1: the shop as one log, websocket registers, the adversarial legs (docs/2026-09-07-POS1.md) ==	SKIP	SKIP	SKIP
+== Graphics.qa: real Terra II + dungeon, focused input, close/restart and captured pixels ==	FAIL	FAIL	FAIL
+== qsys failure paths: refused and ended services are answers; a refused write leaves the file as the disk has it (tests/qsysfail.fpr) ==	PASS	PASS	FAIL
+== Editor and Terminal live preferences and restart persistence ==	FAIL	FAIL	PASS
+== QOS-aarch64: x28 hart discipline (no TLS, Darwin-proof) ==	SKIP	SKIP	SKIP
+== program-carried meshes: the CoScad tank (STL -> mkmesh -> glMesh) drawn by the walker ==	SKIP	SKIP	SKIP
+== the walker's text pass: the SDF face, discs and corners (tests/gltext.fpr) ==	SKIP	SKIP	SKIP
+== the 2D layer's box treatments: glass, rings, corners, a menu over a layer (tests/gl2d.fpr) ==	SKIP	SKIP	SKIP
+== Terra II: the card game on the GLES walker, a scripted game under Xvfb (and the MP3 music channel) ==	SKIP	SKIP	SKIP
+== the dungeon: the Java crawler as an MVU game on the GLES walker, played to a win under Xvfb ==	SKIP	SKIP	SKIP
+== the tree as a toolchain: qos.py install to a prefix, then qos/fpr/sol from an empty directory (<tree>/docs/2026-09-10-INSTALL.md) ==	FAIL	FAIL	FAIL
+== Desktop GL: GLFW window + synthetic-evdev keys (Xvfb) ==	SKIP	SKIP	SKIP
+== Sol NN: feed-forward + backprop over Matrix-on-Vec ==	FAIL	FAIL	FAIL
+== Vec fusion: adjacent maps -> ONE column loop ==	FAIL	FAIL	FAIL
+== Vec fixpoint + write-back fold: 3-chain collapses, fold-of-map fuses ==	FAIL	FAIL	FAIL
+== sol Ok/Err tier + txn hygiene: Try.*, |>?, honest receipts ==	FAIL	FAIL	FAIL
