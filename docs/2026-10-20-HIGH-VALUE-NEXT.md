@@ -188,3 +188,13 @@ The commit preceding this assessment passed the preference regression and
 separate-host restart checks with 1 and 4 workers in the preceding task, plus
 Main check-only and dependency validation. This task rechecked all 302 pins and
 the clean push; it did not rerun the complete sweep, CI, native targets or boards.
+
+## Later: the overhead inventory
+
+[The zero-overhead OS page](2026-11-06-ZERO-OVERHEAD-OS.md) (2026-11-06)
+carries this list forward with source-confirmed per-operation costs: copy on
+send, the per-send inbox charge a declaration currently adds, the Portable
+doorbell syscall, open-per-operation at the `Svc` sites, the per-request lease
+sweep, O(n) admission and the launch re-hash. Its item 1 (atomic replacement)
+is treated there as publish-and-swap plus group commit, in the same
+transactional terms this page sets out.

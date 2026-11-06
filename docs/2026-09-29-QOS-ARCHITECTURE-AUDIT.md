@@ -500,3 +500,11 @@ correlation; `fileWr`; `lManifest`; placement before the live-slot check;
 root-exit quiescence. See [FAILURE-HONESTY](2026-09-30-FAILURE-HONESTY.md).
 That page also records what remains: `svc.storeRpc`'s `receiveRes`, and
 references into an old image that outlive its actors.
+
+## Later: cost of the remaining structure
+
+[The zero-overhead OS page](2026-11-06-ZERO-OVERHEAD-OS.md) (2026-11-06)
+revisits this audit's convergence argument from the cost side: which of the
+remaining mechanisms can be removed, batched or proved once without weakening
+the endpoint, transaction and declaration contracts. The correctness findings
+and the migration estimates above are unchanged by it.
