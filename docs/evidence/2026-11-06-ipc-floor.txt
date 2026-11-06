@@ -1,0 +1,36 @@
+IPC floor reference (tests/ipcfloor.c), 6 November 2026
+Host: arm64 macOS on Apple silicon (same class as the amended proposal's runs).
+Build: cc -O2 -pthread. Five repeats per mode per invocation; the program
+prints median/min/max ns per round trip (a request and its reply).
+
+Three invocations, quiet machine:
+
+  spin    floor: median 106 ns/round-trip (min 105, max 114)   [first run]
+  spin    floor: median 158 ns/round-trip (min 153, max 168)   [noisy period]
+  spin    floor: median 123 ns/round-trip (min 113, max 128)
+  parked  floor: median 4788 ns/round-trip (min 4454, max 5430)
+  spin    floor: median 127 ns/round-trip (min 109, max 151)
+  parked  floor: median 5960 ns/round-trip (min 4790, max 5974)
+
+One earlier invocation during machine load recorded a parked median of
+12,630 ns (min 4,317, max 21,957); the parked mode is strongly load-sensitive.
+
+Reading (against docs/2026-11-06-ZERO-OVERHEAD-OS-AMENDED.md, same host class):
+
+- Spin floor, best median 106-127 ns: the architectural two-thread round
+  trip with no scheduler, actor or protocol. Fractions of floor:
+    hosted same-hart 180 ns    ~1.4-1.7x
+    hosted cross-hart 347 ns   ~2.8x
+    Portable same-hart 292 ns  ~2.3-2.8x
+    Portable + block-spin 446 ns ~3.5-4.2x
+    Portable default cross-hart 4,380 ns ~35x
+- The hosted runtime is within roughly 1.5x of the hardware floor: the
+  total remaining hosted IPC headroom is tens of nanoseconds per round
+  trip, not a multiple. The message-path work is a Portable problem.
+- Portable's default cross-hart figure sits inside the macOS parked band
+  (4.4-6 us quiet, up to 12.6 us loaded), consistent with paying a blocking
+  wake per message; the block-spin hook's 446 ns leaves that band.
+- Caveat: the parked floor is macOS-condvar-specific (a Linux futex
+  ping-pong is typically lower); the spin floor is the portable reference.
+  The parked mode exists to bracket blocking-style doorbells, not to be
+  compared across operating systems.
