@@ -153,9 +153,14 @@ is not the real date. The previous rollback directories, including the 4 Nov one
 untouched. `verification/` beside the rollback holds the soak summary, the preflight
 results, the SDK self-test and the disk preflight reports.
 
-**Space:** the root filesystem now has about 40 MiB free, down from 62 MiB, because of the
-new 22 MiB rollback directory. The next install will probably fail its own space check
-unless an older rollback directory is removed. That cleanup is the user's call.
+**Space:** the new 22 MiB rollback directory left about 40 MiB free. The user then approved a
+cleanup. Eleven older rollback directories (11 Oct to 31 Oct), two leftover
+`check-main-soak-*` disks and `/usr/share/qosp/app.qa.before-pinned-graphics` were copied to
+the Mac first, under `qos/.qos/pi4/retired-backups/` (local, not committed; `manifest.json`
+holds every file's sha256). Each copy was checked file by file against the Pi before the
+originals were removed. The root filesystem now has 307 MiB free. Two rollback directories
+remain: today's, which returns to the 4 Nov install, and the 4 Nov one, which returns to
+the 31 Oct install. Main and fprd kept running throughout (PIDs 19731 and 18653).
 
 Not done: the pin move (`fprisc.lock.json` still 1a09f01), any SDK publication, and the
 push.
