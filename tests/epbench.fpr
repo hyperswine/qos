@@ -1,0 +1,66 @@
+# epbench.fpr -- what an endpoint operation costs with and without the
+# open (docs/2026-11-06-ZERO-OVERHEAD-OS-AMENDED.md).
+#
+# One owner that answers at once, reached through the real namespace
+# (mods/epservice.fpr) and the real client calls (mods/ep.fpr):
+#   per-op   open, write, close for every write: what Svc.write does
+#            (mods/svc.fpr viaNs/viaOp), 8 messages
+#   held     one open, then only writes on that handle, 2 messages each
+# Nanoseconds per write, the clock read around each loop.
+#
+#   ./qos.py run tests/epbench.fpr --harts 1
+#: expect epbench: DONE
+
+unsafe program.
+
+Endpoint = use "../programs/mods/epservice#e8bce05a1ddf73db".
+EP = use "../programs/mods/ep#c66ad65e68dd97f5".
+AC = use "std/actor#201a0e9bf98a5154".
+
+Sys.mtime : Unit -> Int .
+
+owner : unsafe Int -> a .
+owner me = oLoop me 1.
+oLoop : unsafe Int -> Int -> a .
+oLoop me next =
+  m = receive me;
+  (from, id, q) = m;
+  oMsg me next (from, id) q.
+oMsg : unsafe Int -> Int -> (Int, Int) -> EP.Ep -> a .
+oMsg me next ret q = case q of
+    EP.Open url mode -> AC.reply ret (EP.Opened next) >> oLoop me (next + 1)
+  | EP.Write h v -> AC.reply ret (Ok (EP.IInt 0)) >> oLoop me next
+  | EP.Close h -> AC.reply ret (Ok 0) >> oLoop me next
+  | other -> AC.reply ret (Err "epbench: unsupported") >> oLoop me next.
+
+must r = case r of Ok v -> v | Err e -> error "epbench: {e}".
+
+perOp me ns k = if k == 0 then Unit else
+  ep = must (EP.open me ns "/services/bench" "rw");
+  _ = must (EP.write me ep (EP.IInt k));
+  _ = must (EP.close me ep);
+  perOp me ns (k - 1).
+held me ep k = if k == 0 then Unit else
+  _ = must (EP.write me ep (EP.IInt k));
+  held me ep (k - 1).
+
+report name n t0 t1 = print "epbench: {name} {(t1 - t0) * 100 / n} ns per write".
+
+main =
+  me = myself 0;
+  ns = AC.spawnWith (AC.Dynamic 64) Endpoint.namespace;
+  lst = AC.spawnWith (AC.Dynamic 64) (Endpoint.lister ns);
+  _ = EP.register me ns "/" lst;
+  svc = AC.spawnWith (AC.Dynamic 64) owner;
+  _ = must (EP.register me ns "/services/bench" svc);
+  n = 20000;
+  t0 = Sys.mtime Unit;
+  _ = perOp me ns n;
+  t1 = Sys.mtime Unit;
+  ep = must (EP.open me ns "/services/bench" "rw");
+  _ = held me ep n;
+  t2 = Sys.mtime Unit;
+  _ = must (EP.close me ep);
+  _ = report "per-op (open, write, close)" n t0 t1;
+  _ = report "held (write only)" n t1 t2;
+  print "epbench: DONE".

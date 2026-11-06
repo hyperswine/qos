@@ -1,0 +1,84 @@
+# ipcbench.fpr -- what one message costs (docs/2026-11-06-ZERO-OVERHEAD-OS-AMENDED.md).
+#
+# Raw actor traffic only: no namespace, no endpoint, no module import, so
+# the same file builds for the hosted FP-RISC runtime and runs on QOS:
+#
+#   ./qos.py run tests/ipcbench.fpr --harts 2
+#   ../fprisc/fpr build tests/ipcbench.fpr --harts 2 -o /tmp/ipcbench && /tmp/ipcbench
+#
+# Each line is nanoseconds per ROUND TRIP (a request and its reply) unless it
+# says "per hop".  The clock is read around each loop, so start-up is excluded.
+#   same      requester and replier on hart 0
+#   cross     the replier on hart 1
+#   bounded   the replier spawned with an inbox bound (Sys.spawnInbox)
+#   linear    the request sent with sendLinear (a locally built value)
+#   1k        the request carries a 1 KiB string
+#   relay     main -> relay -> sink -> main with a 16 KiB string; the relay
+#             forwards what it received with send (copy) or sendLinear (move)
+#: expect ipcbench: DONE
+
+unsafe program.
+
+Sys.spawnInbox : Int -> Int -> Int -> (Int -> a) -> Result Int String .
+Sys.mtime : Unit -> Int .
+
+ok (Ok value) = value.
+ok (Err why) = error why.
+grow s n = if n == 0 then s else grow (strcat s s) (n - 1).
+
+ponger self = case receive self of (who, n, pay) -> send who (n + 1) >> ponger self.
+
+ping me p pay k acc = if k == 0 then acc else
+  _ = send p (me, k, pay);
+  r = receiveFrom me p;
+  ping me p pay (k - 1) (acc + r).
+pingLinear me p k acc = if k == 0 then acc else
+  _ = sendLinear p (me, k, 0);
+  r = receiveFrom me p;
+  pingLinear me p (k - 1) (acc + r).
+
+sink main self = m = receive self; _ = drop m; _ = send main 1; sink main self.
+relayCopy dst self = m = receive self; _ = send dst m; relayCopy dst self.
+relayMove dst self = m = receive self; _ = sendLinear dst m; relayMove dst self.
+feed me r c pay k acc = if k == 0 then acc else
+  _ = send r pay;
+  a = receiveFrom me c;
+  feed me r c pay (k - 1) (acc + a).
+
+report name n t0 t1 unit = print "ipcbench: {name} {(t1 - t0) * 100 / n} ns {unit}".
+
+round name me p pay n =
+  t0 = Sys.mtime Unit;
+  _ = ping me p pay n 0;
+  t1 = Sys.mtime Unit;
+  _ = kill p;
+  report name n t0 t1 "per round trip".
+roundLinear name me p n =
+  t0 = Sys.mtime Unit;
+  _ = pingLinear me p n 0;
+  t1 = Sys.mtime Unit;
+  _ = kill p;
+  report name n t0 t1 "per round trip".
+relayed name me r c pay n =
+  t0 = Sys.mtime Unit;
+  _ = feed me r c pay n 0;
+  t1 = Sys.mtime Unit;
+  _ = kill r;
+  _ = kill c;
+  report name n t0 t1 "per three hops".
+
+main =
+  me = myself 0;
+  kib = grow "abcdefgh" 7;
+  big = grow "abcdefgh" 11;
+  _ = round "same" me (spawnOn 0 ponger) 0 200000;
+  _ = roundLinear "same linear" me (spawnOn 0 ponger) 200000;
+  _ = round "same bounded" me (ok (Sys.spawnInbox 0 64 1048576 ponger)) 0 200000;
+  _ = round "same 1k" me (spawnOn 0 ponger) kib 200000;
+  _ = round "cross" me (spawnOn 1 ponger) 0 100000;
+  _ = round "cross bounded" me (ok (Sys.spawnInbox 1 64 1048576 ponger)) 0 100000;
+  c1 = spawnOn 0 (sink me);
+  _ = relayed "relay 16k copy" me (spawnOn 0 (relayCopy c1)) c1 big 50000;
+  c2 = spawnOn 0 (sink me);
+  _ = relayed "relay 16k move" me (spawnOn 0 (relayMove c2)) c2 big 50000;
+  print "ipcbench: DONE".

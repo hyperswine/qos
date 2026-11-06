@@ -1,0 +1,59 @@
+IPC cost measurements for docs/2026-11-06-ZERO-OVERHEAD-OS-AMENDED.md
+Host: arm64 macOS (Apple silicon). QOS f2c3a63, sibling fprisc aee02d8 (codegen 204);
+the release lock still names 1a09f01, so these are not the release pin's results.
+Each block is one run; no run was repeated more than twice.
+
+== hosted FP-RISC runtime: fpr build tests/ipcbench.fpr --harts 2
+ipcbench: same 180 ns per round trip
+ipcbench: same linear 180 ns per round trip
+ipcbench: same bounded 201 ns per round trip
+ipcbench: same 1k 198 ns per round trip
+ipcbench: cross 347 ns per round trip
+ipcbench: cross bounded 352 ns per round trip
+ipcbench: relay 16k copy 878 ns per three hops
+ipcbench: relay 16k move 441 ns per three hops
+
+== QOS Portable: ./qos.py run tests/ipcbench.fpr --harts 2   (first run)
+ipcbench: same 296 ns per round trip
+ipcbench: same linear 287 ns per round trip
+ipcbench: same bounded 315 ns per round trip
+ipcbench: same 1k 335 ns per round trip
+ipcbench: cross 4518 ns per round trip
+ipcbench: cross bounded 4670 ns per round trip
+ipcbench: relay 16k copy 1338 ns per three hops
+ipcbench: relay 16k move 821 ns per three hops
+
+== QOS Portable, same command (second run, after the experiment below was reverted)
+ipcbench: same 292 ns per round trip
+ipcbench: same linear 279 ns per round trip
+ipcbench: same bounded 305 ns per round trip
+ipcbench: same 1k 299 ns per round trip
+ipcbench: cross 4380 ns per round trip
+ipcbench: cross bounded 4468 ns per round trip
+ipcbench: relay 16k copy 1288 ns per three hops
+ipcbench: relay 16k move 766 ns per three hops
+
+== QOS Portable with a temporary edit, not committed: appended to qos/appside/hal.c
+==   uw hal_block_spin_ns(void) { return 2000; }
+ipcbench: same 292 ns per round trip
+ipcbench: same linear 282 ns per round trip
+ipcbench: same bounded 309 ns per round trip
+ipcbench: same 1k 309 ns per round trip
+ipcbench: cross 446 ns per round trip
+ipcbench: cross bounded 518 ns per round trip
+ipcbench: relay 16k copy 1292 ns per three hops
+ipcbench: relay 16k move 779 ns per three hops
+
+== QOS Portable: ./qos.py run tests/epbench.fpr --harts 1
+epbench: per-op (open, write, close) 2251 ns per write
+epbench: held (write only) 553 ns per write
+
+== QOS Portable: ./qos.py run tests/epbench.fpr --harts 2
+epbench: per-op (open, write, close) 3608 ns per write
+epbench: held (write only) 706 ns per write
+
+== hosted FP-RISC runtime, cross-hart round trip with the spin windows off
+== (an earlier program of the same shape, 1,000,000 round trips, fastest of 5, process time)
+spin default                      368 ns per round trip
+FPR_SPIN_US=0                     365 ns per round trip
+FPR_SPIN_US=0 FPR_BLOCK_SPIN_NS=0 4398 ns per round trip
