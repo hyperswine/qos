@@ -1,0 +1,3 @@
+# qsysfail-runner.sh qos-pte1 (03ccd4a) fprisc-pte1 (e138e65) e1 10  -- 4 harts
+e1: 10/10 pass;   10 qsysfail: 12=True 13=True 
+runs with 'storage actor admission' trap: 0

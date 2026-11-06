@@ -1,0 +1,7 @@
+blk: /private/tmp/claude-501/-Users-jasonqin-Documents-GitHub/65e80e06-a296-40a0-b2ae-ce708efeb3bc/scratchpad/qf-e1/d1.disk created, 2048 pages of 4096 bytes
+qosp: hosting qsysfail (4 harts, abi v22)
+[host] blk: /private/tmp/claude-501/-Users-jasonqin-Documents-GitHub/65e80e06-a296-40a0-b2ae-ce708efeb3bc/scratchpad/qf-e1/d1.disk created, 2048 pages of 4096 bytes
+[host] qosp: hosting qsysfail (4 harts, abi v22)
+qsysfail: 12=True 13=True
+
+[qos] qsysfail => qsysfail: HOLDS
