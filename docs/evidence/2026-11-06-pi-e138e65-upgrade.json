@@ -1,0 +1,262 @@
+{
+  "date": "2026-11-06",
+  "scope": "Production QOS Portable Main profile on physical Raspberry Pi 4 Model B Rev 1.4, Linux AArch64",
+  "sources": {
+    "fprisc": {
+      "head": "e138e654332f9e016a8ee9ffedd330f40cd146c9",
+      "snapshot_identity": "e138e654332f9e016a8ee9ffedd330f40cd146c9+worktree-09e0d165f399567e",
+      "source_archive_sha256": "35199ebd587d0375b3778caf467c388c49fd733741d14ff73f88191ca9e2d65b",
+      "source_tree_sha256": "09e0d165f399567e21a96a8218840a30c68b41462657359a2f40e0a73ac2e64f",
+      "overlays": {
+        "cabal.project.freeze": "GHC9.8.2 release freeze excluded from GHC9.4.7 Linux builder, matching existing CI/build policy"
+      }
+    },
+    "qos": {
+      "head": "03ccd4a9c72f969509216ff7e93fad50deecf77d",
+      "snapshot_identity": "03ccd4a9c72f969509216ff7e93fad50deecf77d+worktree-2d4e442c52414d7a",
+      "source_archive_sha256": "f4acac5042da59e4563ff6a1dcdf9da8d6cc4a8789083161cc741e2fcfed2812",
+      "source_tree_sha256": "2d4e442c52414d7a96236796116a7b1090bdd5b4e05be37bb83bd1dacd48ce13",
+      "overlays": {
+        "fprisc.lock.json": "6798c96ece67d634e02921bbee8d5297c11dc13e701b22443aee7b761f4f0a90"
+      }
+    }
+  },
+  "core_manifest": {
+    "abi": 22,
+    "codegen_rev": 204,
+    "production": true,
+    "arch": "aarch64",
+    "qos_revision": "03ccd4a9c72f969509216ff7e93fad50deecf77d",
+    "fprisc_revision": "e138e654332f9e016a8ee9ffedd330f40cd146c9",
+    "source_snapshots": {
+      "fprisc": {
+        "head": "e138e654332f9e016a8ee9ffedd330f40cd146c9",
+        "snapshot_identity": "e138e654332f9e016a8ee9ffedd330f40cd146c9+worktree-09e0d165f399567e",
+        "source_archive_sha256": "35199ebd587d0375b3778caf467c388c49fd733741d14ff73f88191ca9e2d65b",
+        "source_tree_sha256": "09e0d165f399567e21a96a8218840a30c68b41462657359a2f40e0a73ac2e64f",
+        "overlays": {
+          "cabal.project.freeze": "GHC9.8.2 release freeze excluded from GHC9.4.7 Linux builder, matching existing CI/build policy"
+        }
+      },
+      "qos": {
+        "head": "03ccd4a9c72f969509216ff7e93fad50deecf77d",
+        "snapshot_identity": "03ccd4a9c72f969509216ff7e93fad50deecf77d+worktree-2d4e442c52414d7a",
+        "source_archive_sha256": "f4acac5042da59e4563ff6a1dcdf9da8d6cc4a8789083161cc741e2fcfed2812",
+        "source_tree_sha256": "2d4e442c52414d7a96236796116a7b1090bdd5b4e05be37bb83bd1dacd48ce13",
+        "overlays": {
+          "fprisc.lock.json": "6798c96ece67d634e02921bbee8d5297c11dc13e701b22443aee7b761f4f0a90"
+        }
+      }
+    },
+    "qos_changes": [
+      "deployment export fprisc.lock.json names the exact compiler snapshot; checkout lock unchanged"
+    ],
+    "compiler_options": {
+      "FPR_TYPED_IR_EARLY_LOOPS": "1",
+      "FPR_TYPED_IR_STRING_SCAN": "1",
+      "FPR_TYPED_IR_LOOP_MOTION": "0"
+    },
+    "apps": [
+      "clock",
+      "logs",
+      "browser",
+      "disk",
+      "terminal",
+      "editor"
+    ],
+    "files": {
+      "qosp-es": "5972f46f5963bbf26ff96a6ee3b11c6bacf456e809ae70d1f52b40dc72c1ac72",
+      "main.qa": "73083103d909d633378653f78006b2ae1d6e6f8c108f972bd9e07699ba2a9acd",
+      "Main.disk": "1047abf0b2b45b0ac3d6ff38b03f5061d5356a11de0d69636c86952b93df7316",
+      "runner": "a26d3454c49d3ba89876b52d24b38ca017f6afee6260621b50d36a5142ba498b",
+      "clock.qa": "8ee384abd3a5a499bc6cc20e845addc0d425ce7ffdd44a99c0aa2fcedf750832",
+      "logs.qa": "398499f8b229dd1906c72a82e044d5fb5a499ccb9899dbd39dab0d9def18b96f",
+      "browser.qa": "db8c8d77da2201a6a0ed9494b5f1af083a7eabf99a7077b83931dad07263af56",
+      "disk.qa": "b8c19201f573e236bf8a940a6f610546c8b0ab3c8f917ef662aabe64bfc09653",
+      "terminal.qa": "84af005ce5446548bf2be4e979acf68af9013f9dd8e258912ceced585e88eb39",
+      "editor.qa": "d46457f514415c9a0be2b6e8cb88ec4d0e79646c298dea3de7f4864c3a223b82"
+    }
+  },
+  "builder": {
+    "image": "qos-pi-builder:20261104",
+    "ghc": "9.4.7",
+    "containers": "qos-pi-e138e65-20261106 (main bundle), qos-pi-e138e65-rest-20261106 (runtime qualification + kms-readback); removed after the build"
+  },
+  "sdk_selftest_builder": {
+    "check": "ok",
+    "plugin": "QAR2",
+    "plugin_bytes": 203537,
+    "compiler_sha256": "f4c9a5a39f9bb0083f7fdace47c5491b39801ab1a05ed12108cec0f74ff90ff6",
+    "publication": "committed-frozen-stable-updated",
+    "publication_version": "v1.1",
+    "invalid_source": "refused",
+    "target": "native-aarch64"
+  },
+  "candidate_sha256": "82ee927d92f5028f073bbe430d9c6ebfa5dcfb45f71837d56193357e8084eaf2",
+  "local_checks": {
+    "dependency_pins": 311,
+    "disk_updater_tests": 20,
+    "sdk_service_publication_signal_checks": "passed"
+  },
+  "physical_runtime_qualification": {
+    "result": "PASS 2286 cases; 45937 replies over 1 ms",
+    "production_unchanged": true
+  },
+  "isolated_main_preflight": {
+    "passed": true,
+    "seconds": 120,
+    "harts": 4,
+    "viewport": "1024x600",
+    "production_unchanged": true
+  },
+  "final_verification": {
+    "passed": true,
+    "arch": "aarch64",
+    "qos_revision": "03ccd4a9c72f969509216ff7e93fad50deecf77d",
+    "fprisc_revision": "e138e654332f9e016a8ee9ffedd330f40cd146c9",
+    "state": "running pid=19731 restarts=0",
+    "compiler_state": "running pid=18653 restarts=0",
+    "installed_sha256": {
+      "/usr/bin/qosp": "5972f46f5963bbf26ff96a6ee3b11c6bacf456e809ae70d1f52b40dc72c1ac72",
+      "/usr/share/qosp/app.qa": "73083103d909d633378653f78006b2ae1d6e6f8c108f972bd9e07699ba2a9acd",
+      "/usr/share/qosp/Main.disk": "1047abf0b2b45b0ac3d6ff38b03f5061d5356a11de0d69636c86952b93df7316",
+      "/usr/share/qosp/compiler-sdk.tar.gz": "76dd4cbbcb8e64f506fbf25d7c069ed437b00540d83fa6f22bb47fe208602ed5"
+    },
+    "renderer": "V3D",
+    "graphics_markers": [
+      "[gfx] scanout: /dev/dri/card1 1024x600 (frame fullscreen)",
+      "[host] [gfx] scanout: /dev/dri/card1 1024x600 (frame fullscreen)",
+      "[gfx] EGL 1.4 (surfaceless)  V3D 4.2.14 / OpenGL ES 3.1 Mesa 24.0.9",
+      "[host] [gfx] EGL 1.4 (surfaceless)  V3D 4.2.14 / OpenGL ES 3.1 Mesa 24.0.9"
+    ],
+    "normal_writable_disk": "/var/lib/qosp/Main.disk",
+    "configuration_preserved": true,
+    "rollback": "/var/lib/qosp/deployment-pi-e138e65-19700106T175815Z/rollback.sh",
+    "rollback_sha256": "0e46dde0db62d9f7b95d501d5809cde67ecac742fb5222481adabd7eaf54df3b",
+    "disk_upgrade": {
+      "apps": [
+        "clock",
+        "logs",
+        "browser",
+        "disk",
+        "terminal",
+        "editor"
+      ],
+      "new_generation": 62,
+      "new_head": 1720,
+      "old_apps": [
+        "clock",
+        "logs",
+        "browser",
+        "disk",
+        "terminal",
+        "editor"
+      ],
+      "old_generation": 60,
+      "old_head": 1704,
+      "preserved_records": 46,
+      "reclaimed_app_records": 7
+    },
+    "health": {
+      "boundary": "passive installed Main/compiler observation",
+      "clock_ticks_per_second": 100,
+      "cpu_percent_of_one_core": {
+        "mean_over_interval": 6.966222423583388,
+        "peak_sample_interval": 7.178675005047204
+      },
+      "cpu_scale": "100 percent is one fully occupied CPU core",
+      "elapsed_seconds": 60.003826260974165,
+      "frequency_khz": {
+        "max": 600000,
+        "min": 600000
+      },
+      "identities": {
+        "compiler": {
+          "pid": 18653,
+          "starttime_ticks": 49683197,
+          "state": "running pid=18653 restarts=0"
+        },
+        "main": {
+          "pid": 19731,
+          "starttime_ticks": 49685262,
+          "state": "running pid=19731 restarts=0"
+        }
+      },
+      "limitation": "A short observation does not establish long-term memory stability.",
+      "output_directory": "/tmp/qos-pi-e138e65-20261106/install-19700106T175815Z/health",
+      "passed": true,
+      "pss_kib": {
+        "change": 585,
+        "first": 43980,
+        "last": 44565,
+        "max": 44565,
+        "min": 43980
+      },
+      "raw_samples_retained_on_pi": "/tmp/qos-pi-e138e65-20261106/install-19700106T175815Z/health/samples.jsonl",
+      "requested_seconds": 60.0,
+      "rss_kib": {
+        "change": 584,
+        "first": 45488,
+        "last": 46072,
+        "max": 46072,
+        "min": 45488
+      },
+      "samples": 13,
+      "temperature_c": {
+        "max": 57.452,
+        "min": 54.53
+      }
+    }
+  },
+  "installed_soak_600s": {
+    "boundary": "passive installed Main/compiler observation",
+    "clock_ticks_per_second": 100,
+    "cpu_percent_of_one_core": {
+      "mean_over_interval": 7.001616386273907,
+      "peak_sample_interval": 7.1301339319661965
+    },
+    "cpu_scale": "100 percent is one fully occupied CPU core",
+    "elapsed_seconds": 600.0043087530066,
+    "frequency_khz": {
+      "max": 600000,
+      "min": 600000
+    },
+    "identities": {
+      "compiler": {
+        "pid": 18653,
+        "starttime_ticks": 49683197,
+        "state": "running pid=18653 restarts=0"
+      },
+      "main": {
+        "pid": 19731,
+        "starttime_ticks": 49685262,
+        "state": "running pid=19731 restarts=0"
+      }
+    },
+    "limitation": "A short observation does not establish long-term memory stability.",
+    "output_directory": "/tmp/qos-pi-e138e65-20261106/soak-600",
+    "passed": true,
+    "pss_kib": {
+      "change": 2,
+      "first": 44570,
+      "last": 44572,
+      "max": 44573,
+      "min": 44570
+    },
+    "raw_samples_retained_on_pi": "/tmp/qos-pi-e138e65-20261106/soak-600/samples.jsonl",
+    "requested_seconds": 600.0,
+    "rss_kib": {
+      "change": 0,
+      "first": 46072,
+      "last": 46072,
+      "max": 46072,
+      "min": 46072
+    },
+    "samples": 21,
+    "temperature_c": {
+      "max": 56.478,
+      "min": 54.53
+    }
+  },
+  "hdmi_readback_sha256": "e9347449f7152694861620fe748fb6c3156ea1fdd7b8696f6ce36cbb4a14fa09"
+}

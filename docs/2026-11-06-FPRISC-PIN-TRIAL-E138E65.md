@@ -83,16 +83,16 @@ In `evidence/2026-11-06-fprisc-pin-trial-e138e65/`:
 
 ## Pi 4B deployment
 
-**Status: candidate built and qualified on the Pi; install not yet run.** The installed
-session is unchanged (Main PID 17227, `/usr/bin/qosp` b2ae9b56..., the 4 Nov compact-runtime
-install). The final install step (`deploy.sh` on the Pi) was held for the user's explicit
-approval because it replaces the production install.
+**Status: deployed and verified on the physical Pi 4B** (user-approved install, 2026-11-06).
+Main, the six apps, the seed disk, the `qosp-es` host and the matching Editor SDK now run
+qos 03ccd4a with fprisc e138e65 (codegen 204, portable ABI 22). Machine-readable record:
+[evidence/2026-11-06-pi-e138e65-upgrade.json](evidence/2026-11-06-pi-e138e65-upgrade.json).
 
 The method follows [2026-11-04-PI-COMPACT-RUNTIME-UPGRADE.md](2026-11-04-PI-COMPACT-RUNTIME-UPGRADE.md).
 Working files, scripts and logs are in `.qos/validation/pi-e138e65-20261106/` (local, not
 committed).
 
-Done so far:
+Before the install:
 
 - **Source export.** Clean worktrees at qos 03ccd4a and fprisc e138e65 were exported, using
   the 5 Nov export script. The export's `fprisc.lock.json` names the compiler snapshot
@@ -121,9 +121,41 @@ Done so far:
   90136749...). The root filesystem has 62,176 KiB free, about the same as on 4 Nov when the
   install's space check passed.
 
-Still to do once approved: run `deploy.sh` on the Pi. It stops Main and fprd and backs up the
-installed files. It writes `/var/lib/qosp/deployment-pi-e138e65-<stamp>/rollback.sh`, then
-migrates the writable disk and installs the host, Main, the seed disk and the SDK. It
-restarts twice, and the second restart must give a new PID. Last comes a 60 s health check.
-Any failure restores the backup automatically. After that come the fresh-SSH verification,
-the HDMI readback and a longer health soak.
+## Install and post-deploy checks
+
+- **Install** (`deploy.sh` on the Pi), accepted. Main and fprd were stopped and the installed
+  files backed up. The writable disk was migrated from the stopped copy: 46 records kept,
+  7 onboard records replaced, generation 60 to 62. Host, Main, seed disk and SDK were
+  installed and the configuration hashes rechecked. Main started, then a deliberate restart
+  gave a new PID (19025 to 19731), followed by the 60 s health check: 13 samples, passed.
+- **Fresh-SSH verification**, a new connection with no shared control socket: PASS.
+  - The installed hashes match the core manifest, and the SDK's qos/fprisc revisions match.
+  - Main is `running pid=19731 restarts=0` and fprd is `running pid=18653 restarts=0`.
+  - The log shows abi v22, "Main Profile ready", all six plugins and V3D, with no PANIC,
+    SIGSEGV or deadlock.
+  - The rollback archive hash verified.
+- **HDMI KMS readback**: the 1024x600 Main launcher on V3D (page 1/2: Clock, Files, Logs,
+  About QOS, clock, logs). This is framebuffer evidence, not manual interaction.
+- **Installed soak**: 600 s, 21 samples, passed. No restarts of Main or fprd. RSS flat at
+  46,072 KiB, PSS 44,570-44,573 KiB, CPU 7.0% of one core at 600 MHz, temperature
+  54.5-56.5 C. As on 4 Nov, ten minutes does not establish long-term memory stability. No
+  power cycle was done.
+
+## Rollback
+
+```sh
+/var/lib/qosp/deployment-pi-e138e65-19700106T175815Z/rollback.sh
+```
+
+It restores the 4 Nov compact-runtime install and its writable disk, which discards any
+writes made since this install. The Pi's clock is unset, so the stamp in the directory name
+is not the real date. The previous rollback directories, including the 4 Nov one, are
+untouched. `verification/` beside the rollback holds the soak summary, the preflight
+results, the SDK self-test and the disk preflight reports.
+
+**Space:** the root filesystem now has about 40 MiB free, down from 62 MiB, because of the
+new 22 MiB rollback directory. The next install will probably fail its own space check
+unless an older rollback directory is removed. That cleanup is the user's call.
+
+Not done: the pin move (`fprisc.lock.json` still 1a09f01), any SDK publication, and the
+push.
