@@ -106,6 +106,19 @@ void fpr_park(void) {
 
 void hal_wfi_enable(void) {}
 void hal_wfi(void) { qos_hal->hart_wait(fpr_hart()->id); }
+/* how long an actor about to block on an otherwise idle hart re-checks its
+ * mailbox before it blocks (fprisc/runtime/actors.c spin_until, guarded by
+ * hart_quiet).  The posix machine reads $FPR_BLOCK_SPIN_NS and defaults to
+ * 2 us; a freestanding image has no environment, so here it is a build
+ * constant.  Without this definition the runtime's weak default of 0
+ * applied, and every cross-hart reply paid a block, a wake, a ship and a
+ * kernel sleep: 4,380 ns a round trip against 446 ns with the spin
+ * (docs/2026-11-06-ZERO-OVERHEAD-OS-AMENDED.md, tests/ipcbench.fpr).
+ * The comparison arm is QOSCFLAGS_EXTRA=-DQOS_BLOCK_SPIN_NS=0. */
+#ifndef QOS_BLOCK_SPIN_NS
+#define QOS_BLOCK_SPIN_NS 2000
+#endif
+uw hal_block_spin_ns(void) { return QOS_BLOCK_SPIN_NS; }
 /* the CLINT model's mtime (10 MHz ticks, net_raw.c's CLINT_MTIME): the
  * clock the parked sleep (actors.c) and the timer service read */
 uint64_t hal_mtime(void) { return qos_hal->mmio_read(0x2000u + 49144u, 8); }
