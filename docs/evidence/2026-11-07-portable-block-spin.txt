@@ -1,0 +1,49 @@
+Portable block spin, both arms (docs/2026-11-07-PORTABLE-BLOCK-SPIN.md), 7 November 2026
+Host: arm64 macOS; QOS main 3bab58f + the hook, sibling fprisc aee02d8 (codegen 204).
+Comparison arm: QOSCFLAGS_EXTRA=-DQOS_BLOCK_SPIN_NS=0. children-cpu is the CPU time of everything
+qos.py run spawned (compile, link, host), from getrusage; idle.fpr sleeps 30 s, instant.fpr prints and exits.
+
+===== spin 2us (default)
+-- ipcbench.fpr harts=2 rc=0 wall=6.7s children-cpu=6.49s
+    ipcbench: same 279 ns per round trip
+    ipcbench: same linear 266 ns per round trip
+    ipcbench: same bounded 297 ns per round trip
+    ipcbench: same 1k 290 ns per round trip
+    ipcbench: cross 394 ns per round trip
+    ipcbench: cross bounded 458 ns per round trip
+    ipcbench: relay 16k copy 1195 ns per three hops
+    ipcbench: relay 16k move 711 ns per three hops
+    ipcbench: DONE
+-- epbench.fpr harts=2 rc=0 wall=8.9s children-cpu=8.60s
+    epbench: per-op (open, write, close) 3363 ns per write
+    epbench: held (write only) 557 ns per write
+    epbench: DONE
+-- instant.fpr harts=default rc=0 wall=6.6s children-cpu=6.35s
+    instant: DONE
+-- idle.fpr harts=default rc=0 wall=36.3s children-cpu=6.31s
+    idle: DONE
+===== spin 0 (comparison)
+-- ipcbench.fpr harts=2 rc=0 wall=8.2s children-cpu=7.87s
+    ipcbench: same 297 ns per round trip
+    ipcbench: same linear 285 ns per round trip
+    ipcbench: same bounded 310 ns per round trip
+    ipcbench: same 1k 316 ns per round trip
+    ipcbench: cross 5209 ns per round trip
+    ipcbench: cross bounded 5321 ns per round trip
+    ipcbench: relay 16k copy 1261 ns per three hops
+    ipcbench: relay 16k move 746 ns per three hops
+    ipcbench: DONE
+-- epbench.fpr harts=2 rc=0 wall=8.8s children-cpu=8.45s
+    epbench: per-op (open, write, close) 2213 ns per write
+    epbench: held (write only) 547 ns per write
+    epbench: DONE
+-- instant.fpr harts=default rc=0 wall=6.5s children-cpu=6.29s
+    instant: DONE
+-- idle.fpr harts=default rc=0 wall=36.7s children-cpu=6.68s
+    idle: DONE
+
+== epbench repeated (placement is not pinned; AC.spawnWith chooses the hart)
+spin 2us  harts=1  per-op [2101, 2111]  held [551, 550]
+spin 2us  harts=2  per-op [2025, 2093, 3612]  held [525, 552, 781]
+spin 0    harts=1  per-op [2146, 2153]  held [545, 538]
+spin 0    harts=2  per-op [2071, 2050, 2041]  held [537, 526, 522]
