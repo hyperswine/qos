@@ -1,0 +1,22 @@
+# fprc at fprisc e138e65 (the qos pin), 2026-11-09. Output trimmed to the export, result and refusal lines.
+$ fprc --profile=bare-metal-builtin --arc --raw --lib --export=yawCos:qos_gfx_yaw_cos rawf32.fpr out.s
+export qos_gfx_yaw_cos : KInt -> KInt  (yawCos@5669d72258316af2)
+wrote out.s (16 supercombinators, linearity OK)
+exit 0
+
+$ fprc --system=bare-metal --target=a64 --profile=builtin --arc --raw --lib --export=yawCos:qos_gfx_yaw_cos rawf32.fpr out.s
+profile builtin supports scalar RV64 or RV32 only
+exit 1
+
+$ fprc --system=bare-metal --target=x64 --profile=builtin --arc --raw --lib --export=yawCos:qos_gfx_yaw_cos rawf32.fpr out.s
+profile builtin supports scalar RV64 or RV32 only
+exit 1
+
+$ fprc --system=posix --target=a64mac --profile=builtin --arc --raw --lib --export=yawCos:qos_gfx_yaw_cos rawf32.fpr out.s
+error: profile builtin runs on the bare-metal system only, not posix (--system=bare-metal)
+exit 1
+
+$ fprc --system=posix --target=a64mac --arc --raw --lib --export=yawCos:qos_gfx_yaw_cos rawf32.fpr out.s
+error: profile builtin runs on the bare-metal system only, not posix (--system=bare-metal)
+exit 1
+

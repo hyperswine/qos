@@ -1,0 +1,3 @@
+profile builtin.
+yawCos : Int -> Int .
+yawCos m = F32.toInt (F32.cos (F32.ofInt m) * F32.ofInt 1000).

@@ -1,0 +1,1 @@
+yaw milli -100000..100000: 200001 inputs, sinf differs 64 (0.032%), cosf differs 58 (0.029%)
