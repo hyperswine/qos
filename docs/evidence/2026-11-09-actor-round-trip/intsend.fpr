@@ -1,0 +1,15 @@
+# same-hart round trip with a bare Int message (no tuple to copy)
+unsafe program.
+Sys.mtime : Unit -> Int .
+ponger p0 self = n = receive self; _ = send p0 (n + 1); ponger p0 self.
+ping me p k acc = if k == 0 then acc else
+  _ = send p k;
+  r = receiveFrom me p;
+  ping me p (k - 1) (acc + r).
+main =
+  me = myself 0;
+  p = spawnOn 0 (ponger me);
+  t0 = Sys.mtime Unit;
+  _ = ping me p 20000000 0;
+  t1 = Sys.mtime Unit;
+  print "int {(t1 - t0) * 100 / 20000000} ns per round trip".

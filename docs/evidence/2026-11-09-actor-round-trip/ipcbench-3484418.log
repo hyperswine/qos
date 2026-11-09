@@ -1,0 +1,33 @@
+ipcbench: same 178 ns per round trip
+ipcbench: same linear 178 ns per round trip
+ipcbench: same bounded 200 ns per round trip
+ipcbench: same 1k 195 ns per round trip
+ipcbench: cross 346 ns per round trip
+ipcbench: cross bounded 355 ns per round trip
+ipcbench: relay 16k copy 993 ns per three hops
+ipcbench: relay 16k move 471 ns per three hops
+ipcbench: DONE
+[36m[qos][0m expect: found 'ipcbench: DONE'
+--
+ipcbench: same 174 ns per round trip
+ipcbench: same linear 175 ns per round trip
+ipcbench: same bounded 196 ns per round trip
+ipcbench: same 1k 193 ns per round trip
+ipcbench: cross 334 ns per round trip
+ipcbench: cross bounded 341 ns per round trip
+ipcbench: relay 16k copy 906 ns per three hops
+ipcbench: relay 16k move 451 ns per three hops
+ipcbench: DONE
+[36m[qos][0m expect: found 'ipcbench: DONE'
+--
+ipcbench: same 175 ns per round trip
+ipcbench: same linear 176 ns per round trip
+ipcbench: same bounded 198 ns per round trip
+ipcbench: same 1k 193 ns per round trip
+ipcbench: cross 329 ns per round trip
+ipcbench: cross bounded 339 ns per round trip
+ipcbench: relay 16k copy 925 ns per three hops
+ipcbench: relay 16k move 470 ns per three hops
+ipcbench: DONE
+[36m[qos][0m expect: found 'ipcbench: DONE'
+--

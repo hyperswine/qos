@@ -1,0 +1,15 @@
+# same-hart round trip only, long enough to sample
+unsafe program.
+Sys.mtime : Unit -> Int .
+ponger self = case receive self of (who, n) -> send who (n + 1) >> ponger self.
+ping me p k acc = if k == 0 then acc else
+  _ = send p (me, k);
+  r = receiveFrom me p;
+  ping me p (k - 1) (acc + r).
+main =
+  me = myself 0;
+  p = spawnOn 0 ponger;
+  t0 = Sys.mtime Unit;
+  _ = ping me p 20000000 0;
+  t1 = Sys.mtime Unit;
+  print "same {(t1 - t0) * 100 / 20000000} ns per round trip".
