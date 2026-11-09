@@ -1,0 +1,34 @@
+# bench-sparse.fpr -- sparse arrivals: one round trip every 10 ms, the
+# requester on hart 0, the replier on hart 1. Both wait long enough that the
+# block spin (2 us) always expires before the next arrival, so this checks
+# that the spin costs nothing between arrivals and does not hurt latency when
+# it always misses, not that it catches replies.
+#
+#   ./qos.py run tests/bench-sparse.fpr --harts 2
+#   QOSCFLAGS_EXTRA=-DQOS_BLOCK_SPIN_NS=0 ./qos.py run tests/bench-sparse.fpr --harts 2
+#
+# The clock is read around each round trip, so the reported mean carries the
+# cost of two clock reads; the same bias applies to both arms. max and the
+# over-10us count are the tail signal.
+
+unsafe program.
+
+ponger self = case receive self of (who, n, pay) -> send who (n + 1) >> ponger self.
+
+ping me p k n sum mx over = if k == 0 then
+  print "sparse: mean {sum / n} ns max {mx} ns over-10us {over} of {n}"
+else
+  t0 = Sys.mtime Unit;
+  _ = send p (me, k, 0);
+  r = receiveFrom me p;
+  t1 = Sys.mtime Unit;
+  ns = (t1 - t0) * 100;
+  ping me p (k - 1) n (sum + ns) (if ns > mx then ns else mx) (if ns > 10000 then over + 1 else over).
+
+main =
+  me = myself 0;
+  p = spawnOn 1 ponger;
+  _ = Sys.sleepUs 50000;
+  _ = ping me p 300 300 0 0 0;
+  _ = kill p;
+  Unit.

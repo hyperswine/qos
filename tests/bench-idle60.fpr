@@ -1,0 +1,17 @@
+# bench-idle60.fpr -- the 60 s idle-CPU gate for the Portable block spin
+# (docs/2026-11-06-ZERO-OVERHEAD-OS-AMENDED.md, block-spin acceptance list).
+#
+# The metric is children-cpu from qos.py run (everything the run spawned,
+# from getrusage), compared across the two arms:
+#
+#   ./qos.py run tests/bench-idle60.fpr
+#   QOSCFLAGS_EXTRA=-DQOS_BLOCK_SPIN_NS=0 ./qos.py run tests/bench-idle60.fpr
+#
+# The compile and link inside qos.py run cost about 6.3 s of child CPU and
+# are identical across the arms; the difference is the idle cost of the run.
+
+unsafe program.
+
+main =
+  _ = Sys.sleepUs 60000000;
+  print "idle60: DONE".

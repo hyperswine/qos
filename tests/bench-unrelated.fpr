@@ -1,0 +1,40 @@
+# bench-unrelated.fpr -- an unrelated runnable actor alongside IPC traffic:
+# a cross-hart ping-pong on harts 0 and 1 while a pure counter runs alone on
+# hart 2. The counter never blocks, so it needs its own hart; the gate asks
+# whether the block spin's CPU cost comes out of unrelated runnable work.
+#
+#   ./qos.py run tests/bench-unrelated.fpr --harts 3
+#   QOSCFLAGS_EXTRA=-DQOS_BLOCK_SPIN_NS=0 ./qos.py run tests/bench-unrelated.fpr --harts 3
+#
+# The busy actor reports ns per 1000 iterations and then signals main, so the
+# program ends only after the counter has finished. The ping loop's clock is
+# read around the whole loop, as in ipcbench.
+
+unsafe program.
+
+ponger self = case receive self of (who, n, pay) -> send who (n + 1) >> ponger self.
+
+go me p k acc = if k == 0 then acc else
+  _ = send p (me, k, 0);
+  r = receiveFrom me p;
+  go me p (k - 1) (acc + r).
+
+countup acc n = if n == 0 then acc else countup (acc + 1) (n - 1).
+
+busy main n self =
+  t0 = Sys.mtime Unit;
+  acc = countup self n;
+  t1 = Sys.mtime Unit;
+  _ = send main 1;
+  print "unrelated: busy {(t1 - t0) * 100000 / n} ns per 1000 iters, acc {acc}".
+
+main =
+  me = myself 0;
+  p = spawnOn 1 ponger;
+  b = spawnOn 2 (busy me 100000000);
+  t0 = Sys.mtime Unit;
+  acc = go me p 1000000 0;
+  t1 = Sys.mtime Unit;
+  _ = kill p;
+  _ = receive me;
+  print "unrelated: ping {(t1 - t0) * 100 / 1000000} ns per round trip".

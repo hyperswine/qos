@@ -1,0 +1,59 @@
+# bench-saturate.fpr -- saturated traffic and oversubscribed workers: eight
+# requester/replier pairs at full send rate, the requester of pair i on hart
+# h(i) and its replier on the next hart around.
+#
+#   ./qos.py run tests/bench-saturate.fpr --harts 10   saturated: 16 actors
+#                                                      on 8 harts, under the
+#                                                      machine's core count
+#   ./qos.py run tests/bench-saturate.fpr --harts 4    oversubscribed: the
+#                                                      same 16 actors on
+#                                                      4 harts, 4 per hart
+#
+# The clock is read around each pair's whole loop, so the number is the mean
+# per round trip under load, not the unloaded figure ipcbench reports. The
+# hart mapping follows Sys.harts: 0..7 when more than 6 harts exist, 0..3
+# otherwise, so both runs stay in range.
+
+unsafe program.
+
+ponger self = case receive self of (who, n, pay) -> send who (n + 1) >> ponger self.
+
+go me p k acc = if k == 0 then acc else
+  _ = send p (me, k, 0);
+  r = receiveFrom me p;
+  go me p (k - 1) (acc + r).
+
+worker main idx rh ph n self =
+  p = spawnOn ph ponger;
+  t0 = Sys.mtime Unit;
+  acc = go self p n 0;
+  t1 = Sys.mtime Unit;
+  _ = kill p;
+  _ = send main (idx, (t1 - t0) * 100 / n);
+  Unit.
+
+h8 i = if i == 8 then 7 else i - 1.
+ph8 i = if i == 8 then 0 else i.
+h4 i = if i < 5 then i - 1 else i - 5.
+ph4 i = if h4 i == 3 then 0 else h4 i + 1.
+wide = Sys.harts Unit > 6.
+h i = if wide then h8 i else h4 i.
+ph i = if wide then ph8 i else ph4 i.
+
+collect me k = if k == 0 then Unit else
+  case receive me of (idx, ns) ->
+    print "saturate: pair {idx} {ns} ns per round trip" >> collect me (k - 1).
+
+main =
+  me = myself 0;
+  n = 1000000;
+  _ = spawnOn (h 1) (worker me 1 (h 1) (ph 1) n);
+  _ = spawnOn (h 2) (worker me 2 (h 2) (ph 2) n);
+  _ = spawnOn (h 3) (worker me 3 (h 3) (ph 3) n);
+  _ = spawnOn (h 4) (worker me 4 (h 4) (ph 4) n);
+  _ = spawnOn (h 5) (worker me 5 (h 5) (ph 5) n);
+  _ = spawnOn (h 6) (worker me 6 (h 6) (ph 6) n);
+  _ = spawnOn (h 7) (worker me 7 (h 7) (ph 7) n);
+  _ = spawnOn (h 8) (worker me 8 (h 8) (ph 8) n);
+  _ = collect me 8;
+  Unit.

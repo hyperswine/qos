@@ -1,0 +1,6 @@
+# bench-instant.fpr -- prints and exits; the compile+link baseline that
+# bench-idle60's children-cpu figures are read against.
+
+unsafe program.
+
+main = print "instant: DONE".
