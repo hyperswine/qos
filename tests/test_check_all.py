@@ -104,7 +104,7 @@ echo "== missing ==" && (service_leg preferences) || leg_failed "$LINENO"
             (compiler / "tools").mkdir(parents=True)
             gate = compiler / "tools/native-insns-ratchet.py"
             source = '''import os,sys
-assert sys.argv[1:] == ['programs/system.fpr','312','rv64','--runtime-call-sites-ceiling','67'],sys.argv
+assert sys.argv[1:] == ['programs/system.fpr','474','rv64','--runtime-call-sites-ceiling','95'],sys.argv
 print('native-insns-v1 ratchet holds')
 sys.exit({'ok':0,'regression':1,'timeout':124,'crash':139}[os.environ['CASE']])
 '''

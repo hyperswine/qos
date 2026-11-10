@@ -100,7 +100,7 @@ jobs:
           export FPR_HOME="$GITHUB_WORKSPACE"
           export FPR_PATH="$FPRISC_ROOT"
           export FPR_FOREIGN="$GITHUB_WORKSPACE/core/foreign.fpr"
-          python3 "$FPRISC_ROOT/tools/native-insns-ratchet.py" programs/system.fpr 312 rv64 --runtime-call-sites-ceiling 67
+          python3 "$FPRISC_ROOT/tools/native-insns-ratchet.py" programs/system.fpr 474 rv64 --runtime-call-sites-ceiling 95
       - name: host C checks
         run: |
           for c in buddy store park blkraw blkflush compile drm-scanout pointer; do
