@@ -170,6 +170,9 @@ std/actor v3.0 201a0e9bf98a5154 tests/editorpolicy.fpr
 ../programs/mods/ep v3.0 c66ad65e68dd97f5 tests/editorstate.fpr
 ../programs/mods/epservice v3.0 e8bce05a1ddf73db tests/editorstate.fpr
 std/actor v3.0 201a0e9bf98a5154 tests/editorstate.fpr
+../programs/mods/epservice v3.0 e8bce05a1ddf73db tests/epbench.fpr
+../programs/mods/ep v3.0 c66ad65e68dd97f5 tests/epbench.fpr
+std/actor v3.0 201a0e9bf98a5154 tests/epbench.fpr
 ../programs/mods/epservice v3.0 e8bce05a1ddf73db tests/epecho.fpr
 ../programs/mods/ep v3.0 c66ad65e68dd97f5 tests/epecho.fpr
 std/actor v3.0 201a0e9bf98a5154 tests/epecho.fpr
