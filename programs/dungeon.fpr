@@ -57,6 +57,7 @@ unsafe program.
 MV = use "std/mvu".
 Services = use "mods/services".
 EP = use "mods/ep#c66ad65e68dd97f5".
+EC = use "mods/epclient#5e2a0f910e610193".
 S2 = use "mods/scene2d".
 Fm = use "mods/fontm".
 Core = use "mods/coreutil".
@@ -416,10 +417,10 @@ colOf k = dim.
 run hub tag app =
   me = myself 0;
   ep = Services.graphics hub tag Nil me;
-  (graphics, _) = ep;
+  (graphics, session) = EC.owner ep;
   cfg = {env = (me, 0), mt = hub.mt, tick = 160000, input = graphics, render = graphics};
   result = MV.game me cfg app;
-  _ = EP.close me ep;
+  _ = EC.close me session;
   _ = print "dungeon over";
   result.
 main =

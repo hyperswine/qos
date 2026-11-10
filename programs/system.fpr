@@ -56,6 +56,7 @@ getcRes r = case r of
 TimeFmt = use "mods/timefmt#39dff276efd647a1".
 SVCM    = use "mods/svc#75479fb6d5f34670".
 EP      = use "mods/ep#c66ad65e68dd97f5".
+EC      = use "mods/epclient#5e2a0f910e610193".
 SysEp   = use "mods/sysep".
 AppsEP  = use "mods/appsep".
 AC      = use "std/actor#201a0e9bf98a5154".
@@ -347,24 +348,41 @@ mkCaps con me clk granted aid st = Caps con me clk granted aid st.
 
 # the handles the svc* helpers below use: opened ONCE, at the builtin
 # launch, so a write or a read is one round trip to the owner (an app that
-# opens its own pays the same); (0, 0) when not granted, and Svc then faults
-# by name.  The record is st plus five fields: row-typed, nothing ripples.
-capsWithEps : Caps -> Caps .
-capsWithEps caps =
+# opens its own pays the same).  The launch owns them (EC.Endpoint, linear)
+# and closes them when the launcher returns; the capability set carries a
+# route to each, plain data it may copy (EC.NoRoute when not granted or
+# refused, and Svc then does the whole open/op/close and faults by name).
+# The record is st plus five fields: row-typed, nothing ripples.
+runLauncher : unsafe Caps -> Unit .
+runLauncher caps =
   Caps con me clk granted aid st = caps;
-  Caps con me clk granted aid (withEps me st granted).
-withEps : Int -> _ -> List (String, String) -> _ .
+  (routes, held) = withEps me st granted;
+  _ = launcher_main (Caps con me clk granted aid routes);
+  closeAll me held.
+withEps : unsafe Int -> _ -> List (String, String) -> (_, List EC.Endpoint) .
 withEps me st granted =
-  { has = st.has, act = st.act, uart = st.uart, timer = st.timer, ns = st.ns,
-    disp = epOf me st.ns granted "/services/display" "write",
-    line = epOf me st.ns granted "/services/display/line" "write",
-    kbd = epOf me st.ns granted "/services/keyboard" "read",
-    poll = epOf me st.ns granted "/services/keyboard/poll" "read",
-    clock = epOf me st.ns granted "/services/clock" "read" }.
-epOf : Int -> Int -> List (String, String) -> String -> String -> (Int, Int) .
-epOf me ns granted url mode = case EP.covered granted url mode of
-    False -> (0, 0)
-  | True -> (case EP.open me ns url mode of Ok ep -> ep | Err e -> (0, 0)).
+  (disp, h1) = epOf me st.ns granted "/services/display" "write" Nil;
+  (line, h2) = epOf me st.ns granted "/services/display/line" "write" h1;
+  (kbd, h3) = epOf me st.ns granted "/services/keyboard" "read" h2;
+  (poll, h4) = epOf me st.ns granted "/services/keyboard/poll" "read" h3;
+  (clock, h5) = epOf me st.ns granted "/services/clock" "read" h4;
+  ({ has = st.has, act = st.act, uart = st.uart, timer = st.timer, ns = st.ns,
+     disp = disp, line = line, kbd = kbd, poll = poll, clock = clock }, h5).
+# a route to url, its endpoint added to those the launch holds
+epOf : unsafe Int -> Int -> List (String, String) -> String -> String -> List EC.Endpoint -> (EC.Route, List EC.Endpoint) .
+epOf me ns granted url mode held = case EP.covered granted url mode of
+    False -> (EC.NoRoute, held)
+  | True -> (case EC.open me ns url mode of
+        Err e -> (EC.NoRoute, held)
+      | Ok ep -> heldRoute (EC.routeOf ep) held).
+heldRoute : (EC.Route, EC.Endpoint) -> List EC.Endpoint -> (EC.Route, List EC.Endpoint) .
+heldRoute pair held =
+  (route, ep) = pair;
+  (route, ep :: held).
+closeAll : unsafe Int -> List EC.Endpoint -> Unit .
+closeAll me eps = case eps of
+    Nil -> Unit
+  | ep :: rest -> _ = EC.close me ep; closeAll me rest.
 stDisp st = st.disp.
 stLine st = st.line.
 stKbd st = st.kbd.
@@ -409,18 +427,14 @@ svcReadKey caps = expectI (fastR caps (stKbd (capSt caps)) "/services/keyboard")
 
 # one round trip on a handle the launch opened; the whole open/op/close
 # through Svc when it opened none
-fastW : Caps -> (Int, Int) -> String -> IoV -> IoV .
-fastW caps ep url v =
-  (o, h) = ep;
-  case o == 0 of
-    True -> Svc.write caps url v
-  | False -> epVal (EP.write (capMe caps) ep v).
-fastR : Caps -> (Int, Int) -> String -> IoV .
-fastR caps ep url =
-  (o, h) = ep;
-  case o == 0 of
-    True -> Svc.read caps url
-  | False -> epVal (EP.read (capMe caps) ep 0).
+fastW : Caps -> EC.Route -> String -> IoV -> IoV .
+fastW caps route url v = case route of
+    EC.NoRoute -> Svc.write caps url v
+  | EC.Route o h -> epVal (EC.writeRoute (capMe caps) route v).
+fastR : Caps -> EC.Route -> String -> IoV .
+fastR caps route url = case route of
+    EC.NoRoute -> Svc.read caps url
+  | EC.Route o h -> epVal (EC.readRoute (capMe caps) route 0).
 epVal r = case r of Ok v -> v | Err e -> IErr e.
 
 # nonblocking key poll (0 = none waiting): what makes an app DYNAMIC --
@@ -681,7 +695,7 @@ capsBlob caps = Manifest.capsBlob (capId caps) (capGranted caps).
 runBuiltin : unsafe (Int, Int) -> String -> Caps -> Unit .
 runBuiltin con entry caps =
   case strEq entry "launcher_main" of
-    True -> launcher_main (capsWithEps caps)
+    True -> runLauncher caps
   | False -> putLn con (strcat entry ": not a builtin; ship it as loadMode = process").
 
 # QAR2: the container work stays HERE (the Loader does the dirty work; C
