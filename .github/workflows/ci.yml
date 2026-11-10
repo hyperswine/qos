@@ -60,6 +60,10 @@ jobs:
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
           cabal update
+          # fprisc's cabal.project.freeze pins the release plan (GHC 9.8.2 boot
+          # packages); CI runners ship other GHCs, so build against their own
+          # plan, as fprisc's own CI does.
+          rm -f fprisc/cabal.project.freeze
           make -C fprisc fpr
           rm -rf fprisc/dist-newstyle
       - run: ./fprisc/fpr --version || test -x ./fprisc/fpr
@@ -192,6 +196,10 @@ jobs:
           git -C fprisc fetch -q --depth 1 origin "${{ steps.lock.outputs.rev }}"
           git -C fprisc checkout -q FETCH_HEAD
           cabal update
+          # fprisc's cabal.project.freeze pins the release plan (GHC 9.8.2 boot
+          # packages); CI runners ship other GHCs, so build against their own
+          # plan, as fprisc's own CI does.
+          rm -f fprisc/cabal.project.freeze
           make -C fprisc fpr
           rm -rf fprisc/dist-newstyle
       - name: qos.py toolchain install --prefix
