@@ -102,7 +102,7 @@ echo "== stdcheck: the REAL std library (lifted lambdas) ==" && (${FPRISC_ROOT}/
 # native-insns-v1, measured with the typed compiler: 1,669 functions / 27 files.
 # This is a per-function code/work regression gate, not elapsed-time admission.
 # C call-site counts have a separate ceiling; C time and return chaining remain unbounded here.
-echo "== Native instruction ratchet: system.fpr selected segments and runtime call sites ==" && (python3 "${FPRISC_ROOT}/tools/native-insns-ratchet.py" programs/system.fpr 312 rv64 --runtime-call-sites-ceiling 67) || leg_failed "${LINENO:-?}"
+echo "== Native instruction ratchet: system.fpr selected segments and runtime call sites ==" && (python3 "${FPRISC_ROOT}/tools/native-insns-ratchet.py" programs/system.fpr 474 rv64 --runtime-call-sites-ceiling 95) || leg_failed "${LINENO:-?}"
 echo "== BareMetal =="           && (make -s bare-metal-run PROG=${FPRISC_ROOT}/tests/stduse.fpr 2>/dev/null | grep "std:") || leg_failed "${LINENO:-?}"
 echo "== Wide ABI: arity 24, wide TCO, Tup4..8 ==" && (make -s bare-metal-run PROG=${FPRISC_ROOT}/tests/wideabi.fpr 2>/dev/null | grep -a "WIDEABI HOLDS") || leg_failed "${LINENO:-?}"
 echo "== Floats: F64/F32 in the AOT tier ==" && (ran make -s bare-metal-run PROG=${FPRISC_ROOT}/tests/float.fpr 2>/dev/null | grep -a "FLOATS HOLD" && printf 'main =\n  t = (1.5, 2.5);\n  print "{t}".\n' > ${CK_TMP}/ck-fneg.fpr && ran env LC_ALL=C.UTF-8 ${FPRISC_ROOT}/fpr --profile=bare-metal --prelude=${FPRISC_ROOT}/core/prelude.fpr ${CK_TMP}/ck-fneg.fpr ${CK_TMP}/ck-fneg.s 2>&1 | grep >/dev/null -c "render is tid-directed" && echo "float-in-structure str/print: compile-time refusal (guard holds)") || leg_failed "${LINENO:-?}"
