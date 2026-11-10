@@ -1,0 +1,159 @@
+{
+  "date": "2026-11-10",
+  "device": "Raspberry Pi 4 Model B Rev 1.4, 192.168.0.233",
+  "qos_revision": "93004f89995a9c7f369f29cb043d9be72ea784e2",
+  "fprisc_revision": "20ad433201e4781f79850af0700a294f59879e94",
+  "abi": 22,
+  "codegen_rev": 204,
+  "candidate_sha256": "091df47cfc83c39723bb850c62e5e90fbf774b0cb684723b41421202563c1cd3",
+  "core_manifest_sha256": "60b4c4e6607727f06bf4fc7b2b7dd67c9ad6be6acbd42296b4a39b342723f537",
+  "export_overlays": {
+    "fprisc.lock.json": "a8868a52978ad653f98fd6b9abd03637588957528533dbdd7e68d629b3a77ad1",
+    "fpr.lock": "bfb6dcd6be6cb0990accea5eb48e45d81beda1b6d866e0324715bf655f5c2d88"
+  },
+  "physical_runtime_qualification": {
+    "status": "PASS",
+    "cases": 2286,
+    "production_unchanged": true
+  },
+  "main_preflight": {
+    "ab_new": [
+      [
+        1,
+        24.1,
+        43812
+      ],
+      [
+        2,
+        53.9,
+        45020
+      ],
+      [
+        3,
+        85.6,
+        45892
+      ],
+      [
+        4,
+        115.5,
+        46324
+      ],
+      [
+        5,
+        143.2,
+        46448
+      ]
+    ],
+    "ab_old_e138e65": [
+      [
+        1,
+        23.7,
+        44556
+      ],
+      [
+        2,
+        51.5,
+        45520
+      ],
+      [
+        3,
+        79.1,
+        46168
+      ],
+      [
+        4,
+        108.1,
+        46680
+      ],
+      [
+        5,
+        137.1,
+        47260
+      ]
+    ]
+  },
+  "final_verification": {
+    "passed": true,
+    "state": "running pid=2970 restarts=0",
+    "compiler_state": "running pid=1879 restarts=0",
+    "renderer": "V3D",
+    "rollback": "/var/lib/qosp/deployment-pi-20ad433-19700110T135432Z/rollback.sh",
+    "rollback_sha256": "fabc54f55a735fac18217a31562b5bdc25942c620eec1c7a149bb32f481c56ef",
+    "graphics_markers": [
+      "[gfx] scanout: /dev/dri/card1 1024x600 (frame fullscreen)",
+      "[host] [gfx] scanout: /dev/dri/card1 1024x600 (frame fullscreen)",
+      "[gfx] EGL 1.4 (surfaceless)  V3D 4.2.14 / OpenGL ES 3.1 Mesa 24.0.9",
+      "[host] [gfx] EGL 1.4 (surfaceless)  V3D 4.2.14 / OpenGL ES 3.1 Mesa 24.0.9"
+    ],
+    "disk_upgrade": {
+      "apps": [
+        "clock",
+        "logs",
+        "browser",
+        "disk",
+        "terminal",
+        "editor"
+      ],
+      "new_generation": 64,
+      "new_head": 1720,
+      "old_apps": [
+        "clock",
+        "logs",
+        "browser",
+        "disk",
+        "terminal",
+        "editor"
+      ],
+      "old_generation": 62,
+      "old_head": 1720,
+      "preserved_records": 46,
+      "reclaimed_app_records": 7
+    },
+    "installed_sha256": {
+      "/usr/bin/qosp": "e27f1a294b0ba8b3e412629bf1ab89eef9854110aae14ff21887664083db803d",
+      "/usr/share/qosp/Main.disk": "9f24b16936b92f11d327287effca355e2139c6074fc12761f21afd232081aae5",
+      "/usr/share/qosp/app.qa": "ae47806c59654e18e13b87970aeca4201e446cd195aaeb6b0a35e516d224561a",
+      "/usr/share/qosp/compiler-sdk.tar.gz": "e2096ebbc170bc107d56f31fc319666dbc48e8582dd7d9d2d00a058c4c56c132"
+    }
+  },
+  "installed_hdmi_ppm_sha256": "e9347449f7152694861620fe748fb6c3156ea1fdd7b8696f6ce36cbb4a14fa09",
+  "soak_600": {
+    "passed": true,
+    "samples": 21,
+    "elapsed_seconds": 600.0029748460511,
+    "rss_kib": {
+      "change": 0,
+      "first": 45124,
+      "last": 45124,
+      "max": 45124,
+      "min": 45124
+    },
+    "pss_kib": {
+      "change": 0,
+      "first": 43589,
+      "last": 43589,
+      "max": 43590,
+      "min": 43586
+    },
+    "cpu_percent_of_one_core": {
+      "mean_over_interval": 7.428296503269135,
+      "peak_sample_interval": 7.796536715775231
+    },
+    "temperature_c": {
+      "max": 52.582,
+      "min": 50.147
+    },
+    "identities": {
+      "compiler": {
+        "pid": 1879,
+        "starttime_ticks": 82780943,
+        "state": "running pid=1879 restarts=0"
+      },
+      "main": {
+        "pid": 2970,
+        "starttime_ticks": 82783029,
+        "state": "running pid=2970 restarts=0"
+      }
+    }
+  }
+}
