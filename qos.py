@@ -1343,7 +1343,9 @@ def tree_pins():
     pins = []
     for p in sorted(ROOT.rglob("*.fpr")):
         rel = p.relative_to(ROOT)
-        if rel.parts[0].startswith(".") or rel.parts[0] in ("build", "dist", "toolchain", "qos", "hal", "loader", "docs"):
+        # fprisc: CI clones the pinned compiler into the tree; its own test
+        # fixtures carry pins (tests/frontend/compat.fpr) that are not ours.
+        if rel.parts[0].startswith(".") or rel.parts[0] in ("build", "dist", "toolchain", "qos", "hal", "loader", "docs", "fprisc"):
             continue
         try:
             src = p.read_text(errors="replace")
