@@ -28,6 +28,8 @@ B = use "std/blockio#8b4ffa1467ca03a5".
 EP = use "../programs/mods/ep#c66ad65e68dd97f5".
 Wire = use "std/storage#a8f7ee14e1efae76".
 ED = use "../programs/mods/epdeadline#08a8ecf9d7c57d85".
+EC = use "../programs/mods/epclient#e09b467f350a5396".
+Core = use "../programs/mods/coreutil#00b87d7442c69e95".
 
 # spawn the service on a device the caller opened; the returned actor
 # handle IS the filesystem from here on
@@ -188,21 +190,102 @@ connected : unsafe Int -> EP.IoV -> Int .
 connected ns (EP.IInt 0) = 0.
 connected ns (EP.IInt 1) = Wire.spawn 8 Wire.inboxBytes (forward ns).
 connected _ _ = error "Files.qa returned an invalid status".
+# The forwarder keeps the endpoint it used last for each operation (at most
+# six: latest, append, replay, delete, stats, compact) and reuses it while the
+# key stays the same, so a client appending to one key pays two messages per
+# append instead of eight (open, operation, close). A different key closes
+# the old endpoint and opens the new one. The Files owner's lease lasts 60 s
+# from open and reads and writes do not renew it: a held endpoint the owner
+# no longer knows ("no such handle", nothing executed) is opened again once.
+# Authority is still checked at open, so a revoked grant takes effect when
+# the held endpoint's lease ends, not at the next operation.
+Held 1 = Type (Held Int String EC.Endpoint).
+Took 1 = Type (Missing | Took Held).
 forward : unsafe Int -> Int -> a .
-forward ns self =
+forward ns self = forwardHeld ns self Nil.
+forwardHeld : unsafe Int -> Int -> List Held -> a .
+forwardHeld ns self held =
   msg = receive self;
   case msg of
-    SVC.TimedRpc caller id until tag key payload -> forwardRequest ns self msg
-  | SVC.Rpc caller tag key payload -> forwardRequest ns self msg
-  | stale -> _ = drop msg; forward ns self.
-forwardRequest ns self msg =
+    SVC.TimedRpc caller id until tag key payload -> forwardRequest ns self held msg
+  | SVC.Rpc caller tag key payload -> forwardRequest ns self held msg
+  | stale -> _ = drop msg; forwardHeld ns self held.
+forwardRequest ns self held msg =
   (ret, (until, (tag, key, payload))) = requestFields msg;
-  answer = if Wire.expired until then Err "storage: deadline exceeded before execution" else viaNamespaceUntil until self ns tag key payload;
+  (answer, held2) = forwardOp until self ns tag key payload held;
   _ = Wire.reply ret answer;
   _ = drop answer;
   _ = drop msg;
-  _ = Sys.poolReset 0;
-  forward ns self.
+  # the boundary keeps the held endpoints and resets everything else
+  forwardHeld ns self (AC.boundary self held2).
+forwardOp : unsafe Int -> Int -> Int -> Int -> String -> String -> List Held -> (Result String String, List Held) .
+forwardOp until me ns tag key payload held =
+  if Wire.expired until then (Err "storage: deadline exceeded before execution", held)
+  else case opUrl tag key of
+      Err why -> (Err why, held)
+    | Ok url -> heldTake until me ns tag url payload (takeTag tag held Nil).
+opUrl : Int -> String -> Result String String .
+opUrl 1 key = Ok "/services/files/{key}/latest".
+opUrl 2 key = Ok "/services/files/{key}/append".
+opUrl 3 key = Ok "/services/files/{key}/replay".
+opUrl 4 key = Ok "/services/files/{key}/delete".
+opUrl 5 key = Ok "/services/files/{key}/stats".
+opUrl 6 key = Ok "/services/files/compact".
+opUrl _ _ = Err "unknown storage operation".
+opWrites tag = or2 (tag == 2) (or2 (tag == 4) (tag == 6)).
+opMode tag = if opWrites tag then "write" else "read".
+opValue tag payload = if tag == 2 then EP.IStr payload else if tag == 4 then EP.IStr "" else EP.IUnit.
+or2 a b = case a of True -> True | False -> b.
+and2 a b = case a of True -> b | False -> False.
+takeTag : Int -> List Held -> List Held -> (Took, List Held) .
+takeTag tag held passed = case held of
+    Nil -> (Missing, passed)
+  | h :: rest -> takeOne tag rest passed h.
+takeOne : Int -> List Held -> List Held -> Held -> (Took, List Held) .
+takeOne tag rest passed h =
+  Held t u ep = h;
+  case t == tag of
+    True -> (Took (Held t u ep), heldOnto passed rest)
+  | False -> takeTag tag rest (Held t u ep :: passed).
+heldOnto : List Held -> List Held -> List Held .
+heldOnto xs acc = case xs of
+    Nil -> acc
+  | x :: r -> heldOnto r (x :: acc).
+heldTake : unsafe Int -> Int -> Int -> Int -> String -> String -> (Took, List Held) -> (Result String String, List Held) .
+heldTake until me ns tag url payload got =
+  (took, rest) = got;
+  case took of
+    Missing -> openRun until me ns tag url payload rest
+  | Took h -> heldRun until me ns tag url payload rest h.
+heldRun : unsafe Int -> Int -> Int -> Int -> String -> String -> List Held -> Held -> (Result String String, List Held) .
+heldRun until me ns tag url payload rest h =
+  Held t u ep = h;
+  case Core.strEq u url of
+    True -> useEp until me ns tag url payload rest ep True
+  | False -> _ = EC.closeUntil until me ep; openRun until me ns tag url payload rest.
+openRun : unsafe Int -> Int -> Int -> Int -> String -> String -> List Held -> (Result String String, List Held) .
+openRun until me ns tag url payload rest = case EC.openUntil until me ns url (opMode tag) of
+    Err why -> (Err why, rest)
+  | Ok ep -> useEp until me ns tag url payload rest ep False.
+useEp : unsafe Int -> Int -> Int -> Int -> String -> String -> List Held -> EC.Endpoint -> Bool -> (Result String String, List Held) .
+useEp until me ns tag url payload rest ep held =
+  (r, ep2) = opRun until me tag payload ep;
+  case r of
+    Ok v -> (fileReply (Ok v), Held tag url ep2 :: rest)
+  | Err why -> opFailed until me ns tag url payload rest ep2 held why.
+opRun : Int -> Int -> Int -> String -> EC.Endpoint -> (Result EP.IoV String, EC.Endpoint) .
+opRun until me tag payload ep = case opWrites tag of
+    True -> EC.writeUntil until me ep (opValue tag payload)
+  | False -> EC.readUntil until me ep 0.
+# Any failure gives the endpoint up. Only an endpoint held from before whose
+# handle the owner no longer knows is opened again: nothing ran, so even an
+# append is safe to send once more.
+opFailed : unsafe Int -> Int -> Int -> Int -> String -> String -> List Held -> EC.Endpoint -> Bool -> String -> (Result String String, List Held) .
+opFailed until me ns tag url payload rest ep held why =
+  _ = EC.closeUntil until me ep;
+  case and2 held (Core.strEq why "no such handle") of
+    True -> openRun until me ns tag url payload rest
+  | False -> (Err why, rest).
 viaNamespace : unsafe Int -> Int -> Int -> String -> String -> Result String String .
 viaNamespace me ns 1 key _ = fileReply (EP.readOnce me ns "/services/files/{key}/latest").
 viaNamespace me ns 2 key bytes = fileReply (EP.writeOnce me ns "/services/files/{key}/append" (EP.IStr bytes)).
