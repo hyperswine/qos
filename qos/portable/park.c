@@ -1,6 +1,7 @@
 /* OS sleep/wake mechanism for the freestanding app's scheduler.
  * The app chooses runnable actors and timer deadlines in its own runtime.
- * A latched bell and one mutex cover clear/check/wait without a lost wake.
+ * The atomic latch and waiter bit share a modification order. The mutex
+ * serializes condition-variable registration with signals and timer updates.
  * A 20 ms fallback matches the Unix runtime: a missed external wake source
  * costs bounded latency, not a permanently stranded worker. */
 
@@ -14,11 +15,14 @@
 #include <time.h>
 #include <errno.h>
 #include <stdint.h>
+#include <stdatomic.h>
+
+enum { BELL = 1, WAITING = 2 };
 
 typedef struct {
   pthread_mutex_t mutex;
   pthread_cond_t changed;
-  int bell;
+  atomic_uint state;
   uint64_t deadline;
 } park_t;
 
@@ -62,11 +66,18 @@ void qosp_hart_wait(uint64_t hart) {
 
   uint64_t cap = now_ticks() + 200000; /* bounded fallback: 20 ms */
 
-  while (!p->bell) {
+  atomic_fetch_or_explicit(&p->state, WAITING, memory_order_acq_rel);
+  while (!(atomic_load_explicit(&p->state, memory_order_acquire) & BELL)) {
     uint64_t now = now_ticks();
     uint64_t until = p->deadline && p->deadline < cap ? p->deadline : cap;
 
-    if (now >= until) break;
+    if (now >= until) {
+#ifdef QOSP_PARK_TEST
+      extern void qosp_test_wait_expired(uint64_t hart);
+      qosp_test_wait_expired(hart);
+#endif
+      break;
+    }
 
     int result;
 
@@ -83,24 +94,25 @@ void qosp_hart_wait(uint64_t hart) {
   }
 
   if (p->deadline && now_ticks() >= p->deadline) p->deadline = 0;
-  p->bell = 0;
+  atomic_exchange_explicit(&p->state, 0, memory_order_acq_rel);
 
   require(pthread_mutex_unlock(&p->mutex));
 }
 
 void qosp_hart_ring(uint64_t hart) {
   park_t *p = get(hart);
+  /* A ring before registration is latched. Once registered, the mutex
+   * closes the window between the predicate check and condvar sleep. */
+  unsigned previous = atomic_fetch_or_explicit(&p->state, BELL, memory_order_release);
+  if (!(previous & WAITING) || (previous & BELL)) return;
   require(pthread_mutex_lock(&p->mutex));
-  p->bell = 1;
   require(pthread_cond_signal(&p->changed));
   require(pthread_mutex_unlock(&p->mutex));
 }
 
 void qosp_hart_clear(uint64_t hart) {
   park_t *p = get(hart);
-  require(pthread_mutex_lock(&p->mutex));
-  p->bell = 0;
-  require(pthread_mutex_unlock(&p->mutex));
+  atomic_fetch_and_explicit(&p->state, ~BELL, memory_order_acq_rel);
 }
 
 void qosp_hart_timer_park(uint64_t hart) {

@@ -63,6 +63,26 @@ static V h_sha256_file(V pathv) {
 }
 FPR_FN(fpr_g_Qos_x2esha256File, h_sha256_file, 1);
 
+/* The SDK stager supplies the successful Main inspection from this CLI
+ * version. Unstaged binaries always use ordinary preflight. */
+#ifndef QOS_VERIFIED_MAIN
+#define QOS_VERIFIED_MAIN ""
+#endif
+static V h_verified_main(V u) {
+  (void)u;
+  return os_str(QOS_VERIFIED_MAIN, sizeof(QOS_VERIFIED_MAIN) - 1);
+}
+FPR_FN(fpr_g_Qos_x2everifiedMain, h_verified_main, 1);
+
+#ifndef QOS_VERIFIED_PLUGINS
+#define QOS_VERIFIED_PLUGINS ""
+#endif
+static V h_verified_plugins(V u) {
+  (void)u;
+  return os_str(QOS_VERIFIED_PLUGINS, sizeof(QOS_VERIFIED_PLUGINS) - 1);
+}
+FPR_FN(fpr_g_Qos_x2everifiedPlugins, h_verified_plugins, 1);
+
 /* Qos.realpath : String -> Result String String */
 static V h_realpath(V pathv) {
   char *path = os_cstr(pathv, "Qos.realpath: path");

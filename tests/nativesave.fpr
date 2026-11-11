@@ -1,0 +1,45 @@
+# Boot twice on the same buffered virtio disk.
+unsafe program.
+Lifecycle = use "../std/lifecycle".
+FS = use "../std/fs".
+P = use "std/storageprotocol".
+C = use "std/storageclient".
+Q = use "../programs/mods/qsys".
+Endpoint = use "../programs/mods/epservice#e8bce05a1ddf73db".
+EP = use "../programs/mods/ep#c66ad65e68dd97f5".
+Jobs = use "../programs/mods/appjobs".
+AW = use "../programs/mods/appwire".
+Lease = use "../programs/mods/endpointstate".
+ok (Ok value) = value.
+ok (Err why) = error why.
+check True = Unit.
+check False = error "native buffered save mismatch".
+refused (Err why) = why == "storage generations require durable v3 storage".
+refused _ = False.
+unsupported (Err why) = P.kind why == P.Unsupported and P.outcome why == P.NotStarted.
+unsupported _ = False.
+main =
+  me = myself 0;
+  ctx = ok (Lifecycle.start me);
+  fs = Lifecycle.files ctx;
+  _ = check (strIndexOf " v=2 " (ok (FS.stats me fs "")) >= 0);
+  ns = spawn Endpoint.namespace;
+  mgr = spawn (Q.filesMgr fs ns Nil);
+  _ = ok (EP.register me ns "/home" mgr);
+  path = "/home/native-save";
+  old = ok (FS.replay me fs path);
+  _ = check (old == "" or old == "second");
+  _ = check (refused (FS.snapshot me fs path));
+  _ = check (refused (FS.replaceAt me fs path 0 "uncommitted"));
+  _ = check (unsupported (C.request me (C.Owner fs) (P.Replace path "uncommitted")));
+  _ = check (unsupported (C.request me (C.Owner fs) (P.ReplaceAt path 0 "uncommitted")));
+  _ = check (ok (FS.replay me fs path) == old);
+  (written, state) = Jobs.execute me ns fs (AW.SaveFile path "first") Lease.Vacant;
+  _ = ok written;
+  (again, done) = Jobs.execute me ns fs (AW.SaveFileIfUnchanged path "first" "second") state;
+  _ = ok again;
+  _ = Lease.ended done;
+  _ = check (ok (FS.replay me fs path) == "second");
+  _ = check (ok (FS.replay me fs "{path}.~save") == "");
+  _ = ok (Lifecycle.stop me ctx);
+  if old == "" then "nativesave: first boot HOLDS" else "nativesave: reopen HOLDS".

@@ -11,7 +11,10 @@ static uint64_t us(void) {
   struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
   return (uint64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
 }
-static atomic_uint turn, done;
+static atomic_uint turn, done, expired;
+void qosp_test_wait_expired(uint64_t hart) {
+  if (hart == 1) atomic_fetch_add(&expired, 1);
+}
 static void *waiter(void *unused) {
   (void)unused;
   for (unsigned i=1; i<=2000; i++) {
@@ -44,6 +47,7 @@ int main(void) {
     while (atomic_load(&done) < i) sched_yield();
   }
   assert(!pthread_join(thread, NULL));
+  assert(!atomic_load(&expired)); /* every handshake woke on its bell */
   assert(us()-start < 10000000); /* losing each race would cost 40 seconds */
   puts("portable park: latched bell/timer/clear/cancel/2000 races HOLDS");
 }

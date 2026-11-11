@@ -150,7 +150,27 @@ load loadText img = case parse loadText of
 # (fprisc docs/2026-10-08-PLANE-TABLES.md). -1 = not declared, or declared
 # badly; the loader refuses each by name.
 nativeNums : unsafe Img -> String -> List Int .
-nativeNums m load = nativeNumsWith m (nativeAbi load) (planeActorsAbi load) (planeMemoryAbi load).
+nativeNums m load =
+  (abi, actors, memory) = declarations load 0 (strlen load) (0 - 1, 0 - 1, 0 - 1);
+  nativeNumsWith m (version abi) (version actors) (version memory).
+# Preserve invalid declarations across later lines; the public ABI uses -1
+# for both absent and invalid fields.
+version v = if v < 0 then 0 - 1 else v.
+recordVersion : unsafe String -> Int -> Int -> Int -> Int .
+recordVersion s start end seen = if seen != (0 - 1) or end <= start or end - start > 9 then 0 - 2 else
+  (value, digits) = decimal s start end 0 0;
+  if digits == end - start then value else 0 - 2.
+declarations : unsafe String -> Int -> Int -> (Int, Int, Int) -> (Int, Int, Int) .
+declarations s i n state = if i >= n then state else
+  end = lineStop s i n;
+  space = spaceIn s i end;
+  (abi, actors, memory) = state;
+  next = if space == end then state else case substr s i (space - i) of
+      "nativeabi" -> (recordVersion s (space + 1) end abi, actors, memory)
+    | "planeactors" -> (abi, recordVersion s (space + 1) end actors, memory)
+    | "planememory" -> (abi, actors, recordVersion s (space + 1) end memory)
+    | other -> state;
+  declarations s (end + 1) n next.
 nativeNumsWith : Img -> Int -> Int -> Int -> List Int .
 nativeNumsWith m abi actors memory = base m :: entry m :: execsz m :: rwoff m :: memsz m :: abi :: actors :: memory :: Nil.
 

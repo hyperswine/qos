@@ -26,6 +26,8 @@
 # device register -- it says `svcReadKey caps` and `svcWriteLine caps s`.
 # ============================================================================
 
+unsafe program.
+
 # ---- the console: UART.qa's client, through System.qa's own endpoints --------
 # con = (uart, ns): the UART service actor -- writes go to it, chunked
 # against its outgoing budget by mods/sysep.fpr's consoleWrite -- and the
@@ -42,8 +44,6 @@ nl con = puts con (strcat (chr 13) (chr 10)).
 putLn : (Int, Int) -> String -> Unit .
 putLn con s = puts con s >> nl con.
 
-getc : Int -> (Int, Int) -> Int .
-getc me con = (u, ns) = con; getcRes (EP.readOnce me ns "/services/keyboard").
 getcRes r = case r of
     Ok v -> (case v of IInt k -> k | o -> error "system: the keyboard answered without a key")
   | Err e -> error "system: keyboard: {e}".
@@ -72,8 +72,8 @@ IStr = EP.IStr.
 IFn  = EP.IFn.
 IErr = EP.IErr.
 Net = use "std/net#464ca3ee0d89bc64".
-Lifecycle = use "std/lifecycle#6e7bea28db71815a".
-FS = use "std/fs#84826bc9e8ddb4b5".
+Lifecycle = use "std/lifecycle".
+FS = use "std/fs".
 Block = use "std/block#615ea5947fe13b00".
 Endpoint = use "mods/epservice#e8bce05a1ddf73db".
 BlockEP = use "mods/blockep#bd295a609815dadd".
@@ -183,25 +183,17 @@ Io4 = Type (Io4 con me clk st).
 # render one permission prompt and read y/n. `caps` here is the console +
 # reader actor needed for IO; the app-facing capability set is separate.
 # Returns True (grant) / False (deny).
-askPerm : Io4 -> String -> String -> Bool .
-askPerm io url mode =
+askPerm : Io4 -> (Int, Int) -> String -> String -> Bool .
+askPerm io keyboard url mode =
   Io4 con me clk st0 = io;
   _ = puts con "  grant ";
   _ = puts con url;
   _ = puts con " (";
   _ = puts con mode;
   _ = puts con ") ? [y/N] ";
-  c = getc me con;
+  c = getcRes (EP.read me keyboard 0);
   _ = putc con c >> nl con;              # echo
   or2 (c == 121) (c == 89).              # 'y' or 'Y'
-
-# ask every perm in a list; returns list of Bool (parallel to input)
-askAll : unsafe Io4 -> List (String, String) -> List Bool .
-askAll io perms =
-  case perms of
-    Nil -> Nil
-  | p :: rest -> case p of (url, mode) ->
-      askPerm io url mode :: askAll io rest.
 
 # all required granted?  (fold AND over the Bool list)
 allTrue : unsafe List Bool -> Bool .
@@ -294,17 +286,23 @@ permsNeedAsk stored perms isReq =
 # askAll with memory: replay a remembered decision, prompt on a miss
 askAllRem : unsafe Io4 -> String -> Bool -> List (String, String) -> List Bool .
 askAllRem io stored isReq perms =
-  case perms of
+  Io4 con me clk st = io;
+  (uart, ns) = con;
+  if permsNeedAsk stored perms isReq then
+    (case EP.open me ns "/services/keyboard" "read" of
+      Err why -> error "system: keyboard: {why}"
+    | Ok keyboard ->
+        answers = promptDecisions io keyboard stored isReq perms;
+        _ = EP.close me keyboard;
+        answers)
+  else promptDecisions io (0, 0) stored isReq perms.
+promptDecisions io keyboard stored isReq perms = case perms of
     Nil -> Nil
-  | p :: rest -> case p of (url, mode) ->
-      askOneRem io stored isReq url mode :: askAllRem io stored isReq rest.
-askOneRem : unsafe Io4 -> String -> Bool -> String -> String -> Bool .
-askOneRem io stored isReq url mode =
-  case pLook stored url mode of
-    Err _ -> askPerm io url mode
-  | Ok b -> case and2 isReq (bNot b) of
-      True -> askPerm io url mode                # required + remembered-deny
-    | False -> sayRem io url mode b.
+  | (url, mode) :: rest ->
+      answer = case pLook stored url mode of
+          Err _ -> askPerm io keyboard url mode
+        | Ok b -> if and2 isReq (bNot b) then askPerm io keyboard url mode else sayRem io url mode b;
+      answer :: promptDecisions io keyboard stored isReq rest.
 sayRem : Io4 -> String -> String -> Bool -> Bool .
 sayRem io url mode b =
   con = ioCon io;
@@ -681,8 +679,17 @@ capsBlob caps = Manifest.capsBlob (capId caps) (capGranted caps).
 runBuiltin : unsafe (Int, Int) -> String -> Caps -> Unit .
 runBuiltin con entry caps =
   case strEq entry "launcher_main" of
-    True -> launcher_main (capsWithEps caps)
+    True ->
+      held = capsWithEps caps;
+      _ = launcher_main held;
+      st = capSt held;
+      closeHeld (capMe held) [st.disp, st.line, st.kbd, st.poll, st.clock]
   | False -> putLn con (strcat entry ": not a builtin; ship it as loadMode = process").
+
+closeHeld me Nil = Unit.
+closeHeld me ((owner, handle) :: rest) =
+  _ = if owner == 0 then Unit else _ = EP.close me (owner, handle); Unit;
+  closeHeld me rest.
 
 # QAR2: the container work stays HERE (the Loader does the dirty work; C
 # never parses the archive, nor -- any more -- the LOAD section inside it).
@@ -710,35 +717,30 @@ runProcess con qa caps =
       Err e -> putLn con (strcat "No IMAGE section in this .qa: " e)
     | Ok r -> (case QAR.extent qa "RELOC" of
         Err e -> putLn con "process load failed: no RELOC section (an image linked for a fixed slot): rebuild it with tools/build-process-app.sh"
-      | Ok rel -> runProcessAt con qa (QaImg.parse load) r rel caps).
+      | Ok rel -> runProcessAt con qa load r rel caps).
 
-runProcessAt : unsafe (Int, Int) -> String -> Result QaImg.Img String -> (Int, Int) -> (Int, Int) -> Caps -> Unit .
-runProcessAt con qa parsed r rel caps =
+runProcessAt : unsafe (Int, Int) -> String -> String -> (Int, Int) -> (Int, Int) -> Caps -> Unit .
+runProcessAt con qa load r rel caps =
   (ipos, iln) = r;
-  case parsed of
+  case QaImg.parse load of
     Err e -> putLn con (strcat "process load failed: " e)
-  | Ok m -> runProcessChecked con qa (QaImg.check m iln) ipos iln rel caps.
+  | Ok m -> runProcessChecked con qa load (QaImg.check m iln) ipos iln rel caps.
 
-runProcessChecked : unsafe (Int, Int) -> String -> Result QaImg.Img String -> Int -> Int -> (Int, Int) -> Caps -> Unit .
-runProcessChecked con qa checked ioff iln rel caps =
+runProcessChecked : unsafe (Int, Int) -> String -> String -> Result QaImg.Img String -> Int -> Int -> (Int, Int) -> Caps -> Unit .
+runProcessChecked con qa load checked ioff iln rel caps =
   (rpos, rln) = rel;
   case checked of
     Err e -> putLn con (strcat "process load failed: " e)
   | Ok m -> case QAR.optionalExtent qa "IMPORT" of
       Err e -> putLn con "process load failed: {e}"
-    | Ok imp -> (bpos, bln) = imp; runProcessVerified con qa m (ioff :: iln :: rpos :: rln :: bpos :: bln :: Nil) caps.
+    | Ok imp -> (bpos, bln) = imp; runProcessVerified con qa load m (ioff :: iln :: rpos :: rln :: bpos :: bln :: Nil) caps.
 
-runProcessVerified : unsafe (Int, Int) -> String -> QaImg.Img -> List Int -> Caps -> Unit .
-runProcessVerified con qa m exts caps =
-  nums = nativeProcessNums qa m;
+runProcessVerified : unsafe (Int, Int) -> String -> String -> QaImg.Img -> List Int -> Caps -> Unit .
+runProcessVerified con qa load m exts caps =
+  nums = QaImg.nativeNums m load;
   case Sys.checkImage qa exts nums (QaImg.sha m) (QaImg.relsha m) of
     Err e -> putLn con "process load failed: {e}"
   | Ok u -> runProcessLoaded con (placeGranted con qa exts nums (QaImg.sha m) (QaImg.relsha m) caps).
-
-nativeProcessNums : String -> QaImg.Img -> List Int .
-nativeProcessNums qa m = case QAR.sectionBytes qa "LOAD" of
-    Ok load -> QaImg.nativeNums m load
-  | Err e -> QaImg.nativeNumsWith m (0 - 1) (0 - 1) (0 - 1).
 
 # the process's pid is reserved first and its grants recorded in the
 # namespace under it, so an open from its first instruction on is judged

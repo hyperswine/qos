@@ -1,0 +1,31 @@
+unsafe program.
+FS = use "std/fs#84826bc9e8ddb4b5".
+Wire = use "std/storage#a8f7ee14e1efae76".
+QL = use "profileqlog".
+Sys.trialInterval : Int -> Int -> Unit .
+Sys.heartbeat : Unit -> Int .
+Sys.beatCount : Unit -> Int .
+Sys.replayMetric : Int -> Int -> Int .
+Sys.mtime : Unit -> Int .
+must r = case r of Ok s -> s | Err e -> error e.
+pulse self = _ = Sys.sleepUs 1000; _ = Sys.heartbeat Unit; pulse self.
+sample me fs want i =
+  if i == 16 then Unit else
+    before = Sys.beatCount Unit;
+    start = Sys.mtime Unit;
+    result = FS.replay me fs "events";
+    finish = Sys.mtime Unit;
+    after = Sys.beatCount Unit;
+    _ = if must result == want then Unit else error "replay bytes differ";
+    _ = print "trial {i} {finish - start} {after - before} {Sys.replayMetric i 4} {Sys.replayMetric i 23} {Sys.replayMetric i 18} {Sys.replayMetric i 19} {Sys.replayMetric i 20} {Sys.replayMetric i 21} {Sys.replayMetric i 22} {Sys.replayMetric i 16}";
+    sample me fs want (i + 1).
+main =
+  me = myself 0;
+  fs = Wire.spawn 8 Wire.inboxBytes (QL.actor (device "blk"));
+  config = must (FS.readLatest me fs "mode");
+  want = must (FS.readLatest me fs "expected");
+  _ = Sys.trialInterval (if config == "50" then 50 else (if config == "100" then 100 else 200)) (if config == "reuse" then 1 else 0);
+  other = spawn pulse;
+  _ = sample me fs want 0;
+  _ = kill other;
+  print "block-trial DONE".

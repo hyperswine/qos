@@ -12,6 +12,14 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def check_store_records(disk):
+    pages = disk.read_bytes()
+    records = [offset for offset in range(0, len(pages), 4096)
+               if pages.startswith(b"QREC 1 8 apps/CkSlow/CkSlow.kv h", offset)]
+    if len(records) != 128 or any(pages[i + 4096:i + 4104] != b"event-1\n" for i in records):
+        raise ValueError(f"expected 128 app-scoped event records in {disk.name}")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("output", type=Path)
@@ -19,6 +27,8 @@ def main():
     modes.add_argument("--replay-profile", action="store_true", help="time record reads and concatenation inside indexed replay")
     modes.add_argument("--reply-trace", action="store_true",
                         help="timestamp mailbox publication and correlated receipt in the instrumented arm")
+    modes.add_argument("--files-check", action="store_true",
+                       help="check blocking receive through lifecycle-owned Files in one two-hart boot")
     args = parser.parse_args()
     out = args.output.resolve()
     out.mkdir(parents=True, exist_ok=True)
@@ -52,13 +62,15 @@ def main():
     if args.replay_profile:
         from replay_profile import replay_kernel, write_report
         profiled_kernel = replay_kernel(ROOT, out)
-    for harts in (1, 2):
+    for harts in ((2,) if args.files_check else (1, 2)):
         kernels = {}
-        for counters in (0, 1):
+        for counters in ((1,) if args.files_check else (0, 1)):
             name = f"{harts}h-stats{counters}"
             kernels[counters] = out / f"{name}.elf"
             tracing = args.reply_trace and counters
             kernel_test = "storewaittrace" if tracing else "storewaitnative"
+            if args.files_check:
+                kernel_test = "storewaitfiles"
             flags = f"-DQOS_STORE_WAIT_STATS={counters}"
             extra = []
             if tracing:
@@ -72,8 +84,9 @@ def main():
             run(["make", "-s", "-C", "qos", "native", f"HARTS={harts}",
                  f"SYSTEM={system}", f"KERNEL={kernels[counters]}",
                  f"BUILD={out}/{name}", f"NATIVE_CFLAGS_EXTRA={flags}", *extra])
-        for repeat in range(3):
-            for counters in ((0, 1) if repeat % 2 == 0 else (1, 0)):
+        for repeat in range(1 if args.files_check else 3):
+            order = (0, 1) if repeat % 2 == 0 else (1, 0)
+            for counters in ((1,) if args.files_check else order):
                 name = f"{harts}h-stats{counters}-run{repeat + 1}"
                 disk = out / f"{name}.img"
                 run(["python3", "tools/mkdisk.py", disk, "16", app])
@@ -84,6 +97,7 @@ def main():
                     subprocess.run(command, cwd=ROOT, env=env, stdin=subprocess.DEVNULL, stdout=log,
                                    stderr=subprocess.STDOUT, timeout=120, check=True)
                 log = (out / f"{name}.log").read_text()
+                check_store_records(disk)
                 samples = re.findall(r"storewait ticks (\d+) (\d+)", log)
                 if len(samples) != 128 or "storewait: DONE" not in log or "PANIC" in log:
                     raise ValueError(f"incomplete workload in {name}.log")
@@ -104,11 +118,19 @@ def main():
                         gap = int(received) - int(sent)
                         if int(seq) != i or not 0 <= gap <= int(samples[i // 2][i % 2]):
                             raise ValueError(f"invalid trace sample {i} in {name}.log")
+                park_line = re.search(r"parked calls append/replay (\d+) (\d+)", log)
+                if not park_line:
+                    raise ValueError(f"missing parked-call counters in {name}.log")
+                parked = tuple(map(int, park_line.groups()))
                 for index, op in enumerate(("append", "replay")):
                     m = re.search(rf"{op} calls/slept/sleeps (\d+) (\d+) (\d+)", log)
                     calls, slept, sleeps = map(int, m.groups())
                     if calls != 128 * counters or not 0 <= slept <= calls or sleeps < slept or (not slept and sleeps):
                         raise ValueError(f"inconsistent {op} counters in {name}.log")
+                    if args.files_check and (sleeps or not parked[index]):
+                        raise ValueError(f"{op} did not exercise blocking receive without fallback: {name}")
+                    if parked[index] > calls:
+                        raise ValueError(f"excess parked {op} calls in {name}.log")
                     if args.reply_trace and counters:
                         gaps = sorted((int(rx) - int(tx)) / 10 for _, tx, rx in stamps[index::2])
                         print(name, op, "publish-to-receive p50/p95/p99 us",
@@ -116,7 +138,7 @@ def main():
                     us = sorted(int(row[index]) / 10 for row in samples)
                     quantiles = [us[math.ceil(p * len(us)) - 1] for p in (.5, .95, .99)]
                     print(name, op, f"calls/slept/sleeps={calls}/{slept}/{sleeps}",
-                          "p50/p95/p99 us", *quantiles, flush=True)
+                          f"parked={parked[index]}", "p50/p95/p99 us", *quantiles, flush=True)
 
     if args.replay_profile:
         write_report(out)

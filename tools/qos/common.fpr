@@ -9,7 +9,7 @@ O = use "std/option".
 S = use "std/string".
 OS = use "std/os".
 
-session = "qos.app-session/5".
+session = "qos.app-session/6".
 api = "qos.desktop/2".
 
 # ---- results ------------------------------------------------------------------------

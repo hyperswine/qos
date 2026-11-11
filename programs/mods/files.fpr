@@ -1,9 +1,9 @@
 # Files.qa: one disk owner, namespace endpoints for named log records.
-# /services/files/<record>/{latest,replay,stats,append,delete}
+# /services/files/<record>/{latest,replay,snapshot,generation,stats,append,replace,replace-at,delete}
 # Only System (pid 0) may compact the whole log. Apps receive grants to
 # their record prefix; opening a record does not give them a raw disk.
 unsafe module.
-Endpoint = use "epservice#e8bce05a1ddf73db".
+Endpoint = use "leaseslots#efa81888e7fe1099".
 EP = use "ep#c66ad65e68dd97f5".
 Storage = use "std/storageclient".
 SP = use "std/storageprotocol".
@@ -23,6 +23,8 @@ readRecord fs me client url =
   readOp fs me key op.
 readOp fs me key "latest" = request me fs (SP.ReadLatest key) |> result.
 readOp fs me key "replay" = request me fs (SP.Replay key) |> result.
+readOp fs me key "snapshot" = request me fs (SP.Snapshot key) |> result.
+readOp fs me key "generation" = request me fs (SP.Generation key) |> result.
 readOp fs me key "stats" = request me fs (SP.Stats key) |> result.
 readOp _ _ _ _ = Err "unknown file read operation".
 
@@ -37,7 +39,11 @@ writeRecord fs me client url (EP.IStr text) =
   writeOp fs me key op text.
 writeRecord _ _ _ _ _ = Err "file writes require bytes".
 writeOp fs me key "append" text = request me fs (SP.Append key text) |> result.
+writeOp fs me key "replace" text = request me fs (SP.Replace key text) |> result.
 writeOp fs me key "delete" _ = request me fs (SP.Delete key) |> result.
+writeOp fs me key "replace-at" frame = case SP.replacementFrame key frame of
+    Err why -> Err (SP.message why)
+  | Ok op -> result (request me fs op).
 writeOp _ _ _ _ _ = Err "unknown file write operation".
 
 recordOp url =
@@ -55,6 +61,8 @@ readRecordUntil fs until me client url =
   case op of
       "latest" -> result (requestUntil until me fs (SP.ReadLatest key))
     | "replay" -> result (requestUntil until me fs (SP.Replay key))
+    | "snapshot" -> result (requestUntil until me fs (SP.Snapshot key))
+    | "generation" -> result (requestUntil until me fs (SP.Generation key))
     | "stats" -> result (requestUntil until me fs (SP.Stats key))
     | other -> Err "unknown file read operation".
 writeRecordUntil fs until me client url value | EP.strEq url "/services/files/schema" = Err "storage schema is read-only".
@@ -65,6 +73,8 @@ writeRecordUntil fs until me client url (EP.IStr text) =
   (key, op) = recordOp url;
   case op of
       "append" -> result (requestUntil until me fs (SP.Append key text))
+    | "replace" -> result (requestUntil until me fs (SP.Replace key text))
+    | "replace-at" -> (case SP.replacementFrame key text of Err why -> Err (SP.message why) | Ok op -> result (requestUntil until me fs op))
     | "delete" -> result (requestUntil until me fs (SP.Delete key))
     | other -> Err "unknown file write operation".
 writeRecordUntil _ _ _ _ _ _ = Err "file writes require bytes".

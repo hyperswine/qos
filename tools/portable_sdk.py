@@ -26,7 +26,7 @@ import tomllib
 sys.dont_write_bytecode = True
 from qos_archive import valid_id
 
-SESSION = "qos.app-session/5"
+SESSION = "qos.app-session/6"
 API = "qos.desktop/2"
 ROOT = Path(__file__).resolve().parent.parent
 

@@ -61,25 +61,41 @@ executeWith io me ns storage AW.Disk state =
   result = SP.legacyResult (Storage.within (CP.readMs io) me (Storage.Owner storage) (SP.Stats ""));
   (case result of Ok text -> Ok (AW.Lines (AK.lines text) "STORAGE STATS") | Err why -> Err why, state).
 # the file namespaces: an append is open "write"/write/close, a replace the
-# same with the "replace" mode (the file emptied at the open), a delete an
+# same with the "replace" mode, a delete an
 # open in the "delete" mode that the manager answers by removing the file
 executeWith io me ns storage (AW.AppendPath path text) state = writePathWith io me ns path "write" text state.
 executeWith io me ns storage (AW.WritePath path text) state = writePathWith io me ns path "replace" text state.
+executeWith io me ns storage (AW.SaveRecovery path text) state = writePathWith io me ns path "save" text state.
 # a save that cannot lose the text: the safety copy, the file, the file read
 # back and compared -- the copy goes only after that
-executeWith io me ns storage (AW.SaveFile path text) state =
+executeWith io me ns storage (AW.SaveFile path text) state = saveFileWith io me ns storage path text Nil state.
+executeWith io me ns storage (AW.SaveFileIfUnchanged path expected text) state = saveFileWith io me ns storage path text (expected :: Nil) state.
+saveFileWith io me ns storage path text expected state =
   copy = strcat path ".~save";
-  case writePathWith io me ns copy "replace" text state of
+  case writePathWith io me ns copy "save" text state of
     (Err why, s1) -> (Err "save {path}: the safety copy failed ({why}); the file is unchanged", s1)
-  | (Ok u, s1) -> case writePathWith io me ns path "replace" text s1 of
+  | (Ok u, s1) -> case saveTarget io me ns storage path expected text s1 of
       (Err why, s2) -> (Err "save {path} failed ({why}); your text is safe in {copy}", s2)
     | (Ok u2, s2) -> case executeWith io me ns storage (AW.ReadPath path) s2 of
         (Ok (AW.Text back), s3) -> if back == text then
             (removed, s4) = deletePathWith io me ns copy s3;
-            (Ok (AW.Done "saved {path} ({strlen text} bytes)"), s4)
+            (case removed of
+                Ok u -> Ok (AW.Done "saved {path} ({strlen text} bytes)")
+              | Err why -> Ok (AW.Done "saved {path}; cleanup of {copy} unconfirmed ({why})"), s4)
           else (Err "save {path}: it read back differently; your text is safe in {copy}", s3)
       | (Ok other, s3) -> (Err "save {path}: it did not read back as text; your text is safe in {copy}", s3)
       | (Err why, s3) -> (Err "save {path}: could not read it back ({why}); your text is safe in {copy}", s3).
+saveTarget io me ns storage path Nil text state = writePathWith io me ns path "save" text state.
+saveTarget io me ns storage path (baseline :: _) text state =
+  writeChecked io me ns path "snapshot-save" [baseline] text state.
+# Buffered owners refuse snapshot-save before granting a handle. Compare the
+# visible bytes before opening their existing truncate-on-open save handle.
+bufferedSave io me ns path baseline text =
+  (readBack, ready) = executeWith io me ns 0 (AW.ReadPath path) ES.Vacant;
+  case readBack of
+    Ok (AW.Text current) -> if current == baseline then writePathWith io me ns path "save" text ready else (Err "file changed since open", ready)
+  | Ok other -> (Err "endpoint did not return text", ready)
+  | Err why -> (Err why, ready).
 # the host compiler (tools/fprd.py through Sys.compile): this actor parks
 # while the host's worker compiles, and holds no hart
 executeWith io me ns storage (AW.Compile profile src) state =
@@ -107,16 +123,20 @@ executeWith io me ns storage (AW.ReadPath path) state =
               | Ok other -> Err "endpoint did not return text", next).
 readError (Ok value) = "read completed".
 readError (Err why) = why.
-writePathWith io me ns path mode text state =
+writePathWith io me ns path mode text state = writeChecked io me ns path mode Nil text state.
+writeChecked io me ns path mode expected text state =
   (cleaned, ready) = ES.cleanupWithin (CP.cleanupMs io) me state;
   case cleaned of
     Err why -> (Err why, ready)
   | Ok u -> ES.Vacant = ready; case AC.deadlineAfter (CP.writeMs io) of
       Err why -> (Err why, ES.Vacant)
     | Ok deadline -> case openTracked deadline me ns path mode of
-        Err failure -> ES.failed failure
+        Err (ES.Refused why) -> (case expected of
+            baseline :: _ -> if mode == "snapshot-save" and why == "storage generations require durable v3 storage" then bufferedSave io me ns path baseline text else (Err why, ES.Vacant)
+          | Nil -> (Err why, ES.Vacant))
+      | Err failure -> ES.failed failure
       | Ok ep ->
-          result = ED.writeUntil deadline me ep (EP.IStr text);
+          result = checkedWrite deadline me ep expected text;
           (closed, next) = ES.cleanupWithin (CP.cleanupMs io) me (ES.acquired ep);
           (case closed of
               Err why -> Err "{readError result}; {why}"
@@ -124,6 +144,11 @@ writePathWith io me ns path mode text state =
                 Err why -> Err why
               | Ok (EP.IInt n) -> Ok (AW.Done "wrote {n} bytes to {path}")
               | Ok other -> Ok (AW.Done "wrote to {path}"), next).
+checkedWrite deadline me ep Nil text = ED.writeUntil deadline me ep (EP.IStr text).
+checkedWrite deadline me ep (expected :: _) text = case ED.readUntil deadline me ep 0 of
+    Err why -> Err why
+  | Ok (EP.IStr current) -> if current == expected then ED.writeUntil deadline me ep (EP.IStr text) else Err "file changed since open"
+  | Ok other -> Err "endpoint did not return text".
 deletePathWith io me ns path state =
   (cleaned, ready) = ES.cleanupWithin (CP.cleanupMs io) me state;
   case cleaned of

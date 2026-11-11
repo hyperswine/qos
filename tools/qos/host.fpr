@@ -1,6 +1,8 @@
 # host.fpr -- the host calls of tools/qos/host.c, beside std/os.
 unsafe base.
 
+Qos.verifiedPlugins : Unit -> String .
+Qos.verifiedMain : Unit -> String .
 Qos.sha256       : String -> String .
 Qos.sha256File   : String -> Result String String .
 Qos.realpath     : String -> Result String String .
@@ -26,6 +28,8 @@ Qos.system       : Unit -> String .
 Qos.zeros        : Int -> String .
 Qos.differences  : String -> String -> List Int .
 
+verifiedPlugins u = Qos.verifiedPlugins u.
+verifiedMain u = Qos.verifiedMain u.
 sha256 s = Qos.sha256 s.
 sha256File p = Qos.sha256File p.
 realpath p = Qos.realpath p.

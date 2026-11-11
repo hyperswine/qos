@@ -1,0 +1,34 @@
+# tools/portable-durable-check.py seeds and reopens the final two generations.
+unsafe program.
+Lifecycle = use "../std/lifecycle".
+C = use "../std/storageclient".
+P = use "../std/storageprotocol".
+FS = use "../std/fs".
+must r = case r of Ok v -> v | Err why -> error why.
+check yes why = if yes then Unit else error why.
+refused r why = case r of Err got -> got == why | Ok value -> False.
+typedRefusal r kind = case r of Err why -> P.kind why == kind and P.outcome why == P.NotStarted | Ok value -> False.
+main =
+  me = myself 0;
+  ctx = must (Lifecycle.start me);
+  fs = Lifecycle.files ctx;
+  (initial, before) = must (FS.snapshot me fs "key");
+  _ = if initial == 999999999 then
+        _ = check (before == "old") "unexpected initial bytes";
+        _ = must (FS.replaceAt me fs "key" initial "final");
+        Unit
+      else check (initial == 1000000000 and before == "final") "unexpected reopened state";
+  (last, bytes) = must (FS.snapshot me fs "key");
+  _ = check (last == 1000000000 and bytes == "final") "last generation did not publish";
+  _ = check (refused (FS.replaceAt me fs "key" (last - 1) "stale") "storage generation conflict") "stale token";
+  _ = check (refused (FS.replaceAt me fs "key" last "overflow") "superblock generation exhausted") "exhausted token";
+  _ = check (typedRefusal (C.request me (C.Owner fs) (P.ReplaceAt "key" (last - 1) "stale")) P.GenerationConflict) "typed stale token";
+  _ = check (typedRefusal (C.request me (C.Owner fs) (P.ReplaceAt "key" last "overflow")) P.GenerationExhausted) "typed exhausted token";
+  owner = C.Owner fs;
+  _ = check (typedRefusal (C.request me owner (P.Append "key" "overflow")) P.GenerationExhausted) "exhausted append";
+  _ = check (typedRefusal (C.request me owner (P.Delete "key")) P.GenerationExhausted) "exhausted delete";
+  _ = check (typedRefusal (C.request me owner (P.Replace "key" "overflow")) P.GenerationExhausted) "exhausted unconditional replace";
+  _ = check (typedRefusal (C.request me owner P.Compact) P.GenerationExhausted) "exhausted compact";
+  _ = check (must (FS.readLatest me fs "key") == "final") "refusal changed replay";
+  _ = must (Lifecycle.stop me ctx);
+  "qloglastgeneration: HOLDS".

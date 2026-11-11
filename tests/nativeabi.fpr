@@ -8,5 +8,10 @@ main =
   negative = Q.nativeAbi "nativeabi -1\n" == (0 - 1);
   trailing = Q.nativeAbi "nativeabi 1oops\n" == (0 - 1);
   noValue = Q.nativeAbi "nativeabi \n" == (0 - 1);
-  verdict = if valid and absent and duplicate and huge and negative and trailing and noValue then "HOLDS" else "FAILED";
+  mixed = "planeactors 7\nnativeabi 3oops\nplanememory 999999999\nnativeabi 4\nplaneactors 8";
+  image = Q.Img 0 0 1 1 1 1 "" "";
+  combined = case Q.nativeNums image mixed of
+      [_, _, _, _, _, abi, actors, memory] -> abi == (0 - 1) and actors == (0 - 1) and memory == 999999999
+    | other -> False;
+  verdict = if valid and absent and duplicate and huge and negative and trailing and noValue and combined then "HOLDS" else "FAILED";
   "nativeabi: {verdict}".

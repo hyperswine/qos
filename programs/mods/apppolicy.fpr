@@ -2,7 +2,7 @@
 # snapshots; updates cannot reset endpoint ownership or recovery counters.
 AC = use "std/actor#201a0e9bf98a5154".
 EP = use "ep#c66ad65e68dd97f5".
-Endpoint = use "epservice#e8bce05a1ddf73db".
+Endpoint = use "leaseslots#efa81888e7fe1099".
 Text = use "policytext".
 IoPolicy = Type (IoPolicy Int Int Int Int).
 RecoveryPolicy = Type (RecoveryPolicy Int Int Int Int Int).

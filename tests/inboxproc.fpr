@@ -1,5 +1,8 @@
 # Same-process ARC shares and movable roots retain pointer/ownership semantics.
 unsafe program.
+Sys.sendIntPair : Int -> Int -> Int -> Result Unit String .
+Sys.sendConcat : Int -> String -> String -> Result Unit String .
+Sys.alive : Int -> Bool .
 Sys.spawnInbox : Int -> Int -> Int -> (Int -> a) -> Result Int String .
 Inbox.address : a -> Int .
 S = use "std/string".
@@ -13,17 +16,40 @@ inspect boss me =
   _ = drop value;
   _ = send boss address;
   Unit.
+inspectAfterExit boss me =
+  _ = receiveFrom me boss;
+  value = receive me;
+  address = Inbox.address value;
+  _ = check (strlen value == 196608 and value == S.repeat 196608 "b") "payload changed after relay exit";
+  _ = drop value;
+  _ = send boss address;
+  Unit.
+awaitExit actor n = if not (Sys.alive actor) then Unit else if n == 0 then error "relay did not exit" else
+  _ = Sys.sleepUs 1000; awaitExit actor (n - 1).
+build target me =
+  part = S.repeat 98304 "b";
+  ok (send target (strcat part part)).
 move target boss me =
   value = receive me;
   address = Inbox.address value;
-  _ = sendLinear target value;
+  _ = ok (sendLinear target value);
   _ = send boss address;
   Unit.
+fillRemaining target boss me =
+  _ = ok (send target 2);
+  _ = ok (send target 3);
+  _ = case send target 4 of Err "mailbox full" -> Unit | other -> error "prepaid capacity";
+  ok (send boss 1).
+pairProducer target me = ok (send target (42, 0 - 17)).
 main =
   me = myself 0;
   start = Sys.mtime Unit;
   _ = Sys.sleepUs 10000;
   _ = check (Sys.mtime Unit - start >= 100000) "native process sleep bypassed the plane";
+  pairSender = spawn (pairProducer me);
+  _ = awaitExit pairSender 1000;
+  (left, right) = receiveFrom me pairSender;
+  _ = check (left == 42 and right == 0 - 17) "packed pair lost after sender exit";
   shared = ok (Sys.spawnInbox (0 - 1) 2 4194304 (inspect me));
   value = S.repeat 1000 "a";
   address = Inbox.address value;
@@ -31,14 +57,36 @@ main =
   got = receiveFrom me shared;
   _ = check (got == address and strlen value == 1000) "ARC share copied or consumed";
   _ = drop value;
-  destination = ok (Sys.spawnInbox (0 - 1) 2 4194304 (inspect me));
+  destination = ok (Sys.spawnInbox (0 - 1) 2 4194304 (inspectAfterExit me));
   mover = spawn (move destination me);
-  _ = send mover (S.repeat 1000 "b");
+  _ = ok (send mover (S.repeat 196608 "b"));
   old = receiveFrom me mover;
+  _ = awaitExit mover 1000;
+  _ = ok (send destination 0);
   fresh = receiveFrom me destination;
   _ = check (old == fresh) "linear move copied";
+  flat = spawn (inspectAfterExit me);
+  builder = spawn (build flat);
+  _ = awaitExit builder 1000;
+  _ = ok (send flat 0);
+  _ = receiveFrom me flat;
+  bounded = ok (Sys.spawnInbox (0 - 1) 2 262144 (inspectAfterExit me));
+  piece = S.repeat 131072 "c";
+  _ = case Sys.sendConcat bounded piece piece of Err "message too large" -> Unit | other -> error "concat byte budget";
+  producer = spawn (build bounded);
+  _ = awaitExit producer 1000;
+  _ = ok (send bounded 0);
+  _ = receiveFrom me bounded;
+  prepaid = ok (Sys.spawnInbox (0 - 1) 3 4194304 sleeping);
+  _ = ok (send prepaid 1);
+  _ = Sys.sleepUs 1000;
+  filler = spawn (fillRemaining prepaid me);
+  _ = receiveFrom me filler;
+  _ = kill prepaid;
   full = ok (Sys.spawnInbox (0 - 1) 1 4194304 sleeping);
   _ = ok (send full 1);
+  _ = case Sys.sendConcat full "a" "b" of Err "mailbox full" -> Unit | other -> error "concat admission";
+  _ = case Sys.sendIntPair full 1 2 of Err "mailbox full" -> Unit | other -> error "packed pair admission";
   blocked = S.repeat 1000 "c";
   _ = case sendArc full blocked of Err "mailbox full" -> Unit | Err why -> error "inboxownership: share refusal: {why}" | Ok _ -> error "inboxownership: share unexpectedly admitted";
   _ = check (strlen blocked == 1000) "refusal consumed ARC owner";

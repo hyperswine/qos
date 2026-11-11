@@ -35,6 +35,35 @@ def sections(path):
             for name, off, size in (line.split() for line in header.splitlines()[1:])}
 
 
+def check_staged_plugin(sdk, out, run):
+    # Both the profile copy and its editable digest agree. The embedded
+    # inspection record must still miss, and the parser must reject IMAGE.
+    fixture = out / "changed-profile"
+    (fixture / "tools").mkdir(parents=True)
+    shutil.copy2(sdk / "tools/qos", fixture / "tools/qos")
+    shutil.copytree(sdk / "profile", fixture / "profile")
+    meta = json.loads((sdk / "sdk.json").read_text())
+    plugin = fixture / "profile" / meta["profileApps"][0]
+    raw = plugin.read_bytes()
+    aid = tomllib.loads(sections(plugin)["MANIFEST"].decode())["id"]
+    record = f"|{aid}:{hashlib.sha256(raw).hexdigest()}|".encode()
+    assert record in (fixture / "tools/qos").read_bytes(), "plugin inspection missing from staged CLI"
+    table, payload = raw.split(b"\n\n", 1)
+    offset, size = next((int(off), int(length)) for name, off, length in
+                        (row.split() for row in table.splitlines()[1:]) if name == b"IMAGE")
+    assert size and offset + size <= len(payload)
+    damaged = bytearray(raw)
+    damaged[len(table) + 2 + offset] ^= 1
+    plugin.chmod(plugin.stat().st_mode | 0o200)
+    plugin.write_bytes(damaged)
+    meta["profileFiles"][plugin.name] = hashlib.sha256(damaged).hexdigest()
+    (fixture / "sdk.json").write_text(json.dumps(meta))
+    disk = out / "changed-profile.disk"
+    message = run([fixture / "tools/qos", "disk", "create", disk, "--size", "32"],
+                  "changed-profile-refused.log", expect=1)
+    assert "IMAGE sha256 mismatch" in message and not disk.exists(), message
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--sdk", type=Path, required=True, help="staged prefix (contains bin/)")
@@ -103,6 +132,7 @@ def main():
              '\nfor p in paths:\n try: pathlib.Path(p).read_bytes()\n except PermissionError: pass\n else: raise AssertionError(p)\n'
              'print("checkout access denied; GHC/Cabal/make absent from PATH")')
     run([sys.executable, "-c", probe], "access-probe.log")
+    check_staged_plugin(sdk, out, run)
     run([prefix / "bin/qos", "new", "counter-example"], "scaffold.log")
     project = out / "counter-example"
     # Both directory and source filename can change without changing identity.
@@ -117,7 +147,7 @@ def main():
     sec = sections(archive)
     app = tomllib.loads(sec["MANIFEST"].decode())
     assert (app["id"], app["name"], app["version"], app["loadMode"], app["desktopSession"]) == (
-        "counter-example", "External Counter", "1.2.3", "plugin", "qos.app-session/5")
+        "counter-example", "External Counter", "1.2.3", "plugin", "qos.app-session/6")
     assert sec["IMPORT"] and sec["RELOC"] and sec["IMAGE"]
     assert b"sha " + hashlib.sha256(sec["IMAGE"]).hexdigest().encode() in sec["LOAD"]
     run([prefix / "bin/qos", "build", "--manifest=cost.toml"],
@@ -147,6 +177,16 @@ view viewport ready = (D.text viewport "Clock effect" "" Nil, Nil,
         return json.loads(run([sys.executable, "-c", probe], log))
 
     original_records = values("before-install-values.json")
+    old_session = out / "session-5.qa"
+    # The equal-length manifest change preserves all section offsets and hashes.
+    current = sec["MANIFEST"]
+    previous = current.replace(b'qos.app-session/6', b'qos.app-session/5')
+    assert previous != current
+    old_session.write_bytes(archive.read_bytes().replace(current, previous, 1))
+    message = run([prefix / "bin/qos", "install", old_session, disk],
+                  "previous-session-refused.log", expect=1)
+    assert "desktopSession" in message, message
+    assert values("after-session-refusal.json") == original_records
     run([prefix / "bin/qos", "install", archive, disk], "counter-install.log")
     run([prefix / "bin/qos", "install", clock / "build/clock-example.qa", disk], "clock-install.log")
     run([prefix / "bin/qos", "install", "--prefix", out / "unused"], "old-toolchain-option-refused.log", expect=1)

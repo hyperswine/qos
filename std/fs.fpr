@@ -21,7 +21,7 @@
 # payloads are first-class -- records are length-carried end to end.
 # ============================================================================
 
-QL = use "../programs/mods/qlog#7022992c8e4a9fba".
+QL = use "../programs/mods/qlog#cc114a4d7514b15a".
 SVC = use "../programs/mods/svc#75479fb6d5f34670".
 AC = use "std/actor#201a0e9bf98a5154".
 B = use "std/blockio#8b4ffa1467ca03a5".
@@ -105,6 +105,17 @@ shutdown me fs block = shutdownWithin Wire.defaultMs me fs block.
 shutdownWithin ms me fs block = case Wire.deadline ms of
     Err why -> Err why
   | Ok until -> shutdownUntil until me fs block.
+# One durable image-wide generation covers each replay snapshot. Any
+# intervening commit can conflict, including a write to another key.
+snapshot me fs key = case rpc me fs 10 key "" of
+    Err why -> Err why
+  | Ok frame -> split = strIndexOf "\n" frame;
+      if split < 1 then Err "invalid generation frame"
+      else token = substr frame 0 split; generation = parseInt token;
+        if generation < 0 or "{generation}" != token then Err "invalid generation frame"
+        else Ok (generation, substr frame (split + 1) (strlen frame - split - 1)).
+replaceAt : unsafe Int -> Int -> String -> Int -> String -> Result String String .
+replaceAt me fs key generation bytes = rpc me fs 11 key (strcat "{generation}\n" bytes).
 shutdownUntil until me fs block = case rpcUntil until me fs 7 "" "" of
     Err why -> Err "storage quiesce failed: {why}"
   | Ok value -> case B.callUntil until me block B.Drain of
@@ -206,6 +217,10 @@ forwardRequest ns self msg =
 viaNamespace : unsafe Int -> Int -> Int -> String -> String -> Result String String .
 viaNamespace me ns 1 key _ = fileReply (EP.readOnce me ns "/services/files/{key}/latest").
 viaNamespace me ns 2 key bytes = fileReply (EP.writeOnce me ns "/services/files/{key}/append" (EP.IStr bytes)).
+viaNamespace me ns 9 key bytes = fileReply (EP.writeOnce me ns "/services/files/{key}/replace" (EP.IStr bytes)).
+viaNamespace me ns 10 key _ = fileReply (EP.readOnce me ns "/services/files/{key}/snapshot").
+viaNamespace me ns 12 key _ = fileReply (EP.readOnce me ns "/services/files/{key}/generation").
+viaNamespace me ns 11 key bytes = fileReply (EP.writeOnce me ns "/services/files/{key}/replace-at" (EP.IStr bytes)).
 viaNamespace me ns 3 key _ = fileReply (EP.readOnce me ns "/services/files/{key}/replay").
 viaNamespace me ns 4 key _ = fileReply (EP.writeOnce me ns "/services/files/{key}/delete" (EP.IStr "")).
 viaNamespace me ns 5 key _ = fileReply (EP.readOnce me ns "/services/files/{key}/stats").
@@ -221,6 +236,10 @@ requestFields message = case message of
 
 viaNamespaceUntil until me ns 1 key _ = fileReply (ED.readOnceUntil until me ns "/services/files/{key}/latest").
 viaNamespaceUntil until me ns 2 key bytes = fileReply (ED.writeOnceUntil until me ns "/services/files/{key}/append" (EP.IStr bytes)).
+viaNamespaceUntil until me ns 9 key bytes = fileReply (ED.writeOnceUntil until me ns "/services/files/{key}/replace" (EP.IStr bytes)).
+viaNamespaceUntil until me ns 10 key _ = fileReply (ED.readOnceUntil until me ns "/services/files/{key}/snapshot").
+viaNamespaceUntil until me ns 12 key _ = fileReply (ED.readOnceUntil until me ns "/services/files/{key}/generation").
+viaNamespaceUntil until me ns 11 key bytes = fileReply (ED.writeOnceUntil until me ns "/services/files/{key}/replace-at" (EP.IStr bytes)).
 viaNamespaceUntil until me ns 3 key _ = fileReply (ED.readOnceUntil until me ns "/services/files/{key}/replay").
 viaNamespaceUntil until me ns 4 key _ = fileReply (ED.writeOnceUntil until me ns "/services/files/{key}/delete" (EP.IStr "")).
 viaNamespaceUntil until me ns 5 key _ = fileReply (ED.readOnceUntil until me ns "/services/files/{key}/stats").

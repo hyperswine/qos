@@ -9,7 +9,9 @@ PC = use "../programs/mods/preferencecontrol".
 PS = use "../programs/mods/preferencestore".
 AW = use "../programs/mods/appwire".
 QS = use "../programs/mods/qsys".
-FS = use "std/fs#84826bc9e8ddb4b5".
+FS = use "std/fs".
+Jobs = use "../programs/mods/appjobs".
+Lease = use "../programs/mods/endpointstate".
 B = use "std/blockio#8b4ffa1467ca03a5".
 EP = use "../programs/mods/ep#c66ad65e68dd97f5".
 AC = use "std/actor#201a0e9bf98a5154".
@@ -29,7 +31,7 @@ boot me ns fs app sid actor =
   _ = get (AC.callWithin 500 me actor (AW.magic, AW, (sid, (800, 480), (ns, fs, 0, ""))));
   ready (AC.nowUs Unit + 3000000) me ns (PC.url app sid).
 editor = P.Preferences 17 19 "/home/.editor/persistent-test" H.KeepNewest.
-original = "qed1\n/home/persistent.txt\n1\nunsaved persistent text".
+original = "qed2\n20 5\n/home/persistent.txtpriorunsaved persistent text".
 ended until actor = if not (Sys.alive actor) then Unit else if AC.nowUs Unit >= until then error "corrupt preferences did not refuse startup" else
   _ = Sys.sleepUs 1000; ended until actor.
 close me actor sid = _ = get (AC.callWithin 1500 me actor (AW.Close sid)); Unit.
@@ -99,6 +101,28 @@ main =
   block = B.serve me (device "blk");
   fs = get (FS.startBlock me block);
   QS.Qsys ns _ _ _ _ = QS.bootWire me fs Nil;
+  path = "/home/save-probe";
+  (savedOld, state) = Jobs.execute me ns fs (AW.SaveFile path "previous") Lease.Vacant;
+  _ = get savedOld;
+  pending = get (EP.open me ns path "save");
+  _ = check (text (get (EP.readOnce me ns path)) == "previous") "opening save changed visible file";
+  _ = get (FS.append me fs path "-external");
+  refreshed = get (EP.open me ns path "snapshot-save");
+  _ = check (text (get (EP.read me refreshed 0)) == "previous-external") "snapshot save reused stale file bytes";
+  _ = get (EP.close me refreshed);
+  competing = get (EP.open me ns path "snapshot-save");
+  _ = get (EP.write me competing (EP.IStr "newer"));
+  _ = check (case EP.write me pending (EP.IStr "stale") of Err why -> strIndexOf "storage generation conflict" why >= 0 | Ok u -> False) "stale save handle overwrote concurrent write";
+  _ = check (text (get (EP.readOnce me ns path)) == "newer") "winning write lost";
+  _ = get (EP.close me competing);
+  _ = get (EP.close me pending);
+  (conflicted, retryState) = Jobs.execute me ns fs (AW.SaveFileIfUnchanged path "previous" "my edit") state;
+  _ = check (case conflicted of Err why -> strIndexOf "file changed since open" why >= 0 | _ -> False) "stale editor baseline accepted";
+  _ = check (get (FS.replay me fs path) == "newer" and get (FS.replay me fs (strcat path ".~save")) == "my edit") "conflict lost target or recovery copy";
+  (savedNew, done) = Jobs.execute me ns fs (AW.SaveFileIfUnchanged path "newer" "replacement") retryState;
+  _ = get savedNew;
+  _ = Lease.ended done;
+  _ = check (get (FS.replay me fs path) == "replacement") "editor save did not replace replay";
   saved = text (get (EP.readOnce me ns (PS.url "terminal")));
   _ = if saved == T.encode 0 T.defaults then first me ns fs else second me ns fs;
   live = spawn TM.run;

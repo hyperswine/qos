@@ -21,6 +21,9 @@
 #include <fcntl.h>
 #include <pthread.h>
 #include <stdlib.h>
+#ifdef QOS_BLK_TEST
+#include <stdio.h>
+#endif
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/file.h>
@@ -188,6 +191,7 @@ int64_t qos_blkraw_flush(void) {
    * barrier whose acknowledgment it is about to expose. */
   static unsigned long flushes;
   unsigned long ordinal = __atomic_add_fetch(&flushes, 1, __ATOMIC_RELAXED);
+  if (getenv("QOS_BLK_TEST_TRACE_FLUSH")) fprintf(stderr, "[blk-test] flush %lu\n", ordinal);
   const char *fail = getenv("QOS_BLK_TEST_FAIL_FLUSH_AT");
   const char *delay = getenv("QOS_BLK_TEST_FLUSH_DELAY_US");
   const char *at = getenv("QOS_BLK_TEST_FLUSH_DELAY_AT");

@@ -22,6 +22,7 @@ QI  = use "../../programs/mods/qaimg".
 Host.init      : Bool -> Result String String .                       # fault reporting; the arena at its address
 Host.sdkInfo   : Unit -> String .
 Host.abi       : Unit -> String .                                     # "<abi>.<codegenRev>" this host was built for
+Host.sha256Pair : String -> String -> String .
 Host.sha256    : String -> String .                                   # lower-case hex
 Host.loadImage : String -> String -> String -> List Int -> String -> Result String String . # path, sha, IMAGE, LOAD's numbers, RELOC: place it where the arena is, move its address words, publish code r-x
 Host.run       : String -> String -> String -> Result String String . # id, name, caps: enter the image; main's result
@@ -76,9 +77,9 @@ shaGate m img = case QI.sha m == "" of
     | False -> die "IMAGE sha256 mismatch (corrupt archive)".   # the wording check-all.sh names
 # `relsha <hex>`: the sha-256 of RELOC and IMPORT together, which change what
 # the image does as surely as IMAGE does (docs/2026-10-03-PREEXISTING-FAILURES.md)
-relShaGate m qa = case QI.relsha m == "" of
+relShaGate m qa rel = case QI.relsha m == "" of
     True -> Unit
-  | False -> case QI.relsha m == Host.sha256 (strcat (sectionOr qa "RELOC") (sectionOr qa "IMPORT")) of
+  | False -> case QI.relsha m == Host.sha256Pair rel (sectionOr qa "IMPORT") of
       True -> Unit
     | False -> die "RELOC sha256 mismatch (corrupt archive)".
 
@@ -113,15 +114,20 @@ section qa name = case QAR.sectionBytes qa name of
     Ok b -> b
   | Err e -> die "{name}: {e}".
 # a section an archive may lack (RELOC: a fixed image has none)
-sectionOr qa name = case QAR.sectionBytes qa name of
-    Ok b -> b
-  | Err e -> "".
+sectionOr qa name = case QAR.optionalExtent qa name of
+    Err e -> die "{name}: {e}"
+  | Ok r -> case QAR.sectionSlice qa r of Ok b -> b | Err e -> die "{name}: {e}".
 
-launch o =
+launch o expected =
   Opts yes0 trace path = o;
   yes = or2 yes0 (isSet "QOSP_YES");
   _ = case Host.init trace of Ok _ -> Unit | Err e -> die e;
   qa = fileRead path;
+  _ = case expected of
+      Nil -> Unit
+    | digest :: _ -> case Host.sha256 qa == digest of
+        True -> Unit
+      | False -> die "archive changed since SDK verification";
   man = case M.parseQa qa of Ok m -> m | Err e -> die "{path}: {e}";
   _ = case or2 (M.mode man == "") (M.mode man == "process") of
       True -> Unit
@@ -130,16 +136,19 @@ launch o =
   img = section qa "IMAGE";
   m = case QI.load (section qa "LOAD") img of Ok x -> x | Err e -> die "image load failed: {e}";
   _ = shaGate m img;
-  _ = relShaGate m qa;
+  rel = sectionOr qa "RELOC";
+  _ = relShaGate m qa rel;
   granted = append (gate man yes "required" (M.req man)) (gate man yes "optional" (M.opt man));
-  _ = case Host.loadImage path (QI.sha m) img (QI.nums m) (sectionOr qa "RELOC") of Ok _ -> Unit | Err e -> die "image load failed: {e}";
+  _ = case Host.loadImage path (QI.sha m) img (QI.nums m) rel of Ok _ -> Unit | Err e -> die "image load failed: {e}";
   case Host.run (M.id man) (M.name man) (M.capsBlob (M.id man) granted) of
     Err e -> die e
   | Ok result -> print "\n[qos] {M.id man} => {result}".
 
 main = case Sys.args Unit of
     "--sdk-info" :: Nil -> print (Host.sdkInfo Unit)
-  | args -> runArgs args.
-runArgs args = case parseArgs args (Opts False False "") of
+  | "--expect-archive-sha256" :: digest :: args -> runArgs args (digest :: Nil)
+  | "--expect-archive-sha256" :: Nil -> die "missing expected archive digest"
+  | args -> runArgs args Nil.
+runArgs args expected = case parseArgs args (Opts False False "") of
     Opts _ _ "" -> _ = Sys.stderr "usage: qosp [--yes] [--trace] <app.qa>\n"; Sys.exit 2
-  | o -> launch o.
+  | o -> launch o expected.

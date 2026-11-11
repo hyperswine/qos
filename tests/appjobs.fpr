@@ -97,6 +97,32 @@ stateTransitions me =
   _ = check (case AC.callWithin 200 me missing (EP.NsList "/") of Ok count -> count == 1 | other -> False);
   _ = check (case AC.callWithin 1500 me blocked AW.Stop of Ok (AW.Stopped (Err why)) -> True | other -> False);
   kill missing.
+# Two independent files, with deletion refused only for the safety copy.
+saveOwner me = _ = Sys.loop ("old", "") (saveStep me); Unit.
+saveStep me state =
+  (target, copy) = state;
+  (from, id, request) = receive me;
+  case request of
+    EP.Open "/doc.~save" "delete" ->
+      _ = AC.reply (from, id) (EP.Refused "cleanup denied"); (True, state)
+  | EP.Open path mode ->
+      _ = AC.reply (from, id) (EP.Opened (if path == "/doc" then 1 else 2)); (True, state)
+  | EP.Timed until (EP.Write h (EP.IStr value)) ->
+      _ = AC.reply (from, id) (Ok (EP.IInt (strlen value)));
+      (True, (if h == 1 then (value, copy) else (target, value)))
+  | EP.Timed until (EP.Read h n) ->
+      _ = AC.reply (from, id) (Ok (EP.IStr (if h == 1 then target else copy))); (True, state)
+  | EP.Timed until (EP.Close h) -> _ = AC.reply (from, id) (Ok 0); (True, state)
+  | other -> _ = AC.reply (from, id) state; (True, state).
+saveCleanup me =
+  owner = spawn saveOwner;
+  ns = spawn (namespace owner);
+  worker = spawn (AJ.run me ns 0);
+  result = fetch me worker (AW.SaveFile "/doc" "new");
+  _ = check (case result of Ok (AW.Done note) -> strIndexOf "/doc.~save" note >= 0 and strIndexOf "cleanup denied" note >= 0 | other -> False);
+  _ = check (case AC.callWithin 200 me owner (EP.Close 0) of Ok contents -> contents == ("new", "new") | other -> False);
+  _ = check (case AC.callWithin 1500 me worker AW.Stop of Ok (AW.Stopped (Ok u)) -> True | other -> False);
+  _ = kill ns; kill owner.
 main =
   me = myself 0;
   ep = spawn endpoint;
@@ -140,4 +166,5 @@ main =
   _ = check (not (Sys.alive busyWorker));
   _ = kill slow2;
   _ = stateTransitions me;
+  _ = saveCleanup me;
   "appjobs: HOLDS".

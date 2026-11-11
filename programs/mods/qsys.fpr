@@ -42,10 +42,10 @@
 # (EP.grant, registered by the launcher); the shell's own actors are pid 0.
 # ============================================================================
 
-FS = use "std/fs#84826bc9e8ddb4b5".
+FS = use "std/fs".
 Storage = use "std/storageclient".
 SP = use "std/storageprotocol".
-Lifecycle = use "std/lifecycle#6e7bea28db71815a".
+Lifecycle = use "std/lifecycle".
 AK  = use "appkit".
 BlockEP = use "blockep#bd295a609815dadd".
 SVC = use "svc#75479fb6d5f34670".
@@ -55,6 +55,7 @@ QAR = use "qar".
 Plug = use "plug".
 AppsEP = use "appsep".
 Endpoint = use "epservice#e8bce05a1ddf73db".
+Slots = use "leaseslots#efa81888e7fe1099".
 AC = use "std/actor#201a0e9bf98a5154".
 GX = use "graphics".
 GL = use "glsvc".
@@ -233,8 +234,8 @@ storageSchema me client url = if strEq url "/services/storage-schema" then Ok (I
 fileActor st path me = fileActorOf 0 st path me.
 # a file actor its manager (filesMgr) spawned: it does not end on its own
 # when its last handle goes (see fileRetire), the manager retires it
-fileActorOf mgr st path me = fileServe mgr st path me (storage me st (SP.Replay path)) 1 Nil.
-fileServe : unsafe Int -> Int -> String -> Int -> Result String String -> Int -> List (Int, Int) -> Unit .
+fileActorOf mgr st path me = fileServe mgr st path me (Err "file body not loaded") 1 Nil.
+fileServe : unsafe Int -> Int -> String -> Int -> Result String String -> Int -> List (Int, Int, Int) -> Unit .
 fileServe mgr st path me body next hs =
   borrowed = receive me;
   m = keep borrowed;
@@ -245,7 +246,7 @@ fileServe mgr st path me body next hs =
 # the leases of clients that have ended go; when that empties the list, the
 # manager hears this actor is idle (so a client that died without Close
 # does not hold the file's slot for ever)
-fileSwept : unsafe Int -> Int -> List (Int, Int) -> List (Int, Int) .
+fileSwept : unsafe Int -> Int -> List (Int, Int, Int) -> List (Int, Int, Int) .
 fileSwept mgr me hs = live = sweepDead hs;
   _ = (case hs of Nil -> Unit | h :: rest -> (case live of Nil -> fileIdle mgr me | k :: more -> Unit));
   live.
@@ -257,21 +258,24 @@ fileIdle mgr me = if mgr > 0 then _ = spawn (fileIdleNote mgr me); Unit else Uni
 fileIdleNote mgr file me = case send mgr (file, 0, Close (0 - 1)) of Ok u -> Unit | Err e -> Unit.
 hOwner hs h = case hs of
     Nil -> 0
-  | (k, c) :: rest -> if k == h then c else hOwner rest h.
+  | (k, c, whole) :: rest -> if k == h then c else hOwner rest h.
+saveGeneration hs h = case hs of
+    Nil -> 0 - 1
+  | (k, c, whole) :: rest -> if k == h then whole else saveGeneration rest h.
 hDrop2 hs h c = case hs of
     Nil -> Nil
-  | (k, o) :: rest -> if k == h and o == c then hDrop2 rest h c else (k, o) :: hDrop2 rest h c.
-sweepDead : unsafe List (Int, Int) -> List (Int, Int) .
+  | (k, o, whole) :: rest -> if k == h and o == c then hDrop2 rest h c else (k, o, whole) :: hDrop2 rest h c.
+sweepDead : unsafe List (Int, Int, Int) -> List (Int, Int, Int) .
 sweepDead hs = case hs of
     Nil -> Nil
-  | (k, c) :: rest -> if Sys.alive c then (k, c) :: sweepDead rest else sweepDead rest.
+  | (k, c, whole) :: rest -> if Sys.alive c then (k, c, whole) :: sweepDead rest else sweepDead rest.
 # no live handles left.  A file actor of its own (mgr 0) ends here and
 # frees its slot.  One a manager spawned must NOT end on its own: the
 # manager may already have handed it the next Open, which would then never
 # be answered.  It tells the manager it is idle and keeps serving; the
 # manager, which forwards every Open, asks it to retire (fileRetireAsk)
 # while no Open can be in flight.
-fileRetire : unsafe Int -> Int -> String -> Int -> Result String String -> Int -> List (Int, Int) -> Unit .
+fileRetire : unsafe Int -> Int -> String -> Int -> Result String String -> Int -> List (Int, Int, Int) -> Unit .
 fileRetire mgr st path me body next hs = case hs of
     Nil -> (if mgr > 0 then fileIdle mgr me >> fileServe mgr st path me body next hs else Unit)
   | h :: rest -> fileServe mgr st path me body next hs.
@@ -282,7 +286,7 @@ fileRetire mgr st path me body next hs = case hs of
 # forwarded nothing since; anything else answers "busy" (Ok 0).  A forged
 # request can at most retire an idle actor (clients are not authenticated:
 # see filesMgr).
-fileRetireAsk : unsafe Int -> Int -> String -> Int -> Result String String -> Int -> List (Int, Int) -> (Int, Int) -> Int -> Int -> Unit .
+fileRetireAsk : unsafe Int -> Int -> String -> Int -> Result String String -> Int -> List (Int, Int, Int) -> (Int, Int) -> Int -> Int -> Unit .
 fileRetireAsk mgr st path me body next hs ret sender until =
   fileRetireWith (FP.marginMs FP.defaults) mgr st path me body next hs ret sender until.
 fileRetireWith margin mgr st path me body next hs ret sender until =
@@ -290,29 +294,50 @@ fileRetireWith margin mgr st path me body next hs ret sender until =
   if mgr > 0 and sender == mgr and idle and margin > 0 and margin <= intMax Unit / 1000 and until - AC.nowUs Unit > margin * 1000
   then AC.reply ret (Ok 1) >> Unit
   else AC.reply ret (Ok 0) >> fileServe mgr st path me body next hs.
-# not loaded yet (storage was unreachable): try again on this request
+# Load on the first operation that needs the previous bytes. Retry after a failed replay.
 fileLoaded : unsafe Int -> String -> Int -> Result String String -> Result String String .
 fileLoaded st path me body = case body of
     Ok b -> body
   | Err e -> storage me st (SP.Replay path).
-fileMsg : unsafe Int -> Int -> String -> Int -> Result String String -> Int -> List (Int, Int) -> (Int, Int) -> Int -> EP.Ep -> Unit .
+fileMsg : unsafe Int -> Int -> String -> Int -> Result String String -> Int -> List (Int, Int, Int) -> (Int, Int) -> Int -> EP.Ep -> Unit .
 fileMsg mgr st path me body next hs ret sender q = case q of
     EP.Timed until command -> fileTimed mgr until st path me body next hs ret sender command
   | Open url mode -> if strEq mode "replace" then fileTruncate mgr st path me body next hs ret sender
-      else _ = AC.reply ret (Opened next); fileServe mgr st path me body (next + 1) ((next, sender) :: hs)
+      else if strEq mode "snapshot-save" then fileSnapshotOpen mgr st path me body next hs ret sender
+      else if strEq mode "save" then fileSaveOpen mgr st path me body next hs ret sender
+      else _ = AC.reply ret (Opened next); fileServe mgr st path me body (next + 1) ((next, sender, 0 - 1) :: hs)
   | Read h n -> if hOwner hs h != sender then AC.reply ret (Err "no such handle") >> fileRetire mgr st path me body next hs
       else loaded = fileLoaded st path me body; AC.reply ret (fileText path loaded) >> fileServe mgr st path me loaded next hs
   | Write h v -> if hOwner hs h != sender then AC.reply ret (Err "no such handle") >> fileRetire mgr st path me body next hs
+      else generation = saveGeneration hs h; if generation >= 0 then (case v of IStr text -> fileReplaced mgr st path me body next hs ret text (storage me st (SP.ReplaceAt path generation text))
+        | other -> AC.reply ret (Err "file save requires bytes") >> fileServe mgr st path me body next hs)
       else fileWr mgr st path me (fileLoaded st path me body) next hs ret sender v
   | Close h -> if h < 0 then AC.reply ret (Ok 0) >> fileServe mgr st path me body next hs
       else _ = AC.reply ret (Ok 0); fileRetire mgr st path me body next (hDrop2 hs h sender).
+# Refresh from the durable owner even if this file actor has cached bytes.
+# Its captured generation guards the subsequent write on this handle.
+fileSnapshotOpen mgr st path me body next hs ret sender = case FS.snapshot me st path of
+    Err why -> AC.reply ret (Refused why) >> fileServe mgr st path me body next hs
+  | Ok (generation, bytes) -> AC.reply ret (Opened next) >> fileServe mgr st path me (Ok bytes) (next + 1) ((next, sender, generation) :: hs).
+# Buffered Qlog images retain the original save protocol. Decide before
+# admitting the handle, so an uncertain replacement is never retried.
+fileSaveOpen mgr st path me body next hs ret sender = case storage me st (SP.Generation path) of
+    Err why -> AC.reply ret (Refused why) >> fileServe mgr st path me body next hs
+  | Ok token -> if token == "buffered" then fileTruncate mgr st path me body next hs ret sender
+      else generation = parseInt token;
+        if generation < 0 or generation > 1000000000 or token != "{generation}" then
+          AC.reply ret (Refused "invalid save generation") >> fileServe mgr st path me body next hs
+        else AC.reply ret (Opened next) >> fileServe mgr st path me body (next + 1) ((next, sender, generation) :: hs).
+fileReplaced mgr st path me body next hs ret text answer = case answer of
+    Ok u -> AC.reply ret (Ok (IInt (strlen text))) >> fileServe mgr st path me (Ok (strcat text "")) next hs
+  | Err why -> AC.reply ret (Err "write failed: {why}") >> fileServe mgr st path me (Err "reload after replacement: {why}") next hs.
 # open "replace": the file is emptied now (its records tombstoned), and what
 # the handle writes is its whole text -- open(2)'s O_TRUNC
-fileTruncate : unsafe Int -> Int -> String -> Int -> Result String String -> Int -> List (Int, Int) -> (Int, Int) -> Int -> Unit .
+fileTruncate : unsafe Int -> Int -> String -> Int -> Result String String -> Int -> List (Int, Int, Int) -> (Int, Int) -> Int -> Unit .
 fileTruncate mgr st path me body next hs ret sender = case storage me st (SP.Delete path) of
-    Ok u -> AC.reply ret (Opened next) >> fileServe mgr st path me (Ok "") (next + 1) ((next, sender) :: hs)
+    Ok u -> AC.reply ret (Opened next) >> fileServe mgr st path me (Ok "") (next + 1) ((next, sender, 0 - 1) :: hs)
   | Err why -> AC.reply ret (Refused "replace {path}: {why}") >> fileServe mgr st path me body next hs.
-fileTimed : unsafe Int -> Int -> Int -> String -> Int -> Result String String -> Int -> List (Int, Int) -> (Int, Int) -> Int -> EP.Ep -> Unit .
+fileTimed : unsafe Int -> Int -> Int -> String -> Int -> Result String String -> Int -> List (Int, Int, Int) -> (Int, Int) -> Int -> EP.Ep -> Unit .
 fileTimed mgr until st path me body next hs ret sender q =
   if AC.nowUs Unit >= until then AC.reply ret (Err "endpoint: deadline exceeded before execution") >> fileServe mgr st path me body next hs else
   case q of
@@ -321,6 +346,7 @@ fileTimed mgr until st path me body next hs ret sender q =
     | Read h n -> if hOwner hs h != sender then AC.reply ret (Err "no such handle") >> fileRetire mgr st path me body next hs
         else loaded = fileLoadedUntil until st path me body; AC.reply ret (fileText path loaded) >> fileServe mgr st path me loaded next hs
     | Write h (IStr text) -> if hOwner hs h != sender then AC.reply ret (Err "no such handle") >> fileRetire mgr st path me body next hs
+        else generation = saveGeneration hs h; if generation >= 0 then fileReplaced mgr st path me body next hs ret text (storageUntil until me st (SP.ReplaceAt path generation text))
         else loaded = fileLoadedUntil until st path me body; (case loaded of
         Err why -> AC.reply ret (Err "write failed: {path} could not be read ({why})") >> fileServe mgr st path me loaded next hs
       | Ok bytes -> fileWr2 mgr st path me bytes next hs ret text (storageUntil until me st (SP.Append path text)))
@@ -333,15 +359,15 @@ fileText : unsafe String -> Result String String -> Result EP.IoV String .
 fileText path body = case body of
     Ok b -> Ok (IStr b)          # an empty file reads as "", like any other text
   | Err e -> Err "read failed: {path} ({e})".
-fileWr : unsafe Int -> Int -> String -> Int -> Result String String -> Int -> List (Int, Int) -> (Int, Int) -> Int -> EP.IoV -> Unit .
+fileWr : unsafe Int -> Int -> String -> Int -> Result String String -> Int -> List (Int, Int, Int) -> (Int, Int) -> Int -> EP.IoV -> Unit .
 fileWr mgr st path me body next hs ret sender v = case v of
     IStr text -> fileWr1 mgr st path me body next hs ret text
   | o -> AC.reply ret (Err "write failed: {path} wants IStr") >> fileServe mgr st path me body next hs.
-fileWr1 : unsafe Int -> Int -> String -> Int -> Result String String -> Int -> List (Int, Int) -> (Int, Int) -> String -> Unit .
+fileWr1 : unsafe Int -> Int -> String -> Int -> Result String String -> Int -> List (Int, Int, Int) -> (Int, Int) -> String -> Unit .
 fileWr1 mgr st path me body next hs ret text = case body of
     Err e -> AC.reply ret (Err "write failed: {path} could not be read ({e})") >> fileServe mgr st path me body next hs
   | Ok b -> fileWr2 mgr st path me b next hs ret text (storage me st (SP.Append path text)).
-fileWr2 : unsafe Int -> Int -> String -> Int -> String -> Int -> List (Int, Int) -> (Int, Int) -> String -> Result String String -> Unit .
+fileWr2 : unsafe Int -> Int -> String -> Int -> String -> Int -> List (Int, Int, Int) -> (Int, Int) -> String -> Result String String -> Unit .
 fileWr2 mgr st path me b next hs ret text r = case r of
     Ok u -> AC.reply ret (Ok (IInt (strlen text))) >> fileServe mgr st path me (Ok (strcat b text)) next hs
   | Err e -> AC.reply ret (Err "write failed: {e}") >> fileServe mgr st path me
@@ -381,7 +407,7 @@ FilesCtx = Type (FilesCtx Int Int FP.Policy Int Int).
 # The normal boot entry exposes a leased endpoint; the manager owns the only
 # policy copy and revision. The adapter carries the original deadline/client.
 filesManaged st ns known me =
-  admin = Wire.spawn 8 Wire.inboxBytes (Endpoint.simpleUntil (filesPolicyRead me) (filesPolicyWrite me));
+  admin = Wire.spawn 8 Wire.inboxBytes (Slots.simpleUntil (filesPolicyRead me) (filesPolicyWrite me));
   _ = claim me ns FP.url admin;
   _ = claim me ns FP.schemaUrl admin;
   filesServe (FilesCtx st ns FP.defaults 0 admin) me (filesEntries known).

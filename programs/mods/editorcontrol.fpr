@@ -3,7 +3,7 @@
 unsafe module.
 State = use "editorstate".
 EP = use "ep#c66ad65e68dd97f5".
-Endpoint = use "epservice#e8bce05a1ddf73db".
+Endpoint = use "leaseslots#efa81888e7fe1099".
 AC = use "std/actor#201a0e9bf98a5154".
 Request = Type (Inspect Int | Change Int Int Int State.Action).
 controlMs = 250.
@@ -45,19 +45,19 @@ serve owner ns session me =
   | Ok u ->
       watcher = spawn (watch owner me);
       _ = send owner (Ok me);
-      _ = Sys.loop (Nil, 1) (step owner watcher session me);
+      _ = Sys.loop (Endpoint.Empty, 1, 0) (step owner watcher session me);
       _ = kill watcher;
       withdraw me ns session.
 step owner watcher session me state =
-  (handles, next) = state;
+  (handles, next, cursor) = state;
   message = receive me;
   result = case message of
     (from, id, command) ->
       stopping = case command of EP.Close h -> h == stopHandle and from == watcher | other -> False;
       if stopping then (False, state) else
-        live = Endpoint.liveLeases (AC.nowUs Unit) handles;
-        changed = Endpoint.untilDispatch (read owner session) (write owner session) me live next (from, id) from command;
-        (True, changed)
+        live = Endpoint.sweep handles cursor (AC.nowUs Unit);
+        (after, serial) = Endpoint.dispatch (read owner session) (write owner session) me live next (from, id) from command;
+        (True, (after, serial, (cursor + 1) % 64))
   | stale -> (True, state);
   _ = drop message;
   result.

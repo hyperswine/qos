@@ -13,10 +13,37 @@ Sys.alive : Int -> Bool .
 stuck self = _ = Sys.sleepUs 1000000; stuck self.
 
 pending boss self = _ = S.requestFields (receive self); _ = send boss 88; Sys.sleepUs 3000000 >> Unit.
+replyAfterCancel boss self =
+  ((from, id, correlated), rest) = S.requestFields (receive self);
+  _ = send boss from;
+  _ = receiveFrom self boss;
+  late = send from (id, Ok "late");
+  _ = send boss (case late of Err "dead actor" -> True | _ -> False);
+  Unit.
+cancelCaller me qa =
+  owner = spawn (replyAfterCancel me);
+  _ = Sys.bindStore owner (S.TimedRpc owner 0 0 0 "" "");
+  root = start qa;
+  _ = send root 3;
+  caller = receiveFrom me owner;
+  _ = Sys.sleepUs 20000;
+  _ = kill caller;
+  _ = send owner 1;
+  refused = receiveFrom me owner;
+  refused and not (Sys.alive caller) and NI.settle 0 400.
 malformed self =
   ((from, id, correlated), rest) = S.requestFields (receive self);
   _ = send from (id, 42); Unit.
-silent self = _ = S.requestFields (receive self); Sys.sleepUs 30000000 >> Unit.
+staleThenReply self =
+  ((from, id, correlated), rest) = S.requestFields (receive self);
+  _ = send from (id - 1, Ok "obsolete");
+  _ = Sys.sleepUs 1000;
+  _ = send from (id, Ok "current");
+  Unit.
+silent self =
+  ((from, id, correlated), rest) = S.requestFields (receive self);
+  _ = send from (id - 1, Ok "obsolete");
+  Sys.sleepUs 30000000 >> Unit.
 start qa =
   (ok, why, root) = NI.place qa;
   _ = case ok == 2 of True -> Unit | False -> error "probe placement: {why}";
@@ -51,9 +78,13 @@ main =
   _ = case receiveFromRes me waiting of Ok 88 -> Unit | _ -> error "storage never received request";
   _ = kill waiting;
   during = NI.result me root;
+  cancelled = cancelCaller me qa;
   bad = spawn malformed;
   _ = Sys.bindStore bad (S.TimedRpc bad 0 0 0 "" "");
   invalid = probeTag me qa 2;
+  late = spawn staleThenReply;
+  _ = Sys.bindStore late (S.TimedRpc late 0 0 0 "" "");
+  correlated = probe me qa;
   hung = spawn silent;
   _ = Sys.bindStore hung (S.TimedRpc hung 0 0 0 "" "");
   deadline = probe me qa;
@@ -66,5 +97,5 @@ main =
   _ = case failok == 2 of True -> Unit | False -> error failwhy;
   failed = NI.result me failroot;
   freed = NI.settle 0 400;
-  verdict = if refused == "storeprobe: Err storage: the storage actor refused the request noise=True" and dead == refused and during == "storeprobe: Err storage service: dead actor noise=True" and deadline == "storeprobe: Err storage service: deadline exceeded noise=True" and mutation == "storeprobe: Err storage service: deadline exceeded (outcome unknown) noise=True" and invalid == "storeprobe: Err storage: invalid reply value (outcome unknown) noise=True" and live and healthy == "storeprobe: Ok  noise=True" and failed == "failed: dead actor: blk: page out of range" and freed then "HOLDS" else "FAILED";
-  "nativerefusal: full=[{refused}] dead=[{dead}] during=[{during}] deadline=[{deadline}] mutation=[{mutation}] invalid=[{invalid}] live={live} healthy=[{healthy}] routed=[{failed}] freed={freed} {verdict}".
+  verdict = if refused == "storeprobe: Err storage: the storage actor refused the request noise=True" and dead == refused and during == "storeprobe: Err storage service: dead actor noise=True" and deadline == "storeprobe: Err storage service: deadline exceeded noise=True" and mutation == "storeprobe: Err storage service: deadline exceeded (outcome unknown) noise=True" and invalid == "storeprobe: Err storage: invalid reply value (outcome unknown) noise=True" and correlated == "storeprobe: Ok current noise=True" and cancelled and live and healthy == "storeprobe: Ok  noise=True" and failed == "failed: dead actor: blk: page out of range" and freed then "HOLDS" else "FAILED";
+  "nativerefusal: full=[{refused}] dead=[{dead}] during=[{during}] deadline=[{deadline}] mutation=[{mutation}] invalid=[{invalid}] correlated=[{correlated}] cancelled={cancelled} live={live} healthy=[{healthy}] routed=[{failed}] freed={freed} {verdict}".

@@ -1,5 +1,6 @@
 # Real placement gate: corrupted archives never reserve an image block.
-FS = use "std/fs#84826bc9e8ddb4b5".
+unsafe program.
+FS = use "../std/fs".
 QAR = use "../programs/mods/qar".
 QI = use "../programs/mods/qaimg".
 Sys.checkImage : String -> List Int -> List Int -> String -> String -> Result Unit String.
@@ -15,7 +16,7 @@ prepare qa =
   Ok import = QAR.optionalExtent qa "IMPORT";
   (i,n) = image; (r,rn) = reloc; (b,bn) = import;
   (i :: n :: r :: rn :: b :: bn :: Nil, QI.nativeNums m load, QI.sha m, QI.relsha m).
-checkBad : Int -> Int -> String -> String -> Bool.
+checkBad : unsafe Int -> Int -> String -> String -> Bool.
 checkBad me fs id reason =
   Ok qa = FS.readLatest me fs "apps/{id}.qa";
   (exts,nums,sha,relsha) = prepare qa;
@@ -45,6 +46,8 @@ main =
   legacyActors = checkBad me fs "LegacyActors" "plane actors ABI mismatch: rebuild the process with tools/build-process-app.sh";
   legacyMemory = checkBad me fs "LegacyMemory" "plane memory ABI mismatch: rebuild the process with tools/build-process-app.sh";
   noPlane = checkBad me fs "NoPlane" "plane contract versions missing: rebuild the process with tools/build-process-app.sh";
+  duplicateActors = checkBad me fs "DuplicateActors" "plane contract versions missing: rebuild the process with tools/build-process-app.sh";
+  malformedMemory = checkBad me fs "MalformedMemory" "plane contract versions missing: rebuild the process with tools/build-process-app.sh";
   validImport = checkBad me fs "WithImport" "native process IMPORT is unsupported: rebuild a self-contained process";
   Ok qa = FS.readLatest me fs "apps/CkVector.qa";
   (exts,nums,sha,relsha) = prepare qa;
@@ -52,6 +55,6 @@ main =
   (ok,msg,root) = Sys.placeImageAt qa exts nums "CkVector\n" 0 (sha,relsha);
   reply = case ok == 2 of True -> result me root | False -> msg;
   ended = settle 400;
-  good = unitOk and image and reloc and import and noSha and noRel and old and oldActors and oldMemory and legacyActors and legacyMemory and noPlane and validImport and ended and reply == "vectorproc: generic=2.5 nested=3.5,4.5,7 fold=91" and Sys.testImageAllocs Unit == 1;
+  good = unitOk and image and reloc and import and noSha and noRel and old and oldActors and oldMemory and legacyActors and legacyMemory and noPlane and duplicateActors and malformedMemory and validImport and ended and reply == "vectorproc: generic=2.5 nested=3.5,4.5,7 fold=91" and Sys.testImageAllocs Unit == 1;
   verdict = if good then "HOLDS" else "FAILED";
   "nativeintegrity: process=[{reply}] images={Sys.images 0} allocations={Sys.testImageAllocs Unit} {verdict}".

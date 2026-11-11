@@ -1,0 +1,91 @@
+# Deadline-aware endpoint owner. Six binary decisions select one of 64 slots.
+# A fresh handle carries its generation in its high bits.
+unsafe module.
+EP = use "ep#c66ad65e68dd97f5".
+AC = use "std/actor#201a0e9bf98a5154".
+Sys.alive : Int -> Bool .
+Slots = Type (Empty | Branch Slots Slots | Occupied Int String Int Int).
+
+lookup slots index width = case slots of
+    Branch left right -> if index < width then lookup left index (width / 2)
+      else lookup right (index - width) (width / 2)
+  | leaf -> leaf.
+put slots index width value = if width == 0 then value else case slots of
+    Branch left right -> putBranch left right index width value
+  | other -> putBranch Empty Empty index width value.
+putBranch left right index width value = if index < width then
+  Branch (put left index (width / 2) value) right
+  else Branch left (put right (index - width) (width / 2) value).
+
+# Drop empty subtrees when a lease leaves. Unaffected siblings stay shared.
+pruned Empty Empty = Empty.
+pruned left right = Branch left right.
+clear slots index width = case slots of
+    Branch left right -> if index < width then pruned (clear left index (width / 2)) right
+      else pruned left (clear right (index - width) (width / 2))
+  | leaf -> Empty.
+
+expired now (Occupied h url client until) = now >= until or not (Sys.alive client).
+expired now _ = False.
+sweep slots i now = if expired now (lookup slots i 32) then clear slots i 32 else slots.
+nextHandle h = if h == intMax Unit then 0 else h + 1.
+# Find the first reusable index in [lo, hi), visiting each intersecting
+# subtree once. A missing subtree represents a contiguous run of free slots.
+firstFree slots base size lo hi now = if hi <= base or lo >= base + size then -1 else case slots of
+    Empty -> if lo > base then lo else base
+  | Branch left right ->
+      half = size / 2;
+      found = firstFree left base half lo hi now;
+      if found >= 0 then found else firstFree right (base + half) half lo hi now
+  | entry -> if expired now entry then base else -1.
+freeHandle slots h now remaining = if h <= 0 or remaining <= 0 then 0 else
+  start = h % 64;
+  span = if remaining < 64 then remaining else 64;
+  # Cap the offset before adding it to the last representable handle.
+  count = if intMax Unit - h < span - 1 then intMax Unit - h + 1 else span;
+  end = start + count;
+  found = firstFree slots 0 64 start end now;
+  if found >= 0 then h + (found - start) else if end <= 64 then 0 else
+    wrapped = firstFree slots 0 64 0 (end - 64) now;
+    if wrapped < 0 then 0 else h + (64 - start + wrapped).
+access slots h client now = case lookup slots (h % 64) 32 of
+    Occupied id url owner until -> if h == id and client == owner and now < until and Sys.alive owner then url else ""
+  | other -> "".
+close slots h client = case lookup slots (h % 64) 32 of
+    Occupied id url owner until -> if h == id and client == owner then clear slots (h % 64) 32 else slots
+  | other -> slots.
+
+simpleUntil rd wr me = _ = Sys.loop (Empty, 1, 0) (step rd wr me); Unit.
+step rd wr me state =
+  (slots, next, cursor) = state;
+  msg = receive me;
+  live = sweep slots cursor (AC.nowUs Unit);
+  changed = case msg of
+    (client, id, command) -> dispatch rd wr me live next (client, id) client command
+  | stale -> (live, next);
+  _ = drop msg;
+  (after, serial) = changed;
+  (True, (after, serial, (cursor + 1) % 64)).
+dispatch rd wr me slots next ret client command = case command of
+    EP.Open url mode ->
+      now = AC.nowUs Unit;
+      h = if strlen url > 2048 then 0 else freeHandle slots next now 64;
+      (case h == 0 of
+        True -> _ = AC.reply ret (EP.Refused "endpoint: handle budget exhausted"); (slots, next)
+      | False ->
+          after = put slots (h % 64) 32 (Occupied h (strcat url "") client (now + 60000000));
+          _ = AC.reply ret (EP.Opened h);
+          (after, nextHandle h))
+  | EP.Timed until q -> if AC.nowUs Unit >= until then
+      _ = AC.reply ret (Err "endpoint: deadline exceeded before execution"); (slots, next)
+      else operate rd wr me slots next ret client until q
+  | other -> operate rd wr me slots next ret client (AC.nowUs Unit + 10000000) other.
+operate rd wr me slots next ret client until command = case command of
+    EP.Close h -> _ = AC.reply ret (Ok 0); (close slots h client, next)
+  | EP.Read h n -> url = access slots h client (AC.nowUs Unit);
+      _ = AC.reply ret (if url == "" then Err "no such handle" else rd until me client url);
+      (slots, next)
+  | EP.Write h v -> url = access slots h client (AC.nowUs Unit);
+      _ = AC.reply ret (if url == "" then Err "no such handle" else wr until me client url v);
+      (slots, next)
+  | other -> _ = AC.reply ret (Err "endpoint: invalid timed operation"); (slots, next).

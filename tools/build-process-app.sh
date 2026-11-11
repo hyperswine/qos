@@ -29,7 +29,7 @@ QOS=qos   # relative to the repository root (it was ../qos from fp-risc/tools/, 
 if [ "$TARGET" = rv32 ]; then
   ARCHFLAGS="-march=rv32imac_zicsr -mabi=ilp32"; WORDSZ=4
 else
-  ARCHFLAGS="-march=rv64imafdc_zicsr -mabi=lp64 -mcmodel=medany"; WORDSZ=8
+  ARCHFLAGS="-march=rv64imafdc_zicsr -mabi=lp64 -mcmodel=medany -ffixed-x27"; WORDSZ=8
 fi
 
 [ "$TARGET" = rv64 ] || { echo "native process images are rv64 (relocation is implemented for R_RISCV_64)" >&2; exit 1; }

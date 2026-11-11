@@ -1,6 +1,7 @@
 # Fresh-process probe for tools/portable-durable-check.py. The script substitutes
 # action, leaving all page operations on the routed block-service path.
-QL = use "../programs/mods/qlog#7022992c8e4a9fba".
+unsafe program.
+QL = use "../programs/mods/qlog#cc114a4d7514b15a".
 B = use "std/blockio#8b4ffa1467ca03a5".
 SVC = use "svc#75479fb6d5f34670".
 action = 0.
@@ -13,8 +14,22 @@ perform src h = case action of
   | 2 -> (case QL.compactRes src h of Ok h2 -> "compact {inspect src h2}" | Err why -> "refused {why}")
   | 3 -> swapProbe src h
   | 4 -> rejectProbe src h
+  | 7 -> (case QL.replaceRes src h "key" (strcat (strcat oversizedKey oversizedKey) "end") of Ok h2 -> "replaced head={h2}" | Err why -> "refused {why}")
+  | 10 -> bulkReplay src h
+  | 8 -> replayProbe src h
   | 6 -> inputProbe src h
   | other -> inspect src h.
+bulkReplay src h =
+  idx = QL.scanIdxE src h;
+  first = QL.idxReplayE src idx "key" "";
+  second = QL.idxLatestE src idx "new-key";
+  a = if first == "old" then "old" else if first == strcat "old" oversizedKey then "whole" else "partial";
+  b = case second of Err why -> why | Ok bytes -> if bytes == secondChunk then "whole" else "partial";
+  "pair={a}/{b} verify={outcome (QL.verifyLog src h)}".
+replayProbe src h =
+  bytes = QL.idxReplayE src (QL.scanIdxE src h) "key" "";
+  value = if bytes == "old" then "old" else if bytes == strcat (strcat oversizedKey oversizedKey) "end" then "new" else "partial";
+  "replay={value} verify={outcome (QL.verifyLog src h)}".
 swapProbe src h =
   QL.Meta mh v w c d sw mr = QL.metaOr src h;
   _ = QL.sbW src (QL.Meta mh v w c d (QL.pageCount src - 2) mr);
@@ -58,12 +73,19 @@ worker : unsafe Int -> Int -> Unit .
 worker boss self =
   block = B.serve self (device "blk");
   src = QL.routed block;
-  case action == 5 of True -> QL.actorWith src self | False -> workerProbe boss src.
+  case (action == 5 or action == 9 or action == 11 or action == 12) of True -> QL.actorWith src self | False -> workerProbe boss src.
 workerProbe boss src =
   h = QL.ensure src;
   send boss (perform src h) >> Unit.
+secondChunk = strcat "A" (strcat (substr oversizedKey 0 4094) "Z").
+chunks n = if n == 0 then Nil else ("chunk-{n}", oversizedKey) :: chunks (n - 1).
+sendBulk child me =
+  n = if action == 11 then 1 else if action == 12 then 8 else 2;
+  entries = if n == 2 then [("key", oversizedKey), ("new-key", secondChunk)] else chunks n;
+  (bytes, count) = QL.bulkPack entries;
+  if count == n then send child (SVC.Rpc me 7 "" bytes) else error "bulk count".
 main =
   me = myself 0;
   child = spawn (worker me);
-  _ = case action == 5 of True -> send child (SVC.Rpc me 5 "" "") | False -> Ok Unit;
+  _ = case action of 5 -> send child (SVC.Rpc me 5 "" "") | 9 -> sendBulk child me | 11 -> sendBulk child me | 12 -> sendBulk child me | other -> Ok Unit;
   "durable: {outcome (receiveFromRes me child)}".

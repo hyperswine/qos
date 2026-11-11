@@ -72,6 +72,7 @@ unsafe module.
 #   tag 1 read-latest   2 append-record   3 replay-concat
 #   tag 4 tombstone     5 stats           6 compact
 #   tag 7 append-bulk (payload = packed chunks)   8 verify-hashes
+#   tag 9 replace a replay value atomically (durable v3 only)
 # Requests and replies are tuples/Strings/Ints only -- the shapes that
 # are stable across separately compiled units by construction.
 # ============================================================================
@@ -410,6 +411,31 @@ wrDo dev head hdr s pl np m =
   _ = case v == 3 of True -> durableFlush dev | False -> Unit;
   _ = sbW dev (Meta h2 v 0 1 d sw mr);
   Ok h2.
+# Publish an ordinary tombstone and record under one durable head change.
+# Existing replay, verification and compaction already interpret this pair.
+replaceRes dev head url pay = case latestSeal dev of
+    Ok seal -> replaceSealed dev head url pay seal
+  | Err why -> case legacyMeta dev of Ok m -> Err "replace requires durable v3 storage" | Err invalid -> stop invalid.
+# The storage actor owns publication throughout this turn. Use the same
+# checked seal for head, space, generation and alternate-slot selection.
+replaceSealed dev head url pay seal =
+  Meta h v w c d sw mr = sealMeta seal;
+  pl = strlen pay;
+  np = ceilDiv pl pgsz;
+  end = head + 2 + np;
+  del = hdrLineH "QDEL" 0 0 url (hashStr "");
+  rec = hdrLineH "QREC" np pl url (hashStr pay);
+  if h != head then Err "stale log head"
+  else if end > d then Err "data partition full"
+  else case appendAdmission del "" of Err why -> Err why | Ok u ->
+    (case appendAdmission rec pay of Err why -> Err why | Ok ok ->
+      (case generationRoomSeal seal 1 of False -> Err "superblock generation exhausted" | True ->
+        _ = pageWrite dev head del;
+        _ = pageWrite dev (head + 1) rec;
+        _ = writePages dev (head + 2) pay 0 pl;
+        _ = durableFlush dev;
+        _ = sealCommitFrom dev (Meta end v 0 1 d sw mr) 0 seal;
+        Ok end)).
 # v1 surface: on a full data partition the head simply does not move
 appendRec dev head tag url s =
   case appendRes dev head tag url s of Ok h2 -> h2 | Err _ -> head.
@@ -426,13 +452,15 @@ writeOne dev p s i pl =
 # ---- BULK records -----------------------------------------------------------
 # many small chunks, ONE record: the packed payload is "<len> <url>\n"
 # + bytes, repeated, so a 30-byte kv msg no longer costs two pages.
-bulkPack prs = bpGo prs "" 0.
-bpGo : unsafe List (String, String) -> String -> Int -> (String, Int) .
-bpGo prs acc cnt = case prs of Nil -> (acc, cnt) | e :: r -> bpOne r acc cnt e.
-bpOne : unsafe List (String, String) -> String -> Int -> (String, String) -> (String, Int) .
-bpOne r acc cnt e =
-  case e of (url, pay) ->
-    bpGo r (strcat acc (strcat "{strlen pay} {url}" (strcat lf pay))) (cnt + 1).
+bulkPack prs = packParts prs Nil 0.
+bpGo prs acc cnt = packParts prs (acc :: Nil) cnt.
+bpOne r acc cnt e = bpGo (e :: r) acc cnt.
+packParts : unsafe List (String, String) -> List String -> Int -> (String, Int) .
+packParts prs parts cnt = case prs of
+    Nil -> (strJoin "" (Core.revS parts Nil), cnt)
+  | (url, pay) :: rest ->
+      header = "{strlen pay} {url}";
+      packParts rest (pay :: lf :: header :: parts) (cnt + 1).
 
 appendBulkRes dev head prs = abGo dev head (bulkPack prs).
 abGo dev head pc = case pc of (pay, cnt) -> appendPackedRes dev head pay cnt.
@@ -947,7 +975,18 @@ Ent = Type (Ent url page pl off len).
 
 entRead dev e =
   Ent u p pl off len = e;
-  substr (readPayload dev p pl) off len.
+  if off < 0 then substr (readPayload dev p pl) off len else
+    size = minI len (pl - off);
+    if size <= 0 then "" else
+      page = p + 1 + off / pgsz;
+      skip = imod off pgsz;
+      if skip == 0 then readPayload dev (page - 1) size else
+        Sys.arena (fn unused -> readUnaligned dev page skip size).
+readUnaligned dev page skip size =
+  take = minI size (pgsz - skip);
+  first = substr (pageRead dev page) skip take;
+  if take == size then first else
+    strJoin "" (Core.revS (rpParts dev (page + 1) (size - take) (first :: Nil)) Nil).
 
 scanIdxE dev head = sxGo dev head 1 Nil.
 sxGo : unsafe PageSource -> Int -> Int -> List Ent -> List Ent .
@@ -1006,19 +1045,28 @@ ilStepE : unsafe PageSource -> List Ent -> String -> Result String String -> Ent
 ilStepE dev r url best e =
   Ent u p pl off len = e;
   case strEq u url of
-    True -> ilGoE dev r url (Ok (entRead dev e))
+    True -> Ok (entRead dev (lastMatching r url e))
   | False -> ilGoE dev r url best.
+lastMatching idx url latest = case idx of
+    Nil -> latest
+  | e :: rest ->
+      Ent key page pl off len = e;
+      lastMatching rest url (if strEq key url then e else latest).
 idxReplayE : unsafe PageSource -> List Ent -> String -> String -> String .
-idxReplayE dev idx url acc =
-  case idx of
-    Nil -> acc
-  | e :: r -> irStepE dev r url acc e.
-irStepE : unsafe PageSource -> List Ent -> String -> String -> Ent -> String .
-irStepE dev r url acc e =
-  Ent u p pl off len = e;
-  case strEq u url of
-    True -> idxReplayE dev r url (strcat acc (entRead dev e))
-  | False -> idxReplayE dev r url acc.
+idxReplayE dev idx url acc = replayPayload dev idx url acc (0 - 1) "".
+# Entries in a packed record share the same immutable payload. Keep its
+# bytes only for this replay, including across intervening unrelated keys.
+replayPayload dev idx url acc previous payload =
+  replayParts dev idx url (acc :: Nil) previous payload.
+replayParts dev idx url parts previous payload = case idx of
+    Nil -> strJoin "" (Core.revS parts Nil)
+  | e :: rest ->
+      Ent key page pl off len = e;
+      case len != 0 and strEq key url of
+        False -> replayParts dev rest url parts previous payload
+      | True ->
+          bytes = if page == previous then payload else readPayload dev page pl;
+          replayParts dev rest url (substr bytes off len :: parts) page bytes.
 idxCountE : unsafe List Ent -> String -> Int .
 idxCountE idx url =
   case idx of
@@ -1138,7 +1186,44 @@ aServe dev me head idx tidy replyTo tag url pay =
   | 6 -> aCompact dev me head tidy replyTo
   | 7 -> aAppendBulk dev me head idx tidy replyTo pay
   | 8 -> Wire.reply replyTo (verifyLog dev head)               >> aLoop dev me head idx tidy
+  | 9 -> aReplace dev me head idx tidy replyTo url pay
+  | 12 -> Wire.reply replyTo (saveGeneration dev) >> aLoop dev me head idx tidy
+  | 10 -> Wire.reply replyTo (snapshotReplay dev idx url) >> aLoop dev me head idx tidy
+  | 11 -> (case transactionSeal dev of
+      Err why -> Wire.reply replyTo (Err why) >> aLoop dev me head idx tidy
+    | Ok seal -> (case payloadAtSeal seal pay of
+        Err why -> Wire.reply replyTo (Err why) >> aLoop dev me head idx tidy
+      | Ok bytes -> replaceReply dev me head idx tidy replyTo url bytes (replaceSealed dev head url bytes seal)))
   | _ -> Wire.reply replyTo (Err "storage: unknown request tag") >> aLoop dev me head idx tidy.
+# Snapshot and conditional replacement share the durable log-wide generation.
+# The sole writer processes validation and publication in the same turn.
+# A save handle needs only the current token. Buffered images explicitly
+# opt into their legacy truncate-on-open contract.
+saveGeneration dev = case latestSeal dev of
+    Ok (Seal m generation stage) -> Ok "{generation}"
+  | Err why -> (case legacyMeta dev of Ok m -> Ok "buffered" | Err invalid -> Err invalid).
+# A valid buffered disk cannot issue durable generation tokens. Distinguish
+# that capability refusal from an unreadable or conflicting durable seal.
+transactionSeal dev = case latestSeal dev of
+    Ok seal -> Ok seal
+  | Err why -> case legacyMeta dev of
+      Ok legacy -> Err "storage generations require durable v3 storage"
+    | Err invalid -> Err why.
+snapshotReplay dev idx url = case transactionSeal dev of
+    Err why -> Err why
+  | Ok (Seal m generation stage) -> Ok (strcat "{generation}\n" (idxReplayE dev idx url "")).
+checkedPayload dev pay = case transactionSeal dev of Err why -> Err why | Ok seal -> payloadAtSeal seal pay.
+payloadAtSeal seal pay =
+  Seal m generation stage = seal;
+  split = strIndexOf lf (substr pay 0 11);
+  if split < 1 then Err "invalid generation frame"
+  else if substr pay 0 split != "{generation}" then Err "storage generation conflict"
+  else Ok (substr pay (split + 1) (strlen pay - split - 1)).
+aReplace dev me head idx tidy replyTo url bytes =
+  replaceReply dev me head idx tidy replyTo url bytes (replaceRes dev head url bytes).
+replaceReply dev me head idx tidy replyTo url bytes result = case result of
+    Err why -> Wire.reply replyTo (Err why) >> aLoop dev me head idx tidy
+  | Ok end -> aAppendOk dev me (head + 1) (dropUrlE idx url) tidy replyTo "QREC" url bytes end.
 aStats dev head idx url = aStats2 head idx url (metaOr dev head).
 aStats2 head idx url m =
   Meta h v w c d sw mr = m;

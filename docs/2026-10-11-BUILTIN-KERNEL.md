@@ -311,3 +311,5 @@ Each phase ends running on both `virt-rv64` and `tangnano20k-sdram`.
 - **The 64 KiB BRAM board** probably fits only the substrate and builtin
   services, not Base images. `tangnano20k-sdram` is the first real RV32
   target.
+
+**12 November follow-up.** The [Tang Nano Native port proposal](2026-11-12-TANG-NANO-QOS-NATIVE.md) defines the first physical board milestone and the path to separately loaded applications.

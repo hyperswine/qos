@@ -9,6 +9,8 @@ runBench =
   me = myself 0;
   fs = FS.serve (device "blk");
   qa = case FS.readLatest me fs "apps/CkSlow.qa" of Ok s -> s | Err e -> error e;
+  runBound me fs qa.
+runBound me fs qa =
   _ = Sys.bindApp "CkSlow";
   _ = Sys.bindStore fs (S.TimedRpc fs 0 0 0 "" "");
   (ok, why, root) = NI.place qa;
@@ -16,6 +18,7 @@ runBench =
   r = NI.result me root;
   _ = print "append calls/slept/sleeps {Sys.storeWaitStat 0} {Sys.storeWaitStat 1} {Sys.storeWaitStat 2}";
   _ = print "replay calls/slept/sleeps {Sys.storeWaitStat 3} {Sys.storeWaitStat 4} {Sys.storeWaitStat 5}";
+  _ = print "parked calls append/replay {Sys.storeWaitStat 6} {Sys.storeWaitStat 7}";
   r.
 
 main = runBench.

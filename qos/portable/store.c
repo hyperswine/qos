@@ -58,6 +58,10 @@ int64_t qosp_store_call(uint64_t tag, const char *pay, uint64_t plen,
     pthread_mutex_lock(&store_mu);
     if (plen != sizeof(qos_plugin_t)) { snprintf(out, outcap, "tag 4 takes a qos_plugin_t (abi v13)"); pthread_mutex_unlock(&store_mu); return -1; }
     int64_t r = qosp_load_plugin((const qos_plugin_t *)pay, out, outcap);
+#ifdef QOS_PLUGIN_LIFETIME_TEST
+    extern void qosp_check_plugin_lifetime(const qos_plugin_t *, int64_t);
+    if (r >= 0) qosp_check_plugin_lifetime((const qos_plugin_t *)pay, r);
+#endif
     pthread_mutex_unlock(&store_mu);
     return r;
   }

@@ -116,11 +116,11 @@ def read(raw, abi, architecture, session, api, *, desktop=True, bundled=False):
     require(all(a[1] <= b[0] for a, b in zip(spans, spans[1:])), "overlapping IMPORT slots")
     require(all(not any(a < offset + 8 and offset < b for a, b in spans) for offset in offsets), "IMPORT overlaps RELOC")
     if desktop:
-        check_entry(image, fields["entry"], fields["execsz"], set(offsets))
+        check_entry(image, fields["entry"], fields["execsz"], set(offsets), spans)
     return Archive(raw, manifest, parts, fields)
 
 
-def check_entry(image, entry, executable, relocs):
+def check_entry(image, entry, executable, relocs, imports=()):
     def words(at, count):
         require(at % 8 == 0 and 0 <= at <= len(image) - 8 * count, "module table pointer outside IMAGE")
         return struct.unpack_from("<" + "Q" * count, image, at)
@@ -131,11 +131,25 @@ def check_entry(image, entry, executable, relocs):
         return image[at + 16:at + 16 + size]
 
     magic, schema, root_at = words(entry, 3)
-    require((magic, schema) == (0x4650524D, 1), "unsupported module table schema")
+    require(magic == 0x4650524D and schema in (1, 2), "unsupported module table schema")
     require(entry + 16 in relocs, "unrelocated module root")
     root = string(root_at)
     require(root != b"", "missing root module identity")
     at, found = entry + 24, 0
+    if schema == 2:
+        require(not relocs.intersection((entry, entry + 8, entry + 32)) and
+                not any(a < entry + 40 and entry < b for a, b in imports), "fixup changes module header")
+        layout, prefix = words(at, 2)
+        require(prefix in (8, 16), "invalid managed prefix")
+        if at in relocs:
+            count, = words(layout, 1)
+            require(count <= (len(image) - layout - 8) // 24, "module layout outside IMAGE")
+            end = layout + 8 + count * 24
+            require(not any(layout <= off < end for off in relocs) and
+                    not any(a < end and layout < b for a, b in imports), "fixup changes module layout")
+        else:
+            require(layout == 0, "unrelocated module layout")
+        at += 16
     while True:
         first, = words(at, 1)
         if first == 0:

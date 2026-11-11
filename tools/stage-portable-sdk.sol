@@ -15,7 +15,7 @@ J = use "sol/lib/json".
 CLI = use "sol/lib/cli".
 
 api = "qos.desktop/2".
-session = "qos.app-session/5".
+session = "qos.app-session/6".
 
 options = [CLI.Option "fprisc" "" CLI.One, CLI.Option "compiler" "" CLI.One, CLI.Option "output" "" CLI.One,
            CLI.Option "profile" "" CLI.One, CLI.Option "lld" "" CLI.One].
@@ -54,11 +54,11 @@ platformSources root fprisc =
 
 # tools/qos/qos.fpr + host.c -> the SDK's `qos` binary, built by the SDK's
 # own compiler with the FP-RISC tree it comes from
-buildCommand root compiler fprisc destination =
+buildCommand root compiler fprisc destination extra =
   _ = K.mkdirs (K.parent destination);
-  K.commandIn "{root}/tools/qos" ["/usr/bin/env", "-u", "GHCRTS", "-u", "FPR_PATH", "-u", "FPR_FOREIGN", "-u", "FPRISC_ROOT",
+  K.commandIn "{root}/tools/qos" (["/usr/bin/env", "-u", "GHCRTS", "-u", "FPR_PATH", "-u", "FPR_FOREIGN", "-u", "FPRISC_ROOT",
     "FPR_HOME={fprisc}", "FPR_NO_RUN_CACHE=1",
-    compiler, "build", "{root}/tools/qos/qos.fpr", "--with", "{root}/tools/qos/host.c", "-o", destination].
+    compiler, "build", "{root}/tools/qos/qos.fpr", "--with", "{root}/tools/qos/host.c", "-o", destination] + extra).
 
 # a linker that loads anything outside the system is refused
 systemOnly path = List.all (fn l -> Str.startsWith "/usr/lib/" (Str.trim l) or Str.startsWith "/System/" (Str.trim l))
@@ -66,7 +66,7 @@ systemOnly path = List.all (fn l -> Str.startsWith "/usr/lib/" (Str.trim l) or S
 
 # the profile archives, each checked by the staged `qos inspect` as the
 # packager and installer read them; -> (apps, files)
-profile : unsafe String -> String -> (List String, List (String, String)) .
+profile : unsafe String -> String -> (List String, List (String, String, String)) .
 profile sdk abi = case List.filter (fn n -> K.suffix n == ".qa") (K.files "{sdk}/profile") of
   names ->
     checked = List.map (fn name ->
@@ -74,7 +74,7 @@ profile sdk abi = case List.filter (fn n -> K.suffix n == ".qa") (K.files "{sdk}
         (sid, sha) = case Str.words (K.trimEnd (K.command (["{sdk}/tools/qos", "inspect", "{sdk}/profile/{name}", "--abi", abi] + main))) of
             [a, b] -> (a, b)
           | _ -> error "qos inspect: unexpected output for {name}";
-        (name, sha)) names;
+        (name, sid, sha)) names;
     (List.filter (fn n -> n != "main.qa") names, checked).
 
 opt parsed key = CLI.valueOr "" key parsed.
@@ -88,21 +88,27 @@ shipLinker root sdk lld =
 
 host root sdk abi name =
   info = K.need (J.parse (K.command ["{root}/qos/{name}", "--sdk-info"]));
-  _ = K.check "{name} lacks matching ABI/disk lock contract; rebuild the host"
-        (K.textOr "" "abi" info == abi and K.field "diskLockContract" info == J.JNum 1);
+  _ = K.check "{name} lacks matching ABI, disk lock or archive digest contract; rebuild the host"
+        (K.textOr "" "abi" info == abi and K.field "diskLockContract" info == J.JNum 1 and K.field "archiveDigestContract" info == J.JNum 1);
   _ = K.copy "{root}/qos/{name}" "{sdk}/runtime/{name}";
   (name, J.JStr (K.sha256 "{sdk}/runtime/{name}")).
 
-withProfile : unsafe String -> String -> String -> String -> J.Json -> J.Json .
-withProfile root sdk profileDir abi meta0 =
+withProfile : unsafe String -> String -> String -> String -> String -> String -> J.Json -> J.Json .
+withProfile root compiler fprisc sdk profileDir abi meta0 =
   _ = List.fold (fn u name -> K.copy "{profileDir}/{name}" "{sdk}/profile/{name}") Unit
         (List.filter (fn n -> K.suffix n == ".qa" and Str.contains "/" n == False) (K.files profileDir));
   (apps, files) = profile sdk abi;
+  digest = case List.filter (fn row -> (n, _, _) = row; n == "main.qa") files of
+      [(_, _, h)] -> h
+    | _ -> error "missing inspected Main digest";
+  plugins = List.fold (fn acc row -> (n, sid, h) = row;
+      if n == "main.qa" then acc else "{acc}{sid}:{h}|") "|" files;
+  _ = buildCommand root compiler fprisc "{sdk}/tools/qos" ["--cflag", "-DQOS_VERIFIED_MAIN=\"{digest}:{abi}\"", "--cflag", "-DQOS_VERIFIED_PLUGINS=\"{plugins}\""];
   hosts = List.map (fn name -> host root sdk abi name) ["qosp", "qosp-gl"];
   case meta0 of
-    J.JObj kvs -> J.JObj (kvs + [("profileFiles", J.JObj (List.map (fn p -> (n, h) = p; (n, J.JStr h)) files)),
+    J.JObj kvs -> J.JObj (kvs + [("profileFiles", J.JObj (List.map (fn p -> (n, _, h) = p; (n, J.JStr h)) files)),
                                  ("profileApps", J.JArr (List.map J.JStr apps)),
-                                 ("runtimeFiles", J.JObj hosts), ("diskLockContract", J.JNum 1)])
+                                 ("runtimeFiles", J.JObj hosts), ("diskLockContract", J.JNum 1), ("archiveDigestContract", J.JNum 1)])
   | other -> other.
 
 main : unsafe Unit .
@@ -127,7 +133,7 @@ main = parsed = K.need (CLI.parse options (args Unit));
   _ = List.fold (fn u folder -> modules "{root}/{folder}" "{sdk}/modules/{folder}") Unit ["core", "std", "programs/mods", ".fpr"];
   _ = modules "{root}/sdk" "{sdk}/modules";
   _ = List.fold (fn u name -> K.copy "{root}/tools/{name}" "{sdk}/tools/{name}") Unit ["desktop-adapter.fpr.in", "desktop-counter.fpr"];
-  _ = buildCommand root compiler fprisc "{sdk}/tools/qos";
+  _ = buildCommand root compiler fprisc "{sdk}/tools/qos" [];
   lld = opt parsed "lld";
   toolchain = if lld == "" then [] else shipLinker root sdk lld;
   _ = K.copy "{root}/qos/appside/link-qosplug.ld" "{sdk}/support/link-qosplug.ld";
@@ -148,7 +154,7 @@ main = parsed = K.need (CLI.parse options (args Unit));
       ("platformSha256", J.JStr (K.platformDigest platform))]
     + (if toolchain == [] then [] else [("toolchainFiles", J.JObj toolchain),
         ("toolchainLld", J.JStr (K.trimEnd (K.command ["{sdk}/toolchain/ld.lld", "--version"])))]));
-  meta = if profileDir == "" then meta0 else withProfile root sdk profileDir "{abi}.{codegen}" meta0;
+  meta = if profileDir == "" then meta0 else withProfile root compiler fprisc sdk profileDir "{abi}.{codegen}" meta0;
   _ = K.writeJson "{sdk}/sdk.json" meta;
   # Since 0.2.0 the package exports only `qos`; since 0.3.0 it is the native
   # command beside the private, hash-matched compiler.

@@ -14,6 +14,7 @@
 # Expected: "plugimports: plugmini under a second shell: 40+2=42;
 # plugneeds: the plugin needs ..., which this app does not export HOLDS"
 
+unsafe program.
 QL = use "../programs/mods/qlog#7022992c8e4a9fba".
 Plug = use "../programs/mods/plug".
 
@@ -28,9 +29,11 @@ main =
       Err e -> "plugimports: apps/plugneeds.qa not on the disk ({e})"
     | Ok needs -> (case QL.readLatest (QL.direct dsk) h "apps/plugtamp.qa" of
         Err e -> "plugimports: apps/plugtamp.qa not on the disk ({e})"
-      | Ok tamp -> run mini needs tamp)).
+      | Ok tamp -> (case QL.readLatest (QL.direct dsk) h "apps/plugimporttamp.qa" of
+          Err e -> "plugimports: missing import tamper fixture ({e})"
+        | Ok importTamp -> run mini needs tamp importTamp))).
 
-run mini needs tamp =
+run mini needs tamp importTamp =
   n0 = Mod.plugs 0;
   first = case Plug.attach mini of
       Err e -> "plugmini refused: {e}"
@@ -41,9 +44,10 @@ run mini needs tamp =
   third = case Plug.attach tamp of
       Ok u -> "plugtamp ATTACHED"
     | Err e -> e;
-  ok = has first "40+2=42" and has second "the plugin needs " and has second "which this app does not export" and has third "RELOC sha256 mismatch";
+  fourth = case Plug.attach importTamp of Ok u -> "altered imports attached" | Err e -> e;
+  ok = has fourth "RELOC sha256 mismatch" and has first "40+2=42" and has second "the plugin needs " and has second "which this app does not export" and has third "RELOC sha256 mismatch";
   verdict = case ok of True -> "HOLDS" | False -> "FAILED";
-  "plugimports: {first}; plugneeds: {second}; plugtamp: {third} {verdict}".
+  "plugimports: {first}; plugneeds: {second}; plugtamp: {third}; altered imports: {fourth} {verdict}".
 
 call n0 =
   (f, add) = Mod.findAt n0 "plugAdd";

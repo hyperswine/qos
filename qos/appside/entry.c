@@ -257,21 +257,12 @@ FPR_FN(fpr_g_Sys_x2eimages, h_sys_images, 1);
  * tampered relocation list must not move a single word, so the host's own
  * check after placement is too late to be the first one
  * (docs/2026-10-03-PREEXISTING-FAILURES.md). */
-void qosp_sha256(const unsigned char *msg, uint64_t n, unsigned char out[32]);
+void qosp_sha256_pair(const unsigned char *, uint64_t, const unsigned char *, uint64_t, unsigned char[32]);
 static int digest_is(qos_span_t want, const unsigned char *a, uw an, const unsigned char *b, uw bn) {
   if (!want.n) return 1; /* nothing claimed, nothing to refuse */
-  unsigned char d[32];
-  if (bn) {
-    unsigned char *both = (unsigned char *)buddy_alloc(an + bn);
-    if (!both) return 0;
-    __builtin_memcpy(both, a, an);
-    __builtin_memcpy(both + an, b, bn);
-    qosp_sha256(both, an + bn, d);
-    buddy_free(both);
-  } else {
-    qosp_sha256(a, an, d);
-  }
   if (want.n != 64) return 0;
+  unsigned char d[32];
+  qosp_sha256_pair(a, an, b, bn, d);
   static const char hx[] = "0123456789abcdef";
   for (int i = 0; i < 32; i++)
     if (want.p[2 * i] != hx[d[i] >> 4] || want.p[2 * i + 1] != hx[d[i] & 15]) return 0;
@@ -507,7 +498,7 @@ int64_t qos_app_entry(const qos_boot_t *boot, char *result_out,
   }
   h->current = 0;
   h->rq_head = h->rq_tail = 0;
-  h->idle = 0;
+  __atomic_store_n(&h->idle, 0, __ATOMIC_RELAXED);
   h->fuel_preempts = 0;
   h->rpos = 0;
   fpr_set_tp(h); /* per-thread hart register or host-borrowed TLS slot */

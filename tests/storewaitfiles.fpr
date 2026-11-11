@@ -1,0 +1,13 @@
+# Run the native store workload through the lifecycle-owned Files service.
+unsafe program.
+Lifecycle = use "../std/lifecycle".
+FS = use "../std/fs".
+Bench = use "storewaitnative".
+main =
+  me = myself 0;
+  ctx = case Lifecycle.start me of Ok c -> c | Err why -> error why;
+  fs = Lifecycle.files ctx;
+  qa = case FS.readLatest me fs "apps/CkSlow.qa" of Ok bytes -> bytes | Err why -> error why;
+  result = Bench.runBound me fs qa;
+  _ = case Lifecycle.stop me ctx of Ok _ -> Unit | Err why -> error why;
+  result.

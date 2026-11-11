@@ -5,7 +5,7 @@ E = use "editorpreferences".
 T = use "terminalpreferences".
 EP = use "ep#c66ad65e68dd97f5".
 ED = use "epdeadline".
-Endpoint = use "epservice#e8bce05a1ddf73db".
+Endpoint = use "leaseslots#efa81888e7fe1099".
 AC = use "std/actor#201a0e9bf98a5154".
 Storage = use "std/storageclient".
 SP = use "std/storageprotocol".
@@ -57,7 +57,7 @@ writeText ns storage until me path text = if strlen text > Wire.maxPayloadBytes 
 migrate until me ns (Editor old) (Editor proposed) recovery =
   path = E.recoveryPath (E.preferences proposed);
   if path == E.recoveryPath (E.preferences old) then Ok Unit else
-  if not (SP.prefix "qed1\n" recovery) then Err "changing recoveryPath requires the current Editor recovery snapshot" else
+  if not (SP.prefix "qed1\n" recovery or SP.prefix "qed2\n" recovery) then Err "changing recoveryPath requires the current Editor recovery snapshot" else
   id = Sys.nextId Unit;
   worker = spawn (copyRecovery until me id ns path recovery);
   result = EP.flat (AC.awaitReplyUntil until me worker id);
@@ -68,7 +68,7 @@ migrate until me ns old proposed recovery = Err "preference type mismatch".
 # Namespace forwards new opens from its own actor. Keep those envelopes off
 # the correlated namespace reply channel used by the migration worker.
 copyRecovery until owner id ns path recovery me =
-  result = case ED.openUntil until me ns path "replace" of Err why -> Err why
+  result = case ED.openUntil until me ns path "save" of Err why -> Err why
     | Ok endpoint -> case ED.withClose until me endpoint (ED.writeUntil until me endpoint (EP.IStr recovery)) of
         Err why -> Err "recovery migration: {why}"
       | Ok u -> Ok Unit;
@@ -86,4 +86,4 @@ save deadline me ns storage app text recovery = if storage == 0 then Ok Unit els
   | Ok (EP.IStr saved) -> if saved == text then Ok Unit else Err "preference store returned a different snapshot"
   | Ok other -> Err "invalid preference store response".
 mode storage = if storage == 0 then "session-only (no disk)" else "disk; shared defaults; existing sessions retain their admitted snapshot".
-schema = "type=PersistentPreferences version=1\nrecords=sys/preferences/v1/editor,sys/preferences/v1/terminal\nformat=qos-preferences-1 newline canonical typed snapshot\nread=current durable snapshot; missing record alone selects defaults\nwrite=system-only; next durable revision; optional newline and current qed1 recovery snapshot for Editor path migration\ncommit=one whole append-only settings record; never delete the previous snapshot\nconcurrency=serialized compare-and-write; stale sessions must restart to load newer defaults\nrecovery=write destination before selecting it; retain old path; failed updates may leave a destination copy\nerrors=malformed/unavailable records refuse startup and updates; timeout may have committed, inspect before retry\ncontrolMs={PC.controlMs}; each load or save transport bound\ndurability=storage acknowledgement; clean shutdown flush where supported; no power-loss guarantee\n".
+schema = "type=PersistentPreferences version=1\nrecords=sys/preferences/v1/editor,sys/preferences/v1/terminal\nformat=qos-preferences-1 newline canonical typed snapshot\nread=current durable snapshot; missing record alone selects defaults\nwrite=system-only; next durable revision; optional newline and current qed1 or qed2 recovery snapshot for Editor path migration\ncommit=one whole append-only settings record; never delete the previous snapshot\nconcurrency=serialized compare-and-write; stale sessions must restart to load newer defaults\nrecovery=write destination before selecting it; retain old path; failed updates may leave a destination copy\nerrors=malformed/unavailable records refuse startup and updates; timeout may have committed, inspect before retry\ncontrolMs={PC.controlMs}; each load or save transport bound\ndurability=storage acknowledgement; clean shutdown flush where supported; no power-loss guarantee\n".

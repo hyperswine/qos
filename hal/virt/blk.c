@@ -538,6 +538,13 @@ static int blk_probe(void) {
 /* one page transfer through the 3-descriptor chain; the caller holds the
  * lock.  On return the transfer is complete and the status good; every
  * other outcome fail-stops the caller (see the header). */
+#ifdef QOS_REPLAY_BLK_PROFILE
+void qos_replay_device_stamps(uw page, uint64_t submitted, uint64_t observed);
+#endif
+#ifdef QOS_POLL_TRIAL
+extern unsigned qos_trial_poll_us;
+void qos_trial_polls(uw page, uw count, uint64_t parked);
+#endif
 static void blk_rw(u64 page, int is_write) {
 
   breq.type = is_write ? BLK_T_OUT : BLK_T_IN;
@@ -559,10 +566,17 @@ static void blk_rw(u64 page, int is_write) {
   FENCE();
   uint64_t start = hal_mtime();
   blk_since = start;
+#ifdef QOS_REPLAY_BLK_PROFILE
+  uint64_t submitted = hal_mtime();
+#endif
 #ifdef QOS_BLK_TEST
   if (!blk_test_stall || --blk_test_stall)
 #endif
   wr(R_QNOTIFY, 0);
+#if defined(QOS_POLL_TRIAL) && defined(QOS_REPLAY_BLK_PROFILE)
+  uint64_t parked = 0;
+  uw empty = 0;
+#endif
   uint64_t parks = 0;
   for (;;) {
     FENCE();
@@ -574,8 +588,25 @@ static void blk_rw(u64 page, int is_write) {
       (void)blk_change(BLK_HELD, BLK_ABANDON);
       fpr_actor_fail("blk: request timed out (the device stalled); its buffers stay reserved until it completes or is reset");
     }
+#ifdef QOS_POLL_TRIAL
+#ifdef QOS_REPLAY_BLK_PROFILE
+    uint64_t park_start = hal_mtime();
+#endif
+    fpr_actor_sleep_us(is_write ? 200 : qos_trial_poll_us);
+#ifdef QOS_REPLAY_BLK_PROFILE
+    parked += hal_mtime() - park_start;
+    ++empty;
+#endif
+#else
     fpr_actor_sleep_us(200);
+#endif
   }
+#ifdef QOS_REPLAY_BLK_PROFILE
+  if (!is_write) qos_replay_device_stamps(page, submitted, hal_mtime());
+#endif
+#if defined(QOS_POLL_TRIAL) && defined(QOS_REPLAY_BLK_PROFILE)
+  if (!is_write) qos_trial_polls(page, empty, parked);
+#endif
   q.last_used = QUSED->idx;
   wr(R_INTACK, 3);
   FENCE();

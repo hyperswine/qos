@@ -233,7 +233,7 @@ V fpr_process_entry(void *heap_base, uw heap_size, fpr_grant_t (*grow)(uw want_b
   }
   h->current = 0;
   h->rq_head = h->rq_tail = 0;
-  h->idle = 0;
+  __atomic_store_n(&h->idle, 0, __ATOMIC_RELAXED);
   h->fuel_preempts = 0;
   h->rpos = 0;
   fpr_set_tp(h);

@@ -4,6 +4,7 @@
 Snapshots model interrupted writes and corrupt metadata deterministically.
 These are process/format tests, not physical power-cut or SD-card qualification.
 """
+import argparse
 import os
 import re
 import subprocess
@@ -70,6 +71,17 @@ def seeded(legacy=None):
     return img
 
 
+def limited_disk(free_pages):
+    limited = seeded()
+    head = D - free_pages
+    payload_pages = head - 7
+    payload = b'x' * (payload_pages * PG)
+    put(limited, 6, f'QREC {payload_pages} {len(payload)} filler h{hh(payload)}\n'.encode())
+    limited[7 * PG:head * PG] = payload
+    slots(limited, head)
+    return limited
+
+
 def valid_stable_slots(img, head):
     for p in (0, NP - 1):
         line = bytes(img[p * PG:(p + 1) * PG]).split(b'\n', 1)[0]
@@ -79,6 +91,11 @@ def valid_stable_slots(img, head):
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument('--bulk-only', action='store_true')
+    modes.add_argument('--replacement-only', action='store_true')
+    args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix='qos-durable-') as td:
         tmp = Path(td)
         ENV.setdefault('XDG_CACHE_HOME', str(tmp / 'cache'))
@@ -88,22 +105,142 @@ def main():
         fixture = (ROOT / 'tests/portabledurable.fpr').read_text()
         fixture = fixture.replace('../programs/mods/qlog', str(ROOT / 'programs/mods/qlog'))
         apps = {}
-        for action in (0, 1, 2, 3, 4, 5, 6):
+        for action in ((7, 8) if args.replacement_only else (5, 9, 10, 11, 12) if args.bulk_only else range(13)):
             src = tmp / f'probe-{action}.fpr'
             src.write_text(fixture.replace('action = 0.', f'action = {action}.'))
             apps[action] = tmp / f'probe-{action}.qa'
             run(['make', '-s', 'qos-app', f'PROG={src}', f'BUILD={tmp}/build-{action}',
                  f'QA_OUT={apps[action]}'])
 
+        if not args.bulk_only:
+            apps['last-generation'] = tmp / 'last-generation.qa'
+            run(['make', '-s', 'qos-app', 'PROG=tests/qloglastgeneration.fpr',
+                 f'BUILD={tmp}/build-last-generation', f'QA_OUT={apps["last-generation"]}'])
+
         def probe(name, img, action=0, env=None):
             disk = tmp / f'{name}.disk'
             disk.write_bytes(img)
             out = run([host, '--yes', apps[action]], cwd=tmp,
-                      env={'FPR_DISK': str(disk), 'FPR_HARTS': '2', **(env or {})}, timeout=40)
+                      env={'FPR_DISK': str(disk), 'FPR_HARTS': '2', 'FPR_PORT': '0', **(env or {})}, timeout=40)
             return out, bytearray(disk.read_bytes())
 
         def has(out, want):
             assert want in out, out
+
+        before = seeded()
+        if not args.replacement_only:
+            old = 'pair=old/no such file verify=Ok verified 3 records'
+            new = 'pair=whole/whole verify=Ok verified 4 records'
+            trace = {'QOS_BLK_TEST_TRACE_FLUSH': '1'}
+            control, _ = probe('bulk-startup-control', before, 5, trace)
+            def flushes(log):
+                return re.findall(r'\[blk-test\] flush (\d+)', log)
+            assert flushes(control) == ['1'], control
+            for count, action in [(1, 11), (8, 12)]:
+                out, _ = probe(f'bulk-count-{count}', before, action, trace)
+                has(out, 'durable: Ok Ok')
+                assert flushes(out) == ['1', '2', '3'], out
+            out, batch = probe('bulk-append', before, 9, trace)
+            assert flushes(out) == ['1', '2', '3'], out
+            has(out, 'durable: Ok Ok')
+            # This batch needs one header and three payload pages. Fill the
+            # log with a valid record to leave exactly four or three pages.
+            for free_pages in (4, 3):
+                limited = limited_disk(free_pages)
+                out, result = probe(f'bulk-space-{free_pages}', limited, 9, trace)
+                if free_pages == 4:
+                    has(out, 'durable: Ok Ok')
+                    assert flushes(out) == ['1', '2', '3'], out
+                    expected = 'pair=whole/whole verify=Ok verified 5 records'
+                else:
+                    has(out, 'Err data partition full')
+                    assert flushes(out) == ['1'] and result == limited, out
+                    expected = 'pair=old/no such file verify=Ok verified 4 records'
+                reopened, _ = probe(f'bulk-space-reopen-{free_pages}', result, 10)
+                has(reopened, expected)
+            for pages in range(5):
+                cut = bytearray(before)
+                end = (6 + pages) * PG
+                cut[6 * PG:end] = batch[6 * PG:end]
+                out, _ = probe(f'bulk-prefix-{pages}', cut, 10)
+                has(out, old)
+            torn = bytearray(batch)
+            torn[0] ^= 1
+            for name, image, expected in [('torn', torn, old), ('ack', batch, new)]:
+                out, _ = probe(f'bulk-{name}', image, 10)
+                has(out, expected)
+            for ordinal, expected in [(2, old), (3, new)]:
+                out, failed = probe(f'bulk-failure-{ordinal}', before, 9,
+                                    {'QOS_BLK_TEST_FAIL_FLUSH_AT': str(ordinal)})
+                has(out, 'Err dead actor')
+                out, _ = probe(f'bulk-reopen-{ordinal}', failed, 10)
+                has(out, expected)
+            near_limit = seeded()
+            slots(near_limit, 6, 999999998)
+            out, final_batch = probe('bulk-last-generation', near_limit, 9)
+            has(out, 'durable: Ok Ok')
+            out, unchanged = probe('bulk-exhausted-retry', final_batch, 9)
+            has(out, 'Err superblock generation exhausted')
+            assert unchanged == final_batch
+            out, _ = probe('bulk-exhausted-reopen', unchanged, 10)
+            has(out, new)
+            print('Portable durable: two-key bulk publication and flush failures: PASS', flush=True)
+            if args.bulk_only:
+                return
+        for free_pages in (5, 4):
+            limited = limited_disk(free_pages)
+            out, result = probe(f'replace-space-{free_pages}', limited, 7,
+                                {'QOS_BLK_TEST_TRACE_FLUSH': '1'})
+            barriers = re.findall(r'\[blk-test\] flush (\d+)', out)
+            if free_pages == 5:
+                has(out, f'Ok replaced head={D}')
+                assert barriers == ['1', '2', '3'], out
+                expected = 'replay=new verify=Ok verified 6 records'
+            else:
+                has(out, 'refused data partition full')
+                assert barriers == ['1'] and result == limited, out
+                expected = 'replay=old verify=Ok verified 4 records'
+            reopened, _ = probe(f'replace-space-reopen-{free_pages}', result, 8)
+            has(reopened, expected)
+        out, published = probe('replace', before, 7)
+        has(out, 'Ok replaced head=11')
+        # Actual tombstone, header and three payload pages from the writer.
+        # Leave both old metadata slots intact while recovering each prefix.
+        for pages in range(6):
+            cut = bytearray(before)
+            cut[6 * PG:(6 + pages) * PG] = published[6 * PG:(6 + pages) * PG]
+            out, _ = probe(f'replace-data-{pages}', cut, 8)
+            has(out, 'replay=old verify=Ok verified 3 records')
+        torn = bytearray(published)
+        torn[0] ^= 1
+        out, _ = probe('replace-torn-publication', torn, 8)
+        has(out, 'replay=old verify=Ok verified 3 records')
+        out, _ = probe('replace-acknowledged', published, 8)
+        has(out, 'replay=new verify=Ok verified 5 records')
+        print('Portable durable: replacement recovery at each data page, torn publication and acknowledged reopen: PASS', flush=True)
+        # ensure() probes flush support first. The next two flushes cover
+        # replacement data and publication of the alternate superblock.
+        for ordinal, value, records in [(2, 'old', 3), (3, 'new', 5)]:
+            out, interrupted = probe(f'replace-flush-{ordinal}', before, 7,
+                                     {'QOS_BLK_TEST_FAIL_FLUSH_AT': str(ordinal)})
+            has(out, 'Err dead actor')
+            assert 'Ok replaced' not in out, out
+            out, _ = probe(f'replace-flush-{ordinal}-reboot', interrupted, 8)
+            has(out, f'replay={value} verify=Ok verified {records} records')
+        print('Portable durable: both replacement flush failures ended without acknowledgement; reopened values verified: PASS', flush=True)
+        near_limit = seeded()
+        slots(near_limit, 6, 999999998)
+        out, last = probe('publish-last-generation', near_limit, 'last-generation')
+        has(out, 'qloglastgeneration: HOLDS')
+        assert last[:PG] == page(seal(9, 1000000000))
+        assert last[PG:6 * PG] == near_limit[PG:6 * PG]
+        assert last[9 * PG:] == near_limit[9 * PG:]
+        out, unchanged = probe('reopen-last-generation', last, 'last-generation')
+        has(out, 'qloglastgeneration: HOLDS')
+        assert unchanged == last, 'rejected writes modified the exhausted image'
+        print('Portable durable: final conditional replacement and read-only exhausted reopen: PASS', flush=True)
+        if args.replacement_only:
+            return
 
         out, fresh = probe('fresh', bytes(PG * NP))
         has(out, 'Ok head=1 v=3 w=0 c=1')

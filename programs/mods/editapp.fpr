@@ -60,10 +60,10 @@ persistedInit (PS.Editor (Prefs.Snapshot rev p)) = initWith rev p.
 persistedInit other = error "wrong Editor preference type".
 initWith rev p =
   sessionPath = Prefs.recoveryPath p;
-  ({preferences = p, preferenceRevision = rev, preferenceAdapter = 0, preferencePersistence = PS.mode 0, policyNamespace = 0, runAdmission = RunPolicy.Unadmitted, buf = E.empty, path = "", version = 0, savedVersion = 0, nextStamp = 1, recorded = "", idle = 0,
+  ({preferences = p, preferenceRevision = rev, preferenceAdapter = 0, preferencePersistence = PS.mode 0, policyNamespace = 0, runAdmission = RunPolicy.Unadmitted, buf = E.empty, baseline = Nil, document = 0, path = "", version = 0, savedVersion = 0, nextStamp = 1, recorded = "", idle = 0,
          top = 0, left = 0, undo = Nil, redo = Nil, lastKind = State.NoEdit, clip = "",
          mode = State.Editing, query = "", files = Nil, listed = False, pick = 0, findText = "", msg = "", warn = False,
-         out = Nil, outOpen = False, confirm = State.NoConfirmation, pending = [{token = 1, kind = State.RestoreSession, version = 0, path = sessionPath, wrapped = False, grant = FA.NoGrant}],
+         out = Nil, outOpen = False, confirm = State.NoConfirmation, pending = [{token = 1, kind = State.RestoreSession, document = 0, submitted = "", version = 0, path = sessionPath, wrapped = False, grant = FA.NoGrant}],
          diags = Nil, checking = False, checker = True, checkedVersion = 0 - 1,
          outBack = 0, token = 1, building = False, running = False, proc = 0, partial = "", appRun = False, progView = Nil, progFocus = False, busy = False, phase = AW.Ready, w = 960, h = 530, focused = True,
          down = False, capture = 0 - 1, wheel = 0, scroll = 0, dragY = 0, dragScroll = 0, dragged = False},
@@ -223,7 +223,8 @@ issue kind version path job m = issueAs False kind version path job m.
 issueAs wrapped kind version path job m = issueGranted FA.NoGrant wrapped kind version path job m.
 issueGranted grant wrapped kind version path job m =
   t = m.token + 1;
-  ({m | token = t, pending = {token = t, kind = kind, version = version, path = path, wrapped = wrapped, grant = grant} :: m.pending}, [AW.Fetch t job]).
+  submitted = case job of AW.SaveFile _ text -> text | AW.SaveFileIfUnchanged _ _ text -> text | _ -> "";
+  ({m | token = t, pending = {token = t, document = m.document, submitted = submitted, kind = kind, version = version, path = path, wrapped = wrapped, grant = grant} :: m.pending}, [AW.Fetch t job]).
 openPicker m = issue State.ListDocuments 0 "" AW.ListRoot {m | mode = State.OpenPrompt, query = "", pick = 0, listed = False, confirm = State.NoConfirmation}.
 pickList m = filterS (fn u -> matches m.query u) m.files.
 matches q u = strlen q == 0 or strIndexOf (lower q) (lower u) >= 0.
@@ -238,13 +239,15 @@ openPath path m = if dirty m and m.confirm != State.DiscardForOpen path then
   else issue State.OpenDocument 0 path (AW.ReadPath path) {m | mode = State.Editing, confirm = State.NoConfirmation, msg = "Opening {path}", warn = False}.
 newFile m = if dirty m and m.confirm != State.DiscardForNew then {m | confirm = State.DiscardForNew, msg = "Unsaved changes in {name m}: ^N again to discard them, ^S to save", warn = True}
   else fresh "" E.empty {m | msg = "New file -- ^S saves it", warn = False}.
-fresh path b m = follow {m | buf = b, path = path, version = m.nextStamp, savedVersion = m.nextStamp, nextStamp = m.nextStamp + 1,
+fresh path b m = follow {m | buf = b, baseline = Nil, document = m.nextStamp, path = path, version = m.nextStamp, savedVersion = m.nextStamp, nextStamp = m.nextStamp + 1,
   undo = Nil, redo = Nil, top = 0, left = 0, lastKind = State.NoEdit, confirm = State.NoConfirmation, mode = State.Editing, diags = Nil}.
 save m = if m.path == "" then (prompt State.SaveAsPrompt "/home/" m, Nil) else
-  issue State.SaveDocument m.version m.path (AW.SaveFile m.path (E.toText m.buf)) {m | msg = "Saving {m.path}", warn = False}.
+  text = E.toText m.buf;
+  job = case m.baseline of Nil -> AW.SaveFile m.path text | previous :: _ -> AW.SaveFileIfUnchanged m.path previous text;
+  issue State.SaveDocument m.version m.path job {m | msg = "Saving {m.path}", warn = False}.
 saveAs path m =
   if not (E.startsWith "/home/" path or E.startsWith "/tmp/" path) or E.endsWith "/" path then ({m | msg = "Files live under /home/ and /tmp/", warn = True}, Nil)
-  else save {m | path = path, mode = State.Editing}.
+  else save {m | path = path, baseline = (if path == m.path then m.baseline else Nil), mode = State.Editing}.
 name m = if m.path == "" then "untitled" else baseName m.path.
 
 # ---- the compiler ---------------------------------------------------------------
@@ -332,7 +335,7 @@ settle p result m = case p.kind of
 # the session record: "qed1", the path, 1 when the text that follows is
 # unsaved work, then that text
 restore result m = case result of
-    Ok (AW.Text t) -> (case E.splitLines t of
+    Ok (AW.Text t) -> if E.startsWith "qed2\n" t then restoreGuarded (substr t 5 (strlen t - 5)) m else (case E.splitLines t of
         "qed1" :: path :: flag :: rest -> if flag == "1" then
             _ = print "editor: recovered {(if path == "" then "untitled" else path)}";
             ({(fresh path (E.fromText (E.joinLines rest)) m) | savedVersion = 0, msg = "Recovered your unsaved changes to {(if path == "" then "untitled" else path)}", warn = False}, Nil)
@@ -340,10 +343,25 @@ restore result m = case result of
           else (welcome m, Nil)
       | other -> (welcome m, Nil))
   | other -> (welcome m, Nil).
+# Byte counts let paths, original bytes and edits contain newlines.
+restoreGuarded frame m =
+  stop = strIndexOf "\n" frame;
+  header = substr frame 0 stop;
+  separator = strIndexOf " " header;
+  pathSize = parseInt (substr header 0 separator);
+  baseSize = parseInt (substr header (separator + 1) (stop - separator - 1));
+  start = stop + 1;
+  available = strlen frame - start;
+  if stop < 0 or separator < 0 or header != "{pathSize} {baseSize}" or pathSize < 0 or pathSize > available or baseSize < 0 or baseSize > available - pathSize then
+    ({m | msg = "Could not restore the editor recovery record", warn = True}, Nil)
+  else path = substr frame start pathSize;
+    original = substr frame (start + pathSize) baseSize;
+    text = substr frame (start + pathSize + baseSize) (available - pathSize - baseSize);
+    ({(fresh path (E.fromText text) m) | baseline = [original], savedVersion = 0, msg = "Recovered your unsaved changes to {path}", warn = False}, Nil).
 welcome m = {m | msg = "^O open   ^N new   ^S save   ^R run", warn = False}.
 opened p result m = case result of
     Ok (AW.Text t) -> _ = print "editor: opened {p.path}";
-      ({(fresh p.path (E.fromText t) m) | msg = "Opened {p.path} ({E.count (E.splitLines t)} lines)", recorded = ""}, Nil)
+      ({(fresh p.path (E.fromText t) m) | baseline = [t], msg = "Opened {p.path} ({E.count (E.splitLines t)} lines)", recorded = ""}, Nil)
   | Err why -> if strIndexOf "no such file" why >= 0 then ({(fresh p.path E.empty m) | savedVersion = 0, msg = "New file {p.path} -- ^S creates it", recorded = ""}, Nil)
       else ({m | msg = "Could not open {p.path}: {why}", warn = True}, Nil)
   | other -> ({m | msg = "{p.path} is not text", warn = True}, Nil).
@@ -354,7 +372,7 @@ listed result m = case result of
 userFile u = (E.startsWith "/home/" u or E.startsWith "/tmp/" u) and strIndexOf "/." u < 0 and not (E.endsWith ".~save" u).
 saved p result m = case result of
     Ok (AW.Done note) -> _ = print "editor: saved {p.path}";
-      ({m | savedVersion = (if p.path == m.path then p.version else m.savedVersion), msg = "Saved {p.path}", warn = False, recorded = ""}, Nil)
+      ({m | baseline = (if p.document == m.document and p.path == m.path then [p.submitted] else m.baseline), savedVersion = (if p.document == m.document and p.path == m.path then p.version else m.savedVersion), msg = note, warn = False, recorded = ""}, Nil)
   | Err why -> ({m | msg = why, warn = True}, Nil)
   | other -> ({m | msg = "Save answered oddly", warn = True}, Nil).
 built p result m = case result of
@@ -545,7 +563,7 @@ keepSession now m =
   if (now or m.idle >= 5) and key != m.recorded and (now or not (pendingKind State.KeepSession m.pending)) then
     record = recoveryRecord m;
     path = Prefs.recoveryPath m.preferences;
-    issue State.KeepSession m.version path (AW.WritePath path record) {m | recorded = key}
+    issue State.KeepSession m.version path (AW.SaveRecovery path record) {m | recorded = key}
   else (m, Nil).
 pendingKind k Nil = False.
 pendingKind k (p :: rest) = p.kind == k or pendingKind k rest.
@@ -866,4 +884,7 @@ preferencesStep me ctx m adapter = if m.preferenceAdapter == 0 then controlStep 
           | Ok u -> _ = AC.reply (from, id) (Ok (preferenceText fresh));
               (True, (AS.advance ctx ctx.sequence, fresh, adapter)).
 
-recoveryRecord m = "qed1\n{m.path}\n{(if dirty m then "1\n" else "0\n")}{(if dirty m then E.toText m.buf else "")}".
+recoveryRecord m = case m.baseline of
+    original :: _ -> if dirty m then "qed2\n{strlen m.path} {strlen original}\n{m.path}{original}{E.toText m.buf}" else legacyRecord m
+  | Nil -> legacyRecord m.
+legacyRecord m = "qed1\n{m.path}\n{(if dirty m then "1\n" else "0\n")}{(if dirty m then E.toText m.buf else "")}".

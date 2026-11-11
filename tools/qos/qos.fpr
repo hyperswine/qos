@@ -155,7 +155,7 @@ newDisk path size = case H.exists path of
 inspect archive abi main = B.native Unit |>? (fn nat -> case nat of (arch, _, _, _) ->
   C.readFile archive |>? (fn raw ->
   Q.read raw { abi = abi, architecture = arch, session = C.session, api = C.api, desktop = (case main of True -> False | False -> True), bundled = True } |>? (fn app ->
-  _ = C.say "{app.id} {app.sha256}";
+  _ = C.say "{app.id} {H.sha256 app.raw}";
   Ok Unit))).
 
 # ---- the command line --------------------------------------------------------------------

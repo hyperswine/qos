@@ -153,7 +153,7 @@ plainChars t i | charAt t i < 32 or charAt t i == 34 or charAt t i == 92 = False
 plainChars t i = plainChars t (i + 1).
 
 # want: { abi, architecture, session, api, desktop : Bool, bundled : Bool }
-# answers { raw, manifest, id, version, sha256 }
+# answers { raw, manifest, id, version }
 read raw want = case sections raw of
     Err e -> Err e
   | Ok parts -> (case T.parse (part parts "MANIFEST") of
@@ -165,7 +165,7 @@ read raw want = case sections raw of
         | Ok f -> (case imageChecks parts f want of
             Err e -> Err e
           | Ok _ -> Ok { raw = raw, manifest = man, id = O.withDefault "" (text man "id"),
-                         version = O.withDefault "" (text man "version"), sha256 = H.sha256 raw })))).
+                         version = O.withDefault "" (text man "version") })))).
 
 checks man want =
   r1 = require (case text man "id" of O.Some i -> validId i | O.None -> False) "invalid archive manifest ID";
@@ -252,7 +252,7 @@ imageChecks parts f want =
               | Ok sp -> (case spansApart (L.sortWith (fn a b -> case a of (x, _) -> (case b of (y, _) -> E.intOrder x y)) sp) offsets of
                   Err e -> Err e
                 | Ok _ -> (case want.desktop of
-                    True -> checkEntry image (num f "entry") (num f "execsz") offsets
+                    True -> checkEntry image (num f "entry") (num f "execsz") offsets sp
                   | False -> Ok Unit))))))).
 
 relocOffsets rel i acc | i >= strlen rel = L.reverse acc.
@@ -311,9 +311,9 @@ moduleString image at = case words image at 2 of
     | False -> Err "invalid module string")
   | Ok _ -> Err "invalid module string".
 
-checkEntry image entry executable relocs = case words image entry 3 of
+checkEntry image entry executable relocs imports = case words image entry 3 of
     Err e -> Err e
-  | Ok (magic :: schema :: rootAt :: Nil) -> (case magic == 1179669069 and schema == 1 of
+  | Ok (magic :: schema :: rootAt :: Nil) -> (case magic == 1179669069 and (schema == 1 or schema == 2) of
       False -> Err "unsupported module table schema"
     | True -> (case L.member (entry + 16) relocs of
         False -> Err "unrelocated module root"
@@ -321,8 +321,24 @@ checkEntry image entry executable relocs = case words image entry 3 of
           Err e -> Err e
         | Ok root -> (case root == "" of
             True -> Err "missing root module identity"
-          | False -> rowsGo image (entry + 24) root executable relocs 0))))
+          | False -> moduleRows image entry schema relocs imports |>? (fn at -> rowsGo image at root executable relocs 0)))))
   | Ok _ -> Err "unsupported module table schema".
+moduleRows image entry 1 relocs imports = Ok (entry + 24).
+moduleRows image entry schema relocs imports = words image (entry + 24) 2 |>? (fn header -> case header of
+    layout :: prefix :: Nil ->
+      require (not (L.any (fn at -> at == entry or at == entry + 8 or at == entry + 32) relocs)
+        and not (importTouches imports entry (entry + 40))) "fixup changes module header" |>? (fn checked ->
+      require (prefix == 8 or prefix == 16) "invalid managed prefix" |>? (fn u ->
+      case L.member (entry + 24) relocs of
+        False -> require (layout == 0) "unrelocated module layout" |>? (fn v -> Ok (entry + 40))
+      | True -> words image layout 1 |>? (fn sizes -> case sizes of
+          count :: Nil -> require (count <= (strlen image - layout - 8) / 24) "module layout outside IMAGE" |>? (fn v ->
+            end = layout + 8 + count * 24;
+            require (not (L.any (fn at -> layout <= at and at < end) relocs) and not (importTouches imports layout end))
+              "fixup changes module layout" |>? (fn safe -> Ok (entry + 40)))
+        | _ -> Err "invalid module layout")))
+  | _ -> Err "invalid module table header").
+importTouches imports start end = L.any (fn span -> case span of (a, b) -> a < end and start < b) imports.
 rowsGo image at root executable relocs found = case words image at 1 of
     Err e -> Err e
   | Ok (0 :: Nil) -> (case found == 1 of True -> Ok Unit | False -> Err "desktop archive needs exactly one root appMain export")

@@ -1,0 +1,67 @@
+# Deadline-aware endpoint owner. Six binary decisions select one of 64 slots.
+# A fresh handle carries its generation in its high bits.
+unsafe module.
+EP = use "ep#c66ad65e68dd97f5".
+AC = use "std/actor#201a0e9bf98a5154".
+Sys.alive : Int -> Bool .
+Slots = Type (Empty | Branch Slots Slots | Occupied Int String Int Int).
+
+lookup slots index width = case slots of
+    Branch left right -> if index < width then lookup left index (width / 2)
+      else lookup right (index - width) (width / 2)
+  | leaf -> leaf.
+put slots index width value = if width == 0 then value else case slots of
+    Branch left right -> putBranch left right index width value
+  | other -> putBranch Empty Empty index width value.
+putBranch left right index width value = if index < width then
+  Branch (put left index (width / 2) value) right
+  else Branch left (put right (index - width) (width / 2) value).
+
+expired now (Occupied h url client until) = now >= until or not (Sys.alive client).
+expired now _ = False.
+sweep slots i now = if expired now (lookup slots i 32) then put slots i 32 Empty else slots.
+freeHandle slots h now remaining = if remaining == 0 then 0 else
+  case lookup slots (h % 64) 32 of
+    Empty -> h
+  | entry -> if expired now entry then h else freeHandle slots (h + 1) now (remaining - 1).
+access slots h client now = case lookup slots (h % 64) 32 of
+    Occupied id url owner until -> if h == id and client == owner and now < until and Sys.alive owner then url else ""
+  | other -> "".
+close slots h client = case lookup slots (h % 64) 32 of
+    Occupied id url owner until -> if h == id and client == owner then put slots (h % 64) 32 Empty else slots
+  | other -> slots.
+
+simpleUntil rd wr me = _ = Sys.loop (Empty, 1, 0) (step rd wr me); Unit.
+step rd wr me state =
+  (slots, next, cursor) = state;
+  msg = receive me;
+  live = sweep slots cursor (AC.nowUs Unit);
+  changed = case msg of
+    (client, id, command) -> dispatch rd wr me live next (client, id) client command
+  | stale -> (live, next);
+  _ = drop msg;
+  (after, serial) = changed;
+  (True, (after, serial, (cursor + 1) % 64)).
+dispatch rd wr me slots next ret client command = case command of
+    EP.Open url mode ->
+      now = AC.nowUs Unit;
+      h = if strlen url > 2048 then 0 else freeHandle slots next now 64;
+      (case h == 0 of
+        True -> _ = AC.reply ret (EP.Refused "endpoint: handle budget exhausted"); (slots, next)
+      | False ->
+          after = put slots (h % 64) 32 (Occupied h (strcat url "") client (now + 60000000));
+          _ = AC.reply ret (EP.Opened h);
+          (after, h + 1))
+  | EP.Timed until q -> if AC.nowUs Unit >= until then
+      _ = AC.reply ret (Err "endpoint: deadline exceeded before execution"); (slots, next)
+      else operate rd wr me slots next ret client until q
+  | other -> operate rd wr me slots next ret client (AC.nowUs Unit + 10000000) other.
+operate rd wr me slots next ret client until command = case command of
+    EP.Close h -> _ = AC.reply ret (Ok 0); (close slots h client, next)
+  | EP.Read h n -> url = access slots h client (AC.nowUs Unit);
+      _ = AC.reply ret (if url == "" then Err "no such handle" else rd until me client url);
+      (slots, next)
+  | EP.Write h v -> url = access slots h client (AC.nowUs Unit);
+      _ = AC.reply ret (if url == "" then Err "no such handle" else wr until me client url v);
+      (slots, next)
+  | other -> _ = AC.reply ret (Err "endpoint: invalid timed operation"); (slots, next).

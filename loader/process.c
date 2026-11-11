@@ -111,8 +111,8 @@ typedef struct {
   int placing;        /* the launcher is still inside placement: the entry
                        * (image code) is running and the record is being
                        * read, so the block may not go home yet */
-  uw idlen;
-  char id[];          /* the app id (Sys.bindApp) */
+  uw store_url_len;
+  char store_url[];   /* immutable app-scoped key, built at placement */
 } proc_image_t;
 static fpr_plane_actors_t g_kernel_actors; /* the kernel's two plane tables, exported once */
 static fpr_plane_memory_t g_kernel_memory;
@@ -153,9 +153,10 @@ extern V fpr_g_Sys_x2enextId_call1(V);
 /* Optional native benchmark counters, indexed by append/replay. The test
  * kernel reads them after the measured process exits. */
 #ifdef QOS_STORE_WAIT_STATS
-static uw store_wait_stats[2][3];
+static uw store_wait_stats[2][3], store_parked_calls[2];
 static V store_wait_stat(V index) {
   uw i = (uw)UNTAG(index);
+  if (i == 6 || i == 7) return TAG(__atomic_load_n(&store_parked_calls[i - 6], __ATOMIC_RELAXED));
   if (i >= 6) fpr_cpanic("invalid store wait counter");
   return TAG(__atomic_load_n(&store_wait_stats[i / 3][i % 3], __ATOMIC_RELAXED));
 }
@@ -167,34 +168,27 @@ void qos_trace_request(V caller, V owner, V id);
 void qos_trace_received(V owner, V caller, V id, uint64_t received);
 #endif
 
+/* Older release runtimes retain the deadline-bounded poll fallback. */
+extern int fpr_wait_from_until_c(V me, V from, uint64_t deadline_ticks) __attribute__((weak));
+
 sw qos_store_call(uw tag, const char *pay, uw plen, char *out, uw outcap) {
-  if (!g_store_actor) return -2; /* no disk */
+  V owner = g_store_actor;
+  if (!owner) return -2; /* no disk */
   if (tag != 2 && tag != 3) return -3;
   if (plen > QOS_KV_PAYLOAD_MAX)
     return store_refused("storage: payload too large", out, outcap);
   /* apps/<id>/<id>.kv, where <id> is the CALLING process's own app id */
   fpr_lock(&g_img_lock);
   proc_image_t *pi = image_of_pid(fpr_current_pid());
-  /* placement refused any id over QOS_APP_ID_MAX, so the url always fits
-   * whole: it used to be cut at 100/120 bytes, and two long ids sharing a
-   * prefix shared a store */
-  char url[5 + QOS_APP_ID_MAX + 1 + QOS_APP_ID_MAX + 3 + 1];
-  uw n = 0;
-  int toolong = 0;
-  if (pi && pi->idlen > QOS_APP_ID_MAX) toolong = 1;
-  else if (pi) {
-    const char *pre = "apps/";
-    for (const char *q = pre; *q; q++) url[n++] = *q;
-    for (uw i = 0; i < pi->idlen; i++) url[n++] = pi->id[i];
-    url[n++] = '/';
-    for (uw i = 0; i < pi->idlen; i++) url[n++] = pi->id[i];
-    const char *suf = ".kv";
-    for (const char *q = suf; *q; q++) url[n++] = *q;
+  char url[9 + 2 * QOS_APP_ID_MAX];
+  uw n = pi ? pi->store_url_len : 0;
+  if (n > sizeof url) {
+    fpr_unlock(&g_img_lock);
+    return store_refused("storage: invalid app storage path", out, outcap);
   }
+  if (pi) __builtin_memcpy(url, pi->store_url, n);
   fpr_unlock(&g_img_lock);
-  if (!pi) return -2; /* not a loaded process: no app bound */
-  if (toolong) return store_refused("storage: app id longer than 64 bytes", out, outcap);
-
+  if (!pi) return -2;
   V urlv = (V)fpr_mkstr((const uint8_t *)url, n);
   V payv = (V)fpr_mkstr((const uint8_t *)pay, plen);
   /* the calling PROCESS ACB is the replyTo -- kv IO is an ordinary actor
@@ -204,13 +198,13 @@ sw qos_store_call(uw tag, const char *pay, uw plen, char *out, uw outcap) {
   uint64_t until = hal_mtime() / 10 + 10000000; /* same default as storage.fpr */
   V msg = mkrpc((V)me, id, TAG((sw)until), TAG((sw)tag), urlv, payv);
 #ifdef QOS_STORE_REPLY_TRACE
-  qos_trace_request((V)me, g_store_actor, id);
+  qos_trace_request((V)me, owner, id);
 #endif
-  if (!fpr_sent(fpr_send_as((uw)me, g_store_actor, msg)))
+  if (!fpr_sent(fpr_send_as((uw)me, owner, msg)))
     return store_refused("storage: the storage actor refused the request", out, outcap);
 #if QOS_STORE_WAIT_STATS
   uw *stats = store_wait_stats[tag - 2];
-  int first_empty = 1;
+  int first_empty = 1, counted_park = 0;
   __atomic_fetch_add(&stats[0], 1, __ATOMIC_RELAXED);
 #endif
   for (;;) {
@@ -218,11 +212,21 @@ sw qos_store_call(uw tag, const char *pay, uw plen, char *out, uw outcap) {
     if (now >= until)
       return store_refused(tag == 2 ? "storage service: deadline exceeded (outcome unknown)" :
                            "storage service: deadline exceeded", out, outcap);
-    V polled = fpr_receive_from_now_c((V)me, g_store_actor);
+    V polled = fpr_receive_from_now_c((V)me, owner);
     if (((hdr_t *)polled)->var != 0) {
       str_t *why = (str_t *)FPR_FLD(polled, 0);
       if (why->len == 5 && why->bytes[0] == 'e' && why->bytes[1] == 'm' &&
           why->bytes[2] == 'p' && why->bytes[3] == 't' && why->bytes[4] == 'y') {
+        int waited = fpr_wait_from_until_c ? fpr_wait_from_until_c((V)me, owner, until * 10) : 0;
+        if (waited) {
+#if QOS_STORE_WAIT_STATS
+          if (waited == 2 && !counted_park) {
+            __atomic_fetch_add(&store_parked_calls[tag - 2], 1, __ATOMIC_RELAXED);
+            counted_park = 1;
+          }
+#endif
+          continue;
+        }
 #if QOS_STORE_WAIT_STATS
         if (first_empty) {
           __atomic_fetch_add(&stats[1], 1, __ATOMIC_RELAXED);
@@ -247,7 +251,7 @@ sw qos_store_call(uw tag, const char *pay, uw plen, char *out, uw outcap) {
     }
     if (FPR_FLD(message, 0) != id) { fpr_arc_decref(message); continue; }
 #ifdef QOS_STORE_REPLY_TRACE
-    qos_trace_received(g_store_actor, (V)me, id, received);
+    qos_trace_received(owner, (V)me, id, received);
 #endif
     V r = FPR_FLD(message, 1);
     if (ISINT(r) || TID(r) != T_RESULT || ISINT(FPR_FLD(r, 0)) || TID(FPR_FLD(r, 0)) != T_STR) {
@@ -411,7 +415,14 @@ static V g_sys_place_image_at(V qastr, V extv, V numsv, V capsv, V pidv, V diges
     const char *bad = qos_app_id_invalid(g_app_id->bytes, idlen);
     if (bad) return refuse(bad);
   }
-  uw head = (sizeof(proc_image_t) + idlen + 15) & ~(uw)15;
+  char store_url[9 + 2 * QOS_APP_ID_MAX];
+  uw store_url_len = 9 + 2 * idlen;
+  __builtin_memcpy(store_url, "apps/", 5);
+  if (idlen) __builtin_memcpy(store_url + 5, g_app_id->bytes, idlen);
+  store_url[5 + idlen] = '/';
+  if (idlen) __builtin_memcpy(store_url + 6 + idlen, store_url + 5, idlen);
+  __builtin_memcpy(store_url + 6 + 2 * idlen, ".kv", 3);
+  uw head = (sizeof(proc_image_t) + store_url_len + 15) & ~(uw)15;
   if (head > ~(uw)0 - 4096 || memsz > ~(uw)0 - head - 4096)
     return refuse("native image memory size out of range");
 #ifdef QOS_PROCESS_TEST
@@ -445,8 +456,8 @@ static V g_sys_place_image_at(V qastr, V extv, V numsv, V capsv, V pidv, V diges
   pi->block = blk;
   pi->ending = 0;
   pi->placing = 1; /* until the launcher is out of the entry and the record */
-  pi->idlen = idlen;
-  for (uw i = 0; i < idlen; i++) pi->id[i] = (char)g_app_id->bytes[i];
+  pi->store_url_len = store_url_len;
+  __builtin_memcpy(pi->store_url, store_url, store_url_len);
   pi->sb.actors = &g_kernel_actors;
   pi->sb.memory = &g_kernel_memory;
   pi->sb.refused = 0;

@@ -63,14 +63,16 @@ void qosp_sha256_pair(const unsigned char *a, uint64_t an,
                 0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19}, 0, 0, {0}};
   sha_feed(&c, a, an);
   sha_feed(&c, b, bn);
-  unsigned char tail[128] = {0};
-  __builtin_memcpy(tail, c.block, c.used);
-  tail[c.used] = 0x80;
-  uint64_t tl = (c.used + 9 <= 64) ? 64 : 128;
+  c.block[c.used++] = 0x80;
+  if (c.used > 56) {
+    __builtin_memset(c.block + c.used, 0, 64 - c.used);
+    sha_block(c.h, c.block);
+    c.used = 0;
+  }
+  __builtin_memset(c.block + c.used, 0, 56 - c.used);
   uint64_t bits = c.bytes * 8;
-  for (int k = 0; k < 8; k++) tail[tl - 1 - k] = (unsigned char)(bits >> (8 * k));
-  sha_block(c.h, tail);
-  if (tl == 128) sha_block(c.h, tail + 64);
+  for (int k = 0; k < 8; k++) c.block[63 - k] = (unsigned char)(bits >> (8 * k));
+  sha_block(c.h, c.block);
   for (int k = 0; k < 8; k++) {
     out[4*k]   = (unsigned char)(c.h[k] >> 24);
     out[4*k+1] = (unsigned char)(c.h[k] >> 16);

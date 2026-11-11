@@ -27,7 +27,7 @@ def hash_checks(out):
     sha = ctypes.CDLL(str(lib))
     sha.qosp_sha256_pair.argtypes = [ctypes.c_void_p,ctypes.c_uint64,ctypes.c_void_p,ctypes.c_uint64,ctypes.c_void_p]
     sha.qosp_sha256.argtypes = [ctypes.c_void_p,ctypes.c_uint64,ctypes.c_void_p]
-    for n in (0,1,2,55,56,63,64,65,119,120,127,128,129,4096):
+    for n in (*range(130), 4096):
         data = bytes((i*37+11) % 256 for i in range(n))
         expected = hashlib.sha256(data).digest()
         digest = (ctypes.c_ubyte*32)()
@@ -85,6 +85,8 @@ def native_checks(out):
     if memory_abi != b'1':
         changed=dict(sections);changed['LOAD']=changed['LOAD'].replace(b'planememory '+memory_abi+b'\n',b'planememory 1\n');variants['LegacyMemory']=changed
     changed=dict(sections);changed['LOAD']=b''.join(row+b'\n' for row in changed['LOAD'].splitlines() if not row.startswith(b'plane'));variants['NoPlane']=changed
+    variants['DuplicateActors'] = dict(sections, LOAD=sections['LOAD'] + b'planeactors ' + actors_abi + b'\n')
+    variants['MalformedMemory'] = dict(sections, LOAD=b'planememory invalid\n' + sections['LOAD'])
     changed=dict(sections);changed['IMPORT']=b'c 0 8 fpr_missing\n'
     digest=hashlib.sha256(changed['RELOC']+changed['IMPORT']).hexdigest().encode()
     changed['LOAD']=b''.join((b'relsha '+digest if row.startswith(b'relsha ') else row)+b'\n' for row in changed['LOAD'].splitlines())

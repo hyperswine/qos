@@ -1,0 +1,77 @@
+#: expect leaseslots: HOLDS
+unsafe program.
+S = use "../programs/mods/leaseslots".
+EP = use "../programs/mods/ep#c66ad65e68dd97f5".
+AC = use "std/actor#201a0e9bf98a5154".
+rd until me client url = Ok (EP.IStr url).
+wr until me client url value = Ok value.
+check True why = Unit.
+check False why = error why.
+fill slots owner i = if i == 64 then slots else fill (S.put slots i 32 (S.Occupied (64 + i) "old" owner 1000)) owner (i + 1).
+clearAll slots owner i = if i == 64 then slots else
+  clearAll (if i % 2 == 0 then S.close slots (64 + i) owner else S.sweep slots i 1000) owner (i + 1).
+openHandle me owner path = case AC.call me owner (EP.Open path "rw") of
+    Ok (EP.Opened h) -> h
+  | other -> error "open handle".
+fillOwner me owner i = if i > 64 then Unit else
+  _ = check (openHandle me owner "/initial" == i) "initial allocation";
+  fillOwner me owner (i + 1).
+pressure me owner =
+  _ = fillOwner me owner 1;
+  full = AC.call me owner (EP.Open "/overflow" "rw");
+  _ = check (case full of Ok (EP.Refused why) -> why == "endpoint: handle budget exhausted" | other -> False) "full owner";
+  _ = AC.call me owner (EP.Close 31);
+  replacement = openHandle me owner "/replacement";
+  _ = check (replacement == 95) "reuse interior slot";
+  denied = AC.call me owner (EP.Write 31 EP.IUnit);
+  _ = check (case denied of Ok (Err why) -> why == "no such handle" | other -> False) "stale write";
+  _ = AC.call me owner (EP.Close 31);
+  live = AC.call me owner (EP.Read replacement 0);
+  check (case live of Ok (Ok (EP.IStr path)) -> path == "/replacement" | other -> False) "stale close preserved new lease".
+gone me = Unit.
+lastOwner me = _ = Sys.loop (S.Empty, intMax Unit, 0) (S.step rd wr me); Unit.
+main =
+  me = myself 0;
+  full = fill S.Empty me 0;
+  _ = check (S.freeHandle full 128 999 64 == 0) "live capacity";
+  _ = check (S.freeHandle full 128 1000 64 == 128) "expiry at capacity";
+  _ = check (S.access full 73 me 999 == "old") "deadline minus one";
+  _ = check (S.access full 73 me 1000 == "" and S.access full 73 me 1001 == "") "expired without sweep";
+  _ = check (S.access (S.close full 73 0) 73 me 999 == "old") "wrong close";
+  _ = check (S.access full 73 0 999 == "") "wrong owner";
+  dead = spawn gone;
+  _ = receiveFromRes me dead;
+  orphaned = S.put full 9 32 (S.Occupied 73 "old" dead 2000);
+  _ = check (S.access orphaned 73 dead 999 == "" and S.freeHandle orphaned 128 999 64 == 137) "dead owner and pressure reclamation";
+  _ = check (case clearAll full me 0 of S.Empty -> True | other -> False) "empty tree after close and expiry";
+  closed = S.close full 73 me;
+  _ = check (S.access closed 72 me 999 == "old" and S.access closed 74 me 999 == "old") "clear preserves neighbors";
+  _ = check (S.freeHandle closed 190 999 11 == 0 and S.freeHandle closed 190 999 12 == 201) "wrapped probe budget";
+  lastIndex = intMax Unit % 64;
+  lastFree = S.close full (64 + lastIndex) me;
+  _ = check (S.freeHandle lastFree (intMax Unit - 2) 999 64 == intMax Unit) "final reachable hole";
+  _ = check (S.freeHandle closed (intMax Unit - 2) 999 64 == 0) "no wrap beyond last handle";
+  fresh = S.freeHandle closed 128 999 64;
+  _ = check (fresh == 137) "pressure probe";
+  reused = S.put closed 9 32 (S.Occupied fresh "new" me 2000);
+  _ = check (S.access reused 73 me 999 == "" and S.access reused fresh me 999 == "new") "generation";
+  _ = check (S.freeHandle full (intMax Unit) 999 64 == 0) "probe at last generation";
+  last = spawn lastOwner;
+  opened = AC.call me last (EP.Open "/last" "rw");
+  _ = check (case opened of Ok (EP.Opened handle) -> handle == intMax Unit | other -> False) "last generation";
+  _ = AC.call me last (EP.Close (intMax Unit));
+  refused = AC.call me last (EP.Open "/again" "rw");
+  _ = check (case refused of Ok (EP.Refused why) -> True | other -> False) "exhausted generations";
+  _ = kill last;
+  crowded = spawn (S.simpleUntil rd wr);
+  _ = pressure me crowded;
+  _ = kill crowded;
+  owner = spawn (S.simpleUntil rd wr);
+  h = case AC.call me owner (EP.Open "/first" "rw") of Ok (EP.Opened handle) -> handle | other -> error "open";
+  seen = AC.call me owner (EP.Read h 0);
+  _ = check (case seen of Ok (Ok (EP.IStr path)) -> path == "/first" | other -> False) "owner read";
+  _ = AC.call me owner (EP.Close h);
+  after = AC.call me owner (EP.Read h 0);
+  _ = check (case after of Ok (Err why) -> why == "no such handle" | other -> False) "closed read";
+  _ = kill owner;
+  "leaseslots: HOLDS".

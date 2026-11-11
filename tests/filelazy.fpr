@@ -1,0 +1,40 @@
+unsafe program.
+Q = use "../programs/mods/qsys".
+EP = use "../programs/mods/ep#c66ad65e68dd97f5".
+Endpoint = use "../programs/mods/epservice#e8bce05a1ddf73db".
+S = use "../programs/mods/svc#75479fb6d5f34670".
+FS = use "../std/fs".
+ok (Ok v) = v.
+ok (Err why) = error why.
+check True = Unit.
+check False = error "file replay count or contents mismatch".
+store count me =
+  (ret, (until, (tag, key, bytes))) = S.requestFields (receive me);
+  answer = case tag of
+      3 -> Ok "existing"
+    | 5 -> Ok "{count}"
+    | 12 -> Ok "1"
+    | 11 -> Ok ""
+    | other -> Err "unexpected storage operation";
+  _ = S.reply ret answer;
+  store (if tag == 3 then count + 1 else count) me.
+main =
+  me = myself 0;
+  st = spawn (store 0);
+  ns = spawn Endpoint.namespace;
+  writer = spawn (Q.fileActor st "/save");
+  _ = ok (EP.register me ns "/save" writer);
+  save = ok (EP.open me ns "/save" "save");
+  _ = ok (EP.write me save (EP.IStr "new"));
+  _ = check (ok (EP.read me save 0) == EP.IStr "new");
+  _ = ok (EP.close me save);
+  _ = check (ok (FS.stats me st "") == "0");
+  reader = spawn (Q.fileActor st "/read");
+  _ = ok (EP.register me ns "/read" reader);
+  handle = ok (EP.open me ns "/read" "read");
+  _ = check (ok (FS.stats me st "") == "0");
+  _ = check (ok (EP.read me handle 0) == EP.IStr "existing");
+  _ = check (ok (EP.read me handle 0) == EP.IStr "existing");
+  _ = check (ok (FS.stats me st "") == "1");
+  _ = ok (EP.close me handle);
+  "filelazy: HOLDS".

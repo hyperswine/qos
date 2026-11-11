@@ -1,10 +1,10 @@
 # Typed interpretation of the existing storage ABI. Never renumber these tags:
 # separately compiled clients still send Svc.Rpc and Svc.TimedRpc.
 Wire = use "std/storage#a8f7ee14e1efae76".
-StorageOp = Type (ReadLatest String | Append String String | Replay String | Delete String | Stats String | Compact | Quiesce | AppendBulk String | Verify).
+StorageOp = Type (ReadLatest String | Append String String | Replay String | Delete String | Stats String | Compact | Quiesce | AppendBulk String | Verify | Replace String String | Generation String | Snapshot String | ReplaceAt String Int String).
 TargetKind = Type (FilesOwner | Qlog | FilesAdapter).
 WireVersion = Type (LegacyV1 | DeadlineV2).
-ErrorKind = Type (MissingRecord | DiskAbsent | KeyLimit | PayloadLimit | BadDuration | Deadline | DeadActor | MailboxFull | Offline | InvalidWire | Unsupported | Other).
+ErrorKind = Type (MissingRecord | DiskAbsent | KeyLimit | PayloadLimit | BadDuration | Deadline | DeadActor | MailboxFull | Offline | InvalidWire | Unsupported | Other | GenerationConflict | GenerationExhausted | DataPartitionFull).
 Outcome = Type (NotStarted | Unknown | Reported).
 # Preserve original diagnostics, including future errors from old/new servers.
 StorageError = Type (StorageError ErrorKind Outcome String).
@@ -20,6 +20,10 @@ fromLegacy "no such file" = StorageError MissingRecord Reported "no such file".
 fromLegacy "no disk" = StorageError DiskAbsent NotStarted "no disk".
 fromLegacy "storage: key too large" = StorageError KeyLimit NotStarted "storage: key too large".
 fromLegacy "storage: payload too large" = StorageError PayloadLimit NotStarted "storage: payload too large".
+fromLegacy "storage generation conflict" = StorageError GenerationConflict NotStarted "storage generation conflict".
+fromLegacy "superblock generation exhausted" = StorageError GenerationExhausted NotStarted "superblock generation exhausted".
+fromLegacy "data partition full" = StorageError DataPartitionFull NotStarted "data partition full".
+fromLegacy "invalid bulk framing" = StorageError InvalidWire NotStarted "invalid bulk framing".
 fromLegacy "invalid deadline duration" = StorageError BadDuration NotStarted "invalid deadline duration".
 fromLegacy "storage service: deadline exceeded before admission" = StorageError Deadline NotStarted "storage service: deadline exceeded before admission".
 fromLegacy "storage: deadline exceeded before execution" = StorageError Deadline NotStarted "storage: deadline exceeded before execution".
@@ -28,6 +32,9 @@ fromLegacy "storage service: dead actor" = StorageError DeadActor Unknown "stora
 fromLegacy "storage service: dead actor (outcome unknown)" = StorageError DeadActor Unknown "storage service: dead actor (outcome unknown)".
 fromLegacy "storage service: deadline exceeded (outcome unknown)" = StorageError Deadline Unknown "storage service: deadline exceeded (outcome unknown)".
 fromLegacy text =
+  if text == "storage generations require durable v3 storage" or text == "replace requires durable v3 storage"
+  then StorageError Unsupported NotStarted text else reportedError text.
+reportedError text =
   k = if prefix "storage offline: " text then Offline else Other;
   o = if strIndexOf "outcome unknown" text >= 0 then Unknown else Reported;
   StorageError k o text.
@@ -55,12 +62,18 @@ name (Stats _) = "stats".
 name Compact = "compact".
 name Quiesce = "quiesce".
 name (AppendBulk _) = "append-bulk".
+name (Replace _ _) = "replace".
+name (Generation _) = "generation".
+name (Snapshot _) = "snapshot".
+name (ReplaceAt _ _ _) = "replace-at".
 name Verify = "verify".
 mutates (Append _ _) = True.
 mutates (Delete _) = True.
 mutates Compact = True.
 mutates Quiesce = True.
 mutates (AppendBulk _) = True.
+mutates (Replace _ _) = True.
+mutates (ReplaceAt _ _ _) = True.
 mutates other = False.
 supported FilesOwner (AppendBulk _) = False.
 supported Qlog Quiesce = False.
@@ -76,12 +89,18 @@ fields (Stats key) = (5, key, "").
 fields Compact = (6, "", "").
 fields Quiesce = (7, "", "").
 fields (AppendBulk bytes) = (7, "", bytes).
+fields (Replace key bytes) = (9, key, bytes).
+fields (Generation key) = (12, key, "").
+fields (Snapshot key) = (10, key, "").
+fields (ReplaceAt key gen bytes) = (11, key, "{gen}\n{bytes}").
 fields Verify = (8, "", "").
 # v1/v2 share operation fields; the envelope supplies correlation/deadline in
 # v2. The target is essential: v1 and v2 both overload tag 7.
 encode : WireVersion -> TargetKind -> StorageOp -> Result (Int, String, String) StorageError .
 encode wire target op =
   if not (supported target op) then failure Unsupported "{name op} is unsupported by {targetName target}" else
+  valid = case op of ReplaceAt key gen bytes -> gen >= 0 and gen <= 1000000000 | other -> True;
+  if not valid then failure InvalidWire "invalid generation frame" else
   (tag, key, bytes) = fields op;
   case decodeResult (Wire.validate key bytes) of
     Err why -> Err why
@@ -103,9 +122,20 @@ operation target 5 key bytes = Ok (Stats key).
 operation target 6 key bytes = Ok Compact.
 operation FilesOwner 7 key bytes = Ok Quiesce.
 operation Qlog 7 key bytes = Ok (AppendBulk bytes).
+operation target 12 key bytes = Ok (Generation key).
+operation target 10 key bytes = Ok (Snapshot key).
+operation target 11 key bytes = replacementFrame key bytes.
+replacementFrame key bytes =
+  split = strIndexOf "\n" (substr bytes 0 11);
+  if split < 1 then failure InvalidWire "invalid generation frame" else
+  word = substr bytes 0 split;
+  gen = parseInt word;
+  if gen < 0 or gen > 1000000000 or "{gen}" != word then failure InvalidWire "invalid generation frame"
+  else Ok (ReplaceAt key gen (substr bytes (split + 1) (strlen bytes - split - 1))).
+operation target 9 key bytes = Ok (Replace key bytes).
 operation target 8 key bytes = Ok Verify.
 operation target tag key bytes = failure InvalidWire "unknown storage operation tag: {tag}".
-schema target = "type=StorageOp,StorageError version=1\nwire=1 Rpc; 2 TimedRpc (correlation and absolute deadline)\nclientWire=2\ntarget={targetName target}\noperations=1 read-latest; 2 append; 3 replay; 4 delete; 5 stats; 6 compact\n{extra target}\nmaxKeyBytes={Wire.maxKeyBytes}\nmaxPayloadBytes={Wire.maxPayloadBytes}\ndefaultMs={Wire.defaultMs}\nerrors=missing-record,disk-absent,key-limit,payload-limit,bad-duration,deadline,dead-actor,mailbox-full,offline,invalid-wire,unsupported,other\noutcomes=not-started,unknown,reported; reported retains server diagnostic without inferring commit status\nmissing=only exact no such file permits an empty/default value\nmutability=wire tags and target capabilities are read-only ABI constraints; change requires a versioned migration\ndeadline=caller selects budget per new operation; never renew an in-flight deadline or replay an uncertain mutation\n".
-extra FilesOwner = "operationsExtra=7 quiesce (creator only); 8 verify".
-extra Qlog = "operationsExtra=7 append-bulk; 8 verify".
-extra FilesAdapter = "operationsExtra=none; quiesce,append-bulk,verify unsupported".
+schema target = "type=StorageOp,StorageError version=1\nwire=1 Rpc; 2 TimedRpc (correlation and absolute deadline)\nclientWire=2\ntarget={targetName target}\noperations=1 read-latest; 2 append; 3 replay; 4 delete; 5 stats; 6 compact\n{extra target}\nmaxKeyBytes={Wire.maxKeyBytes}\nmaxPayloadBytes={Wire.maxPayloadBytes}\ndefaultMs={Wire.defaultMs}\nerrors=missing-record,disk-absent,key-limit,payload-limit,bad-duration,deadline,dead-actor,mailbox-full,offline,invalid-wire,unsupported,other,generation-conflict,generation-exhausted,data-partition-full\noutcomes=not-started,unknown,reported; reported retains server diagnostic without inferring commit status\nmissing=only exact no such file permits an empty/default value\nmutability=wire tags and target capabilities are read-only ABI constraints; change requires a versioned migration\ndeadline=caller selects budget per new operation; never renew an in-flight deadline or replay an uncertain mutation\n".
+extra FilesOwner = "operationsExtra=7 quiesce (creator only); 8 verify; 9 replace; 10 snapshot; 11 replace-at (durable v3); 12 generation".
+extra Qlog = "operationsExtra=7 append-bulk; 8 verify; 9 replace; 10 snapshot; 11 replace-at (durable v3); 12 generation".
+extra FilesAdapter = "operationsExtra=9 replace; 10 snapshot; 11 replace-at (durable v3); 12 generation; quiesce,append-bulk,verify unsupported".

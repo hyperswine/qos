@@ -220,14 +220,31 @@ int qosp_ready(void) {
  * clears the instruction cache, and hands back the module table's address.
  * Nothing about a plugin is tied to an address or to one app build. */
 void qosp_sha256(const unsigned char *msg, uint64_t n, unsigned char out[32]); /* sha256.c */
+void qosp_sha256_pair(const unsigned char *, uint64_t, const unsigned char *, uint64_t, unsigned char[32]);
 static int span_is(qos_span_t a, const char *z) {
   uint64_t n = strlen(z);
   return a.n == n && !memcmp(a.p, z, n);
+}
+static int digest_matches(qos_span_t expected, const unsigned char digest[32]) {
+  static const char digits[] = "0123456789abcdef";
+  if (expected.n != 64) return 0;
+  for (size_t i = 0; i < 32; i++) {
+    if (expected.p[2*i] != digits[digest[i] >> 4] ||
+        expected.p[2*i + 1] != digits[digest[i] & 15]) return 0;
+  }
+  return 1;
 }
 static uint64_t g_arena_size; /* 0: could not reserve address space for the arena */
 static uintptr_t g_arena_base; /* where it landed: the published address when free, else anywhere (the image is relocatable) */
 static fpr_elf_load_t g_ld;    /* the placed image (Host.loadImage) */
 static uintptr_t g_img_base;   /* where it was placed: the arena's start */
+/* Plugin publish and unload are serialized by store_mu in store.c. */
+typedef struct published_plugin {
+  uintptr_t base, end, exec_end;
+  uint64_t execsz;
+  struct published_plugin *next;
+} published_plugin_t;
+static published_plugin_t *published_plugins;
 /* Every span a plugin names points into the app's own strings, hence into
  * the arena the host reserved for it.  Check that before reading through
  * one: the records are app-supplied, and a corrupt one must be refused,
@@ -293,13 +310,21 @@ int64_t qosp_load_plugin(const qos_plugin_t *pl, char *err, uint64_t errcap) {
              "-- rebuild the plugin", idn, id, (int)pl->abi.n, (const char *)pl->abi.p, want);
     return -1;
   }
+  if (g_img_base && lo < (uintptr_t)g_ld.image_end && g_img_base < hi) {
+    snprintf(err, errcap, "plugin overlaps the running process image");
+    return -1;
+  }
+  for (published_plugin_t *p = published_plugins; p; p = p->next) {
+    if (lo < p->end && p->base < hi) {
+      snprintf(err, errcap, "plugin overlaps a published image");
+      return -1;
+    }
+  }
   /* the image is what its LOAD section says it is, or it does not load */
   if (pl->sha.n) {
     unsigned char d[32];
-    char hex[65];
     qosp_sha256(pl->img.p, pl->img.n, d);
-    for (int i = 0; i < 32; i++) snprintf(hex + 2 * i, 3, "%02x", d[i]);
-    if (!span_is(pl->sha, hex)) {
+    if (!digest_matches(pl->sha, d)) {
       snprintf(err, errcap, "plugin %.*s: IMAGE sha256 mismatch (corrupt archive)", idn, id);
       return -1;
     }
@@ -307,24 +332,25 @@ int64_t qosp_load_plugin(const qos_plugin_t *pl, char *err, uint64_t errcap) {
   /* ...and its relocations and imports are what LOAD says they are */
   if (pl->relsha.n) {
     unsigned char d[32];
-    char hex[65];
-    unsigned char *both = malloc(pl->rel.n + pl->imp.n + 1);
-    if (!both) { snprintf(err, errcap, "out of memory"); return -1; }
-    memcpy(both, pl->rel.p, pl->rel.n);
-    memcpy(both + pl->rel.n, pl->imp.p, pl->imp.n);
-    qosp_sha256(both, pl->rel.n + pl->imp.n, d);
-    free(both);
-    for (int i = 0; i < 32; i++) snprintf(hex + 2 * i, 3, "%02x", d[i]);
-    if (!span_is(pl->relsha, hex)) {
+    qosp_sha256_pair(pl->rel.p, pl->rel.n, pl->imp.p, pl->imp.n, d);
+    if (!digest_matches(pl->relsha, d)) {
       snprintf(err, errcap, "plugin %.*s: RELOC sha256 mismatch (corrupt archive)", idn, id);
       return -1;
     }
   }
+  published_plugin_t *record = malloc(sizeof *record);
+  if (!record) {
+    snprintf(err, errcap, "plugin publication: out of memory");
+    return -1;
+  }
   if (mprotect((void *)lo, xend - lo, PROT_READ | PROT_EXEC)) {
+    free(record);
     snprintf(err, errcap, "plugin mprotect: %s", strerror(errno));
     return -1;
   }
-  __builtin___clear_cache((char *)lo, (char *)hi);
+  *record = (published_plugin_t){lo, hi, xend, pl->execsz, published_plugins};
+  published_plugins = record;
+  __builtin___clear_cache((char *)lo, (char *)xend);
   qos_hostlog("[qosp] plugin %.*s (%llu B): published at %#lx-%#lx, table at %#lx",
               idn, id, (unsigned long long)pl->img.n, (unsigned long)lo,
               (unsigned long)hi, (unsigned long)(lo + pl->entry));
@@ -332,22 +358,23 @@ int64_t qosp_load_plugin(const qos_plugin_t *pl, char *err, uint64_t errcap) {
 }
 
 /* syscall tag 8: the image's process ended and the app frees its block;
- * undo the r-x so the buddy can hand the pages out as heap again.  The
- * range is checked the way a publish is (inside the arena, page aligned);
- * the host keeps no ledger of published ranges, the app's image map is it. */
+ * restore write access only to a matching publication's executable pages. */
 int64_t qosp_unload_plugin(const qos_unload_t *u, char *err, uint64_t errcap) {
-  uintptr_t pg = (uintptr_t)getpagesize();
-  uintptr_t lo = (uintptr_t)u->base;
-  uintptr_t xend = (lo + u->execsz + pg - 1) & ~(pg - 1);
-  uintptr_t alo = g_arena_base, ahi = alo + g_arena_size;
-  if (u->execsz == 0 || xend < lo || lo < alo || xend > ahi || (lo & (pg - 1))) {
+  published_plugin_t **link = &published_plugins;
+  while (*link && ((*link)->base != u->base || (*link)->execsz != u->execsz))
+    link = &(*link)->next;
+  if (!*link) {
     snprintf(err, errcap, "unload: not a published plugin range");
     return -1;
   }
+  published_plugin_t *record = *link;
+  uintptr_t lo = record->base, xend = record->exec_end;
   if (mprotect((void *)lo, xend - lo, PROT_READ | PROT_WRITE)) {
     snprintf(err, errcap, "unload mprotect: %s", strerror(errno));
     return -1;
   }
+  *link = record->next;
+  free(record);
   qos_hostlog("[qosp] plugin at %#lx-%#lx: its process ended, pages writable again",
               (unsigned long)lo, (unsigned long)xend);
   return 0;
@@ -506,25 +533,32 @@ FPR_FN(fpr_g_Host_x2eabi, h_abi, 1);
 static V h_sdk_info(V u) {
   (void)u;
   char info[128];
-  int n = snprintf(info, sizeof info, "{\"diskLockContract\":1,\"abi\":\"%u.%u\"}",
+  int n = snprintf(info, sizeof info, "{\"diskLockContract\":1,\"archiveDigestContract\":1,\"abi\":\"%u.%u\"}",
                    (unsigned)QOS_ABI_VERSION, (unsigned)QOSP_CODEGEN_REV);
   return (V)fpr_mkstr((const uint8_t *)info, (uw)n);
 }
 FPR_FN(fpr_g_Host_x2esdkInfo, h_sdk_info, 1);
 
 /* Host.sha256 : String -> String -- lower-case hex */
-static V h_sha256(V sv) {
-  const str_t *t = arg_str(sv, "Host.sha256: expected a String");
+static V hash_sections(const str_t *a, const str_t *b) {
   unsigned char d[32];
   char hex[64];
-  qosp_sha256(t->bytes, t->len, d);
+  qosp_sha256_pair(a->bytes, a->len, b ? b->bytes : 0, b ? b->len : 0, d);
   for (int i = 0; i < 32; i++) {
     hex[2 * i] = "0123456789abcdef"[d[i] >> 4];
     hex[2 * i + 1] = "0123456789abcdef"[d[i] & 15];
   }
   return (V)fpr_mkstr((const uint8_t *)hex, 64);
 }
+static V h_sha256(V sv) {
+  return hash_sections(arg_str(sv, "Host.sha256: expected a String"), 0);
+}
+static V h_sha256_pair(V a, V b) {
+  return hash_sections(arg_str(a, "Host.sha256Pair: expected a String"),
+                       arg_str(b, "Host.sha256Pair: expected a String"));
+}
 FPR_FN(fpr_g_Host_x2esha256, h_sha256, 1);
+FPR_FN(fpr_g_Host_x2esha256Pair, h_sha256_pair, 2);
 
 /* Host.init : Bool -> Result String String -- fault reporting, and the
  * arena at its published address.  Ok "" | Err reason. */
@@ -602,7 +636,6 @@ static V h_load_image(V pathv, V shav, V imgv, V numsv, V relv) {
     const char *bad = fpr_qaimg_relocate((unsigned char *)dst, img->len, rel->bytes, rel->len);
     if (bad) return res_err(bad);
   }
-  g_img_base = dst;
   /* Publish the code: the arena is one rw anonymous mapping, and a page is
    * never writable and executable at once, so flip just the executable
    * prefix (the PF_X PT_LOADs) to r-x and leave the rest rw.  The linker
@@ -629,7 +662,8 @@ static V h_load_image(V pathv, V shav, V imgv, V numsv, V relv) {
     return res_err("mprotect(code, r-x) failed");
   TRACE("stage 2: image [%#lx..%p), entry %p, code r-x to %#lx\n",
         (unsigned long)dst, ld.image_end, ld.entry, (unsigned long)xend);
-  __builtin___clear_cache((char *)dst, (char *)ld.image_end);
+  __builtin___clear_cache((char *)dst, (char *)xend);
+  g_img_base = dst;
   g_ld = ld;
   return res_ok_str("", 0);
 }

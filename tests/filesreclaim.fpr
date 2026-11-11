@@ -8,7 +8,7 @@ check tag True = Unit.
 check tag False = error "filesreclaim: {tag}".
 stalled me = _ = Sys.sleepUs 10000000; Unit.
 gone me = Unit.
-file manager path hs me = QS.fileServe manager 0 path me (Ok "body") 2 hs.
+file manager path me = QS.fileServe manager 0 path me (Ok "body") 1 Nil.
 waitDead actor n = if not (Sys.alive actor) then True else
   if n <= 0 then False else _ = Sys.sleepUs 5000; waitDead actor (n - 1).
 # A busy actor consumes some of the pass's budget before refusing retirement.
@@ -33,21 +33,22 @@ main =
   # Dead entries already cost no live slot; skip them and find a live idle one.
   dead = spawn gone;
   _ = check "dead fixture" (waitDead dead 200);
-  busy = spawn (file me "/busy" [(1, me)]);
-  first = spawn (file me "/first" Nil);
-  spare = spawn (file me "/spare" Nil);
+  busy = spawn (file me "/busy");
+  handle = case AC.call me busy (EP.Open "/busy" "read") of Ok (EP.Opened h) -> h | other -> error "busy open";
+  first = spawn (file me "/first");
+  spare = spawn (file me "/spare");
   released = QS.filesReclaim me [("/known", 0), ("/dead", dead), ("/busy", busy), ("/first", first), ("/spare", spare)];
   _ = check "stop after one live slot" (released == [("/known", 0), ("/dead", 0), ("/busy", busy), ("/first", 0), ("/spare", spare)]);
   _ = check "idle actor retired" (waitDead first 200);
   _ = check "later actor untouched" (Sys.alive spare);
-  read = AC.callWithin 200 me busy (EP.Read 1 0);
+  read = AC.callWithin 200 me busy (EP.Read handle 0);
   _ = check "live lease still works" (case read of Ok (Ok (EP.IStr text)) -> text == "body" | other -> False);
   _ = kill busy; _ = kill spare;
 
   # Do not renew the deadline after a refusal. The real idle actor must keep
   # the existing one-second retirement margin when the pass is nearly spent.
   slow = spawn slowBusy;
-  idle = spawn (file me "/idle" Nil);
+  idle = spawn (file me "/idle");
   late = QS.filesReclaim me [("/slow", slow), ("/idle", idle)];
   _ = check "retirement margin uses original deadline" (late == [("/slow", slow), ("/idle", idle)] and Sys.alive idle);
   _ = kill slow; _ = kill idle;

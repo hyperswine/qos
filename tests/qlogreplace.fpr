@@ -1,0 +1,111 @@
+unsafe program.
+QL = use "../programs/mods/qlog".
+Str = use "std/string".
+C = use "../std/storageclient".
+P = use "../std/storageprotocol".
+FS = use "../std/fs".
+must r = case r of Ok v -> v | Err why -> error why.
+check ok = if ok then Unit else error "replacement mismatch".
+contender fs key generation value me = case C.request me (C.Owner fs) (P.ReplaceAt key generation value) of
+    Ok _ -> 1
+  | Err why -> if P.kind why == P.GenerationConflict and P.outcome why == P.NotStarted then 0 else error (P.message why).
+winner (Ok _) = 1.
+winner (Err "storage generation conflict") = 0.
+winner (Err why) = error why.
+disjointWrites me fs =
+  _ = must (FS.rpc me fs 9 "left-key" "old-left");
+  _ = must (FS.rpc me fs 9 "right-key" "old-right");
+  (generation, _) = must (FS.snapshot me fs "left-key");
+  a = spawn (fn self -> send me (contender fs "left-key" generation "new-left" self));
+  b = spawn (fn self -> send me (contender fs "right-key" generation "new-right" self));
+  left = receiveFrom me a;
+  right = receiveFrom me b;
+  _ = check (left + right == 1);
+  loser = if left == 1 then "right-key" else "left-key";
+  (fresh, previous) = must (FS.snapshot me fs loser);
+  _ = check (fresh == generation + 1 and previous == (if left == 1 then "old-right" else "old-left"));
+  _ = must (FS.replaceAt me fs loser fresh (if left == 1 then "new-right" else "new-left"));
+  check (must (FS.replay me fs "left-key") == "new-left" and must (FS.replay me fs "right-key") == "new-right").
+observeUntilNew me fs old new remaining =
+  value = must (FS.replay me fs "visible");
+  if value == new then True else if value == old and remaining > 0 then
+    observeUntilNew me fs old new (remaining - 1)
+  else False.
+observer parent fs old new me =
+  _ = send parent (must (FS.replay me fs "visible") == old);
+  _ = send parent (observeUntilNew me fs old new 256);
+  Unit.
+visibleReplacement me fs =
+  old = Str.repeat 4200 "A";
+  new = Str.repeat 5000 "B";
+  _ = must (FS.rpc me fs 9 "visible" old);
+  a = spawn (observer me fs old new);
+  b = spawn (observer me fs old new);
+  _ = check (receiveFrom me a);
+  _ = check (receiveFrom me b);
+  _ = must (FS.rpc me fs 9 "visible" new);
+  _ = check (receiveFrom me a);
+  check (receiveFrom me b).
+checkEmptyLatest me fs =
+  _ = check (must (FS.replay me fs "empty-tail") == "earlier");
+  _ = check (must (FS.readLatest me fs "empty-tail") == "");
+  _ = check (must (FS.readLatest me fs "empty-only") == "");
+  check (case FS.readLatest me fs "never-created" of Err why -> why == "no such file" | other -> False).
+main =
+  me = myself 0;
+  fs = FS.serve (device "blk");
+  _ = case FS.readLatest me fs "other" of
+    Err why ->
+      _ = must (FS.append me fs "other" "keep");
+      _ = must (FS.append me fs "key" "old");
+      _ = must (FS.rpc me fs 9 "key" "");
+      _ = check (must (FS.readLatest me fs "key") == "");
+      _ = must (FS.append me fs "key" "middle");
+      _ = must (FS.rpc me fs 9 "key" "new");
+      (first, _) = QL.bulkPack [("packed", "a"), ("skip", "first"), ("packed", "b")];
+      (last, _) = QL.bulkPack [("packed", "c"), ("skip", "last"), ("packed", "d"), ("empty-tail", ""), ("empty-only", "")];
+      # FS.serve returns a direct Qlog interpreter. Files gateways reserve
+      # tag 7 for quiesce, so bulk writes must use the explicit Log target.
+      wrong = C.request me (C.Owner fs) (P.AppendBulk first);
+      _ = check (case wrong of Err why -> P.kind why == P.Unsupported and P.outcome why == P.NotStarted | Ok _ -> False);
+      (beforeBad, previous) = must (FS.snapshot me fs "key");
+      (prefix, _) = QL.bulkPack [("partial", "uncommitted"), ("key", "uncommitted")];
+      bad = C.request me (C.Log fs) (P.AppendBulk (prefix + "8 partial\nshort"));
+      _ = check (case bad of Err why -> P.kind why == P.InvalidWire and P.outcome why == P.NotStarted | Ok _ -> False);
+      (afterBad, unchanged) = must (FS.snapshot me fs "key");
+      _ = check (beforeBad == afterBad and previous == unchanged);
+      _ = must (P.legacyResult (C.request me (C.Log fs) (P.AppendBulk first)));
+      _ = must (FS.append me fs "packed" "!");
+      _ = must (FS.append me fs "empty-tail" "earlier");
+      _ = must (P.legacyResult (C.request me (C.Log fs) (P.AppendBulk last)));
+      Unit
+  | Ok v -> check (v == "keep");
+  _ = check (case FS.readLatest me fs "partial" of Err why -> why == "no such file" | Ok _ -> False);
+  _ = check (must (FS.replay me fs "key") == "new");
+  _ = check (must (FS.replay me fs "packed") == "ab!cd");
+  _ = check (must (FS.readLatest me fs "packed") == "d");
+  _ = checkEmptyLatest me fs;
+  _ = must (FS.compact me fs);
+  _ = checkEmptyLatest me fs;
+  _ = check (must (FS.replay me fs "packed") == "ab!cd");
+  _ = check (must (FS.readLatest me fs "packed") == "d");
+  _ = must (FS.rpc me fs 8 "" "");
+  _ = check (must (FS.replay me fs "key") == "new");
+  _ = check (must (FS.readLatest me fs "other") == "keep");
+  (generation, before) = must (FS.snapshot me fs "contested");
+  # Return each result to the parent. The actors share a snapshot and
+  # the Qlog mailbox determines which conditional write arrives first.
+  a = spawn (fn self -> send me (contender fs "contested" generation "left" self));
+  b = spawn (fn self -> send me (contender fs "contested" generation "right" self));
+  firstWon = receiveFrom me a;
+  secondWon = receiveFrom me b;
+  _ = check (firstWon + secondWon == 1);
+  (fresh, actual) = must (FS.snapshot me fs "contested");
+  _ = check (actual == (if firstWon == 1 then "left" else "right"));
+  _ = check (winner (FS.replaceAt me fs "other" generation "stale") == 0);
+  _ = check (must (FS.readLatest me fs "other") == "keep");
+  _ = must (FS.replaceAt me fs "contested" fresh "final\nbytes");
+  _ = check (must (FS.replay me fs "contested") == "final\nbytes");
+  _ = disjointWrites me fs;
+  _ = visibleReplacement me fs;
+  "qlogreplace: HOLDS".

@@ -29,7 +29,7 @@ oLoop me next =
 oMsg : unsafe Int -> Int -> (Int, Int) -> EP.Ep -> a .
 oMsg me next ret q = case q of
     EP.Open url mode -> AC.reply ret (EP.Opened next) >> oLoop me (next + 1)
-  | EP.Write h v -> AC.reply ret (Ok (EP.IInt 0)) >> oLoop me next
+  | EP.Write h v -> AC.reply ret (Ok v) >> oLoop me next
   | EP.Close h -> AC.reply ret (Ok 0) >> oLoop me next
   | other -> AC.reply ret (Err "epbench: unsupported") >> oLoop me next.
 
@@ -41,8 +41,35 @@ perOp me ns k = if k == 0 then Unit else
   _ = must (EP.close me ep);
   perOp me ns (k - 1).
 held me ep k = if k == 0 then Unit else
-  _ = must (EP.write me ep (EP.IInt k));
+  _ = checkEcho k (must (EP.write me ep (EP.IInt k)));
   held me ep (k - 1).
+
+checkEcho k v = case v of EP.IInt n -> if n == k then Unit else error "wrong echo" | other -> error "wrong reply shape".
+
+# Same owner, handle, EP.Write, reply matching and keep/drop as held.
+# The countdown supplies unique IDs while only one request is outstanding.
+counted me ep k = if k == 0 then Unit else
+  (owner, h) = ep;
+  _ = must (send owner (me, k, EP.Write h (EP.IInt k)));
+  _ = checkEcho k (must (must (AC.awaitReply me owner k)));
+  counted me ep (k - 1).
+
+# Consume the echoed integer while the reply is borrowed. Only Unit escapes.
+# As in awaitReply, unrelated senders stay queued and stale owner replies drop.
+borrowedEcho me owner k = case receiveFromRes me owner of
+    Err why -> error "epbench: {why}"
+  | Ok msg ->
+      (rid, result) = msg;
+      if rid == k then
+        _ = checkEcho k (must result);
+        drop msg
+      else drop msg >> borrowedEcho me owner k.
+
+borrowed me ep k = if k == 0 then Unit else
+  (owner, h) = ep;
+  _ = must (send owner (me, k, EP.Write h (EP.IInt k)));
+  _ = borrowedEcho me owner k;
+  borrowed me ep (k - 1).
 
 report name n t0 t1 = print "epbench: {name} {(t1 - t0) * 100 / n} ns per write".
 
@@ -57,6 +84,8 @@ main =
   _ = perOp me ns 1000;
   warm = must (EP.open me ns "/services/bench" "rw");
   _ = held me warm 1000;
+  _ = counted me warm 1000;
+  _ = borrowed me warm 1000;
   _ = must (EP.close me warm);
   t0 = Sys.mtime Unit;
   _ = perOp me ns n;
@@ -65,7 +94,13 @@ main =
   heldStart = Sys.mtime Unit;
   _ = held me ep n;
   t2 = Sys.mtime Unit;
+  _ = counted me ep n;
+  t3 = Sys.mtime Unit;
+  _ = borrowed me ep n;
+  t4 = Sys.mtime Unit;
   _ = must (EP.close me ep);
   _ = report "per-op (open, write, close)" n t0 t1;
   _ = report "held (write only)" n heldStart t2;
+  _ = report "held (countdown ID)" n t2 t3;
+  _ = report "held (countdown ID, borrowed echo)" n t3 t4;
   print "epbench: DONE".

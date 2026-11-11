@@ -71,7 +71,7 @@ main =
   _ = check "zero disables both stacks" (disabled.undo == Nil and disabled.redo == Nil and nextEdit.undo == Nil);
   _ = check "future Editor output bounded" (ED.sayWith custom shrunk.out ["four", "five"] == ["four", "five"]);
   (saving, commands) = ED.keepSession False shrunk;
-  _ = check "new recovery job captures new path" (case commands of [AW.Fetch token (AW.WritePath path bytes)] -> path == P.recoveryPath custom and strIndexOf "abc" bytes >= 0 | other -> False);
+  _ = check "new recovery job captures new path" (case commands of [AW.Fetch token (AW.SaveRecovery path bytes)] -> path == P.recoveryPath custom and strIndexOf "abc" bytes >= 0 | other -> False);
   _ = check "pending recovery cannot move" (failed (ED.applyPreferences P.defaults saving));
   (failedSave, _) = ED.arrived saving.token (Err "offline") saving;
   (retry, retryJobs) = ED.keepSession False failedSave;
