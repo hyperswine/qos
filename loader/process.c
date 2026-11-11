@@ -150,6 +150,18 @@ static void image_quiet(uw pid) {
 
 extern V fpr_g_Sys_x2enextId_call1(V);
 
+/* Optional native benchmark counters, indexed by append/replay. The test
+ * kernel reads them after the measured process exits. */
+#ifdef QOS_STORE_WAIT_STATS
+static uw store_wait_stats[2][3];
+static V store_wait_stat(V index) {
+  uw i = (uw)UNTAG(index);
+  if (i >= 6) fpr_cpanic("invalid store wait counter");
+  return TAG(__atomic_load_n(&store_wait_stats[i / 3][i % 3], __ATOMIC_RELAXED));
+}
+FPR_FN(fpr_g_Sys_x2estoreWaitStat, store_wait_stat, 1);
+#endif
+
 sw qos_store_call(uw tag, const char *pay, uw plen, char *out, uw outcap) {
   if (!g_store_actor) return -2; /* no disk */
   if (tag != 2 && tag != 3) return -3;
@@ -188,6 +200,11 @@ sw qos_store_call(uw tag, const char *pay, uw plen, char *out, uw outcap) {
   V msg = mkrpc((V)me, id, TAG((sw)until), TAG((sw)tag), urlv, payv);
   if (!fpr_sent(fpr_send_as((uw)me, g_store_actor, msg)))
     return store_refused("storage: the storage actor refused the request", out, outcap);
+#if QOS_STORE_WAIT_STATS
+  uw *stats = store_wait_stats[tag - 2];
+  int first_empty = 1;
+  __atomic_fetch_add(&stats[0], 1, __ATOMIC_RELAXED);
+#endif
   for (;;) {
     uint64_t now = hal_mtime() / 10;
     if (now >= until)
@@ -198,6 +215,13 @@ sw qos_store_call(uw tag, const char *pay, uw plen, char *out, uw outcap) {
       str_t *why = (str_t *)FPR_FLD(polled, 0);
       if (why->len == 5 && why->bytes[0] == 'e' && why->bytes[1] == 'm' &&
           why->bytes[2] == 'p' && why->bytes[3] == 't' && why->bytes[4] == 'y') {
+#if QOS_STORE_WAIT_STATS
+        if (first_empty) {
+          __atomic_fetch_add(&stats[1], 1, __ATOMIC_RELAXED);
+          first_empty = 0;
+        }
+        __atomic_fetch_add(&stats[2], 1, __ATOMIC_RELAXED);
+#endif
         fpr_actor_sleep_us(until - now < 100 ? (uw)(until - now) : 100);
         continue;
       }

@@ -1,0 +1,18 @@
+unsafe program.
+# A loaded native app, starting with an empty app-state log. Time one append
+# and its replay per iteration. Validate the replay outside the timed path.
+Sys.mtime : Unit -> Int .
+run n expected =
+  if n == 0 then "storewait: DONE" else
+    next = strcat expected "event-1\n";
+    t0 = Sys.mtime Unit;
+    a = Sys.storeReq 2 "event-1\n";
+    t1 = Sys.mtime Unit;
+    _ = case a of Ok _ -> Unit | Err e -> error e;
+    t2 = Sys.mtime Unit;
+    b = Sys.storeReq 3 "";
+    t3 = Sys.mtime Unit;
+    _ = case b of Ok s -> (if s == next then Unit else error "wrong replay") | Err e -> error e;
+    _ = print "storewait ticks {t1 - t0} {t3 - t2}";
+    run (n - 1) next.
+main = run 128 "".

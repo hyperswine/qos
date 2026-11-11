@@ -1,0 +1,45 @@
+Native app-state waits: QOS 301a642 plus benchmark changes, FP-RISC release pin e138e654332f.
+QEMU 11.1.3 RV64 virt, virtio-blk v1, Darwin arm64 host. Guest mtime ticks are 100 ns.
+Three fresh-disk boots per configuration, alternating counter off/on order by run.
+Each boot appends an 8-byte event then replays and compares the full log, 128 times.
+All iterations included, from 1 through 128 events. Times bracket Sys.storeReq in the app.
+Counter-on: calls/slept/sleeps are accepted requests, calls with any empty poll, and empty polls followed by sleep.
+Control kernel omits counter increments. Ordinary production build also omits the reader.
+Reproduce with FPRISC_ROOT=<release-pin-checkout> python3 tools/store-wait-bench.py <output-dir>.
+
+Pooled nearest-rank percentiles, 384 calls per row. Times in milliseconds.
+harts counters operation p50 p95 p99 calls_slept total_sleeps median_first_16 median_last_16
+1 0 append 36.636 44.767 47.808 - - 36.511 37.365
+1 0 replay 132.593 259.535 273.487 - - 19.678 254.089
+1 1 append 36.843 44.794 48.156 384 13281 35.564 38.123
+1 1 replay 134.651 256.93 273.695 384 92805 18.357 252.259
+2 0 append 36.866 43.886 46.985 - - 37.45 37.888
+2 0 replay 139.589 257.746 275.153 - - 18.279 255.528
+2 1 append 36.83 45.053 48.531 384 13283 37.433 38.066
+2 1 replay 135.857 257.489 275.995 384 92074 17.578 250.083
+
+Per-boot summaries (microseconds); 0/0/0 denotes disabled counters.
+1h-stats0-run1 append calls/slept/sleeps=0/0/0 p50/p95/p99 us 35767.0 44382.0 49762.0
+1h-stats0-run1 replay calls/slept/sleeps=0/0/0 p50/p95/p99 us 130722.0 265455.0 273487.0
+1h-stats1-run1 append calls/slept/sleeps=128/128/4410 p50/p95/p99 us 36435.0 44113.0 46561.0
+1h-stats1-run1 replay calls/slept/sleeps=128/128/30964 p50/p95/p99 us 131563.0 259053.0 270485.0
+1h-stats1-run2 append calls/slept/sleeps=128/128/4448 p50/p95/p99 us 37177.0 44997.0 48156.0
+1h-stats1-run2 replay calls/slept/sleeps=128/128/30908 p50/p95/p99 us 134821.0 263252.0 275984.0
+1h-stats0-run2 append calls/slept/sleeps=0/0/0 p50/p95/p99 us 36594.0 45866.0 47808.0
+1h-stats0-run2 replay calls/slept/sleeps=0/0/0 p50/p95/p99 us 135422.0 260748.0 272138.0
+1h-stats0-run3 append calls/slept/sleeps=0/0/0 p50/p95/p99 us 37195.0 44501.0 46179.0
+1h-stats0-run3 replay calls/slept/sleeps=0/0/0 p50/p95/p99 us 132590.0 254363.0 271512.0
+1h-stats1-run3 append calls/slept/sleeps=128/128/4423 p50/p95/p99 us 36780.0 45106.0 47060.0
+1h-stats1-run3 replay calls/slept/sleeps=128/128/30933 p50/p95/p99 us 134651.0 254895.0 265668.0
+2h-stats0-run1 append calls/slept/sleeps=0/0/0 p50/p95/p99 us 36866.0 44224.0 44787.0
+2h-stats0-run1 replay calls/slept/sleeps=0/0/0 p50/p95/p99 us 139589.0 263545.0 275153.0
+2h-stats1-run1 append calls/slept/sleeps=128/128/4405 p50/p95/p99 us 37139.0 45402.0 49977.0
+2h-stats1-run1 replay calls/slept/sleeps=128/128/30827 p50/p95/p99 us 133615.0 257718.0 285938.0
+2h-stats1-run2 append calls/slept/sleeps=128/128/4427 p50/p95/p99 us 36843.0 44109.0 47396.0
+2h-stats1-run2 replay calls/slept/sleeps=128/128/30671 p50/p95/p99 us 132365.0 258508.0 273138.0
+2h-stats0-run2 append calls/slept/sleeps=0/0/0 p50/p95/p99 us 36527.0 44600.0 48040.0
+2h-stats0-run2 replay calls/slept/sleeps=0/0/0 p50/p95/p99 us 135684.0 257746.0 277779.0
+2h-stats0-run3 append calls/slept/sleeps=0/0/0 p50/p95/p99 us 36991.0 43501.0 46396.0
+2h-stats0-run3 replay calls/slept/sleeps=0/0/0 p50/p95/p99 us 140114.0 257116.0 261118.0
+2h-stats1-run3 append calls/slept/sleeps=128/128/4451 p50/p95/p99 us 36534.0 44421.0 48531.0
+2h-stats1-run3 replay calls/slept/sleeps=128/128/30576 p50/p95/p99 us 137540.0 249964.0 273100.0

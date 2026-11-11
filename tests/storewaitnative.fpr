@@ -1,0 +1,19 @@
+unsafe program.
+FS = use "std/fs#84826bc9e8ddb4b5".
+S = use "../programs/mods/svc#75479fb6d5f34670".
+NI = use "nativeimage".
+Sys.bindStore : Int -> S.Rpc -> Unit .
+Sys.bindApp : String -> Unit .
+Sys.storeWaitStat : Int -> Int .
+main =
+  me = myself 0;
+  fs = FS.serve (device "blk");
+  qa = case FS.readLatest me fs "apps/CkSlow.qa" of Ok s -> s | Err e -> error e;
+  _ = Sys.bindApp "CkSlow";
+  _ = Sys.bindStore fs (S.TimedRpc fs 0 0 0 "" "");
+  (ok, why, root) = NI.place qa;
+  _ = case ok == 2 of True -> Unit | False -> error "placement: {why}";
+  r = NI.result me root;
+  _ = print "append calls/slept/sleeps {Sys.storeWaitStat 0} {Sys.storeWaitStat 1} {Sys.storeWaitStat 2}";
+  _ = print "replay calls/slept/sleeps {Sys.storeWaitStat 3} {Sys.storeWaitStat 4} {Sys.storeWaitStat 5}";
+  r.

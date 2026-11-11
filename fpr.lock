@@ -305,6 +305,8 @@ std/actor v3.0 201a0e9bf98a5154 tests/storageprotocol.fpr
 ../programs/mods/ep v3.0 c66ad65e68dd97f5 tests/storageprotocol.fpr
 ../programs/mods/epservice v3.0 e8bce05a1ddf73db tests/storageprotocol.fpr
 ../programs/mods/svc v5.0 75479fb6d5f34670 tests/storerpc.fpr
+std/fs v5.0 84826bc9e8ddb4b5 tests/storewaitnative.fpr
+../programs/mods/svc v5.0 75479fb6d5f34670 tests/storewaitnative.fpr
 ../programs/mods/svc v5.0 75479fb6d5f34670 tests/svcurl.fpr
 ../programs/mods/ep v3.0 c66ad65e68dd97f5 tests/svcurl.fpr
 std/actor v3.0 201a0e9bf98a5154 tests/svcurl.fpr
