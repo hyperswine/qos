@@ -32,6 +32,7 @@ std/actor v3.0 201a0e9bf98a5154 programs/mods/endpointstate.fpr
 std/actor v3.0 201a0e9bf98a5154 programs/mods/ep.fpr
 ep v3.0 c66ad65e68dd97f5 programs/mods/epclient.fpr
 std/actor v3.0 201a0e9bf98a5154 programs/mods/epclient.fpr
+epdeadline v1.1 08a8ecf9d7c57d85 programs/mods/epclient.fpr
 ep v3.0 c66ad65e68dd97f5 programs/mods/epdeadline.fpr
 std/actor v3.0 201a0e9bf98a5154 programs/mods/epdeadline.fpr
 ep v3.0 c66ad65e68dd97f5 programs/mods/epservice.fpr
