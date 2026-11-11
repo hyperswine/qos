@@ -15,7 +15,9 @@ ROOT = Path(__file__).resolve().parents[1]
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("output", type=Path)
-    parser.add_argument("--reply-trace", action="store_true",
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument("--replay-profile", action="store_true", help="time record reads and concatenation inside indexed replay")
+    modes.add_argument("--reply-trace", action="store_true",
                         help="timestamp mailbox publication and correlated receipt in the instrumented arm")
     args = parser.parse_args()
     out = args.output.resolve()
@@ -47,6 +49,9 @@ def main():
         trace = ROOT / "tests/storewait_trace.c"
         (out / "actors_trace.c").write_text(f'#include "{trace}"\n' + actors)
 
+    if args.replay_profile:
+        from replay_profile import replay_kernel, write_report
+        profiled_kernel = replay_kernel(ROOT, out)
     for harts in (1, 2):
         kernels = {}
         for counters in (0, 1):
@@ -59,8 +64,12 @@ def main():
             if tracing:
                 flags += " -DQOS_STORE_REPLY_TRACE"
                 extra.append(f"ACTORS_SRC={out}/actors_trace.c")
+            system = ROOT / f"tests/{kernel_test}.fpr"
+            if args.replay_profile and counters:
+                system = profiled_kernel
+                extra.append(f"NATIVE_TEST_SRC={ROOT}/tests/storewait_replay.c")
             run(["make", "-s", "-C", "qos", "native", f"HARTS={harts}",
-                 f"SYSTEM={ROOT}/tests/{kernel_test}.fpr", f"KERNEL={kernels[counters]}",
+                 f"SYSTEM={system}", f"KERNEL={kernels[counters]}",
                  f"BUILD={out}/{name}", f"NATIVE_CFLAGS_EXTRA={flags}", *extra])
         for repeat in range(3):
             for counters in ((0, 1) if repeat % 2 == 0 else (1, 0)):
@@ -77,6 +86,15 @@ def main():
                 samples = re.findall(r"storewait ticks (\d+) (\d+)", log)
                 if len(samples) != 128 or "storewait: DONE" not in log or "PANIC" in log:
                     raise ValueError(f"incomplete workload in {name}.log")
+                if args.replay_profile and counters:
+                    rows = re.findall(r"replayprofile (\d+) (\d+) (\d+) (\d+) (\d+)", log)
+                    if len(rows) != len(samples):
+                        raise ValueError(f"missing actor samples in {name}")
+                    for i, row in enumerate(rows):
+                        seq, records, reads, concat, elapsed = map(int, row)
+                        if (seq != i or records != i + 1 or reads + concat > elapsed
+                                or not 0 < elapsed <= int(samples[i][1])):
+                            raise ValueError(f"invalid replay spans in {name}: {row}")
                 if args.reply_trace and counters:
                     stamps = re.findall(r"storetrace (\d+) (\d+) (\d+)", log)
                     if len(stamps) != 2 * len(samples):
@@ -98,6 +116,9 @@ def main():
                     quantiles = [us[math.ceil(p * len(us)) - 1] for p in (.5, .95, .99)]
                     print(name, op, f"calls/slept/sleeps={calls}/{slept}/{sleeps}",
                           "p50/p95/p99 us", *quantiles, flush=True)
+
+    if args.replay_profile:
+        write_report(out)
 
 
 if __name__ == "__main__":
