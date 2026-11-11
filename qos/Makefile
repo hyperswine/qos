@@ -131,7 +131,8 @@ portable-a64: $(QOSP_SRC) appside/qos_abi.h portable/park.h $(FPRISC_ROOT)/compi
 	  -I$(FRUNTIME) -I$(HAL)/unix -Iappside $(QOSP_SRC) -o qosp-a64 -lpthread -lm
 
 # ---- QOS Native: the kernel --------------------------------------------
-RT_CORE = $(FRUNTIME)/runtime.c $(FRUNTIME)/actors.c $(FRUNTIME)/bits.c \
+ACTORS_SRC ?= $(FRUNTIME)/actors.c
+RT_CORE = $(FRUNTIME)/runtime.c $(ACTORS_SRC) $(FRUNTIME)/bits.c \
           $(FRUNTIME)/vec.c $(FRUNTIME)/sstr.c $(FRUNTIME)/mod.c $(FRUNTIME)/buddy.c
 RT_VIRT = $(FMACHINE)/virt/crt0.S $(FMACHINE)/virt/ctx.S $(FMACHINE)/virt/ctx_fab.c \
           $(FMACHINE)/virt/hal.c $(FMACHINE)/virt/memshim.c

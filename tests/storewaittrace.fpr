@@ -1,0 +1,10 @@
+unsafe program.
+Bench = use "storewaitnative".
+Sys.storeTraceStamp : Int -> Int .
+dump i = if i == 256 then Unit else
+  _ = print "storetrace {i} {Sys.storeTraceStamp (2 * i)} {Sys.storeTraceStamp (2 * i + 1)}";
+  dump (i + 1).
+main =
+  result = Bench.runBench;
+  _ = dump 0;
+  result.

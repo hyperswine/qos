@@ -5,7 +5,7 @@ NI = use "nativeimage".
 Sys.bindStore : Int -> S.Rpc -> Unit .
 Sys.bindApp : String -> Unit .
 Sys.storeWaitStat : Int -> Int .
-main =
+runBench =
   me = myself 0;
   fs = FS.serve (device "blk");
   qa = case FS.readLatest me fs "apps/CkSlow.qa" of Ok s -> s | Err e -> error e;
@@ -17,3 +17,5 @@ main =
   _ = print "append calls/slept/sleeps {Sys.storeWaitStat 0} {Sys.storeWaitStat 1} {Sys.storeWaitStat 2}";
   _ = print "replay calls/slept/sleeps {Sys.storeWaitStat 3} {Sys.storeWaitStat 4} {Sys.storeWaitStat 5}";
   r.
+
+main = runBench.

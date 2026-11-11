@@ -162,6 +162,11 @@ static V store_wait_stat(V index) {
 FPR_FN(fpr_g_Sys_x2estoreWaitStat, store_wait_stat, 1);
 #endif
 
+#ifdef QOS_STORE_REPLY_TRACE
+void qos_trace_request(V caller, V owner, V id);
+void qos_trace_received(V owner, V caller, V id, uint64_t received);
+#endif
+
 sw qos_store_call(uw tag, const char *pay, uw plen, char *out, uw outcap) {
   if (!g_store_actor) return -2; /* no disk */
   if (tag != 2 && tag != 3) return -3;
@@ -198,6 +203,9 @@ sw qos_store_call(uw tag, const char *pay, uw plen, char *out, uw outcap) {
   V id = fpr_g_Sys_x2enextId_call1((V)&fpr_unit);
   uint64_t until = hal_mtime() / 10 + 10000000; /* same default as storage.fpr */
   V msg = mkrpc((V)me, id, TAG((sw)until), TAG((sw)tag), urlv, payv);
+#ifdef QOS_STORE_REPLY_TRACE
+  qos_trace_request((V)me, g_store_actor, id);
+#endif
   if (!fpr_sent(fpr_send_as((uw)me, g_store_actor, msg)))
     return store_refused("storage: the storage actor refused the request", out, outcap);
 #if QOS_STORE_WAIT_STATS
@@ -228,6 +236,9 @@ sw qos_store_call(uw tag, const char *pay, uw plen, char *out, uw outcap) {
       return store_refused(tag == 2 ? "storage service: dead actor (outcome unknown)" :
                            "storage service: dead actor", out, outcap);
     }
+#ifdef QOS_STORE_REPLY_TRACE
+    uint64_t received = hal_mtime();
+#endif
     V message = FPR_FLD(polled, 0);
     if (ISINT(message) || TID(message) != T_TUP2) {
       fpr_arc_decref(message);
@@ -235,6 +246,9 @@ sw qos_store_call(uw tag, const char *pay, uw plen, char *out, uw outcap) {
                            "storage: invalid correlated reply", out, outcap);
     }
     if (FPR_FLD(message, 0) != id) { fpr_arc_decref(message); continue; }
+#ifdef QOS_STORE_REPLY_TRACE
+    qos_trace_received(g_store_actor, (V)me, id, received);
+#endif
     V r = FPR_FLD(message, 1);
     if (ISINT(r) || TID(r) != T_RESULT || ISINT(FPR_FLD(r, 0)) || TID(FPR_FLD(r, 0)) != T_STR) {
       fpr_arc_decref(message);

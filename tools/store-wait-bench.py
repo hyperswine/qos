@@ -15,6 +15,8 @@ ROOT = Path(__file__).resolve().parents[1]
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("output", type=Path)
+    parser.add_argument("--reply-trace", action="store_true",
+                        help="timestamp mailbox publication and correlated receipt in the instrumented arm")
     args = parser.parse_args()
     out = args.output.resolve()
     out.mkdir(parents=True, exist_ok=True)
@@ -33,14 +35,33 @@ def main():
                         'loadMode = "process"\nversion = "1"\n')
     app = out / "CkSlow.qa"
     run(["tools/build-process-app.sh", "tests/storewaitbench.fpr", manifest, app])
+    if args.reply_trace:
+        # Compile a temporary copy of the release runtime. Fail on source drift
+        # rather than silently observing a different stage of delivery.
+        actors = (Path(env["FPRISC_ROOT"]) / "runtime/actors.c").read_text()
+        publication = "      __atomic_store_n(&c->rt, rt + 1, __ATOMIC_RELEASE); /* publish */"
+        if actors.count(publication) != 1:
+            raise ValueError("cannot identify the mailbox publication site")
+        actors = actors.replace(publication,
+                                "      qos_trace_publish(key, (V)a, m);\n" + publication)
+        trace = ROOT / "tests/storewait_trace.c"
+        (out / "actors_trace.c").write_text(f'#include "{trace}"\n' + actors)
+
     for harts in (1, 2):
         kernels = {}
         for counters in (0, 1):
             name = f"{harts}h-stats{counters}"
             kernels[counters] = out / f"{name}.elf"
+            tracing = args.reply_trace and counters
+            kernel_test = "storewaittrace" if tracing else "storewaitnative"
+            flags = f"-DQOS_STORE_WAIT_STATS={counters}"
+            extra = []
+            if tracing:
+                flags += " -DQOS_STORE_REPLY_TRACE"
+                extra.append(f"ACTORS_SRC={out}/actors_trace.c")
             run(["make", "-s", "-C", "qos", "native", f"HARTS={harts}",
-                 f"SYSTEM={ROOT}/tests/storewaitnative.fpr", f"KERNEL={kernels[counters]}",
-                 f"BUILD={out}/{name}", f"NATIVE_CFLAGS_EXTRA=-DQOS_STORE_WAIT_STATS={counters}"])
+                 f"SYSTEM={ROOT}/tests/{kernel_test}.fpr", f"KERNEL={kernels[counters]}",
+                 f"BUILD={out}/{name}", f"NATIVE_CFLAGS_EXTRA={flags}", *extra])
         for repeat in range(3):
             for counters in ((0, 1) if repeat % 2 == 0 else (1, 0)):
                 name = f"{harts}h-stats{counters}-run{repeat + 1}"
@@ -56,11 +77,23 @@ def main():
                 samples = re.findall(r"storewait ticks (\d+) (\d+)", log)
                 if len(samples) != 128 or "storewait: DONE" not in log or "PANIC" in log:
                     raise ValueError(f"incomplete workload in {name}.log")
+                if args.reply_trace and counters:
+                    stamps = re.findall(r"storetrace (\d+) (\d+) (\d+)", log)
+                    if len(stamps) != 2 * len(samples):
+                        raise ValueError(f"incomplete reply trace in {name}.log")
+                    for i, (seq, sent, received) in enumerate(stamps):
+                        gap = int(received) - int(sent)
+                        if int(seq) != i or not 0 <= gap <= int(samples[i // 2][i % 2]):
+                            raise ValueError(f"invalid trace sample {i} in {name}.log")
                 for index, op in enumerate(("append", "replay")):
                     m = re.search(rf"{op} calls/slept/sleeps (\d+) (\d+) (\d+)", log)
                     calls, slept, sleeps = map(int, m.groups())
                     if calls != 128 * counters or not 0 <= slept <= calls or sleeps < slept or (not slept and sleeps):
                         raise ValueError(f"inconsistent {op} counters in {name}.log")
+                    if args.reply_trace and counters:
+                        gaps = sorted((int(rx) - int(tx)) / 10 for _, tx, rx in stamps[index::2])
+                        print(name, op, "publish-to-receive p50/p95/p99 us",
+                              *(gaps[math.ceil(p * len(gaps)) - 1] for p in (.5, .95, .99)), flush=True)
                     us = sorted(int(row[index]) / 10 for row in samples)
                     quantiles = [us[math.ceil(p * len(us)) - 1] for p in (.5, .95, .99)]
                     print(name, op, f"calls/slept/sleeps={calls}/{slept}/{sleeps}",
