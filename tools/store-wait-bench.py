@@ -66,6 +66,7 @@ def main():
                 extra.append(f"ACTORS_SRC={out}/actors_trace.c")
             system = ROOT / f"tests/{kernel_test}.fpr"
             if args.replay_profile and counters:
+                flags += " -DQOS_REPLAY_BLK_PROFILE"
                 system = profiled_kernel
                 extra.append(f"NATIVE_TEST_SRC={ROOT}/tests/storewait_replay.c")
             run(["make", "-s", "-C", "qos", "native", f"HARTS={harts}",

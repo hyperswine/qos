@@ -604,14 +604,33 @@ static V h_blkPages(V d) {
   return TAG(blk ? (sw)(blk_sectors / SEC_PER_PAGE) : 0);
 }
 
+#ifdef QOS_REPLAY_BLK_PROFILE
+void qos_replay_blk_cost(uw page, uint64_t lock, uint64_t transfer, uint64_t copy);
+#endif
+
 static V h_blkRead(V d, V pv) {
   (void)d;
   if (!ISINT(pv)) fpr_cpanic("blkRead: page must be an Int");
   blk_check(pv);
+#ifdef QOS_REPLAY_BLK_PROFILE
+  uint64_t start = hal_mtime();
+#endif
   blk_lock();
+#ifdef QOS_REPLAY_BLK_PROFILE
+  uint64_t acquired = hal_mtime();
+#endif
   blk_rw((u64)UNTAG(pv), 0);
+#ifdef QOS_REPLAY_BLK_PROFILE
+  uint64_t transferred = hal_mtime();
+#endif
   V result = (V)fpr_mkstr(bdata, PAGE_SZ);
+#ifdef QOS_REPLAY_BLK_PROFILE
+  uint64_t copied = hal_mtime();
+#endif
   blk_unlock();
+#ifdef QOS_REPLAY_BLK_PROFILE
+  qos_replay_blk_cost((uw)UNTAG(pv), acquired - start, transferred - acquired, copied - transferred);
+#endif
   return result;
 }
 
