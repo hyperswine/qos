@@ -38,6 +38,34 @@ profileReplay dev idx url =
   _ = Sys.replayDone (end - begin);
   result.
 """
+    # Only replay calls the timed copies. Boot-time reads of the process
+    # image and other Qlog operations continue using their original functions.
+    parts = qlog[qlog.index("rpParts :"):qlog.index("rpGo :")]
+    gather = "rpParts dev (p + 1) (left - take) (substr (pageRead dev p) 0 take :: acc)"
+    if parts.count(gather) != 1:
+        raise ValueError("unexpected pinned payload gather")
+    parts = parts.replace(gather, """begin = Sys.mtime Unit;
+      page = pageRead dev p;
+      end = Sys.mtime Unit;
+      _ = Sys.replayPageCost (end - begin);
+      rpParts dev (p + 1) (left - take) (substr page 0 take :: acc)""")
+    payload = next(line for line in qlog.splitlines() if line.startswith("readPayload dev p pl ="))
+    qlog = qlog.replace("payload = entRead dev e;", "payload = timedEntRead dev e;")
+    qlog += "\n" + parts.replace("rpParts", "timedParts")
+    qlog += "\n" + payload.replace("readPayload", "timedPayload").replace("rpParts", "timedParts")
+    qlog += """
+Sys.replayPageCost : Int -> Unit .
+Sys.replayPayloadCost : Int -> Int -> Unit .
+timedEntRead dev e =
+  Ent u p pl off len = e;
+  begin = Sys.mtime Unit;
+  payload = timedPayload dev p pl;
+  middle = Sys.mtime Unit;
+  slice = substr payload off len;
+  end = Sys.mtime Unit;
+  _ = Sys.replayPayloadCost (middle - begin) (end - middle);
+  slice.
+"""
     (bench / "profileqlog.fpr").write_text(qlog)
     kernel = (root / "tests/storewaitnative.fpr").read_text()
     factory = 'FS.serve (device "blk")'
@@ -51,6 +79,7 @@ Wire = use "std/storage#a8f7ee14e1efae76".
 Sys.replayMetric : Int -> Int -> Int .
 dump i = if i == 128 then Unit else
   _ = print "replayprofile {i} {Sys.replayMetric i 0} {Sys.replayMetric i 1} {Sys.replayMetric i 2} {Sys.replayMetric i 3}";
+  _ = print "entprofile {i} {Sys.replayMetric i 4} {Sys.replayMetric i 5} {Sys.replayMetric i 6} {Sys.replayMetric i 7}";
   dump (i + 1).
 runBench =''').replace("main = runBench.", "main = r = runBench; _ = dump 0; r.")
     path = bench / "profilekernel.fpr"
@@ -64,13 +93,15 @@ def write_report(out: Path):
         "Native Qlog indexed replay, guest mtime at 10 MHz. Times below are elapsed guest time.",
         "Three fresh QEMU boots per configuration and hart count, 128 eight-byte appends and validated replays each.",
         "Read includes entRead, page access, internal payload assembly and extraction; concat times the outer strcat only.",
+        "Page times pageRead; assembly = inclusive readPayload minus pageRead (includes arena, probe overhead and internal assembly).",
+        "Slice brackets final substr. Unattributed read ticks cover outer entRead bookkeeping and clock/probe overhead.",
         "Actor total brackets idxReplayE before reply construction. Clock and sampling overhead are included.",
         "Control call ticks come from the same ordinal replay on a separate counter-off, unmodified-Qlog boot.",
         "Reproduce: FPRISC_ROOT=<pinned-checkout> python3 tools/store-wait-bench.py --replay-profile <new-directory>",
         "", "Medians across three boots at each exact log length.",
-        "harts records read_ms concat_ms actor_ms profiled_call_ms control_call_ms",
+        "harts records page_ms assembly_ms slice_ms other_read_ms read_ms concat_ms actor_ms profiled_call_ms control_call_ms",
     ]
-    raw = ["harts run records read_ticks concat_ticks actor_ticks profiled_call_ticks control_call_ticks"]
+    raw = ["harts run records pages page_ticks assembly_ticks slice_ticks other_read_ticks read_ticks concat_ticks actor_ticks profiled_call_ticks control_call_ticks"]
     for harts in (1, 2):
         groups = {}
         for run in (1, 2, 3):
@@ -78,17 +109,23 @@ def write_report(out: Path):
                 return (out / f"{harts}h-stats{stats}-run{run}.log").read_text()
             profiled, control = log(1), log(0)
             rows = re.findall(r"replayprofile (\d+) (\d+) (\d+) (\d+) (\d+)", profiled)
+            details = re.findall(r"entprofile (\d+) (\d+) (\d+) (\d+) (\d+)", profiled)
             pattern = r"storewait ticks \d+ (\d+)"
             on, off = re.findall(pattern, profiled), re.findall(pattern, control)
-            if len(rows) != 128 or len(on) != 128 or len(off) != 128:
+            if len(details) != 128 or len(rows) != 128 or len(on) != 128 or len(off) != 128:
                 raise ValueError("missing replay samples")
             for i, row in enumerate(rows):
                 seq, records, reads, concat, elapsed = map(int, row)
-                metrics = (reads, concat, elapsed, int(on[i]), int(off[i]))
-                if seq != i or records != i + 1 or not reads + concat <= elapsed <= metrics[3]:
+                ordinal, pages, page, payload, sliced = map(int, details[i])
+                assembly = payload - page
+                other = reads - payload - sliced
+                if ordinal != i or pages != records or min(assembly, other) < 0:
+                    raise ValueError(f"invalid entRead breakdown: {details[i]}")
+                metrics = (page, assembly, sliced, other, reads, concat, elapsed, int(on[i]), int(off[i]))
+                if seq != i or records != i + 1 or not reads + concat <= elapsed <= int(on[i]):
                     raise ValueError("invalid replay profile")
                 groups.setdefault(records, []).append(metrics)
-                raw.append(" ".join(map(str, (harts, run, records, *metrics))))
+                raw.append(" ".join(map(str, (harts, run, records, pages, *metrics))))
         for n in (1, 8, 16, 32, 64, 128):
             ms = [median(col) / 10000 for col in zip(*groups[n])]
             lines.append(f"{harts} {n} " + " ".join(f"{v:.3f}" for v in ms))
