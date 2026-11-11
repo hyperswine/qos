@@ -1,0 +1,21 @@
+Portable endpoint and Darwin discard-write reference, 2026-11-11
+QOS 4e60743 plus tests/epbench.fpr timing changes, release FP-RISC e138e654332f.
+Darwin 27.2.0 arm64. One QOS hart. Default OS scheduling, no affinity control.
+Each sample is a loop mean: 1,000 warmup operations, 20,000 timed operations.
+Five pairs in order, QOS followed by the host executable in each pair.
+The owner discards an integer and acknowledges; /dev/null discards a word and
+returns a byte count. Neither path measures persistence or device delivery.
+
+run   open/write/close ns   held write ns   held /dev/null write ns
+1     2303                  635             827.6
+2     2542                  577             975.5
+3     2368                  641             697.5
+4     2556                  774             792.8
+5     2204                  530             813.9
+
+Build the QOS image and portable host with the release-pinned checkout:
+./qos.py --fprisc <pinned-checkout> run tests/epbench.fpr --harts 1 --expect 'epbench: DONE'
+cc -std=c11 -O2 -Wall -Wextra -Werror tests/epbench_syscall.c -o /tmp/epbench_syscall
+From .qos, repeat FPR_HARTS=1 ../qos/qosp --yes epbench.qa then /tmp/epbench_syscall.
+These samples characterize steady single-client throughput. They do not
+provide individual operation percentiles or quantify a production caller.
