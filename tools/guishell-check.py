@@ -566,11 +566,12 @@ def check(out):
         'S = use "' + str(ROOT/'programs/mods/guishell') + '".\n' +
         'QS = use "' + str(ROOT/'programs/mods/qsys') + '".\n' +
         'GX = use "' + str(ROOT/'programs/mods/graphics') + '".\n' +
+        'EC = use "' + str(ROOT/'programs/mods/epclient') + '#5e2a0f910e610193".\n' +
         'MV = use "std/mvu".\n' +
         'fault me env event model = case event of\n' +
         '    MV.ETick -> (q, tiles, mt, jobs, sessions) = env; QS.Qsys ns st vfs log apps = q;\n' +
         '      ep = case GX.attach me ns "failure" of Ok value -> value | Err why -> error why;\n' +
-        '      (graphics, handle) = ep; _ = kill graphics; (model, Nil)\n' +
+        '      (graphics, session) = EC.owner ep; _ = kill graphics; _ = EC.close me session; (model, Nil)\n' +
         '  | other -> S.update me env event model.\n' +
         'main = S.runWindow "qos-shell-failure" fault 960 600.\n')
     run('make', '-s', 'qos-app', f'PROG={failure}',

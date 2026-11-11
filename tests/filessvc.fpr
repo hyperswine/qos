@@ -4,6 +4,7 @@
 unsafe program.
 Services = use "../programs/mods/services".
 EP = use "../programs/mods/ep#c66ad65e68dd97f5".
+EC = use "../programs/mods/epclient#5e2a0f910e610193".
 AC = use "std/actor#201a0e9bf98a5154".
 FS = use "std/fs#84826bc9e8ddb4b5".
 
@@ -39,9 +40,10 @@ main =
   (_, (ok2, length2)) = second;
   _ = print "filessvc: replay lengths {length1} {length2}";
   client = FS.connect me hub.ns;
-  status = case EP.open me hub.ns "/services/files/status" "read" of Ok ep -> ep | Err why -> error why;
-  (owner, _) = status;
+  status = case EC.open me hub.ns "/services/files/status" "read" of Ok ep -> ep | Err why -> error why;
+  (owner, opened) = EC.owner status;
   _ = kill owner;
+  _ = EC.close me opened;               # its owner is dead: answered, not held
   dead = FS.readLatest me client "terra2/log";
   case and2 (and2 ok1 ok2) (refused dead) of
     True -> "filessvc: HOLDS"

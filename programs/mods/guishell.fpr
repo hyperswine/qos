@@ -4,6 +4,7 @@ unsafe module.
 QS = use "qsys".
 GX = use "graphics".
 EP = use "ep#c66ad65e68dd97f5".
+EC = use "epclient#5e2a0f910e610193".
 AK = use "appkit".
 S2 = use "scene2d".
 ST = use "scrolltext".
@@ -381,8 +382,8 @@ runProgram tag app requestedW requestedH =
   case attached of
       Err why -> finishUnattached me lifecycle (Err "shell graphics: {why}")
     | Ok ep -> runAttached me app q lifecycle tiles mt ep.
-runAttached me app q lifecycle tiles mt ep =
-  (graphics, h) = ep;
+runAttached me app q lifecycle tiles mt attached =
+  (graphics, ep) = EC.owner attached;
   calls = spawn (AC.session me);
   dimsResult = case AC.deadlineAfter serviceBudgetMs of
       Err why -> Err why
@@ -391,9 +392,9 @@ runAttached me app q lifecycle tiles mt ep =
   case dimsResult of
       Err why -> finishSession me lifecycle ep (Err "shell dimensions: {why}")
     | Ok dims -> runSized me app q lifecycle tiles mt ep dims.
-runSized me program q lifecycle tiles mt ep dims =
+runSized me program q lifecycle tiles mt session dims =
   QS.Qsys ns st vfs log apps = q;
-  (graphics, h) = ep;
+  (graphics, ep) = EC.owner session;
   (w, hh) = dims;
   layout = L.layout w hh;
   inp = spawn (input graphics w hh);
@@ -422,8 +423,7 @@ withPort port (MV.MApp ini upd sk vw vl dn sbs) = MV.MApp ini upd sk vw vl dn (p
 portSubs port sbs model = MV.SPort port :: sbs model.
 finishSession me lifecycle ep result =
   _ = Sys.shutdownBegin Unit;
-  (graphics, h) = ep;
-  closed = EP.flat (AC.callWithin serviceBudgetMs me graphics (EP.Close h));
+  closed = EC.closeWithin serviceBudgetMs me ep;
   finishUnattached me lifecycle (withCleanup result "graphics close" closed).
 finishUnattached me lifecycle result =
   _ = Sys.shutdownBegin Unit;

@@ -23,6 +23,7 @@
 unsafe program.
 
 EP = use "../programs/mods/ep#c66ad65e68dd97f5".
+EC = use "../programs/mods/epclient#5e2a0f910e610193".
 GX = use "../programs/mods/graphics".
 MV = use "std/mvu".
 AC = use "std/actor#201a0e9bf98a5154".
@@ -60,14 +61,14 @@ runApp ns tag scene life tester me =
   case GX.attach me ns tag of
     Err e -> send tester (9, "attach {tag}: {e}") >> Unit
   | Ok ep -> runApp2 ns tag scene life tester me ep.
-runApp2 : unsafe Int -> String -> Int -> Int -> Int -> Int -> (Int, Int) -> Unit .
+runApp2 : unsafe Int -> String -> Int -> Int -> Int -> Int -> EC.Endpoint -> Unit .
 runApp2 ns tag scene life tester me ep =
-  (gfx, h) = ep;
+  (gfx, session) = EC.owner ep;
   clint = device "clint";
   mt = reg32 clint 49144;
   cfg = { env = 0, mt = mt, tick = 2000, input = gfx, render = gfx };
   r = MV.game me cfg (App appInit (appUpdate life) appSubs (appView scene));
-  _ = EP.close me ep;
+  _ = EC.close me session;
   _ = send tester (9, "{tag} done");
   Unit.
 

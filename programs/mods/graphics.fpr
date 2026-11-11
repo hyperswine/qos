@@ -48,6 +48,7 @@
 unsafe module.
 
 EP = use "ep#c66ad65e68dd97f5".
+EC = use "epclient#5e2a0f910e610193".
 AC = use "std/actor#201a0e9bf98a5154".
 MV = use "std/mvu".
 
@@ -410,15 +411,16 @@ hOf s = case s of Ses pd h t sn ow -> h.
 
 # ---- a program's side ---------------------------------------------------------------
 # open a session: the service actor to hand std.MVU as input and render
-attach : unsafe Int -> Int -> String -> Result (Int, Int) String .
-attach me ns tag = EP.open me ns "/services/graphics/{tag}" "rw".
-# register a program's meshes on a session
-meshes : unsafe Int -> (Int, Int) -> List (String, String) -> Unit .
+# (an owned endpoint: the program closes it when its session ends)
+attach : unsafe Int -> Int -> String -> Result EC.Endpoint String .
+attach me ns tag = EC.open me ns "/services/graphics/{tag}" "rw".
+# register a program's meshes on a session; the session comes back
+meshes : unsafe Int -> EC.Endpoint -> List (String, String) -> EC.Endpoint .
 meshes me ep ms = case ms of
-    Nil -> Unit
+    Nil -> ep
   | nt :: r -> mStep me ep r nt.
-mStep : unsafe Int -> (Int, Int) -> List (String, String) -> (String, String) -> Unit .
+mStep : unsafe Int -> EC.Endpoint -> List (String, String) -> (String, String) -> EC.Endpoint .
 mStep me ep r nt =
   (name, text) = nt;
-  _ = EP.write me ep (IStr "{name}\n{text}");
-  meshes me ep r.
+  (_, kept) = EC.write me ep (IStr "{name}\n{text}");
+  meshes me kept r.

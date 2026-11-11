@@ -21,6 +21,7 @@ unsafe program.
 
 Endpoint = use "../programs/mods/epservice#e8bce05a1ddf73db".
 EP = use "../programs/mods/ep#c66ad65e68dd97f5".
+EC = use "../programs/mods/epclient#5e2a0f910e610193".
 AC = use "std/actor#201a0e9bf98a5154".
 
 Open = EP.Open. Read = EP.Read. Write = EP.Write. Close = EP.Close.
@@ -103,22 +104,23 @@ expect what got want = case EP.strEq got want of
 # a reader that opens, reads (held), and reports what it got
 reader : unsafe Int -> Int -> Int -> Unit .
 reader ns back me =
-  case EP.open me ns "/services/echo" "read" of
+  case EC.open me ns "/services/echo" "read" of
     Err e -> send back (0, "open: {e}") >> Unit
   | Ok ep -> readerGo ns back me ep.
-readerGo : unsafe Int -> Int -> Int -> (Int, Int) -> Unit .
+readerGo : unsafe Int -> Int -> Int -> EC.Endpoint -> Unit .
 readerGo ns back me ep =
-  (owner, h) = ep;
+  EC.Endpoint owner h = ep;
   _ = send back (h, "opened");
-  r = EP.read me ep 0;
+  (r, kept) = EC.read me (EC.Endpoint owner h) 0;
   _ = send back (h, EP.text r);
+  _ = EC.close me kept;                     # main closed it: answered, not held
   Unit.
 
 # a child under its own pid: may it open the url?
 child : unsafe Int -> String -> Int -> Int -> Int .
 child ns url back me =
-  r = EP.open me ns url "read";
-  got = case r of Ok ep -> "opened" | Err e -> e;
+  r = EC.open me ns url "read";
+  got = case r of Ok ep -> EC.close me ep >> "opened" | Err e -> e;
   _ = send back got;
   0.
 
@@ -140,20 +142,20 @@ main =
   svc = AC.spawnWith (AC.Dynamic 64) echo;
   reg = EP.register me ns "/services/echo" svc;
   ok0 = expect "register" "{reg}" "Ok 1";
-  ep = case EP.open me ns "/services/echo" "rw" of
+  ep = case EC.open me ns "/services/echo" "rw" of
       Ok e -> e
     | Err e -> error "epecho: open: {e}";
-  (owner, h) = ep;
+  (owner, ep1) = EC.owner ep;
   ok1 = expect "owner is the echo actor" "{owner == svc}" "True";
-  w = EP.write me ep (IStr "ping");
-  r = EP.read me ep 0;
-  c = EP.close me ep;
+  (w, ep2w) = EC.write me ep1 (IStr "ping");
+  (r, ep3) = EC.read me ep2w 0;
+  c = EC.close me ep3;
   ok2 = expect "write" "{w}" "Ok (IInt 4)" and expect "read" (EP.text r) "ping" and expect "close" "{c}" "Ok 0";
   # 2. the listing is a read of "/services/"
   ls = EP.text (EP.readOnce me ns "/services/");
   ok3 = expect "listing names the service" "{contains ls "/services/echo"}" "True";
   # 3. refusals by name
-  no = case EP.open me ns "/services/nothing" "read" of Ok e -> "opened" | Err e -> e;
+  no = case EC.open me ns "/services/nothing" "read" of Ok e -> EC.close me e >> "opened" | Err e -> e;
   dup = case EP.register me ns "/services/echo" me of Ok n -> "ok" | Err e -> e;
   ok4 = expect "unknown url" no "no such url: /services/nothing"
     and expect "taken url" dup "taken: /services/echo";
@@ -161,11 +163,11 @@ main =
   rd = spawn (reader ns me);
   (h2, st1) = receive me;
   _ = Sys.sleepUs 20000;                    # the reader is parked in its read
-  ep2 = case EP.open me ns "/services/echo" "rw" of Ok e -> e | Err e -> error "epecho: open2: {e}";
-  _ = EP.close me (svc, h2);                # close the READER's handle
+  ep2 = case EC.open me ns "/services/echo" "rw" of Ok e -> e | Err e -> error "epecho: open2: {e}";
+  _ = EC.close me (EC.Endpoint svc h2);     # close the READER's handle, from here
   (h3, st2) = receive me;
   ok5 = expect "reader opened" st1 "opened" and expect "held read answered by close" st2 "closed";
-  _ = EP.close me ep2;
+  _ = EC.close me ep2;
   # 5. grants: a child without one is refused; granted, it opens
   c1 = Sys.spawnApp (child ns "/services/echo" me);
   g1 = receive me;
@@ -177,7 +179,7 @@ main =
   # 3b. a dead owner
   _ = kill svc;
   _ = Sys.sleepUs 20000;
-  dead = case EP.open me ns "/services/echo" "read" of Ok e -> "opened" | Err e -> e;
+  dead = case EC.open me ns "/services/echo" "read" of Ok e -> EC.close me e >> "opened" | Err e -> e;
   ok7 = expect "dead owner" dead "/services/echo: its owner dead actor";
   case ok0 and ok1 and ok2 and ok3 and ok4 and ok5 and ok6 and ok7 of
     True -> "epecho: HOLDS"

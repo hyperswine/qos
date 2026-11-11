@@ -9,6 +9,7 @@
 unsafe program.
 
 EP = use "../programs/mods/ep#c66ad65e68dd97f5".
+EC = use "../programs/mods/epclient#5e2a0f910e610193".
 SE = use "../programs/mods/sysep".
 UM = use "../programs/mods/uart".
 AC = use "std/actor#201a0e9bf98a5154".
@@ -20,12 +21,12 @@ ucall me a msg =
   r = receiveFrom me a;
   Unit.
 
-polls : unsafe Int -> (Int, Int) -> Int -> Int -> Int .
-polls me pp 0 acc = acc.
+polls : unsafe Int -> EC.Endpoint -> Int -> Int -> (Int, EC.Endpoint) .
+polls me pp 0 acc = (acc, pp).
 polls me pp n acc =
-  k = key (EP.read me pp 0);
+  (r, kept) = EC.read me pp 0;
   _ = Sys.sleepUs 1000;
-  polls me pp (n - 1) (acc + k).
+  polls me kept (n - 1) (acc + key r).
 
 key r = case r of Ok v -> (case v of IInt k -> k | o -> 0 - 2) | Err e -> 0 - 1.
 
@@ -41,20 +42,24 @@ main =
   _ = EP.register me ns "/" (AC.spawnWith (AC.Dynamic 64) (EP.lister ns));
   st = { has = False, act = 0, uart = usvc, timer = 0, ns = ns };
   _ = SE.boot me ns usvc 0 clk st;
-  ep = case EP.open me ns "/services/keyboard" "read" of Ok e -> e | Err e -> error "kbdread: open: {e}";
-  pp = case EP.open me ns "/services/keyboard/poll" "read" of Ok e -> e | Err e -> error "kbdread: open poll: {e}";
-  seq = pollSeq me pp 6 "";           # bytes queued BEFORE the first poll come out one per poll
-  z = polls me pp 400 0;             # the launcher's shape: many polls before a held read
-  a = key (EP.read me ep 0);
-  b = key (EP.read me ep 0);
-  _ = EP.close me ep;
+  ep = case EC.open me ns "/services/keyboard" "read" of Ok e -> e | Err e -> error "kbdread: open: {e}";
+  pp = case EC.open me ns "/services/keyboard/poll" "read" of Ok e -> e | Err e -> error "kbdread: open poll: {e}";
+  (seq, pp1) = pollSeq me pp 6 "";    # bytes queued BEFORE the first poll come out one per poll
+  (z, pp2) = polls me pp1 400 0;      # the launcher's shape: many polls before a held read
+  _ = EC.close me pp2;
+  (ra, ep1) = EC.read me ep 0;
+  (rb, ep2) = EC.read me ep1 0;
+  a = key ra;
+  b = key rb;
+  _ = EC.close me ep2;
   p = key (EP.readOnce me ns "/services/keyboard/poll");
   verdict = case a == 97 and b == 98 and p == 0 and EP.strEq seq "wxyz00" of True -> "HOLDS" | False -> "FAILED";
   "kbdread: seq={seq} first={a} second={b} poll={p} {verdict}".
 
-pollSeq : unsafe Int -> (Int, Int) -> Int -> String -> String .
-pollSeq me pp 0 acc = acc.
+pollSeq : unsafe Int -> EC.Endpoint -> Int -> String -> (String, EC.Endpoint) .
+pollSeq me pp 0 acc = (acc, pp).
 pollSeq me pp n acc =
-  k = key (EP.read me pp 0);
+  (r, kept) = EC.read me pp 0;
+  k = key r;
   _ = Sys.sleepUs 20000;
-  pollSeq me pp (n - 1) (strcat acc (case k == 0 of True -> "0" | False -> chr k)).
+  pollSeq me kept (n - 1) (strcat acc (case k == 0 of True -> "0" | False -> chr k)).

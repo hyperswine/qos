@@ -15,6 +15,7 @@ unsafe program.
 
 Endpoint = use "../programs/mods/epservice#e8bce05a1ddf73db".
 EP = use "../programs/mods/ep#c66ad65e68dd97f5".
+EC = use "../programs/mods/epclient#5e2a0f910e610193".
 AC = use "std/actor#201a0e9bf98a5154".
 
 Sys.mtime : Unit -> Int .
@@ -36,13 +37,15 @@ oMsg me next ret q = case q of
 must r = case r of Ok v -> v | Err e -> error "epbench: {e}".
 
 perOp me ns k = if k == 0 then Unit else
-  ep = must (EP.open me ns "/services/bench" "rw");
-  _ = must (EP.write me ep (EP.IInt k));
-  _ = must (EP.close me ep);
+  ep = must (EC.open me ns "/services/bench" "rw");
+  (w, kept) = EC.write me ep (EP.IInt k);
+  _ = must w;
+  _ = must (EC.close me kept);
   perOp me ns (k - 1).
-held me ep k = if k == 0 then Unit else
-  _ = must (EP.write me ep (EP.IInt k));
-  held me ep (k - 1).
+held me ep k = if k == 0 then ep else
+  (w, kept) = EC.write me ep (EP.IInt k);
+  _ = must w;
+  held me kept (k - 1).
 
 report name n t0 t1 = print "epbench: {name} {(t1 - t0) * 100 / n} ns per write".
 
@@ -55,17 +58,17 @@ main =
   _ = must (EP.register me ns "/services/bench" svc);
   n = 20000;
   _ = perOp me ns 1000;
-  warm = must (EP.open me ns "/services/bench" "rw");
-  _ = held me warm 1000;
-  _ = must (EP.close me warm);
+  warm = must (EC.open me ns "/services/bench" "rw");
+  warmed = held me warm 1000;
+  _ = must (EC.close me warmed);
   t0 = Sys.mtime Unit;
   _ = perOp me ns n;
   t1 = Sys.mtime Unit;
-  ep = must (EP.open me ns "/services/bench" "rw");
+  ep = must (EC.open me ns "/services/bench" "rw");
   heldStart = Sys.mtime Unit;
-  _ = held me ep n;
+  kept = held me ep n;
   t2 = Sys.mtime Unit;
-  _ = must (EP.close me ep);
+  _ = must (EC.close me kept);
   _ = report "per-op (open, write, close)" n t0 t1;
   _ = report "held (write only)" n heldStart t2;
   print "epbench: DONE".
