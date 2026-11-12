@@ -1,0 +1,10 @@
+#!/bin/sh
+# sweep -- run the legs in checks/legs (checks/sweep.sol says how).
+#
+# The runner is a Sol script started with a RELEASED toolchain, pinned here,
+# never with the compiler under test: a compiler bug must not be able to
+# break the thing that reports compiler bugs.  Install it once with
+#   fprmeta install 0.13.1
+SOL_RELEASE=0.13.1
+cd "$(dirname "$0")" || exit 2
+exec sol "+$SOL_RELEASE" checks/sweep.sol "$@"

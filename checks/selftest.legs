@@ -1,0 +1,27 @@
+# checks/selftest.legs -- a manifest whose verdicts are known, for the leg
+# that checks the runner itself (see `sweep verdicts` in checks/legs).
+== passes
+true
+== fails where a pass is expected
+false
+== skips
+leg_skipped "no such tool here"
+== red as expected
+@ expect fail -- a fixture
+false
+== expected red, but passes
+@ expect fail -- a fixture
+true
+== a failing stage is the verdict under pipefail
+false | cat
+== ran: a stage whose status is not the verdict
+ran false | cat
+== builds something
+echo built > "$CK_TMP/selftest-built"
+== uses what the leg above built
+@ with previous
+grep -q built "$CK_TMP/selftest-built"
+== sees only the sweep's environment
+[ -z "${FPR_TOOLCHAIN:-}" ] && [ "$FPR_HOME" = "$ROOT" ] && [ -n "$FPRISC_ROOT" ]
+== outlives its deadline
+sleep 30

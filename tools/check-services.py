@@ -201,7 +201,7 @@ def main():
     ap.add_argument('--output', type=Path, help='new directory to retain private workspaces/logs/results')
     ap.add_argument('--only', action='append', choices=[c.name for c in CHECKS])
     ap.add_argument('--list', action='store_true')
-    ap.add_argument('--verdict', choices=[c.name for c in CHECKS], help='read one check status for check-all.sh')
+    ap.add_argument('--verdict', choices=[c.name for c in CHECKS], help='read one check status for a sweep leg')
     ap.add_argument('--results', type=Path)
     args = ap.parse_args()
     if args.verdict:

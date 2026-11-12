@@ -51,7 +51,7 @@ class Services(unittest.TestCase):
             self.assertTrue((ROOT / c.script).is_file(), c.script)
         workflow = (ROOT / '.github/workflows/ci.yml').read_text()
         self.assertIn('tools/check-services.py --jobs 2', workflow)
-        sweep = (ROOT / 'check-all.sh').read_text()
+        sweep = (ROOT / 'checks/legs').read_text()
         self.assertLess(sweep.index('== QOSPortable host+run'), sweep.index('== clause groups:'))
         for c in CHECKS:
             self.assertEqual(sweep.count('service_leg ' + c.name + ')'), 1)
