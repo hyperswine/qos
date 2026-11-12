@@ -1,7 +1,7 @@
 # Fresh-process probe for tools/portable-durable-check.py. The script substitutes
 # action, leaving all page operations on the routed block-service path.
 unsafe program.
-QL = use "../programs/mods/qlog#cc114a4d7514b15a".
+QL = use "../programs/mods/qlog#045dbfa936f832eb".
 B = use "std/blockio#8b4ffa1467ca03a5".
 SVC = use "svc#75479fb6d5f34670".
 action = 0.

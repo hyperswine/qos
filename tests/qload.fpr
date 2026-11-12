@@ -13,7 +13,7 @@
 # a .qa read off qosp.disk; 40+2=42".
 
 unsafe program.
-QL = use "../programs/mods/qlog#7022992c8e4a9fba".
+QL = use "../programs/mods/qlog#045dbfa936f832eb".
 Plug = use "../programs/mods/plug".
 
 main =

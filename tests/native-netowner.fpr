@@ -1,6 +1,6 @@
 unsafe program.
 N = use "../std/net#464ca3ee0d89bc64".
-FS = use "std/fs#84826bc9e8ddb4b5".
+FS = use "std/fs#19932fc6492e8a87".
 NI = use "nativeimage".
 Sys.bindApp : String -> Unit .
 main =

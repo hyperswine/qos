@@ -1,0 +1,67 @@
+# Appends through FS.connect, the std/fs forwarder an application uses to
+# reach Files.qa: ns per append and per read on one key, then keys taken in
+# turn (each change of key closes the held endpoint and opens another).
+# Then two replays of the n-record key. The answers are checked, so a reused
+# endpoint or a cached entry that answered for the wrong key fails here.
+#: expect fsbench: HOLDS
+unsafe program.
+Services = use "../programs/mods/services".
+EP = use "../programs/mods/ep#c66ad65e68dd97f5".
+FS = use "../std/fs".
+
+ok (Ok _) = True.
+ok (Err _) = False.
+bytes (Ok text) = text.
+bytes (Err why) = error "fsbench: unexpected file error: {why}".
+and2 a b = case a of True -> b | False -> False.
+
+appends me client record k = if k == 0 then True else
+  _ = bytes (FS.append me client record "x");
+  appends me client record (k - 1).
+reads me client record k = if k == 0 then True else
+  _ = bytes (FS.readLatest me client record);
+  reads me client record (k - 1).
+# alternate two keys: every operation changes key
+turns me client k = if k == 0 then True else
+  a = EP.strEq (bytes (FS.readLatest me client "bench/a")) "a";
+  b = EP.strEq (bytes (FS.readLatest me client "bench/b")) "b";
+  and2 (and2 a b) (turns me client (k - 1)).
+report name n t0 t1 = print "fsbench: {name} {(t1 - t0) * 100 / n} ns per operation".
+
+app ns tester me =
+  _ = receive me;
+  client = FS.connect me ns;
+  _ = appends me client "bench/warm" 50;
+  # each append takes two disk pages: keep a run well inside a small disk
+  n = 200;
+  t0 = Sys.mtime Unit;
+  _ = appends me client "bench/log" n;
+  t1 = Sys.mtime Unit;
+  _ = reads me client "bench/log" n;
+  t2 = Sys.mtime Unit;
+  _ = bytes (FS.append me client "bench/a" "a");
+  _ = bytes (FS.append me client "bench/b" "b");
+  t3 = Sys.mtime Unit;
+  alternated = turns me client 100;
+  t4 = Sys.mtime Unit;
+  _ = report "append, one key" n t0 t1;
+  _ = report "read latest, one key" n t1 t2;
+  _ = report "read latest, alternating keys" 200 t3 t4;
+  t5 = Sys.mtime Unit;
+  replay = bytes (FS.replay me client "bench/log");
+  t6 = Sys.mtime Unit;
+  again = bytes (FS.replay me client "bench/log");
+  t7 = Sys.mtime Unit;
+  _ = report "replay of {n} records, first" 1 t5 t6;
+  _ = report "replay of {n} records, again" 1 t6 t7;
+  _ = send tester (and2 alternated (and2 (strlen replay == n) (strlen again == n)));
+  Unit.
+
+main =
+  me = myself 0;
+  hub = Services.boot;
+  a = Services.launch me hub (Services.filesGrants "bench") (app hub.ns me);
+  held = receive me;
+  case held of
+    True -> "fsbench: HOLDS"
+  | False -> error "fsbench: FAILED".

@@ -28,7 +28,7 @@
 #   ed/hello.s (<n>B readback ok); bad source -> Err ok
 
 CP = use "std/compile".
-FS = use "std/fs#84826bc9e8ddb4b5".
+FS = use "std/fs#19932fc6492e8a87".
 
 src = "main = 6 * 7 .".
 

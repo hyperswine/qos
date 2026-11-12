@@ -1,6 +1,6 @@
 # Ready .qa publication through Files/qlog. One publisher owns this journal;
 # no other actor may append its catalog or change its immutable archive keys.
-FS = use "std/fs#84826bc9e8ddb4b5".
+FS = use "std/fs#19932fc6492e8a87".
 Storage = use "std/storageclient".
 SP = use "std/storageprotocol".
 AC = use "std/actor#201a0e9bf98a5154".

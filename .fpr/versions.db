@@ -116,3 +116,6 @@ qlog v21.0 cc114a4d7514b15a
 leaseslots v3.0 efa81888e7fe1099
 epclient v1.0 5e2a0f910e610193
 epclient v2.0 e09b467f350a5396
+qlog v22.0 045dbfa936f832eb
+fs v6.0 19932fc6492e8a87
+lifecycle v7.0 2ec580ebc636437d

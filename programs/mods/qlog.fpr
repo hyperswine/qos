@@ -111,6 +111,13 @@ pageFlush source = case source of
     Direct dev -> flushDirect (blkFlush 0)
   | Routed service -> flushReply (B.call (myself 0) service B.Flush)
   | Bounded service until -> flushReply (B.callUntil until (myself 0) service B.Flush).
+# One device read (the superblock page) per read request, answered or not
+# from cached entries: a stalled, reset or dead device fails the request the
+# way an uncached read did, ends this actor and latches storage offline. A
+# replay of n cached records costs this one read instead of n.
+pageProbe source =
+  _ = pageRead source 0;
+  Unit.
 flushDirect n = case n == 0 of True -> True | False -> case n == 1 of True -> False | False -> stop "flush failed".
 flushReply r = case r of Ok (B.Flushed durable) -> durable | Err why -> stop why | other -> stop "invalid flush reply".
 durableFlush dev = case pageFlush dev of True -> Unit | False -> stop "durable image requires a flush-capable block service".
@@ -971,10 +978,22 @@ finishCompact dev m =
 # Reads become index walks instead of disk walks; appends extend the
 # index incrementally.  The next elaboration after this is per-url
 # URActors.
-Ent = Type (Ent url page pl off len).
+#
+# An entry whose record fits one page keeps its bytes once they are known:
+# from the append that wrote them, or from the first read. Reads after that
+# need no disk. Each record still has a page of its own on disk, so without
+# this every replay re-read one page per record through the block service.
+# Larger records stay on disk; what a replay returns already holds the
+# cached bytes, so the index holds at most what a replay of every url would.
+Body = Type (Uncached | Cached String).
+Ent = Type (Ent url page pl off len body).
 
 entRead dev e =
-  Ent u p pl off len = e;
+  Ent u p pl off len b = e;
+  case b of
+    Cached bytes -> bytes
+  | Uncached -> entReadDisk dev p pl off len.
+entReadDisk dev p pl off len =
   if off < 0 then substr (readPayload dev p pl) off len else
     size = minI len (pl - off);
     if size <= 0 then "" else
@@ -987,6 +1006,8 @@ readUnaligned dev page skip size =
   first = substr (pageRead dev page) skip take;
   if take == size then first else
     strJoin "" (Core.revS (rpParts dev (page + 1) (size - take) (first :: Nil)) Nil).
+# a single-page record's bytes, kept in its entry once known
+cacheable pay = case strlen pay <= pgsz of True -> Cached pay | False -> Uncached.
 
 scanIdxE dev head = sxGo dev head 1 Nil.
 sxGo : unsafe PageSource -> Int -> Int -> List Ent -> List Ent .
@@ -1010,7 +1031,7 @@ sxHit2 dev head p idx rec =
   RecH tag np pl u hh = rec;
   case strEq tag "QBLK" of
     True -> sxGo dev head (p + 1 + np) (append idx (bulkEnts (readPayload dev p pl) p pl))
-  | False -> sxGo dev head (p + 1 + np) (append idx ((Ent u p pl 0 pl) :: Nil)).
+  | False -> sxGo dev head (p + 1 + np) (append idx ((Ent u p pl 0 pl Uncached) :: Nil)).
 
 bulkEnts : unsafe String -> Int -> Int -> List Ent .
 bulkEnts pay page pl = beGo pay page pl 0 (strlen pay) Nil.
@@ -1021,7 +1042,7 @@ beE pay page pl n acc wp = case wp of (lw, i2) -> beE2 pay page pl n acc (parseN
 beE2 : unsafe String -> Int -> Int -> Int -> List Ent -> Int -> (String, Int) -> List Ent .
 beE2 pay page pl n acc len wp =
   case wp of (uw, i3) ->
-    beGo pay page pl (i3 + len) n (append acc ((Ent uw page pl i3 len) :: Nil)).
+    beGo pay page pl (i3 + len) n (append acc ((Ent uw page pl i3 len Uncached) :: Nil)).
 
 append xs ys = Core.listAppend xs ys.
 dropUrlE : unsafe List Ent -> String -> List Ent .
@@ -1031,42 +1052,51 @@ dropUrlE idx u =
   | e :: r -> dropUrlE2 r u e.
 dropUrlE2 : unsafe List Ent -> String -> Ent -> List Ent .
 dropUrlE2 r u e =
-  Ent eu ep epl eo el = e;
+  Ent eu ep epl eo el eb = e;
   case strEq eu u of True -> dropUrlE r u | False -> e :: dropUrlE r u.
 
 # index reads
-idxLatestE dev idx url = ilGoE dev idx url (Err "no such file").
-ilGoE : unsafe PageSource -> List Ent -> String -> Result String String -> Result String String .
-ilGoE dev idx url best =
+# latest reads only the last matching entry (it used to read every match)
+LastEnt = Type (NoEnt | LastEnt Ent).
+idxLatestE dev idx url = case ilGoE idx url NoEnt of
+    NoEnt -> Err "no such file"
+  | LastEnt e -> Ok (entRead dev e).
+ilGoE : unsafe List Ent -> String -> LastEnt -> LastEnt .
+ilGoE idx url best =
   case idx of
     Nil -> best
-  | e :: r -> ilStepE dev r url best e.
-ilStepE : unsafe PageSource -> List Ent -> String -> Result String String -> Ent -> Result String String .
-ilStepE dev r url best e =
-  Ent u p pl off len = e;
+  | e :: r -> ilStepE r url best e.
+ilStepE : unsafe List Ent -> String -> LastEnt -> Ent -> LastEnt .
+ilStepE r url best e =
+  Ent u p pl off len b = e;
   case strEq u url of
-    True -> Ok (entRead dev (lastMatching r url e))
-  | False -> ilGoE dev r url best.
-lastMatching idx url latest = case idx of
-    Nil -> latest
-  | e :: rest ->
-      Ent key page pl off len = e;
-      lastMatching rest url (if strEq key url then e else latest).
+    True -> ilGoE r url (LastEnt e)
+  | False -> ilGoE r url best.
 idxReplayE : unsafe PageSource -> List Ent -> String -> String -> String .
-idxReplayE dev idx url acc = replayPayload dev idx url acc (0 - 1) "".
-# Entries in a packed record share the same immutable payload. Keep its
-# bytes only for this replay, including across intervening unrelated keys.
-replayPayload dev idx url acc previous payload =
-  replayParts dev idx url (acc :: Nil) previous payload.
-replayParts dev idx url parts previous payload = case idx of
-    Nil -> strJoin "" (Core.revS parts Nil)
+idxReplayE dev idx url acc = case idxReplayF dev idx url of (bytes, kept) -> strcat acc bytes.
+# The storage actor's replay: the answer, and the index back with the url's
+# single-page entries cached. Entries in a packed record share the same
+# immutable payload: its bytes are read once per replay, including across
+# intervening unrelated keys.
+idxReplayF : unsafe PageSource -> List Ent -> String -> (String, List Ent) .
+idxReplayF dev idx url = replayFill dev idx url ("" :: Nil) Nil (0 - 1) "".
+replayFill dev idx url parts kept previous payload = case idx of
+    Nil -> (strJoin "" (Core.revS parts Nil), revEnts kept Nil)
   | e :: rest ->
-      Ent key page pl off len = e;
+      Ent key page pl off len b = e;
       case len != 0 and strEq key url of
-        False -> replayParts dev rest url parts previous payload
-      | True ->
-          bytes = if page == previous then payload else readPayload dev page pl;
-          replayParts dev rest url (substr bytes off len :: parts) page bytes.
+        False -> replayFill dev rest url parts (e :: kept) previous payload
+      | True -> (case b of
+          Cached bytes -> replayFill dev rest url (bytes :: parts) (e :: kept) previous payload
+        | Uncached ->
+            whole = if page == previous then payload else readPayload dev page pl;
+            piece = substr whole off len;
+            filled = if pl <= pgsz then Ent key page pl off len (Cached piece) else e;
+            replayFill dev rest url (piece :: parts) (filled :: kept) page whole).
+revEnts : unsafe List Ent -> List Ent -> List Ent .
+revEnts xs acc = case xs of
+    Nil -> acc
+  | x :: r -> revEnts r (x :: acc).
 idxCountE : unsafe List Ent -> String -> Int .
 idxCountE idx url =
   case idx of
@@ -1074,7 +1104,7 @@ idxCountE idx url =
   | e :: r -> icStepE r url e.
 icStepE : unsafe List Ent -> String -> Ent -> Int .
 icStepE r url e =
-  Ent u p pl off len = e;
+  Ent u p pl off len b = e;
   case strEq u url of True -> 1 + idxCountE r url | False -> idxCountE r url.
 
 # ---- the v1 tuple index (kept for API compat; skips bulk records) -----------
@@ -1178,9 +1208,9 @@ aTimed dev me head idx tidy ret until tag url pay =
 aServe : unsafe PageSource -> Int -> Int -> List Ent -> AC.Tidy -> (Int, Int, Bool) -> Int -> String -> String -> zz .
 aServe dev me head idx tidy replyTo tag url pay =
   case tag of
-    1 -> Wire.reply replyTo (idxLatestE dev idx url)           >> aLoop dev me head idx tidy
+    1 -> pageProbe dev >> Wire.reply replyTo (idxLatestE dev idx url) >> aLoop dev me head idx tidy
   | 2 -> aAppend dev me head idx tidy replyTo "QREC" url pay
-  | 3 -> Wire.reply replyTo (Ok (idxReplayE dev idx url ""))   >> aLoop dev me head idx tidy
+  | 3 -> aReplay dev me head idx tidy replyTo url
   | 4 -> aAppend dev me head idx tidy replyTo "QDEL" url ""
   | 5 -> Wire.reply replyTo (Ok (aStats dev head idx url))     >> aLoop dev me head idx tidy
   | 6 -> aCompact dev me head tidy replyTo
@@ -1224,6 +1254,12 @@ aReplace dev me head idx tidy replyTo url bytes =
 replaceReply dev me head idx tidy replyTo url bytes result = case result of
     Err why -> Wire.reply replyTo (Err why) >> aLoop dev me head idx tidy
   | Ok end -> aAppendOk dev me (head + 1) (dropUrlE idx url) tidy replyTo "QREC" url bytes end.
+aReplay : unsafe PageSource -> Int -> Int -> List Ent -> AC.Tidy -> (Int, Int, Bool) -> String -> zz .
+aReplay dev me head idx tidy replyTo url =
+  _ = pageProbe dev;
+  (bytes, idx2) = idxReplayF dev idx url;
+  _ = Wire.reply replyTo (Ok bytes);
+  aLoop dev me head idx2 tidy.
 aStats dev head idx url = aStats2 head idx url (metaOr dev head).
 aStats2 head idx url m =
   Meta h v w c d sw mr = m;
@@ -1241,10 +1277,11 @@ aAppendOk dev me head idx tidy replyTo tag url pay h2 =
   # on exit (the syscall trampoline allocates it from the process
   # heap).  strcat always allocates fresh in the CURRENT actor's slab,
   # and aAppendOk runs in the storage actor, so this pins ownership here.
+  # The cached payload is copied for the same reason.
   u2 = strcat url "";
   idx2 = case strEq tag "QDEL" of
            True -> dropUrlE idx url
-         | False -> append idx ((Ent u2 head (strlen pay) 0 (strlen pay)) :: Nil);
+         | False -> append idx ((Ent u2 head (strlen pay) 0 (strlen pay) (cacheable (strcat pay ""))) :: Nil);
   _ = Wire.reply replyTo (Ok "");
   aLoop dev me h2 idx2 tidy.
 aAppendBulk : unsafe PageSource -> Int -> Int -> List Ent -> AC.Tidy -> (Int, Int, Bool) -> String -> zz .

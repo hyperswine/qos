@@ -12,7 +12,7 @@
 #   3. once the worker drains, the disk works: a write and a read land
 #
 #   tools/disk-harden-check.py runs it
-FS = use "std/fs#84826bc9e8ddb4b5".
+FS = use "std/fs#19932fc6492e8a87".
 B = use "std/blockio#8b4ffa1467ca03a5".
 dsk u = device "blk".
 reader : Int -> Int -> Int -> Unit .

@@ -1,6 +1,6 @@
 # The main actor waits while the lifecycle actor owns shutdown administration.
-Lifecycle = use "std/lifecycle#6e7bea28db71815a".
-FS = use "std/fs#84826bc9e8ddb4b5".
+Lifecycle = use "std/lifecycle#2ec580ebc636437d".
+FS = use "std/fs#19932fc6492e8a87".
 wait : unsafe Lifecycle.Context -> Unit .
 wait ctx = _ = Sys.sleepUs 10000; wait ctx.
 main : unsafe Unit .

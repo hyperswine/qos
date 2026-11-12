@@ -1,6 +1,6 @@
 unsafe program.
 # Bind once, then keep using that syscall address across Qlog replacement.
-FS = use "std/fs#84826bc9e8ddb4b5".
+FS = use "std/fs#19932fc6492e8a87".
 B = use "std/blockio#8b4ffa1467ca03a5".
 Native = use "std/block#615ea5947fe13b00".
 S = use "../programs/mods/svc#75479fb6d5f34670".

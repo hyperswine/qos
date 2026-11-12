@@ -1,6 +1,6 @@
 #: expect development publication: old=20 new=30 state=kept owned=stopped PASS
 unsafe program.
-FS = use "std/fs#84826bc9e8ddb4b5".
+FS = use "std/fs#19932fc6492e8a87".
 P = use "std/qpublication".
 D = use "std/devreload".
 CP = use "std/compile".

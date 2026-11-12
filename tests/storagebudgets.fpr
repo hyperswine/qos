@@ -1,7 +1,7 @@
 # Service-owned limits: page bytes, pending count, handles and finite helpers.
 unsafe program.
 B = use "std/blockio#8b4ffa1467ca03a5".
-FS = use "std/fs#84826bc9e8ddb4b5".
+FS = use "std/fs#19932fc6492e8a87".
 AC = use "std/actor#201a0e9bf98a5154".
 W = use "std/storage#a8f7ee14e1efae76".
 EP = use "../programs/mods/ep#c66ad65e68dd97f5".

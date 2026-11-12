@@ -5,7 +5,7 @@
 # the record, and the entry's epilogue is image code).  A freed record is
 # poisoned in test builds, so a read after the free returns garbage.
 # tools/placement-uaf-check.py builds and boots it.
-FS = use "std/fs#84826bc9e8ddb4b5".
+FS = use "std/fs#19932fc6492e8a87".
 QAR = use "../programs/mods/qar".
 QI = use "../programs/mods/qaimg".
 Sys.placeImageAt : String -> List Int -> List Int -> String -> Int -> (String,String) -> (Int,String,Int).
