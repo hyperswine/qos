@@ -4,7 +4,7 @@ unsafe module.
 QS = use "qsys".
 GX = use "graphics".
 EP = use "ep#c66ad65e68dd97f5".
-EC = use "epclient#5e2a0f910e610193".
+EC = use "epclient#e09b467f350a5396".
 AK = use "appkit".
 S2 = use "scene2d".
 ST = use "scrolltext".

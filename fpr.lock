@@ -3,7 +3,7 @@
 # committed version (.fpr/versions.db) and content blob (.fpr/store).
 # spec  version  hash  pinned-by
 mods/ep v3.0 c66ad65e68dd97f5 programs/dungeon.fpr
-mods/epclient v1.0 5e2a0f910e610193 programs/dungeon.fpr
+mods/epclient v2.0 e09b467f350a5396 programs/dungeon.fpr
 std/actor v3.0 201a0e9bf98a5154 programs/mods/appclient.fpr
 ep v3.0 c66ad65e68dd97f5 programs/mods/appjobs.fpr
 std/actor v3.0 201a0e9bf98a5154 programs/mods/appjobs.fpr
@@ -44,10 +44,10 @@ std/actor v3.0 201a0e9bf98a5154 programs/mods/files.fpr
 std/net v3.0 464ca3ee0d89bc64 programs/mods/fprlive.fpr
 std/actor v3.0 201a0e9bf98a5154 programs/mods/fprlive.fpr
 ep v3.0 c66ad65e68dd97f5 programs/mods/graphics.fpr
-epclient v1.0 5e2a0f910e610193 programs/mods/graphics.fpr
+epclient v2.0 e09b467f350a5396 programs/mods/graphics.fpr
 std/actor v3.0 201a0e9bf98a5154 programs/mods/graphics.fpr
 ep v3.0 c66ad65e68dd97f5 programs/mods/guishell.fpr
-epclient v1.0 5e2a0f910e610193 programs/mods/guishell.fpr
+epclient v2.0 e09b467f350a5396 programs/mods/guishell.fpr
 std/fs v6.0 19932fc6492e8a87 programs/mods/guishell.fpr
 std/actor v3.0 201a0e9bf98a5154 programs/mods/guishell.fpr
 ep v3.0 c66ad65e68dd97f5 programs/mods/leaseslots.fpr
@@ -78,7 +78,7 @@ std/storage v1.1 a8f7ee14e1efae76 programs/mods/qsys.fpr
 std/actor v3.0 201a0e9bf98a5154 programs/mods/runprog.fpr
 epservice v3.0 e8bce05a1ddf73db programs/mods/services.fpr
 ep v3.0 c66ad65e68dd97f5 programs/mods/services.fpr
-epclient v1.0 5e2a0f910e610193 programs/mods/services.fpr
+epclient v2.0 e09b467f350a5396 programs/mods/services.fpr
 std/actor v3.0 201a0e9bf98a5154 programs/mods/services.fpr
 blockep v5.0 bd295a609815dadd programs/mods/services.fpr
 std/storage v1.1 a8f7ee14e1efae76 programs/mods/services.fpr
@@ -95,7 +95,7 @@ std/fs v6.0 19932fc6492e8a87 programs/pos1.fpr
 mods/timefmt v1.0 39dff276efd647a1 programs/system.fpr
 mods/svc v5.0 75479fb6d5f34670 programs/system.fpr
 mods/ep v3.0 c66ad65e68dd97f5 programs/system.fpr
-mods/epclient v1.0 5e2a0f910e610193 programs/system.fpr
+mods/epclient v2.0 e09b467f350a5396 programs/system.fpr
 std/actor v3.0 201a0e9bf98a5154 programs/system.fpr
 std/net v3.0 464ca3ee0d89bc64 programs/system.fpr
 std/block v6.0 615ea5947fe13b00 programs/system.fpr
@@ -104,7 +104,7 @@ mods/blockep v5.0 bd295a609815dadd programs/system.fpr
 std/blockio v6.0 8b4ffa1467ca03a5 programs/system.fpr
 mods/tui v2.1 af7fad6c6e992699 programs/system.fpr
 mods/ep v3.0 c66ad65e68dd97f5 programs/terra2.fpr
-mods/epclient v1.0 5e2a0f910e610193 programs/terra2.fpr
+mods/epclient v2.0 e09b467f350a5396 programs/terra2.fpr
 std/fs v6.0 19932fc6492e8a87 programs/terra2.fpr
 std/blockio v6.0 8b4ffa1467ca03a5 std/block.fpr
 std/actor v3.0 201a0e9bf98a5154 std/blockio.fpr
@@ -178,17 +178,17 @@ std/actor v3.0 201a0e9bf98a5154 tests/editorpolicy.fpr
 std/actor v3.0 201a0e9bf98a5154 tests/editorstate.fpr
 ../programs/mods/epservice v3.0 e8bce05a1ddf73db tests/epbench.fpr
 ../programs/mods/ep v3.0 c66ad65e68dd97f5 tests/epbench.fpr
-../programs/mods/epclient v1.0 5e2a0f910e610193 tests/epbench.fpr
+../programs/mods/epclient v2.0 e09b467f350a5396 tests/epbench.fpr
 std/actor v3.0 201a0e9bf98a5154 tests/epbench.fpr
 ../programs/mods/epservice v3.0 e8bce05a1ddf73db tests/epecho.fpr
 ../programs/mods/ep v3.0 c66ad65e68dd97f5 tests/epecho.fpr
-../programs/mods/epclient v1.0 5e2a0f910e610193 tests/epecho.fpr
+../programs/mods/epclient v2.0 e09b467f350a5396 tests/epecho.fpr
 std/actor v3.0 201a0e9bf98a5154 tests/epecho.fpr
 ../programs/mods/epservice v3.0 e8bce05a1ddf73db tests/epmemory.fpr
 ep v3.0 c66ad65e68dd97f5 tests/epmemory.fpr
 std/actor v3.0 201a0e9bf98a5154 tests/epmemory.fpr
 ../programs/mods/ep v3.0 c66ad65e68dd97f5 tests/epproc.fpr
-../programs/mods/epclient v1.0 5e2a0f910e610193 tests/epproc.fpr
+../programs/mods/epclient v2.0 e09b467f350a5396 tests/epproc.fpr
 std/fs v6.0 19932fc6492e8a87 tests/errornative.fpr
 ../programs/mods/ep v3.0 c66ad65e68dd97f5 tests/filelazy.fpr
 ../programs/mods/epservice v3.0 e8bce05a1ddf73db tests/filelazy.fpr
@@ -205,7 +205,7 @@ std/actor v3.0 201a0e9bf98a5154 tests/filesreclaim.fpr
 ../std/blockio v6.0 8b4ffa1467ca03a5 tests/filesshutdownactive.fpr
 ../std/block v6.0 615ea5947fe13b00 tests/filesshutdownactive.fpr
 ../programs/mods/ep v3.0 c66ad65e68dd97f5 tests/filessvc.fpr
-../programs/mods/epclient v1.0 5e2a0f910e610193 tests/filessvc.fpr
+../programs/mods/epclient v2.0 e09b467f350a5396 tests/filessvc.fpr
 std/actor v3.0 201a0e9bf98a5154 tests/filessvc.fpr
 std/fs v6.0 19932fc6492e8a87 tests/filessvc.fpr
 ../programs/mods/ep v3.0 c66ad65e68dd97f5 tests/fsbench.fpr
@@ -214,11 +214,11 @@ std/actor v3.0 201a0e9bf98a5154 tests/gfxapps.fpr
 std/fs v6.0 19932fc6492e8a87 tests/gfxapps.fpr
 std/actor v3.0 201a0e9bf98a5154 tests/gfxmemory.fpr
 ../programs/mods/ep v3.0 c66ad65e68dd97f5 tests/gfxshare.fpr
-../programs/mods/epclient v1.0 5e2a0f910e610193 tests/gfxshare.fpr
+../programs/mods/epclient v2.0 e09b467f350a5396 tests/gfxshare.fpr
 std/actor v3.0 201a0e9bf98a5154 tests/gfxshare.fpr
 std/actor v3.0 201a0e9bf98a5154 tests/guishell.fpr
 ../programs/mods/ep v3.0 c66ad65e68dd97f5 tests/kbdread.fpr
-../programs/mods/epclient v1.0 5e2a0f910e610193 tests/kbdread.fpr
+../programs/mods/epclient v2.0 e09b467f350a5396 tests/kbdread.fpr
 std/actor v3.0 201a0e9bf98a5154 tests/kbdread.fpr
 std/fs v6.0 19932fc6492e8a87 tests/kvlargenative.fpr
 ../programs/mods/svc v5.0 75479fb6d5f34670 tests/kvlargenative.fpr

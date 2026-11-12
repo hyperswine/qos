@@ -48,7 +48,7 @@ unsafe program.
 MV = use "std/mvu".
 Services = use "mods/services".
 EP = use "mods/ep#c66ad65e68dd97f5".
-EC = use "mods/epclient#5e2a0f910e610193".
+EC = use "mods/epclient#e09b467f350a5396".
 S2 = use "mods/scene2d".
 Fm = use "mods/fontm".
 FS = use "std/fs#19932fc6492e8a87".

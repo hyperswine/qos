@@ -19,7 +19,7 @@
 unsafe program.
 
 EP = use "../programs/mods/ep#c66ad65e68dd97f5".
-EC = use "../programs/mods/epclient#5e2a0f910e610193".
+EC = use "../programs/mods/epclient#e09b467f350a5396".
 
 Sys.ns : Int -> Int .
 Sys.caps : Int -> String .

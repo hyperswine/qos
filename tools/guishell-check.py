@@ -566,7 +566,7 @@ def check(out):
         'S = use "' + str(ROOT/'programs/mods/guishell') + '".\n' +
         'QS = use "' + str(ROOT/'programs/mods/qsys') + '".\n' +
         'GX = use "' + str(ROOT/'programs/mods/graphics') + '".\n' +
-        'EC = use "' + str(ROOT/'programs/mods/epclient') + '#5e2a0f910e610193".\n' +
+        'EC = use "' + str(ROOT/'programs/mods/epclient') + '#e09b467f350a5396".\n' +
         'MV = use "std/mvu".\n' +
         'fault me env event model = case event of\n' +
         '    MV.ETick -> (q, tiles, mt, jobs, sessions) = env; QS.Qsys ns st vfs log apps = q;\n' +

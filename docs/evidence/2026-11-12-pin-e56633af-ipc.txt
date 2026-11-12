@@ -1,0 +1,26 @@
+step 4: Thu Nov 12 02:41:55 AEDT 2026; base = qos-qlog 7992992 + fprisc e138e65; pin = qos-pinrt 3817c35 + fprisc e56633af
+1 base ep: per-op (open, write, close) 2853 ns per write;held (write only) 749 ns per write;
+1 base ipc: same 367 ns;same linear 405 ns;same bounded 389 ns;same 1k 393 ns;cross 730 ns;cross bounded 902 ns;
+1 pin ep: per-op (open, write, close) 1987 ns per write;held (write only) 367 ns per write;
+1 pin ipc: same 150 ns;same linear 175 ns;same bounded 148 ns;same 1k 213 ns;cross 432 ns;cross bounded 675 ns;
+1 host: held /dev/null write 1076.3 ns per write
+2 base ep: per-op (open, write, close) 2916 ns per write;held (write only) 523 ns per write;
+2 base ipc: same 363 ns;same linear 384 ns;same bounded 393 ns;same 1k 412 ns;cross 893 ns;cross bounded 1077 ns;
+2 pin ep: per-op (open, write, close) 2175 ns per write;held (write only) 504 ns per write;
+2 pin ipc: same 122 ns;same linear 146 ns;same bounded 133 ns;same 1k 280 ns;cross 557 ns;cross bounded 520 ns;
+2 host: held /dev/null write 827.6 ns per write
+3 base ep: per-op (open, write, close) 3494 ns per write;held (write only) 566 ns per write;
+3 base ipc: same 366 ns;same linear 353 ns;same bounded 405 ns;same 1k 388 ns;cross 895 ns;cross bounded 995 ns;
+3 pin ep: per-op (open, write, close) 2071 ns per write;held (write only) 344 ns per write;
+3 pin ipc: same 153 ns;same linear 131 ns;same bounded 143 ns;same 1k 187 ns;cross 526 ns;cross bounded 660 ns;
+3 host: held /dev/null write 1224.2 ns per write
+4 base ep: per-op (open, write, close) 2879 ns per write;held (write only) 820 ns per write;
+4 base ipc: same 412 ns;same linear 421 ns;same bounded 473 ns;same 1k 427 ns;cross 840 ns;cross bounded 1410 ns;
+4 pin ep: per-op (open, write, close) 2121 ns per write;held (write only) 554 ns per write;
+4 pin ipc: same 122 ns;same linear 145 ns;same bounded 158 ns;same 1k 209 ns;cross 500 ns;cross bounded 620 ns;
+4 host: held /dev/null write 914.2 ns per write
+5 base ep: per-op (open, write, close) 3427 ns per write;held (write only) 841 ns per write;
+5 base ipc: same 343 ns;same linear 384 ns;same bounded 504 ns;same 1k 433 ns;cross 815 ns;cross bounded 1015 ns;
+5 pin ep: per-op (open, write, close) 2196 ns per write;held (write only) 348 ns per write;
+5 pin ipc: same 121 ns;same linear 170 ns;same bounded 158 ns;same 1k 201 ns;cross 582 ns;cross bounded 699 ns;
+5 host: held /dev/null write 842.6 ns per write

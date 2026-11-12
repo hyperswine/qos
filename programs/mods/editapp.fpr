@@ -357,6 +357,7 @@ restoreGuarded frame m =
   else path = substr frame start pathSize;
     original = substr frame (start + pathSize) baseSize;
     text = substr frame (start + pathSize + baseSize) (available - pathSize - baseSize);
+    _ = print "editor: recovered {(if path == "" then "untitled" else path)}";
     ({(fresh path (E.fromText text) m) | baseline = [original], savedVersion = 0, msg = "Recovered your unsaved changes to {path}", warn = False}, Nil).
 welcome m = {m | msg = "^O open   ^N new   ^S save   ^R run", warn = False}.
 opened p result m = case result of

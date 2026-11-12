@@ -193,7 +193,7 @@ main =
   _ = check "editor run excerpt mapped past the entry" (E.nth r3.out (E.count r3.out - 4) == "2 | x = ." and E.nth r3.out (E.count r3.out - 3) == "  |     ^");
   _ = check "editor excerpt keeps its gutter" (ED.excerpt (fn n -> n - 1) "10 | x" == " 9 | x" and ED.excerpt (fn n -> n - 1) "  |  ^" == "  |  ^");
   (s5, scmds) = ticks 5 (typeKeys [30] e9);
-  _ = check "editor keeps its session" (case scmds of AW.Fetch tok (AW.WritePath p t) :: Nil -> p == "/home/.editor/session" and t == "qed1\n/home/x.fpr\n1\naba" | other -> False);
+  _ = check "editor keeps its session" (case scmds of AW.Fetch tok (AW.SaveRecovery p t) :: Nil -> p == "/home/.editor/session" and t == "qed2\n11 2\n/home/x.fprababa" | other -> False);
   # live checks: three quiet ticks after a change send the buffer to the check
   # op; parse and type errors land on the buffer's lines (a program's mapped
   # past the Run entry), a safety finding on its definition, a stale answer
