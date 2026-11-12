@@ -19,6 +19,7 @@
 unsafe program.
 
 EP = use "../programs/mods/ep#c66ad65e68dd97f5".
+EC = use "../programs/mods/epclient#5e2a0f910e610193".
 
 Sys.ns : Int -> Int .
 Sys.caps : Int -> String .
@@ -34,8 +35,8 @@ main =
   c = case EP.readOnce me ns "/services/clock" of
       Ok v -> clockOk v
     | Err e -> e;
-  p = case EP.open me ns "/pins/1" "read" of
-      Ok ep -> "opened"
+  p = case EC.open me ns "/pins/1" "read" of
+      Ok ep -> EC.close me ep >> "opened"
     | Err e -> e;
   k = kv me ns id;
   "epproc: display={d} clock={c} ungranted={p} kv={k}".
@@ -45,14 +46,14 @@ clockOk v = case v of
   | o -> "wrong shape".
 
 kv : unsafe Int -> Int -> String -> String .
-kv me ns id = case EP.open me ns "/services/storage/kv/{id}" "rw" of
+kv me ns id = case EC.open me ns "/services/storage/kv/{id}" "rw" of
     Err e -> e
   | Ok ep -> kv2 me ep.
-kv2 : unsafe Int -> (Int, Int) -> String .
+kv2 : unsafe Int -> EC.Endpoint -> String .
 kv2 me ep =
-  w = EP.write me ep (IStr "hello");
-  r = EP.read me ep 0;
-  _ = EP.close me ep;
+  (w, written) = EC.write me ep (IStr "hello");
+  (r, kept) = EC.read me written 0;
+  _ = EC.close me kept;
   case r of
     Ok v -> kvHas v
   | Err e -> e.

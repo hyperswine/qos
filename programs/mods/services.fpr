@@ -4,6 +4,7 @@
 unsafe module.
 Endpoint = use "epservice#e8bce05a1ddf73db".
 EP = use "ep#c66ad65e68dd97f5".
+EC = use "epclient#5e2a0f910e610193".
 AC = use "std/actor#201a0e9bf98a5154".
 Lifecycle = use "std/lifecycle".
 BlockEP = use "blockep#bd295a609815dadd".
@@ -35,10 +36,11 @@ withGraphics hub w h =
   _ = claim me hub.ns "/services/graphics" graphics;
   hub.
 
-graphics : unsafe _ -> String -> List (String, String) -> Int -> (Int, Int) .
+# an owned session: the caller closes it (EC.close) when it is done
+graphics : unsafe _ -> String -> List (String, String) -> Int -> EC.Endpoint .
 graphics hub tag models me = case GX.attach me hub.ns tag of
     Err why -> error "graphics open {tag}: {why}"
-  | Ok ep -> _ = GX.meshes me ep models; ep.
+  | Ok ep -> GX.meshes me ep models.
 
 # A root started by a supervisor waits until its grants have been recorded.
 launch me hub grants entry =

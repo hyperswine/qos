@@ -48,6 +48,7 @@ unsafe program.
 MV = use "std/mvu".
 Services = use "mods/services".
 EP = use "mods/ep#c66ad65e68dd97f5".
+EC = use "mods/epclient#5e2a0f910e610193".
 S2 = use "mods/scene2d".
 Fm = use "mods/fontm".
 FS = use "std/fs#84826bc9e8ddb4b5".
@@ -2070,11 +2071,11 @@ view m = (scene m, ui m, m.snap).
 run hub tag app =
   me = myself 0;
   ep = Services.graphics hub tag models me;
-  (graphics, _) = ep;
+  (graphics, session) = EC.owner ep;
   fs = FS.connect me hub.ns;
   cfg = {env = (me, fs), mt = hub.mt, tick = 160000, input = graphics, render = graphics};
   result = MV.game me cfg app;
-  _ = EP.close me ep;
+  _ = EC.close me session;
   result.
 main =
   hub = Services.withGraphics Services.boot 960 600;

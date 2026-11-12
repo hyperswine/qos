@@ -1,0 +1,103 @@
+# ============================================================================
+# epclient.fpr -- the client side of ep.fpr with OWNED endpoints.
+#
+# ep.fpr's open answers (owner, handle): two Ints anyone may copy, keep after
+# close, or forget, while the owner actor keeps the handle until Close.  Here
+# an open endpoint is a linear `Endpoint`, so the compiler refuses one that is
+# never closed, closed twice, or used after it was closed.  read and write
+# hand it back; close consumes it.  The messages are ep.fpr's own (the same
+# pinned version), so this speaks to every namespace and owner unchanged.
+#
+# A ROUTE is for a holder that keeps an endpoint open for a long time and
+# hands copies around: System's builtin launch keeps five for the launcher's
+# lifetime, in its capability set, and closes them when the launcher returns.
+# A route is plain data.  A read or write on a route whose endpoint was closed
+# is answered by the owner as any unknown handle is; NoRoute answers
+# "not opened".
+#
+# The Endpoint constructor is visible, as every QOS type's is: the same
+# cooperative trust as ep.fpr's namespace (docs/2026-10-02-QOS-AUDIT.md).
+# ============================================================================
+
+EP = use "ep#c66ad65e68dd97f5".
+AC = use "std/actor#201a0e9bf98a5154".
+
+IoV = EP.IoV.
+NsOpen = EP.NsOpen.
+Read = EP.Read. Write = EP.Write. Close = EP.Close.
+Opened = EP.Opened. Refused = EP.Refused. Redirect = EP.Redirect.
+
+Endpoint 1 = Type (Endpoint Int Int).
+
+# Ok the endpoint, or why not
+open : unsafe Int -> Int -> String -> String -> Result Endpoint String .
+open me ns url mode = case AC.call me ns (NsOpen url mode) of
+    Err e -> Err "namespace: {e}"
+  | Ok r -> openRes me r.
+openRes : unsafe Int -> Result (Int, Int) String -> Result Endpoint String .
+openRes me r = case r of
+    Err e -> Err e
+  | Ok p -> openAt me p.
+openAt : unsafe Int -> (Int, Int) -> Result Endpoint String .
+openAt me p =
+  (owner, id2) = p;
+  openAwait me owner id2.
+# the owner's answer to the forwarded envelope: it may hand us on
+openAwait : unsafe Int -> Int -> Int -> Result Endpoint String .
+openAwait me owner id2 = case AC.awaitReply me owner id2 of
+    Err e -> Err "the owner {e} before answering open"
+  | Ok rep -> openRep me owner id2 rep.
+openRep : unsafe Int -> Int -> Int -> EP.OpenRep -> Result Endpoint String .
+openRep me owner id2 rep = case rep of
+    Opened h -> Ok (Endpoint owner h)
+  | Refused why -> Err why
+  | Redirect a -> openAwait me a id2.
+
+read : Int -> Endpoint -> Int -> (Result IoV String, Endpoint) .
+read me ep n =
+  Endpoint o h = ep;
+  (EP.flat (AC.call me o (Read h n)), Endpoint o h).
+write : Int -> Endpoint -> IoV -> (Result IoV String, Endpoint) .
+write me ep v =
+  Endpoint o h = ep;
+  (EP.flat (AC.call me o (Write h v)), Endpoint o h).
+close : Int -> Endpoint -> Result Int String .
+close me ep =
+  Endpoint o h = ep;
+  EP.flat (AC.call me o (Close h)).
+# close, giving up after ms milliseconds (a shutdown path that must not hang)
+closeWithin : Int -> Int -> Endpoint -> Result Int String .
+closeWithin ms me ep =
+  Endpoint o h = ep;
+  EP.flat (AC.callWithin ms me o (Close h)).
+# the actor that serves it (to send it other traffic, or to watch it)
+owner : Endpoint -> (Int, Endpoint) .
+owner ep =
+  Endpoint o h = ep;
+  (o, Endpoint o h).
+
+# one operation, then close
+readClose : Int -> Endpoint -> Result IoV String .
+readClose me ep =
+  (r, kept) = read me ep 0;
+  _ = close me kept;
+  r.
+writeClose : Int -> Endpoint -> IoV -> Result IoV String .
+writeClose me ep v =
+  (r, kept) = write me ep v;
+  _ = close me kept;
+  r.
+
+Route = Type (NoRoute | Route Int Int).
+routeOf : Endpoint -> (Route, Endpoint) .
+routeOf ep =
+  Endpoint o h = ep;
+  (Route o h, Endpoint o h).
+readRoute : Int -> Route -> Int -> Result IoV String .
+readRoute me route n = case route of
+    NoRoute -> Err "not opened"
+  | Route o h -> EP.flat (AC.call me o (Read h n)).
+writeRoute : Int -> Route -> IoV -> Result IoV String .
+writeRoute me route v = case route of
+    NoRoute -> Err "not opened"
+  | Route o h -> EP.flat (AC.call me o (Write h v)).
