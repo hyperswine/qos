@@ -20,6 +20,11 @@ QOS_BASE_FLAG  = -DQOS_ARENA_BASE=$(QOS_SLOT_BASE)ul
 # run time.  It used to be linked in here as ARENA_MB and had to agree with
 # the host's (found as random corruption past ~220 sessions): docs/2026-09-19-BOUNDS.md
 QOSHARTS ?= 8
+# The runtime's C sources compile once per (compiler, flags, preprocessed
+# source) into QOS_OBJ_CACHE (tools/ccobj.py); an image's three links, and
+# every later app build with the same flags, take the objects.  A sweep
+# points every private build directory at one cache.
+QOS_OBJ_CACHE ?= $(BUILD)/rtobj
 QOSAPP_RT_COMMON = $(QOS)/appside/entry.c $(QOS)/appside/hal.c $(QOS)/appside/support.c \
 				   $(FRUNTIME)/runtime.c $(FRUNTIME)/i32.c $(FRUNTIME)/actors.c $(FRUNTIME)/bits.c \
 				   $(FRUNTIME)/vec.c $(FRUNTIME)/sstr.c $(FRUNTIME)/mod.c \
@@ -35,18 +40,20 @@ $(BUILD)/qosapp-prog.s: fprc $(SOURCE) $(FPRISC_ROOT)/core/prelude.fpr FORCE
 # Two links: the first learns the image's symbols, tools/mkexports.py writes
 # the export table plugins complete their imports from (by NAME), and the
 # second links it in (docs/2026-10-01-IMPORT-TABLE.md)
-QOSAPP_X64_LINK = gcc -O2 -Wall -Wextra -ffreestanding -nostdlib -nostartfiles -static \
+QOSAPP_X64_CC = gcc -O2 -Wall -Wextra -ffreestanding -nostdlib -nostartfiles -static \
 	  -fno-stack-protector -fno-asynchronous-unwind-tables -fno-pic -mcmodel=large \
 	  -DFPR_POSIX -DFPR_QOSAPP -DFPR_NHARTS=$(QOSHARTS) -DFPR_SLAB_SZ=$(QOSSLAB) -DFPR_STACK_SZ=$(QOSSTACK) $(QOSCFLAGS_EXTRA) \
-	  -I$(FRUNTIME) -I$(QOS)/appside -I$(HAL) \
+	  -I$(FRUNTIME) -I$(QOS)/appside -I$(HAL)
+QOSAPP_X64_LINK = $(QOSAPP_X64_CC) \
 	  -T $(QOS)/appside/link-qosapp.ld -Wl,--emit-relocs \
 	  -Wl,--defsym=_heap_start=_proc_image_end -Wl,--defsym=_heap_end=_proc_image_end \
 	  -Wl,--build-id=none -Wl,-z,noexecstack \
-	  $(BUILD)/qosapp-prog.s $$(cat $(BUILD)/qosapp-prog.s.units) $(QOSAPP_RT)
+	  $$(cat $(BUILD)/qosapp-prog.objs)
 
 # FORCE: the .s is regenerated every time, and a make with 1-second mtimes
 # (Apple's 3.81) otherwise packs the PREVIOUS program's image into this .qa
 $(BUILD)/qosapp.elf: $(BUILD)/qosapp-prog.s $(QOSAPP_RT) $(QOS)/appside/link-qosapp.ld tools/mkexports.py FORCE
+	python3 tools/ccobj.py $(QOS_OBJ_CACHE) $(QOSAPP_X64_CC) -- $(BUILD)/qosapp-prog.s $$(cat $(BUILD)/qosapp-prog.s.units) $(QOSAPP_RT) > $(BUILD)/qosapp-prog.objs
 	$(QOSAPP_X64_LINK) -Wl,--defsym=QOS_SLOT_BASE=0 -Wl,--unresolved-symbols=ignore-all -o $(BUILD)/qosapp.pre.elf
 	python3 tools/mkexports.py $(BUILD)/qosapp.pre.elf -o $(BUILD)/qosapp-exports.s
 	$(QOSAPP_X64_LINK) -Wl,--defsym=QOS_SLOT_BASE=0 $(BUILD)/qosapp-exports.s -o $@
@@ -71,17 +78,18 @@ $(BUILD)/qosapp-a64.s: fprc $(SOURCE) $(FPRISC_ROOT)/core/prelude.fpr FORCE
 	@mkdir -p $(BUILD)
 	LC_ALL=C.UTF-8 "$(FPRC)" --target=qa64 --prelude=$(FPRISC_ROOT)/core/prelude.fpr $(SOURCE) $@
 
-QOSAPP_A64_LINK = clang --target=aarch64-none-elf -fuse-ld=lld -O2 -Wall -Wextra \
+QOSAPP_A64_CC = clang --target=aarch64-none-elf -O2 -Wall -Wextra \
 	  -ffreestanding -nostdlib -nostartfiles -fno-stack-protector \
 	  -fno-asynchronous-unwind-tables -fno-pic -ffixed-x18 -ffixed-x27 -ffixed-x28 \
 	  -DFPR_POSIX -DFPR_QOSAPP $(QOS_BASE_FLAG) -DFPR_NHARTS=$(QOSHARTS) -DFPR_SLAB_SZ=$(QOSSLAB) -DFPR_STACK_SZ=$(QOSSTACK) $(QOSCFLAGS_EXTRA) \
-	  -I$(FRUNTIME) -I$(QOS)/appside -I$(HAL) \
+	  -I$(FRUNTIME) -I$(QOS)/appside -I$(HAL)
+QOSAPP_A64_LINK = $(QOSAPP_A64_CC) -fuse-ld=lld \
 	  -T $(QOS)/appside/link-qosapp-a64.ld -Wl,--emit-relocs \
 	  -Wl,--defsym=_heap_start=_proc_image_end -Wl,--defsym=_heap_end=_proc_image_end \
-	  $(BUILD)/qosapp-a64.s $$(cat $(BUILD)/qosapp-a64.s.units) \
-	  $(QOSAPP_RT_COMMON) $(FMACHINE)/unix/ctx_a64.S
+	  $$(cat $(BUILD)/qosapp-a64.objs)
 
 $(BUILD)/qosapp-a64.elf: $(BUILD)/qosapp-a64.s $(QOSAPP_RT_COMMON) $(FMACHINE)/unix/ctx_a64.S $(QOS)/appside/link-qosapp-a64.ld tools/mkexports.py FORCE
+	python3 tools/ccobj.py $(QOS_OBJ_CACHE) $(QOSAPP_A64_CC) -- $(BUILD)/qosapp-a64.s $$(cat $(BUILD)/qosapp-a64.s.units) $(QOSAPP_RT_COMMON) $(FMACHINE)/unix/ctx_a64.S > $(BUILD)/qosapp-a64.objs
 	$(QOSAPP_A64_LINK) -Wl,--defsym=QOS_SLOT_BASE=0 -Wl,--unresolved-symbols=ignore-all -o $(BUILD)/qosapp-a64.pre.elf
 	python3 tools/mkexports.py $(BUILD)/qosapp-a64.pre.elf -o $(BUILD)/qosapp-a64-exports.s
 	$(QOSAPP_A64_LINK) -Wl,--defsym=QOS_SLOT_BASE=0 $(BUILD)/qosapp-a64-exports.s -o $@

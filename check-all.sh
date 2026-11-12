@@ -4,6 +4,11 @@
 # (qemu boots + Sol/compiler examples + the GL tiers).  The summary at the
 # end counts passed, failed and skipped legs; a skip is not a pass.
 #
+# tools/sweep.py runs these same legs several at a time, each worker in a
+# private copy of the tree.  A leg that uses what the leg before it built
+# (app.qa, the native kernel) says so with `# sweep: with previous` on the
+# line above it; `# sweep: serial` keeps a leg on the one serial lane.
+#
 # Each leg is `echo "== name ==" && (body) || leg_failed "$LINENO"`.
 # pipefail makes a leg whose body ends in `| tail -1` / `| grep` fail when
 # the command feeding the pipe fails (without it only the last stage counted).
@@ -65,7 +70,7 @@ service_leg() {
   fi
   python3 tools/check-services.py --verdict "$1" --results "$CK_TMP/services/results.json"
 }
-echo "== sweep verdicts: injected failures must fail the sweep ==" && (python3 -m unittest discover -s tests -p test_check_all.py && python3 -m unittest discover -s tests -p test_service_checks.py) || leg_failed "${LINENO:-?}"
+echo "== sweep verdicts: injected failures must fail the sweep ==" && (python3 -m unittest discover -s tests -p test_check_all.py && python3 -m unittest discover -s tests -p test_service_checks.py && python3 -m unittest discover -s tests -p test_sweep.py) || leg_failed "${LINENO:-?}"
 echo "== fprc =="                && (make -s fpr) || leg_failed "${LINENO:-?}"
 echo "== Linux RV64 lowering, cache isolation and QOS TLS ==" && (python3 "$FPRISC_ROOT/tests/check_rv64_linux.py") || leg_failed "${LINENO:-?}"
 echo "== DRM scanout: RGB, orientation, pitch and full-screen scaling ==" && (sh qos/tests-host/drm-scanout-check.sh) || leg_failed "${LINENO:-?}"
@@ -86,6 +91,7 @@ echo "== the compile bridge: worker-backed, a reply past the old 256 KiB whole, 
 echo "== Portable compatibility KV application ABI and uncertain outcomes ==" && (python3 tools/portable-store-check.py) || leg_failed "${LINENO:-?}"
 echo "== Files quiesce, block drain and final flush ==" && (service_leg files-shutdown) || leg_failed "${LINENO:-?}"
 echo "== Portable bounded graceful shutdown ==" && (service_leg portable-shutdown) || leg_failed "${LINENO:-?}"
+# sweep: serial
 echo "== Buildroot service supervision and finite restart ==" && (python3 tools/buildroot/service-check.py) || leg_failed "${LINENO:-?}"
 echo "== Buildroot persistent state directory installation ==" && (python3 tools/buildroot/package-install-check.py) || leg_failed "${LINENO:-?}"
 echo "== Pi quiet boot splash and vector rendering ==" && (python3 tools/buildroot/splash-check.py) || leg_failed "${LINENO:-?}"
@@ -119,6 +125,7 @@ echo "== dedup ratchet: the frontend un-forking must not regress ==" && "${FPRIS
 echo "== spans: diagnostics carry file:line[:col] anchors (steps 1-3) ==" && (python3 tools/diagnostics-check.py) || leg_failed "${LINENO:-?}"
 echo "== versions: every pin is a committed version, fpr.lock current ==" && ./qos.py lock --check | tail -1 || leg_failed "${LINENO:-?}"
 echo "== QOSPortable app =="     && (make -s qos-app PROG=${FPRISC_ROOT}/tests/hello.fpr >/dev/null 2>&1) || leg_failed "${LINENO:-?}"
+# sweep: with previous
 echo "== QOSPortable host+run ==" && (cd qos && make -s portable 2>/dev/null && ./qosp --yes ../app.qa | grep "=>") || leg_failed "${LINENO:-?}"
 echo "== clause groups: a function split by another definition is still one function ==" && (make -s qos-app PROG=${FPRISC_ROOT}/tests/split.fpr >/dev/null 2>&1 && cd qos && ./qosp --yes ../app.qa 2>/dev/null | grep -a "split: zero n6 one") || leg_failed "${LINENO:-?}"
 echo "== the mailbox contract: Static refuses and says so, Dynamic grows in order, the ARC table grows (${FPRISC_ROOT}/tests/mailbox.fpr, ${FPRISC_ROOT}/docs/MAILBOX.md) ==" && (make -s qos-app PROG=${FPRISC_ROOT}/tests/mailbox.fpr >/dev/null 2>&1 && cd qos && timeout 60 ./qosp --yes ../app.qa 2>&1 | grep -a "^mailbox: static 8 queued 8 of 20 (12 refused), drained 8 in order; dynamic 8 queued 20 of 20, drained 20 in order; arc 3000 shared values held, drained 3000 in order; a dead actor answers dead actor") || leg_failed "${LINENO:-?}"
@@ -136,6 +143,7 @@ echo "== FPRLive: POS v2 over a real websocket, functional + adversarial ==" && 
 # reload server rebuilds ITSELF from source, so it inherits FPR_HOME too --
 # with this sweep's value it cannot find the prelude and every rebuild fails.
 echo "== liveboard: std/live end to end -- sessions, deltas, client state, commands, subscriptions, durable fields, replay ==" && (O=$(FPR_HOME=${FPRISC_ROOT} ${FPRISC_ROOT}/fpr build programs/liveboard.fpr -o ${CK_TMP}/ck-liveboard 2>&1) || { echo "$O" | tail -5; false; } && FPR_HOME=${FPRISC_ROOT} timeout 600 python3 qos/tests-host/liveboard-check.py ${CK_TMP}/ck-liveboard 100 2>&1 | tail -2) || leg_failed "${LINENO:-?}"
+# sweep: with previous
 echo "== liveboard: LiveReload -- a broken edit keeps the old program serving, a good one is rebuilt and becomes the server, state intact ==" && (FPR_HOME=${FPRISC_ROOT} timeout 900 python3 qos/tests-host/liveboard-reload.py ${CK_TMP}/ck-liveboard 2>&1 | grep -a "restarting into the rebuilt program" && echo "reload: the failed rebuild was reported and survived; the good one took over with durable state") || leg_failed "${LINENO:-?}"
 echo "== POS v1: the shop as one log, websocket registers, the adversarial legs (docs/2026-09-07-POS1.md) ==" && (if python3 -c "import websockets" 2>/dev/null; then sh qos/tests-host/pos1-check.sh | tail -1 | grep >/dev/null -c "ALL LEGS PASS" && echo "pos1: websocket protocol and persistence hold"; else leg_skipped "needs python websockets"; fi) || leg_failed "${LINENO:-?}"
 echo "== actor runtime: cross-hart wake stress (pingpong) + 40-sender fan-in through one hub ==" && (make -s qos-app PROG=${FPRISC_ROOT}/tests/pingpong.fpr >/dev/null 2>&1 && cd qos && for i in 1 2 3; do timeout 60 ./qosp --yes ../app.qa 2>&1 | grep >/dev/null -ac "pingpong: ok" || exit 1; done && cd .. && make -s qos-app PROG=${FPRISC_ROOT}/tests/fanin.fpr >/dev/null 2>&1 && cd qos && timeout 120 ./qosp --yes ../app.qa 2>&1 | grep -a "fanin: ok" | sed 's/^\[qos\] fanin => //') || leg_failed "${LINENO:-?}"
@@ -146,7 +154,9 @@ echo "== endpoints: a new service claims a url with no central edit; open/read/w
 echo "== the Svc surface over the namespace: display, clock, keyboard, diskless storage, unknown url, wrong shape (tests/svcurl.fpr) ==" && (./qos.py run tests/svcurl.fpr </dev/null >${CK_TMP}/ck-svcurl.out 2>&1 && grep -aq "svcurl done" ${CK_TMP}/ck-svcurl.out && echo "svcurl: done") || leg_failed "${LINENO:-?}"
 echo "== Large KV replies: Portable and Native replay intact ==" && (service_leg kv-large) || leg_failed "${LINENO:-?}"
 echo "== Files.qa: two application prefixes, two boots and owner-death refusal ==" && (service_leg files-service) || leg_failed "${LINENO:-?}"
+# sweep: serial
 echo "== Graphics.qa: real Terra II + dungeon, focused input, close/restart and captured pixels ==" && (if { [ "$(uname -s)" = Darwin ] && pkg-config --exists glfw3; } || { command -v xvfb-run >/dev/null && pkg-config --exists glfw3; }; then python3 tools/gfxapps-check.py; else leg_skipped "needs GLFW and macOS or xvfb-run"; fi) || leg_failed "${LINENO:-?}"
+# sweep: serial
 echo "== Main Profile: paged GUI shell, onboard .qa apps, refusals and two boots ==" && (if { [ "$(uname -s)" = Darwin ] && pkg-config --exists glfw3; } || { command -v xvfb-run >/dev/null && pkg-config --exists glfw3; }; then python3 tools/guishell-check.py --output "$(mktemp -d ${CK_TMP}/qos-shell-parent.XXXXXX)/check"; else leg_skipped "needs GLFW and macOS or xvfb-run"; fi) || leg_failed "${LINENO:-?}"
 echo "== Graphics.qa: two programs on one display, focus, close and restart, a dead program never holds it (tests/gfxshare.fpr, headless) ==" && (./qos.py run tests/gfxshare.fpr </dev/null >${CK_TMP}/ck-gfxshare.out 2>&1 && grep -aq "gfxshare: HOLDS" ${CK_TMP}/ck-gfxshare.out && echo "gfxshare: HOLDS") || leg_failed "${LINENO:-?}"
 echo "== the keyboard endpoint over UART.qa: a held read, bytes queued before the first poll one per poll, an empty poll (tests/kbdread.fpr) ==" && (make -s qos-app PROG=tests/kbdread.fpr >/dev/null 2>&1 && (printf 'wxyz'; sleep 2; printf 'ab'; sleep 2) | timeout 20 qos/qosp --yes app.qa 2>/dev/null | tr -d '\r' | grep -a "kbdread: seq=wxyz00 first=97 second=98 poll=0 HOLDS") || leg_failed "${LINENO:-?}"
@@ -184,6 +194,7 @@ echo "== MVU reload: real plugin replacements and failure paths, one/four harts 
 echo "== first-class paths: @Shape literals + schema tier + refusals (${FPRISC_ROOT}/docs/PATHS.md) ==" && (make -s qos-app PROG=${FPRISC_ROOT}/tests/paths.fpr >/dev/null 2>&1 && timeout 60 qos/qosp --yes app.qa 2>/dev/null | grep >/dev/null -ac "paths: OK hp=99 name=zed fg=7 comp-fg=8 via-str hp=250 tag=live segs=ui.fg leaves=5 bad=no schema leaf 'ui.nope'" && printf 'M9 = {hp : Int}.\nmain = p = @M9.nmae; p.get {hp = 1}.\n' > ${CK_TMP}/ck-badpath.fpr && ran env LC_ALL=C.UTF-8 ${FPRISC_ROOT}/fpr --profile=qos-portable --target=qx64 ${CK_TMP}/ck-badpath.fpr ${CK_TMP}/ck-badpath.s 2>&1 | grep >/dev/null -c "M9 has no field 'nmae'" && echo "typed literals, compose, string sets/gets by tag, bad path Err'd at runtime + bad field refused at compile") || leg_failed "${LINENO:-?}"
 echo "== pathnotes: value-space iteration on the Notes app (paths + port + livereload) ==" && (make -s qos-app PROG=tests/pathnotes.fpr >/dev/null 2>&1 && make -s plugin-qa PROG=tests/notesed1.fpr >/dev/null 2>&1 && make -s plugin-qa PROG=tests/notesed2.fpr >/dev/null 2>&1 && make -s plugin-qa PROG=tests/notesedbad.fpr >/dev/null 2>&1 && python3 tools/mkdisk.py ${CK_TMP}/ck-pn.img 8 notesed1.qa notesed2.qa notesedbad.qa >/dev/null && FPR_DISK=${CK_TMP}/ck-pn.img timeout 60 qos/qosp --yes app.qa 2>/dev/null | tr -d '\r' > ${CK_TMP}/ck-pn.out; grep -aq "pathnotes: OK notes=Third note|Fourth one n=4 cap=2 ui=live ver=caps.v2 log=refused notesedbad" ${CK_TMP}/ck-pn.out && grep -aq "ui.tag=live" ${CK_TMP}/ck-pn.out && echo "schema sets + nested leaf + live cap retune; edit-fn hot-swapped v1->caps.v2 mid-run, impostor refused; inspector walked the model") || leg_failed "${LINENO:-?}"
 echo "== sketch tier: FPR programs INTERPRETED (actors + MVU + paths under fpr sol) ==" && (timeout 90 ${FPRISC_ROOT}/fpr sol ${FPRISC_ROOT}/tests/sketch-paths.sol 2>/dev/null | grep >/dev/null -ac "paths: OK hp=99 name=zed fg=7 comp-fg=8 via-str hp=250 tag=live segs=ui.fg leaves=5" && timeout 120 ${FPRISC_ROOT}/fpr sol tests/sketch-mvutick.sol 2>/dev/null | grep >/dev/null -ac "mvutick: final count=31, arena 0g/0MB \[mvu: 31 frames, 4 statics builds\]" && timeout 90 ${FPRISC_ROOT}/fpr sol ${FPRISC_ROOT}/tests/sketch-hello.sol 2>/dev/null | grep >/dev/null -ac "hello from a .qa: fold(1..10)=55 clamp=55" && echo "paths byte-identical, std.MVU engine (render worker + subs + statics cache) on green actors, std.fpr Struct via language-matched module resolution") || leg_failed "${LINENO:-?}"
+# sweep: with previous
 echo "== QAR2 integrity: a flipped byte in IMAGE or in RELOC refused before copy ==" && (cd qos && python3 - <<'PY' && ran ./qosp --yes ${CK_TMP}/ck-tamper-img.qa 2>&1 | grep >/dev/null -c "IMAGE sha256 mismatch" && ran ./qosp --yes ${CK_TMP}/ck-tamper-rel.qa 2>&1 | grep >/dev/null -c "RELOC sha256 mismatch" && echo "tamper refused: IMAGE and RELOC sha256 mismatch (named, pre-copy)") || leg_failed "${LINENO:-?}"
 import os
 b = open('../app.qa','rb').read()
@@ -218,7 +229,9 @@ echo "== the dungeon: the Java crawler as an MVU game on the GLES walker, played
 echo "== the tree as a toolchain: qos.py install to a prefix, then qos/fpr/sol from an empty directory (${FPRISC_ROOT}/docs/2026-09-10-INSTALL.md) ==" && (qos/tests-host/install-check.sh | tail -1) || leg_failed "${LINENO:-?}"
 echo "== Desktop GL: GLFW window + synthetic-evdev keys (Xvfb) ==" && (if command -v xvfb-run >/dev/null && command -v xdotool >/dev/null && ldconfig -p 2>/dev/null | grep >/dev/null -c libglfw; then tools/gfx-gl-check.sh; else leg_skipped "needs xvfb-run + xdotool + libglfw"; fi) || leg_failed "${LINENO:-?}"
 echo "== QOSNative kernel =="    && (cd qos && make -s native disk.img >/dev/null && (printf 'yyyy'; sleep 8) | ran timeout 14 qemu-system-riscv64 -accel tcg,thread=multi -machine virt -smp 2 -m 256M -nographic -bios none -kernel qos-native.elf -drive file=disk.img,if=none,format=raw,id=hd0 -device virtio-blk-device,drive=hd0 2>/dev/null | grep -a "app launcher" | sed -n 1,1p) || leg_failed "${LINENO:-?}"
+# sweep: with previous
 echo "== QAR2 process load: build, seed, launch, exit ==" && (printf 'main = "qar2 process ran".\n' > ${CK_TMP}/ck-proc.fpr && printf 'name = "CkProc"\nid = "CkProc"\nentry = "n/a"\nloadMode = "process"\nversion = "1"\n' > ${CK_TMP}/CkProc.toml && tools/build-process-app.sh ${CK_TMP}/ck-proc.fpr ${CK_TMP}/CkProc.toml ${CK_TMP}/ck-proc.qa >/dev/null 2>&1 && cd qos && python3 ../tools/mkdisk.py ${CK_TMP}/ck-disk.img 8 ${CK_TMP}/ck-proc.qa >/dev/null && (printf 'yyyy'; sleep 6; printf '1'; sleep 3; sleep 9) | ran timeout 24 qemu-system-riscv64 -accel tcg,thread=multi -machine virt -smp 2 -m 256M -nographic -bios none -kernel qos-native.elf -drive file=${CK_TMP}/ck-disk.img,if=none,format=raw,id=hd0 -device virtio-blk-device,drive=hd0 2>/dev/null | tr -d '\r' | grep -a "process exited: qar2 process ran") || leg_failed "${LINENO:-?}"
+# sweep: with previous
 echo "== Transparent ACBs: process spawn/steal across harts, pid-tagged ==" && (printf 'name = "CkPar"\nid = "CkPar"\nentry = "n/a"\nloadMode = "process"\nversion = "1"\n' > ${CK_TMP}/CkPar.toml && tools/build-process-app.sh ${FPRISC_ROOT}/tests/tpar.fpr ${CK_TMP}/CkPar.toml ${CK_TMP}/ck-par.qa >/dev/null 2>&1 && cd qos && python3 ../tools/mkdisk.py ${CK_TMP}/ck-par.img 8 ${CK_TMP}/ck-par.qa >/dev/null && (printf 'yyyy'; sleep 6; printf '1'; sleep 16) | ran timeout 30 qemu-system-riscv64 -accel tcg,thread=multi -machine virt -smp 2 -m 256M -nographic -bios none -kernel qos-native.elf -drive file=${CK_TMP}/ck-par.img,if=none,format=raw,id=hd0 -device virtio-blk-device,drive=hd0 2>/dev/null | tr -d '\r' | grep -a "process exited: tpar: ok" | grep -a "harts=2") || leg_failed "${LINENO:-?}"
 echo "== typed vectors: type-changing output layouts on Portable and Native ==" && (sh tools/typedvector-check.sh) || leg_failed "${LINENO:-?}"
 echo "== native process images: buddy blocks, relocated; two at once, each held until its process has ended, memory back ==" && (sh tools/nativeimage-check.sh) || leg_failed "${LINENO:-?}"
