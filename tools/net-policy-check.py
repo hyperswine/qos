@@ -14,7 +14,7 @@ with tempfile.TemporaryDirectory(prefix='qos-netpolicy-') as d:
     temp=Path(d)
     for bits in (32,64):
         obj=temp/f'net-{bits}.o'
-        run(['riscv64-unknown-elf-gcc',f'-march=rv{bits}imafdc_zicsr','-mabi=ilp32' if bits==32 else '-mabi=lp64',
+        run(['riscv64-unknown-elf-gcc',f'-march=rv{bits}imafdc_zicsr','-ffixed-x27','-mabi=ilp32' if bits==32 else '-mabi=lp64',
              '-mcmodel=medany','-ffreestanding','-O2',f'-I{COMPILER}/runtime',f'-I{COMPILER}/machine/virt',
              '-c',ROOT/'hal/virt/net.c','-o',obj])
         symbols=run(['riscv64-unknown-elf-nm',obj])

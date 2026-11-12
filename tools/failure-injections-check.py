@@ -54,7 +54,7 @@ def check(out, names):
         compiler = Path(ENV['FPRISC_ROOT'])
         for source in ('hal/virt/net.c', 'loader/process.c'):
             obj = out / (Path(source).stem + '.o')
-            run(['riscv64-unknown-elf-gcc', '-march=rv64imafdc_zicsr', '-mabi=lp64',
+            run(['riscv64-unknown-elf-gcc', '-march=rv64imafdc_zicsr', '-ffixed-x27', '-mabi=lp64',
                  '-mcmodel=medany', '-ffreestanding', '-O2', f'-I{compiler}/runtime',
                  f'-I{compiler}/machine/virt', '-c', source, '-o', obj])
             symbols = run(['riscv64-unknown-elf-nm', obj]).stdout

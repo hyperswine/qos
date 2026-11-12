@@ -1,6 +1,10 @@
 # arcaudit.fpr — ARC.qa in action: baseline, deliberate leak, audit.
 # The leak is one undropped received message root — exactly the class
 # every qosp session paid for in blood; here ARC.qa CATCHES it.
+# The request carries a nested pair so it is an ARC-tracked message: a
+# message of only ints and handles rides inline in its ring slot (fprisc
+# runtime, QOS docs/2026-11-10-ACTOR-ROUND-TRIP-STEPS-2-3.md) and is then
+# the receiver's own value, which ARC does not count.
 uart = device "uart" .
 lsrReady = v = read (reg8 uart 5); BITTEST v 5 .
 putc : unsafe Int -> Unit .
@@ -22,21 +26,21 @@ Arc = ARCM.Arc.
 # a well-behaved echo (drops) and a leaky one (keeps the root)
 echo : unsafe Int -> f42 .
 echo me = m = receive me; echoStep me m .
-echoStep : unsafe Int -> (Int, Int) -> g42 .
-echoStep me m = (replyTo, n) = m; send replyTo (n * 2, 0) >> drop m >> echo me .
+echoStep : unsafe Int -> (Int, (Int, Int)) -> g42 .
+echoStep me m = (replyTo, (n, k)) = m; send replyTo (n * 2, 0) >> drop m >> echo me .
 
 # leaky RETAINS the root (carries it into the recursion) — a real
 # retention the autodrop pass correctly refuses to touch (m is
 # referenced after the destructure), and ARC.qa catches.
 leaky : unsafe Int -> p42 .
 leaky me = m = receive me; leakyStep me m .
-leakyStep : unsafe Int -> (Int, Int) -> i42 .
-leakyStep me m = (replyTo, n) = m; send replyTo (n * 3, 0) >> leakyHold me m .
-leakyHold : unsafe Int -> (Int, Int) -> j42 .
+leakyStep : unsafe Int -> (Int, (Int, Int)) -> i42 .
+leakyStep me m = (replyTo, (n, k)) = m; send replyTo (n * 3, 0) >> leakyHold me m .
+leakyHold : unsafe Int -> (Int, (Int, Int)) -> j42 .
 leakyHold me kept = m2 = receive me; leakyStep me m2 .
 
 roundTrip me svc n =
-  _ = send svc (me, n);
+  _ = send svc (me, (n, 0));
   r = receive me;
   (v, z) = r;
   _ = drop r;

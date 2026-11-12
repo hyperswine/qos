@@ -27,7 +27,7 @@ RUNTIME="$FPRISC_ROOT/runtime"
 MACHINE="$FPRISC_ROOT/machine"
 QOS=qos   # relative to the repository root (it was ../qos from fp-risc/tools/, before the programs moved up)
 if [ "$TARGET" = rv32 ]; then
-  ARCHFLAGS="-march=rv32imac_zicsr -mabi=ilp32"; WORDSZ=4
+  ARCHFLAGS="-march=rv32imac_zicsr -mabi=ilp32 -ffixed-x27"; WORDSZ=4
 else
   ARCHFLAGS="-march=rv64imafdc_zicsr -mabi=lp64 -mcmodel=medany -ffixed-x27"; WORDSZ=8
 fi

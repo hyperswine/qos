@@ -12,7 +12,7 @@ def main():
     ap.add_argument('fprisc',type=Path)
     args=ap.parse_args()
     header=args.fprisc.resolve()/'runtime/fpr.h'
-    result=subprocess.run(['riscv64-unknown-elf-gcc','-march=rv64imafdc_zicsr','-mabi=lp64',
+    result=subprocess.run(['riscv64-unknown-elf-gcc','-march=rv64imafdc_zicsr','-ffixed-x27','-mabi=lp64',
                            *(['-DFPR_LEGACY_CELLS'] if os.environ.get('FPR_COMPACT_CELLS')=='0' else []),
                            '-DFPR_NHARTS=1','-ffreestanding','-dM','-E','-x','c','-include',str(header),'-'],
                           input='',capture_output=True,text=True,check=True,timeout=30)

@@ -538,7 +538,7 @@ int64_t qos_app_entry(const qos_boot_t *boot, char *result_out,
   for (uw i = 1; i < live; i++) {
     fpr_hart_t *hi = &fpr_harts[i];
     hi->id = i;
-    hi->fuel = 0;
+    hi->fuel = 0; /* the x86-64 counter cell; on A64/RV the counter is a per-thread register the trampoline refills (not fpr_fuel_set: that writes the CALLING thread) */
   }
 
 #ifdef FPR_COMPACT_CELLS

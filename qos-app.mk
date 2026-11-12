@@ -195,7 +195,7 @@ QOS_RV64_CC ?= gcc
 else
 QOS_RV64_CC ?= riscv64-linux-gnu-gcc
 endif
-RV64_IMAGE_FLAGS = -O2 -Wall -Wextra -march=rv64gc -mabi=lp64d -mcmodel=medany \
+RV64_IMAGE_FLAGS = -O2 -Wall -Wextra -march=rv64gc -mabi=lp64d -mcmodel=medany -ffixed-x27 \
   -mno-relax -msmall-data-limit=0 -ffreestanding -nostdlib -nostartfiles \
   -static -no-pie -fno-pic -fno-pie -fno-builtin -fno-stack-protector \
   -fno-asynchronous-unwind-tables -Wl,--no-relax -Wl,--emit-relocs \

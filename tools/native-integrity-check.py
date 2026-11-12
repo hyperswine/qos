@@ -111,7 +111,7 @@ def native_checks(out):
             assert 'nativeintegrity: process=[vectorproc: generic=2.5 nested=3.5,4.5,7 fold=91] images=0 allocations=1 HOLDS' in log,log
             print(f'Native integrity/ABI/vector process: virtio {2 if modern else 1}, {harts} hart(s) HOLDS',flush=True)
     obj=out/'production.o'
-    run(['riscv64-unknown-elf-gcc','-march=rv64imafdc_zicsr','-mabi=lp64','-mcmodel=medany',
+    run(['riscv64-unknown-elf-gcc','-march=rv64imafdc_zicsr','-ffixed-x27','-mabi=lp64','-mcmodel=medany',
          '-ffreestanding','-O2',f'-I{ENV["FPRISC_ROOT"]}/runtime','-c','loader/process.c','-o',obj])
     assert 'testImageAllocs' not in run(['riscv64-unknown-elf-nm',obj]).stdout
     print('Production placement object has no test allocation counter HOLDS',flush=True)
