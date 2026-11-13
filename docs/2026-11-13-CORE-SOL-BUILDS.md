@@ -1,6 +1,6 @@
 # Core builds and packages in Sol
 
-QOS pins FP-RISC `e2c11c9f7b156463dab3d3f5e02686d86f527573` for these tools.
+QOS pins FP-RISC `84b0606a2321b720b26438a8bef20df03edf0b11` for these tools.
 
 The contributor build path is `./qbuild`, a Sol script. It builds the compiler,
 hosts, process apps and plugins, and packages standalone bundles without Python
