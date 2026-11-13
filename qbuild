@@ -1,0 +1,4 @@
+#!/usr/bin/env -S sol +0.13.1
+Build = use "tools/checkout-build".
+
+> Build.main (args Unit).

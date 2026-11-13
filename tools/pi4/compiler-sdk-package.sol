@@ -4,7 +4,7 @@ package tools sdk compiler arch py kind glibc qr fr qd fd stdlib extensions outp
   run name argv = case Proc.streamNow (ProcessSpec (tool name argv) "" [] "" 0) of
       Ok 0 -> Unit | failed -> error "SDK {name} failed: {failed}";
   lib = "{sdk}/python/lib";
-  _ = run "stdlib" [stdlib,"{lib}/python{Str.replace "." "" py}.zip"];
+  _ = if py == "" then Unit else run "stdlib" [stdlib,"{lib}/python{Str.replace "." "" py}.zip"];
   _ = run "libs" (List.append ["{sdk}/lib",extensions,"{lib}/python{py}/lib-dynload"] roots);
   _ = run "strip" [sdk];
   _ = run "metadata" [sdk,compiler,arch,py,kind,glibc,qr,fr,qd,fd];

@@ -9,7 +9,7 @@
 #
 # Checks: `qos new` (min + mvu templates) from an empty directory,
 # `qos run` prints each template's expected line, `qos pack --bundle`
-# writes dist/<name>/{<name>.qa,qosp,run.sh}, and run.sh works after the
+# writes dist/<name>/{<name>.qa,qosp,run}, and run works after the
 # bundle is copied somewhere else.  Exits nonzero on the first miss.
 set -eu
 
@@ -24,7 +24,7 @@ ok() { echo "sdk-smoke: ok: $*"; }
 # (SDK_SMOKE_EXTRA_PATH: e.g. Homebrew lld on macOS)
 PATH="$PREFIX/bin${SDK_SMOKE_EXTRA_PATH:+:$SDK_SMOKE_EXTRA_PATH}:/usr/local/bin:/usr/bin:/bin"
 export PATH
-unset FPRISC_ROOT FPR_HOME FPR_PATH FPR_FOREIGN QOS_OUT 2>/dev/null || true
+unset FPRISC_ROOT FPR_HOME FPR_PATH FPR_FOREIGN QOS_OUT SOL 2>/dev/null || true
 for t in ghc cabal; do
   if command -v "$t" >/dev/null 2>&1; then
     echo "sdk-smoke: note: $t is on PATH at $(command -v $t) (not used by the installed toolchain)"
@@ -68,15 +68,15 @@ expect run-min.out "smokemin: ok fold=55"
 "$QOS" run smokemvu/app.fpr 2>&1 | tee run-mvu.out
 expect run-mvu.out "smokemvu: done count=12 note=hi"
 "$QOS" pack smokemvu/app.fpr --bundle 2>&1 | tee pack.out
-for f in smokemvu.qa qosp run.sh; do
+for f in smokemvu.qa qosp run; do
   [ -f "dist/smokemvu/$f" ] || fail "bundle is missing dist/smokemvu/$f"
 done
-ok "bundle dist/smokemvu/ has smokemvu.qa qosp run.sh"
+ok "bundle dist/smokemvu/ has smokemvu.qa qosp run"
 
 # 3. the bundle runs on its own, from another directory
 mkdir -p elsewhere
 cp -R dist/smokemvu elsewhere/
-(cd / && "$WORK/elsewhere/smokemvu/run.sh") > bundle.out 2>&1 || { cat bundle.out; fail "run.sh exited nonzero"; }
+(cd / && "$WORK/elsewhere/smokemvu/run") > bundle.out 2>&1 || { cat bundle.out; fail "run exited nonzero"; }
 expect bundle.out "smokemvu: done count=12 note=hi"
 
 echo "sdk-smoke: PASS"

@@ -52,7 +52,7 @@ class InstallLayout(unittest.TestCase):
         self.assertLessEqual(set(self.cli.TOOLCHAIN_SDK), set(self.cli.TOOLCHAIN_FULL))
 
     def test_sdk_keeps_what_an_app_build_reads(self):
-        for item in ("qos.py", "dependency.mk", "Makefile", "qos-app.mk", "std", "core", "hal", "loader",
+        for item in ("qos.py", "qbuild", "dependency.mk", "Makefile", "qos-app.mk", "std", "core", "hal", "loader",
                      "tools", "programs/mods", ".fpr", "fpr.lock", "qos/appside", "qos/portable", "qos/qosp"):
             self.assertIn(item, self.cli.INSTALL_TREE_SDK)
         for item in ("fpr", "core", "std", "runtime", "machine"):

@@ -28,18 +28,22 @@ sourceTree source target dirs =
   _ = List.map (fn dir -> sources source target dir ["-name","*.fpr","-o","-name","*.txt"]) dirs;
   _ = (if pathTest "-f" "{source}/.fpr/versions.db" then stageFiles source target ".fpr" ["versions.db"] else Unit);
   sources source target ".fpr/store" ["-name","*.fpr"].
-stage qos fpr sdk kind =
+stage qos fpr sdk kind py =
   _ = sourceTree qos "{sdk}/qos" ["core","std","programs/mods"];
   _ = sourceTree fpr "{sdk}/fprisc" ["core","std"];
+  _ = sources fpr "{sdk}/fprisc" "sol/lib" ["-name","*.sol"];
   _ = stageFiles qos "{sdk}/qos" "." ["Makefile","dependency.mk","qos-app.mk"];
   _ = command ["touch","{sdk}/qos/.installed"];
   _ = command ["ln","-s","../fprisc","{sdk}/qos/toolchain"];
   _ = stageFiles qos "{sdk}/qos" "qos/appside" ["qos_abi.h","link-qosplug.ld"];
   _ = stageFiles qos "{sdk}/qos" "hal/virt" ["qos-virt.mk"];
-  _ = stageFiles qos "{sdk}/qos" "tools" ["fprd.py","qa-pack.sol","elf-image.sol","qa-relocations.sol","qa-moved.sol","qa-imports.sol","mkimports.sol","elf-symbols.sol","app-manifest.sol"];
+  _ = stageFiles qos "{sdk}/qos" "tools" ["qa-pack.sol","elf-image.sol","qa-relocations.sol","qa-moved.sol","qa-imports.sol","mkimports.sol","elf-symbols.sol","app-manifest.sol"];
   _ = stageFiles qos "{sdk}/qos" "tools/sdk" ["sort.sol"];
   _ = stageFiles fpr "{sdk}/fprisc" "compiler" ["Main.hs","Codegen.hs"];
-  _ = command ["cp","-pL","{qos}/tools/pi4/compiler-sdk-run.py","{sdk}/run.py"];
+  _ = command ["cp","-pL","{qos}/tools/pi4/compiler-sdk-run.sol","{sdk}/run.sol"];
+  _ = if py == "" then Unit else
+    _ = stageFiles qos "{sdk}/qos" "tools" ["fprd.py"];
+    command ["cp","-pL","{qos}/tools/pi4/compiler-sdk-run.py","{sdk}/run.py"];
   case kind of "editor" -> stageFiles qos "{sdk}/qos" "tools/pi4" ["EditorCompiler.hs"]
   | "full" -> Unit | _ -> error "unknown compiler kind {kind}".
 probe sdk manifest =
@@ -48,7 +52,7 @@ probe sdk manifest =
   lines = Str.lines (readPath manifest);
   if List.any (fn line -> line == "entry = \"fpr_modtab\"") lines then Unit
   else error "bundled Sol failed to generate a plugin manifest".
-> case args Unit of [qos,fpr,sdk,kind,manifest] ->
-    _ = stage qos fpr sdk kind;
+> case args Unit of [qos,fpr,sdk,kind,manifest,py] ->
+    _ = stage qos fpr sdk kind py;
     probe sdk manifest
   | _ -> error "expected QOS FPRISC SDK COMPILER_KIND PROBE_MANIFEST".

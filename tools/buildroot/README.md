@@ -210,7 +210,7 @@ router's DHCP lease for hostname `qosp` to find the address, then:
     reboot
 
 The minimal image does not include an mDNS daemon; `qosp.local` discovery is
-not assumed. `python3 tools/main-profile.py` builds the graphical shell and
+not assumed. `sol tools/main-profile.sol` builds the graphical shell and
 onboard apps; select `BR2_PACKAGE_QOSP_MAIN_PROFILE` and its artifact directory
 to boot that profile with the supervisor's required readiness signal.
 

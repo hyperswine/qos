@@ -88,6 +88,12 @@ jobs:
           fail-on-cache-miss: true
       # in a container job ${{ github.workspace }} is the HOST's path;
       # $GITHUB_WORKSPACE is the one the container sees
+      - name: Sol build interpreter
+        run: |
+          mkdir -p "$RUNNER_TEMP/sol-bin"
+          ln -sf "$GITHUB_WORKSPACE/fprisc/fpr" "$RUNNER_TEMP/sol-bin/sol"
+          echo "$RUNNER_TEMP/sol-bin" >> "$GITHUB_PATH"
+          echo "SOL=$RUNNER_TEMP/sol-bin/sol" >> "$GITHUB_ENV"
       - run: echo "FPRISC_ROOT=$GITHUB_WORKSPACE/fprisc" >> "$GITHUB_ENV"
       - name: lock --check
         run: ./qos.py lock --check
@@ -108,10 +114,14 @@ jobs:
           done
       - name: portable quickstart (x86-64)
         run: |
-          # qos.py build runs this quietly; build it loudly first so a
+          # Build the host loudly first so a
           # failure shows its compiler output in the log
           make -C qos portable
-          ./qos.py build
+          mkdir -p "$RUNNER_TEMP/sol-bin"
+          ln -sf "$FPRISC_ROOT/fpr" "$RUNNER_TEMP/sol-bin/sol"
+          export SOL="$RUNNER_TEMP/sol-bin/sol"
+          export FPR_HOME="$GITHUB_WORKSPACE" FPR_PATH="$FPRISC_ROOT"
+          "$SOL" qbuild build
           ./qos.py run tests/hello.fpr | tee "$RUNNER_TEMP/hello.out"
           grep -q 'fold(1..10)=55' "$RUNNER_TEMP/hello.out"
       - name: portable legs that build on x86-64
@@ -142,6 +152,12 @@ jobs:
           path: fprisc
           key: fprisc-trixie-${{ needs.fprisc.outputs.rev }}
           fail-on-cache-miss: true
+      - name: Sol build interpreter
+        run: |
+          mkdir -p "$RUNNER_TEMP/sol-bin"
+          ln -sf "$GITHUB_WORKSPACE/fprisc/fpr" "$RUNNER_TEMP/sol-bin/sol"
+          echo "$RUNNER_TEMP/sol-bin" >> "$GITHUB_PATH"
+          echo "SOL=$RUNNER_TEMP/sol-bin/sol" >> "$GITHUB_ENV"
       - name: qos.py toolchain install --prefix
         run: |
           FPRISC_ROOT="$GITHUB_WORKSPACE/fprisc" ./qos.py toolchain install --prefix "$RUNNER_TEMP/qos-sdk"
@@ -202,6 +218,12 @@ jobs:
           rm -f fprisc/cabal.project.freeze
           make -C fprisc fpr
           rm -rf fprisc/dist-newstyle
+      - name: Sol build interpreter
+        run: |
+          mkdir -p "$RUNNER_TEMP/sol-bin"
+          ln -sf "$GITHUB_WORKSPACE/fprisc/fpr" "$RUNNER_TEMP/sol-bin/sol"
+          echo "$RUNNER_TEMP/sol-bin" >> "$GITHUB_PATH"
+          echo "SOL=$RUNNER_TEMP/sol-bin/sol" >> "$GITHUB_ENV"
       - name: qos.py toolchain install --prefix
         run: |
           FPRISC_ROOT="$GITHUB_WORKSPACE/fprisc" ./qos.py toolchain install --prefix "$RUNNER_TEMP/qos-sdk"
@@ -244,6 +266,12 @@ jobs:
           fail-on-cache-miss: true
       # in a container job ${{ github.workspace }} is the HOST's path;
       # $GITHUB_WORKSPACE is the one the container sees
+      - name: Sol build interpreter
+        run: |
+          mkdir -p "$RUNNER_TEMP/sol-bin"
+          ln -sf "$GITHUB_WORKSPACE/fprisc/fpr" "$RUNNER_TEMP/sol-bin/sol"
+          echo "$RUNNER_TEMP/sol-bin" >> "$GITHUB_PATH"
+          echo "SOL=$RUNNER_TEMP/sol-bin/sol" >> "$GITHUB_ENV"
       - run: echo "FPRISC_ROOT=$GITHUB_WORKSPACE/fprisc" >> "$GITHUB_ENV"
       - name: native smoke boot
         run: ./qos.py native --smoke
@@ -282,6 +310,12 @@ jobs:
           fail-on-cache-miss: true
       # in a container job ${{ github.workspace }} is the HOST's path;
       # $GITHUB_WORKSPACE is the one the container sees
+      - name: Sol build interpreter
+        run: |
+          mkdir -p "$RUNNER_TEMP/sol-bin"
+          ln -sf "$GITHUB_WORKSPACE/fprisc/fpr" "$RUNNER_TEMP/sol-bin/sol"
+          echo "$RUNNER_TEMP/sol-bin" >> "$GITHUB_PATH"
+          echo "SOL=$RUNNER_TEMP/sol-bin/sol" >> "$GITHUB_ENV"
       - run: echo "FPRISC_ROOT=$GITHUB_WORKSPACE/fprisc" >> "$GITHUB_ENV"
       # actions/checkout only marks the workspace safe under a temporary HOME;
       # check-services.py runs `git ls-files` as root in the container, where
@@ -307,3 +341,36 @@ jobs:
             ${{ runner.temp }}/qos-services/prepare.log
             ${{ runner.temp }}/qos-services/jobs/*/output.log
             ${{ runner.temp }}/qos-services/jobs/*/processes.json
+
+  core-build:
+    name: core build and package without Python or Bash
+    needs: fprisc
+    runs-on: ubuntu-latest
+    container: debian:trixie
+    steps:
+      - name: native build tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git ca-certificates make gcc libc6-dev pkg-config \
+            libgit2-1.9 libarchive13t64 libcurl4t64 libgmp10 libffi8 libnuma1 libegl1 libgl1 libegl-dev libgl-dev
+      - uses: actions/checkout@v4
+      - uses: actions/cache/restore@v4
+        with:
+          path: fprisc
+          key: fprisc-trixie-${{ needs.fprisc.outputs.rev }}
+          fail-on-cache-miss: true
+      - name: build, pack and run with forbidden interpreters blocked
+        shell: sh
+        run: |
+          export FPRISC_ROOT="$GITHUB_WORKSPACE/fprisc"
+          export FPR_HOME="$GITHUB_WORKSPACE" FPR_PATH="$FPRISC_ROOT"
+          mkdir -p "$RUNNER_TEMP/core-bin"
+          ln -s "$FPRISC_ROOT/fpr" "$RUNNER_TEMP/core-bin/sol"
+          printf '%s\n' '#include <stdio.h>' 'int main(void){fputs("forbidden core build interpreter\n",stderr);return 99;}' > "$RUNNER_TEMP/deny.c"
+          cc "$RUNNER_TEMP/deny.c" -o "$RUNNER_TEMP/core-bin/python3"
+          ln -s python3 "$RUNNER_TEMP/core-bin/python"
+          ln -s python3 "$RUNNER_TEMP/core-bin/bash"
+          export PATH="$RUNNER_TEMP/core-bin:$PATH" SOL="$RUNNER_TEMP/core-bin/sol"
+          "$SOL" qbuild pack tests/nativeabi.fpr --bundle --plugin tests/plugmini.fpr --out "$RUNNER_TEMP/core-package"
+          "$RUNNER_TEMP/core-package/run" | tee "$RUNNER_TEMP/core-run.out"
+          grep -q 'nativeabi: HOLDS' "$RUNNER_TEMP/core-run.out"

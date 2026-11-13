@@ -43,6 +43,6 @@ stageModules source target =
       | failed -> error "staging Python extensions failed: {failed}".
 main : unsafe Unit -> Unit .
 > case args Unit of dest :: source :: target :: roots ->
-    extensions = stageModules source target;
+    extensions = if source == "" then [] else stageModules source target;
     walkLibraries dest [] (List.rev (List.append roots extensions))
   | _ -> error "expected LIB_DIRECTORY EXTENSION_SOURCE EXTENSION_TARGET ELF_ROOTS...".

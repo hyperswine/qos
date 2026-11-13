@@ -8,7 +8,7 @@ repository; this tree only needs to know where a checkout of it is.
 ```sh
 git clone https://github.com/hyperswine/fprisc ../fprisc   # a sibling needs no setup
 ./qos.py fprisc ~/wherever/fprisc                          # or say where it is, once
-./qos.py build
+./qbuild build
 ./qos.py run tests/hello.fpr
 ./qos.py run programs/interactive_desktop_gl.fpr
 ```
@@ -40,7 +40,7 @@ Build the compiler in a sibling checkout, then QOS Portable, then run hello:
 git clone https://github.com/hyperswine/fprisc ../fprisc
 make -C ../fprisc fpr          # first build fetches Haskell deps; takes a while
 ./qos.py fprisc                # shows which fprisc checkout is used
-./qos.py build
+./qbuild build
 ./qos.py run tests/hello.fpr   # [qos] hello => hello from a .qa: fold(1..10)=55 clamp=55
 ```
 
@@ -61,6 +61,9 @@ Write build scripts only in Sol. Use Sol 0.13.1 or any compatible version, and k
 
 Some existing commands still invoke Bash or Python during the migration. When changing one, move its build logic into Sol, verify the replacement through the existing command, and remove the superseded implementation.
 
+Core builds and packaging now use `./qbuild`; see the [Sol build guide](docs/2026-11-13-CORE-SOL-BUILDS.md) for app/plugin bundles, Main and the native installed SDK. Legacy interactive commands and test runners still use Python.
+
+
 The checkout CLI still coordinates builds in `qos.py`. The installed Portable SDK uses its native `qos` command. The parity check also runs the older `tools/portable_sdk.py` builder against the same inputs. Keep that comparison working when migrating the remaining checkout build logic.
 
 ## App loop today: install, new, run, pack
@@ -77,8 +80,8 @@ export PATH="$HOME/qos-sdk/bin:$PATH"      # qos (fpr/sol come from the standalo
 cd ~/src                                   # anywhere outside the checkout
 qos new hello --template mvu               # standalone app.fpr (mvu is the default here; `--template desktop` needs QOS Portable's `qos build`)
 qos run hello/app.fpr                      # [qos] app => hello: done count=12 note=hi ...
-qos pack hello/app.fpr --bundle            # dist/hello/{hello.qa,qosp,run.sh}
-dist/hello/run.sh                          # the bundle runs on its own
+qos pack hello/app.fpr --bundle            # dist/hello/{hello.qa,qosp,run}
+dist/hello/run                          # the bundle runs on its own
 ```
 
 At run time an app still needs make, a C compiler and python3, because each `qos run`
@@ -98,14 +101,14 @@ offline tile installation/replacement and persistent app state; see the
 Try the graphical Main Profile shell with its onboard apps:
 
 ```sh
-python3 tools/main-profile.py --run
+sol tools/main-profile.sol --run
 ```
 
 It opens a paged shortcut grid. Click or use arrows and Enter to open; Escape
 returns home, Page Up/Down changes pages, and Q exits from home. See the
 [Main Profile guide](docs/2026-10-03-GUI-SHELL.md) for boot-image wiring and
-the current prototype's application contract. The run also starts the host
-compiler daemon, so the Editor app can build FP-RISC (^B) and run it as a
+the current prototype's application contract. The optional `python3 tools/main-profile.py --run` frontend also starts the host
+compiler daemon, so the Editor can build FP-RISC (^B) and run it as a
 process of its own (^R): [docs/2026-10-16-EDITOR.md](docs/2026-10-16-EDITOR.md).
 A run is given a memory budget and is not granted the devices, and a program
 can be an app in the Elm shape (`std/hosted`) that draws in the Editor's panel

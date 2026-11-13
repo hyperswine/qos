@@ -61,7 +61,7 @@ config BR2_PACKAGE_QOSP_MAIN_PROFILE
 	default n
 	help
 	  Install the paged GUI shell and its seeded onboard application disk.
-	  Build the artifacts with tools/main-profile.py on the target architecture
+	  Build the artifacts with tools/main-profile.sol on the target architecture
 	  first, then set the directory below. Existing persistent disks are kept.
 
 config BR2_PACKAGE_QOSP_BOOT_SPLASH
@@ -78,6 +78,6 @@ config BR2_PACKAGE_QOSP_MAIN_DIR
 	depends on BR2_PACKAGE_QOSP_MAIN_PROFILE
 	default ""
 	help
-	  Directory containing main.qa and Main.disk from tools/main-profile.py.
+	  Directory containing main.qa and Main.disk from tools/main-profile.sol.
 
 endif

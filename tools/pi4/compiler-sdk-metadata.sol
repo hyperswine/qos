@@ -24,7 +24,7 @@ metadata sdk compiler arch py kind glibc qr fr qd fd =
   fingerprint = Hex.encode (Sha256.finish (List.fold (source sdk) (Sha256.init Unit) paths));
   digest path = J.JStr (unwrap (D.sha256File path));
   entry = if kind == "editor" then digest "{sdk}/qos/tools/pi4/EditorCompiler.hs" else J.JNull;
-  record = J.JObj [("format",J.JNum 1),("arch",J.JStr arch),("python",J.JStr py),("compiler_kind",J.JStr kind),
+  record = J.JObj [("format",J.JNum 1),("arch",J.JStr arch),("python",if py == "" then J.JNull else J.JStr py),("compiler_daemon",J.JBool (py != "")),("compiler_kind",J.JStr kind),
     ("entrypoint_sha256",entry),("glibc",J.JStr glibc),("qos_revision",J.JStr qr),("fprisc_revision",J.JStr fr),
     ("qos_dirty",unwrap (J.parse qd)),("fprisc_dirty",unwrap (J.parse fd)),("bundled_source_sha256",J.JStr fingerprint),
     ("compiler_input_sha256",digest compiler),("compiler_sha256",digest "{sdk}/fprisc/fpr")];

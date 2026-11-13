@@ -26,118 +26,26 @@ import time
 import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
-USE_RE = re.compile(r'\buse\s+"([^"]+)"')
-
-
 def fprisc_root():
-    """dependency.mk's rule: $FPRISC_ROOT, else fprisc.path, else ../fprisc"""
     given = os.environ.get('FPRISC_ROOT', '').strip()
     if not given and (ROOT / 'fprisc.path').exists():
         given = (ROOT / 'fprisc.path').read_text().strip()
     return Path(given or ROOT.parent / 'fprisc').resolve()
 
 
-def fpr_closure(entry: Path, fprisc: Path) -> set[Path]:
-    seen = set()
-    stack = [entry.resolve()]
-    while stack:
-        cur = stack.pop()
-        if cur in seen or not cur.is_file():
-            continue
-        seen.add(cur)
-        try:
-            text = cur.read_text(encoding='utf-8', errors='replace')
-        except OSError:
-            continue
-        for spec in USE_RE.findall(text):
-            nm, _, want_hash = spec.partition('#')
-            rel = nm if nm.endswith('.fpr') else nm + '.fpr'
-            cands = [cur.parent / rel, ROOT / rel, fprisc / rel]
-            if want_hash:
-                cands.extend([ROOT / '.fpr/store' / f'{want_hash}.fpr',
-                              fprisc / '.fpr/store' / f'{want_hash}.fpr'])
-            for c in cands:
-                if c.is_file():
-                    stack.append(c.resolve())
-    return seen
-
-
-def is_fresh(target: Path, deps) -> bool:
-    if not target.is_file():
-        return False
-    t = target.stat().st_mtime
-    return all(not d.exists() or t >= d.stat().st_mtime for d in deps)
-
-
 def build(output, arch=None, cc=None, force=False):
-    output = output.resolve()
-    output.mkdir(parents=True, exist_ok=True)
-    fprisc = fprisc_root()
-    profile_path = ROOT / 'profiles/Main.toml'
-    profile = tomllib.loads(profile_path.read_text())
-    env = dict(os.environ, XDG_CACHE_HOME=str(output / 'cache'))
-    make_vars = ([f'APP_HOST={arch}'] if arch else []) + ([f'QOS_RV64_CC={cc}'] if cc else [])
-
-    def run(*args):
-        subprocess.run(list(map(str, args)), cwd=ROOT, env=env, check=True)
-
-    run('make', '-s', 'fpr')
-    stamp_file = output / '.target'
-    want_stamp = f'{arch or "host"}:{cc or ""}\n'
-    if stamp_file.is_file():
-        if stamp_file.read_text() != want_stamp:
-            force = True
-    elif arch or cc:
-        force = True
-
-    common_plug = {
-        fprisc / 'fpr', fprisc / 'core/prelude.fpr',
-        ROOT / 'core/foreign.fpr', ROOT / 'qos-app.mk', ROOT / 'dependency.mk',
-        ROOT / 'qos/appside/qos_abi.h', ROOT / 'qos/appside/link-qosplug.ld',
-        ROOT / 'qos/appside/link-qosplug-rv64.ld',
-        ROOT / 'tools/app-manifest.sol', ROOT / 'tools/mkimports.sol', ROOT / 'tools/sdk/sort.sol', ROOT / 'tools/elf-symbols.sol',
-        ROOT / 'tools/qa-pack.sol', ROOT / 'tools/elf-image.sol', ROOT / 'tools/qa-relocations.sol', ROOT / 'tools/qa-moved.sol', ROOT / 'tools/qa-imports.sol', profile_path,
-    }
-    common_app = common_plug | {
-        ROOT / 'tools/ccobj.sol', ROOT / 'tools/ccobj-worker.sol', ROOT / 'tools/sdk/sdk.sol',
-        ROOT / 'tools/mkexports.sol', ROOT / 'loader/qaimg.c', ROOT / 'qos/portable/sha256.c',
-        ROOT / 'qos/appside/entry.c', ROOT / 'qos/appside/hal.c', ROOT / 'qos/appside/support.c',
-        ROOT / 'qos/appside/link-qosapp.ld', ROOT / 'qos/appside/link-qosapp-a64.ld',
-        ROOT / 'qos/appside/link-qosapp-rv64.ld',
-        *(fprisc / 'runtime').glob('*.[ch]'), *(fprisc / 'machine/unix').glob('*'),
-    }
-
-    archives = []
-    rebuilt_plug = False
-    for source in profile['apps']:
-        name = Path(source).stem
-        archive = output / (name + '.qa')
-        deps = common_plug | fpr_closure(ROOT / source, fprisc)
-        if not force and is_fresh(archive, deps):
-            print(f'{archive} is up to date', flush=True)
-        else:
-            run('make', '-s', 'plugin-qa', *make_vars, f'PROG={source}',
-                f'PLUG_OUT={archive}', f'BUILD={output / ("plugin-" + name)}')
-            rebuilt_plug = True
-        archives.append(archive)
-
-    main_qa = output / 'main.qa'
-    main_deps = common_app | fpr_closure(ROOT / profile['entry'], fprisc)
-    if not force and is_fresh(main_qa, main_deps):
-        print(f'{main_qa} is up to date', flush=True)
-    else:
-        run('make', '-s', 'qos-app', *make_vars, f'PROG={profile["entry"]}',
-            f'QA_OUT={main_qa}', f'BUILD={output / "shell-build"}')
-
-    stamp_file.write_text(want_stamp)
-    disk = output / 'Main.disk'
-    if not disk.exists():
-        run(os.environ.get('SOL', 'sol'), 'tools/mkdisk.sol', disk, 32, *archives)
-    elif rebuilt_plug or not is_fresh(disk, archives):
-        run(os.environ.get('SOL', 'sol'), 'tools/mkdisk.sol', '--preserve', disk, 32, *archives)
-    else:
-        print(f'Preserving existing onboard disk: {disk}', flush=True)
-    return output
+    """Legacy interactive frontend; all build policy lives in Sol."""
+    argv = [os.environ.get('SOL', 'sol'), ROOT / 'tools/main-profile.sol',
+            '--root', ROOT, '--fprisc', fprisc_root(), '--output', output.resolve()]
+    if arch:
+        argv += ['--arch', arch]
+    if cc:
+        argv += ['--cc', cc]
+    if force:
+        argv += ['--force']
+    env = dict(os.environ, FPR_HOME=str(ROOT), FPR_PATH=str(fprisc_root()))
+    subprocess.run(list(map(str, argv)), cwd=ROOT, env=env, check=True)
+    return output.resolve()
 
 
 @contextmanager

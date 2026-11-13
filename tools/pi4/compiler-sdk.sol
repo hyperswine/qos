@@ -1,14 +1,21 @@
 CLI = use "sol/lib/cli".
 J = use "sol/lib/json".
 options = List.map (fn name -> CLI.Option name "" CLI.One)
-  ["qos","fprisc","compiler","compiler-kind","sol","qos-revision","fprisc-revision","output","max-compressed-mib"].
+  ["qos","fprisc","compiler","compiler-kind","sol","qos-revision","fprisc-revision","output","max-compressed-mib","python-runtime"].
 query argv =
   ProcessResult status out err = unwrap (Proc.runNow (ProcessSpec argv "" [] "" 0));
   if status == 0 then Str.trim out else error "command failed: {argv}: {err}".
 required parsed key = value = CLI.valueOr "" key parsed;
   if value == "" then error "missing --{key}" else value.
-# Ask the runtime being bundled for its own installation paths.
-pythonInfo = "import json,sys,sysconfig; print(json.dumps([sys.executable, '%d.%d' % sys.version_info[:2], sysconfig.get_path('stdlib'), sysconfig.get_config_var('DESTSHARED')]))".
+# Optional legacy compiler daemon: copy an explicit target Python runtime.
+# The build never executes it. The default SDK has no Python dependency.
+pythonRuntime prefix = if prefix == "" then ["","","",""] else
+  executable = query ["realpath","{prefix}/bin/python3"];
+  name = query ["basename",executable];
+  version = substr name 6 (Str.len name - 6);
+  _ = if Str.startsWith "python3." name then Unit else error "python-runtime/bin/python3 must resolve to python3.MINOR";
+  stdlib = "{prefix}/lib/python{version}";
+  [executable,version,stdlib,"{stdlib}/lib-dynload"].
 package parsed =
   opt name fallback = CLI.valueOr fallback name parsed;
   arch = query ["uname","-m"];
@@ -23,7 +30,7 @@ package parsed =
   separate = if provided != "" then query ["realpath",provided] else if kind == "editor" then query ["which","sol"] else "";
   # Preserve the sol argv[0] name when bootstrapping a multi-call compiler.
   bootstrap = if provided != "" then [provided] else if separate != "" then [separate] else [compiler,"sol"];
-  py = List.map (fn item -> unwrap (J.text item)) (unwrap (J.parse (query ["python3","-c",pythonInfo]) |>? J.items));
+  py = pythonRuntime (opt "python-runtime" "");
   glibc = query ["getconf","GNU_LIBC_VERSION"];
   limit = opt "max-compressed-mib" "40";
   _ = parseInt limit;

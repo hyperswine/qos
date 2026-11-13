@@ -148,6 +148,9 @@ if TOOLCHAIN:
     os.environ["FPR_HOME"] = str(ROOT)
     os.environ["FPR_PATH"] = str(TOOLCHAIN)
     os.environ["FPR_FOREIGN"] = str(ROOT / "core" / "foreign.fpr")  # the primitives QOS implements, declared by QOS
+    private_sol = TOOLCHAIN / "bin" / "sol"
+    if private_sol.is_file():
+        os.environ.setdefault("SOL", str(private_sol))
 
 
 class Workspace:
@@ -592,18 +595,13 @@ DESKTOP_BUILD_HELP = (
 
 
 def cmd_build(a):
-    if a.what is None:
-        m = desktop_project()
-        if m:
-            die(f"{rel(m)}: kind = \"desktop\": {DESKTOP_BUILD_HELP}")
-        a.what = "host"
-    t0 = time.time()
-    build_fpr()
-    if a.what in ("all", "host"):
-        build_qosp()
-    if a.what in ("all", "native"):
-        build_native()
-    say(f"build done in {time.time() - t0:.1f}s")
+    if a.what is None and desktop_project():
+        die(DESKTOP_BUILD_HELP)
+    argv = [os.environ.get("SOL", "sol"), ROOT / "qbuild", "--root", ROOT,
+            "--fprisc", TOOLCHAIN, "build"]
+    if a.what:
+        argv.append(a.what)
+    return sh(argv, cwd=Path.cwd())
 
 
 def stop_fprd(process):
@@ -727,69 +725,17 @@ def cmd_run(a):
 
 
 def cmd_pack(a):
-    """One program -> one shippable folder.  dist/<name>/ holds the
-    named .qa (the container: its whole dependency closure is inside),
-    the seeded QLOG disk when the program declares plugins, and with
-    --bundle the qosp host binary + a run.sh -- a folder you can hand
-    to someone."""
-    t0 = time.time()
-    m, arg = find_project(a.prog)
-    prog = resolve_prog(arg)
-    d = prog_directives(ROOT / prog)
-    # --name, then qos.toml's id, then `#: name`, then the file stem
-    name = a.name or (m and m["id"]) or (d.get("name") or [Path(prog).stem])[0]
-    size_mb = int((d.get("disk-mb") or ["8"])[0])
-    build_fpr()
-    gfx = a.gfx or wants_gl(prog)
-    host = "qosp-gl" if gfx else "qosp"
-    built = build_app(prog, a.harts, manifest=m)
-    build_qosp(gfx=gfx)
-    out = Path(a.out).resolve() if a.out else WS.dist / name
-    out.mkdir(parents=True, exist_ok=True)
-    qa = out / f"{name}.qa"
-    shutil.copy2(built, qa)
-    pieces = [f"{qa.name} ({qa.stat().st_size // 1024}KB)"]
-    for f in d.get("music", []):
-        src = (ROOT / prog).parent / f
-        shutil.copy2(src, out / src.name)
-        pieces.append(f"{src.name} ({src.stat().st_size // 1024}KB, music)")
-    if m and m["assets"]:
-        # the project's assets/ ride beside the .qa, where the host looks
-        files = [f for f in sorted(m["assets"].rglob("*")) if f.is_file() and f.name != ".gitkeep"]
-        for f in files:
-            dst = out / f.relative_to(m["assets"])
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(f, dst)
-        if files:
-            pieces.append(f"{len(files)} asset file(s) from assets/")
-    disk = None
-    plugins = declared_plugins(a, prog)
-    if plugins:
-        img = build_plugins(prog, plugins, size_mb)
-        disk = out / f"{name}.disk"
-        shutil.copy2(img, disk)
-        pieces.append(f"{disk.name} ({disk.stat().st_size // 1024}KB, {len(plugins)} plugin(s))")
-    if a.bundle:
-        shutil.copy2(QOS / host, out / host)
-        runner = out / "run.sh"
-        lines = ["#!/bin/sh",
-                 f"# {name} -- packed by qos.py ({time.strftime('%Y-%m-%d')}); self-contained",
-                 'cd "$(dirname "$0")"']
-        if disk is not None:
-            lines.append(f'export FPR_DISK="${{FPR_DISK:-{disk.name}}}"')
-        lines.append(f'exec ./{host} --yes {name}.qa "$@"')
-        runner.write_text("\n".join(lines) + "\n")
-        runner.chmod(runner.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
-        pieces.append(f"{host} + run.sh")
-    rel = os.path.relpath(out, Path.cwd())
-    say(f"packed {rel}/: " + ", ".join(pieces))
-    if a.bundle:
-        say(f"run it anywhere: {rel}/run.sh")
-    elif disk is not None:
-        say(f"run it: (cd {rel} && FPR_DISK={disk.name} {QOS / host} --yes {name}.qa)")
-    else:
-        say(f"run it: {QOS / host} --yes {rel}/{name}.qa")
-    say(f"pack done in {time.time() - t0:.1f}s")
+    argv = [os.environ.get("SOL", "sol"), ROOT / "qbuild", "--root", ROOT,
+            "--fprisc", TOOLCHAIN, "pack", a.prog]
+    for key, value in (("out", a.out), ("name", a.name), ("harts", a.harts)):
+        if value:
+            argv.extend(["--" + key, str(value)])
+    for key in ("bundle", "gfx", "no_plugins"):
+        if getattr(a, key):
+            argv.append("--" + key.replace("_", "-"))
+    for plugin in a.plugin or []:
+        argv.extend(["--plugin", plugin])
+    return sh(argv, cwd=Path.cwd())
 
 
 def watch_set(prog_abs):
@@ -1686,13 +1632,13 @@ def cmd_clean(a):
 # can move.
 
 INSTALL_TREE_FULL = [
-    "qos.py", "dependency.mk", "release.toml", "README.md", "docs", "fprisc.lock.json",
+    "qos.py", "qbuild", "dependency.mk", "release.toml", "README.md", "docs", "fprisc.lock.json",
     "Makefile", "qos-app.mk", "std", "programs", "tools", "models", "targets",
     "apps", "profiles", "tests", ".fpr", "fpr.lock", "hal", "loader", "core",
     "qos/Makefile", "qos/store_abi.h", "qos/native", "qos/appside", "qos/portable", "qos/tests-host", "qos/qosp", "qos/qosp-gl",
 ]
 INSTALL_TREE_SDK = [
-    "qos.py", "dependency.mk", "release.toml", "fprisc.lock.json",
+    "qos.py", "qbuild", "dependency.mk", "release.toml", "fprisc.lock.json",
     "Makefile", "qos-app.mk", "std", "programs/mods", "tools", "targets",
     "profiles", ".fpr", "fpr.lock", "hal", "loader", "core",
     "qos/Makefile", "qos/store_abi.h", "qos/appside", "qos/portable", "qos/qosp", "qos/qosp-gl",
@@ -1770,6 +1716,9 @@ def cmd_toolchain_install(a):
             shutil.copytree(src, dst, ignore=INSTALL_SKIP)
         else:
             shutil.copy2(src, dst)
+    private_bin = lib / "toolchain" / "bin"
+    private_bin.mkdir(exist_ok=True)
+    (private_bin / "sol").symlink_to("../fpr")
     ver = read_release()["version"]
     stamp = sdk_stamp(layout)
     (lib / "sdk-version.json").write_text(json.dumps(stamp, indent=2) + "\n")
