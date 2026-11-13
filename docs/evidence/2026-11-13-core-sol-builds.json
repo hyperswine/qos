@@ -1,0 +1,98 @@
+{
+  "schema": "core-sol-build-qualification-v1",
+  "date": "2026-11-13",
+  "host": {
+    "system": "Darwin",
+    "machine": "arm64"
+  },
+  "sources": {
+    "fprisc": "84b0606a2321b720b26438a8bef20df03edf0b11",
+    "qos": "83cfa0b404cfe0cc0d05d47d660df6f3e466dc36"
+  },
+  "clean_checkout_method": "Detached clean worktrees with previously built matching compiler and hosts; app/plugin builds, staging and packaging ran in those trees.",
+  "forbidden_build_interpreters": [
+    "python",
+    "python3",
+    "bash"
+  ],
+  "build_interpreter_policy": "PATH contained native executables that fail if these interpreter names are invoked. Make still uses POSIX /bin/sh.",
+  "compiler_sha256": "cf6e543a8cfd02bdd9319afd53fe6d7f683a2feae70ad294208962a72b241a83",
+  "fprisc_archive": {
+    "file": "fprisc-0.13.1-rc1-macos-arm64.tar.gz",
+    "bytes": 21800407,
+    "sha256": "710c9fcd604563976e3b565e58031363a1937aa645e4b1c520f230729b84f3e7"
+  },
+  "qos_archive": {
+    "file": "qos-portable-0.3.0-rc1-macos-arm64.tar.gz",
+    "bytes": 21978861,
+    "sha256": "5f79c27d3b2fa416b73d9f474e8561ae0db0ac6408b993d728c0d33b253d9e82"
+  },
+  "fprisc_installed_acceptance": {
+    "status": "passed",
+    "sourceAccess": "denied",
+    "sdkReadOnly": true,
+    "absentTools": [
+      "ghc",
+      "cabal",
+      "make",
+      "git"
+    ],
+    "installedFilesUnchanged": true,
+    "relocation": true
+  },
+  "fprisc_installed_steps": 51,
+  "qos_installed_acceptance": {
+    "result": "passed",
+    "sourceAccess": "denied by sandbox-exec",
+    "absentTools": [
+      "ghc",
+      "cabal",
+      "make"
+    ],
+    "readOnlySdkUnchanged": true,
+    "offlineInstallUpdate": true,
+    "persistentAppStore": true,
+    "storeSurvivesAppReplacement": true,
+    "storeSurvivesHostRestart": true,
+    "unrelatedRecordsPreserved": true,
+    "hostInstallerExclusion": false
+  },
+  "differential_checks": {
+    "pi_plan_variants": 7,
+    "full_plan_language_builds": 98,
+    "supported_compressed_encodings": 38550,
+    "linked_fixture_modes": 4,
+    "linked_checks_per_mode": 36,
+    "static_arena": "normalized ELF, placement, stack and callback-work parity; QEMU execution; refusal publication preservation; typed sequences",
+    "compiler_sdk_dispatch": "native default, explicit executable and Sol overrides, path with spaces, exit codes and refusal of legacy fallback"
+  },
+  "qos_native_abi": {
+    "compact": [
+      24,
+      6,
+      5
+    ],
+    "legacy": [
+      23,
+      6,
+      4
+    ],
+    "method": "Both real process builds matched the corresponding preprocessed target headers."
+  },
+  "other_checks": {
+    "qos_unit_tests": 58,
+    "registry_unit_tests": 8,
+    "target_image_unit_tests": 12,
+    "target_image_integration_builds": 4,
+    "existing_static_arena_regression": "passed with execution required",
+    "main_profile": "six onboard plugins plus Main built in Sol",
+    "legacy_sdk_loop": "new/run/pack/native bundle relocation passed without GHC or Cabal on PATH"
+  },
+  "limits": [
+    "Full compiler/QOS corpora were not rerun.",
+    "Native Linux AArch64 Pi compiler SDK changes need Linux qualification.",
+    "Physical Pi/STAR64 boots and upstream Buildroot image builds were not run.",
+    "ESP-IDF vendor tooling and optional runtime compiler daemons retain their own dependencies.",
+    "Archives are local qualification candidates, not published releases."
+  ]
+}

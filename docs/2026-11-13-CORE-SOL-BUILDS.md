@@ -89,3 +89,17 @@ daemons, legacy source SDK installation, ESP-IDF's vendor tools, physical board
 qualification and Buildroot's upstream build machinery are separate from these
 core build/package entry points. The Pi compiler SDK changes require native
 Linux qualification; a macOS staging run does not establish that result.
+
+## Clean-source release qualification
+
+Both projects staged and packaged release candidates from clean detached
+checkouts with Python and Bash blocked on PATH. The compiler and hosts were
+previously built from matching sources; this was not a from-scratch Haskell
+bootstrap in the detached trees. FP-RISC's archive passed 51 source-denied,
+read-only installation/relocation checks. The QOS archive passed installed SDK
+acceptance with source access denied, persistent app state and offline updates.
+The legacy source SDK also passed its new/run/pack/relocated-native-bundle loop.
+
+The exact source revisions, archive hashes, checker counts and qualification
+boundaries are recorded in [the evidence manifest](evidence/2026-11-13-core-sol-builds.json).
+These archives are local qualification candidates; no release was published.
