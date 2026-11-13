@@ -9,6 +9,7 @@ revision value = case value of
     J.JArr [J.JStr commit,dirty] -> (commit,J.render dirty)
   | _ -> error "invalid SDK revision result".
 build qos fpr compiler sol kind qr fr work output scratch limit python py stdlib extensions arch glibc bootstrap =
+  _ = if python == "" and py == "" and stdlib == "" and extensions == "" then Unit else error "Python SDK runtime was retired; use the Sol-only SDK";
   sdk = "{work}/sdk";
   tools = "{qos}/tools/pi4";
   roots = strings (query (List.concat [bootstrap,["{tools}/compiler-sdk-tools.sol",sdk,compiler,sol,python]]));
@@ -19,7 +20,7 @@ build qos fpr compiler sol kind qr fr work output scratch limit python py stdlib
       (qRev,qDirty) = revision q;
       (fRev,fDirty) = revision f;
       _ = invoke (child "inputs" [qos,fpr,sdk,kind,"{work}/probe.toml",py]);
-      _ = if py == "" then Unit else invoke ["install","-m","755","{tools}/qos-fprd","{sdk}/bin/qos-fprd"];
+
       invoke (child "package" (List.append [tools,sdk,compiler,arch,py,kind,glibc,qRev,fRev,qDirty,fDirty,stdlib,extensions,output,scratch,limit] roots))
   | _ -> error "expected revisions for both SDK source trees".
 > case args Unit of qos :: fpr :: compiler :: sol :: kind :: qr :: fr :: work :: output :: scratch :: limit :: python :: py :: stdlib :: extensions :: arch :: glibc :: bootstrap ->

@@ -41,9 +41,6 @@ stage qos fpr sdk kind py =
   _ = stageFiles qos "{sdk}/qos" "tools/sdk" ["sort.sol"];
   _ = stageFiles fpr "{sdk}/fprisc" "compiler" ["Main.hs","Codegen.hs"];
   _ = command ["cp","-pL","{qos}/tools/pi4/compiler-sdk-run.sol","{sdk}/run.sol"];
-  _ = if py == "" then Unit else
-    _ = stageFiles qos "{sdk}/qos" "tools" ["fprd.py"];
-    command ["cp","-pL","{qos}/tools/pi4/compiler-sdk-run.py","{sdk}/run.py"];
   case kind of "editor" -> stageFiles qos "{sdk}/qos" "tools/pi4" ["EditorCompiler.hs"]
   | "full" -> Unit | _ -> error "unknown compiler kind {kind}".
 probe sdk manifest =

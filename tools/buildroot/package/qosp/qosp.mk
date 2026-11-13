@@ -92,12 +92,6 @@ define QOSP_INSTALL_TARGET_CMDS
 	$(INSTALL) -D -m 0755 $(@D)/qosp $(TARGET_DIR)/usr/bin/qosp
 	$(INSTALL) -D -m 0755 $(@D)/qosp-service-guard $(TARGET_DIR)/usr/bin/qosp-service-guard
 	$(INSTALL) -D -m 0644 $(QOSP_APP) $(TARGET_DIR)/usr/share/qosp/app.qa
-	$(INSTALL) -D -m 0755 $(QOSP_PKGDIR)/qosp-session \
-		$(TARGET_DIR)/usr/bin/qosp-session
-	$(INSTALL) -D -m 0755 $(QOSP_PKGDIR)/qosp-supervise \
-		$(TARGET_DIR)/usr/bin/qosp-supervise
-	$(INSTALL) -D -m 0644 $(QOSP_PKGDIR)/qosp-service.sh \
-		$(TARGET_DIR)/usr/lib/qosp-service.sh
 	$(if $(filter y,$(BR2_PACKAGE_QOSP_MAIN_PROFILE)),\
 		$(INSTALL) -D -m 0644 $(QOSP_MAIN_DIR)/Main.disk $(TARGET_DIR)/usr/share/qosp/Main.disk)
 	$(if $(filter y,$(BR2_PACKAGE_QOSP_BOOT_SPLASH)),\
@@ -108,16 +102,11 @@ define QOSP_INSTALL_TARGET_CMDS
 endef
 
 ifeq ($(BR2_PACKAGE_QOSP_AUTOSTART),y)
-define QOSP_INSTALL_INIT_SYSV
-	$(INSTALL) -D -m 0755 $(QOSP_PKGDIR)/S99qosp $(TARGET_DIR)/etc/init.d/S99qosp
-	# Remove the previous pre-coldplug name in incremental image builds.
-	rm -f $(TARGET_DIR)/etc/init.d/S02qosp-splash
-	$(if $(filter y,$(BR2_PACKAGE_QOSP_BOOT_SPLASH)),\
-		$(INSTALL) -D -m 0755 $(QOSP_PKGDIR)/S12qosp-splash $(TARGET_DIR)/etc/init.d/S12qosp-splash)
-endef
+$(error QOSP autostart was retired with the shell supervisor; disable it or use the archived release)
 endif
 
 ifeq ($(BR2_PACKAGE_QOSP_BOOT_SPLASH),y)
+$(error QOSP boot splash service is retired pending a Sol implementation)
 define QOSP_INSTALL_SPLASH_DEFAULTS
 	$(INSTALL) -d -m 0755 $(TARGET_DIR)/etc/default
 	touch $(TARGET_DIR)/etc/default/qosp

@@ -1,5 +1,11 @@
 #!/usr/bin/env -S sol +0.13.1
-# Run from the QOS checkout; use a released compiler independent of the test subject.
-Sweep = use "checks/sweep".
-main : unsafe Unit .
-main = Script.exit (Sweep.entry (args Unit)).
+# The old Bash leg manifest is archived; this runs current Sol checks only.
+B = use "sol/lib/build".
+> argv = args Unit;
+  _ = if argv == [] or argv == ["--in-place"] then Unit else error "usage: ./sweep [--in-place]; legacy leg filters are retired";
+  runner = B.setting "SOL" "sol";
+  _ = B.command [runner,"tools/sol-only-check.sol"];
+  _ = B.command [runner,"tools/checkout.sol","build","host"];
+  _ = B.command [runner,"tools/checkout.sol","pack","tests/sol-hello.fpr","--out","build/sol-smoke/hello","--bundle"];
+  output = B.query ["build/sol-smoke/hello/run"];
+  if Str.contains "Sol-only bundle smoke" output then print "Sol build/package/run smoke: passed" else error "bundle output mismatch: {output}".

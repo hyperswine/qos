@@ -48,8 +48,8 @@ config BR2_PACKAGE_QOSP_APP
 	  what `make qos-app PROG=...` writes.
 
 config BR2_PACKAGE_QOSP_AUTOSTART
-	bool "start it at boot on tty1"
-	default y
+	bool "start it at boot on tty1 (retired; requires Sol port)"
+	default n
 	help
 	  Install an init script that runs the image on tty1 as soon as
 	  the system is up -- the appliance the Pi target is for.  The
@@ -65,7 +65,7 @@ config BR2_PACKAGE_QOSP_MAIN_PROFILE
 	  first, then set the directory below. Existing persistent disks are kept.
 
 config BR2_PACKAGE_QOSP_BOOT_SPLASH
-	bool "show the QOS vector boot splash"
+	bool "show the QOS vector boot splash (retired; requires Sol port)"
 	depends on BR2_PACKAGE_QOSP_AUTOSTART
 	default n
 	help

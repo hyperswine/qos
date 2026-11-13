@@ -19,7 +19,7 @@ ifeq ($(wildcard $(FPRISC_ROOT)/fpr),)
 $(error installed tree at $(QOS_ROOT) has no toolchain/fpr: reinstall)
 endif
 else ifeq ($(wildcard $(FPRISC_ROOT)/compiler/Main.hs),)
-$(error no fprisc checkout at $(FPRISC_ROOT): ./qos.py fprisc /path/to/fprisc, or export FPRISC_ROOT)
+$(error no fprisc checkout at $(FPRISC_ROOT): export FPRISC_ROOT=/path/to/fprisc)
 endif
 export FPRISC_ROOT
 export FPR_HOME := $(QOS_ROOT)

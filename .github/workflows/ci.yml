@@ -1,376 +1,49 @@
-# CI for QOS: what runs on a stock x86-64 runner without hardware or a GPU.
-#
-# The jobs run in a Debian trixie container because the FP-RISC compiler
-# needs libgit2 >= 1.9 (fp-risc.cabal pkgconfig-depends), which Ubuntu
-# 24.04 does not ship.  The compiler is built once from the revision pinned
-# in fprisc.lock.json and cached by that revision.
-#
-# Not covered here: the full ./sweep --in-place sweep (GL/GLFW hosts, Sol/compiler
-# legs, Pi 4/STAR64 hardware); run `./qos.py test --all` locally for it.
+# Main now qualifies surviving Sol/native workflows; archived Python/Bash coverage is retired.
 name: ci
-
 on:
   push:
     branches: [main]
   pull_request:
   workflow_dispatch:
-
 permissions:
   contents: read
-
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
-
-env:
-  DEBIAN_FRONTEND: noninteractive
-
 jobs:
-  fprisc:
-    name: build fprisc (pinned)
-    runs-on: ubuntu-latest
-    container: debian:trixie
-    outputs:
-      rev: ${{ steps.lock.outputs.rev }}
-    steps:
-      - name: tools
-        run: |
-          apt-get update
-          apt-get install -y --no-install-recommends git ca-certificates python3 zstd \
-            make gcc pkg-config ghc cabal-install libghc-megaparsec-dev \
-            libghc-network-dev libghc-utf8-string-dev libgit2-dev libarchive-dev libcurl4-openssl-dev \
-            libegl-dev libgl-dev
-      - uses: actions/checkout@v4
-      - id: lock
-        run: |
-          echo "rev=$(python3 -c 'import json;print(json.load(open("fprisc.lock.json"))["revision"])')" >> "$GITHUB_OUTPUT"
-      - id: cache
-        uses: actions/cache@v4
-        with:
-          path: fprisc
-          key: fprisc-trixie-${{ steps.lock.outputs.rev }}
-      - name: clone fprisc at the locked revision
-        if: steps.cache.outputs.cache-hit != 'true'
-        run: |
-          git init -q fprisc
-          git -C fprisc remote add origin https://github.com/hyperswine/fprisc.git
-          git -C fprisc fetch -q --depth 1 origin "${{ steps.lock.outputs.rev }}"
-          git -C fprisc checkout -q FETCH_HEAD
-      - name: make fpr
-        if: steps.cache.outputs.cache-hit != 'true'
-        run: |
-          cabal update
-          # fprisc's cabal.project.freeze pins the release plan (GHC 9.8.2 boot
-          # packages); CI runners ship other GHCs, so build against their own
-          # plan, as fprisc's own CI does.
-          rm -f fprisc/cabal.project.freeze
-          make -C fprisc fpr
-          rm -rf fprisc/dist-newstyle
-      - run: ./fprisc/fpr --version || test -x ./fprisc/fpr
-
-  host:
-    name: host checks, unittest, lock
-    needs: fprisc
-    runs-on: ubuntu-latest
-    container: debian:trixie
-    steps:
-      - name: tools
-        run: |
-          apt-get update
-          apt-get install -y --no-install-recommends git ca-certificates python3 zstd \
-            make gcc libc6-dev pkg-config libgit2-1.9 libarchive13t64 libcurl4t64 libegl1 libgl1 \
-            libgmp10 libffi8 libnuma1 libegl-dev libgl-dev
-      - uses: actions/checkout@v4
-      - uses: actions/cache/restore@v4
-        with:
-          path: fprisc
-          key: fprisc-trixie-${{ needs.fprisc.outputs.rev }}
-          fail-on-cache-miss: true
-      # in a container job ${{ github.workspace }} is the HOST's path;
-      # $GITHUB_WORKSPACE is the one the container sees
-      - name: Sol build interpreter
-        run: |
-          mkdir -p "$RUNNER_TEMP/sol-bin"
-          ln -sf "$GITHUB_WORKSPACE/fprisc/fpr" "$RUNNER_TEMP/sol-bin/sol"
-          echo "$RUNNER_TEMP/sol-bin" >> "$GITHUB_PATH"
-          echo "SOL=$RUNNER_TEMP/sol-bin/sol" >> "$GITHUB_ENV"
-      - run: echo "FPRISC_ROOT=$GITHUB_WORKSPACE/fprisc" >> "$GITHUB_ENV"
-      - name: lock --check
-        run: ./qos.py lock --check
-      - name: unittest
-        # FPRISC_ROOT stays exported: the tests isolate themselves from it
-        run: python3 -m unittest discover -s tests -p 'test_*.py' -v
-      - name: native instruction regression contract
-        run: |
-          python3 "$FPRISC_ROOT/tests/check_native_insns_ratchet.py"
-          export FPR_HOME="$GITHUB_WORKSPACE"
-          export FPR_PATH="$FPRISC_ROOT"
-          export FPR_FOREIGN="$GITHUB_WORKSPACE/core/foreign.fpr"
-          python3 "$FPRISC_ROOT/tools/native-insns-ratchet.py" programs/system.fpr 474 rv64 --runtime-call-sites-ceiling 95
-      - name: host C checks
-        run: |
-          for c in buddy store park blkraw blkflush compile drm-scanout pointer; do
-            echo "::group::$c"; sh qos/tests-host/$c-check.sh; echo "::endgroup::"
-          done
-      - name: portable quickstart (x86-64)
-        run: |
-          # Build the host loudly first so a
-          # failure shows its compiler output in the log
-          make -C qos portable
-          mkdir -p "$RUNNER_TEMP/sol-bin"
-          ln -sf "$FPRISC_ROOT/fpr" "$RUNNER_TEMP/sol-bin/sol"
-          export SOL="$RUNNER_TEMP/sol-bin/sol"
-          export FPR_HOME="$GITHUB_WORKSPACE" FPR_PATH="$FPRISC_ROOT"
-          "$SOL" qbuild build
-          ./qos.py run tests/hello.fpr | tee "$RUNNER_TEMP/hello.out"
-          grep -q 'fold(1..10)=55' "$RUNNER_TEMP/hello.out"
-      - name: portable legs that build on x86-64
-        run: |
-          python3 tools/portable-store-check.py
-          python3 tools/disk-suspend-check.py
-
-  sdk:
-    # The app-author loop against an INSTALLED toolchain: install, then move
-    # the qos and fprisc checkouts out of sight and run qos new/run/pack
-    # from an empty directory with no GHC/cabal on PATH (tools/sdk-smoke.sh).
-    # Depends only on the fprisc build, not on the host job.
-    name: installed SDK app loop (x86-64)
-    needs: fprisc
-    runs-on: ubuntu-latest
-    container: debian:trixie
-    timeout-minutes: 30
-    steps:
-      - name: tools (no ghc/cabal)
-        run: |
-          apt-get update
-          apt-get install -y --no-install-recommends git ca-certificates python3 zstd \
-            make gcc libc6-dev pkg-config libgit2-1.9 libarchive13t64 libcurl4t64 libegl1 libgl1 \
-            libgmp10 libffi8 libnuma1 libegl-dev libgl-dev
-      - uses: actions/checkout@v4
-      - uses: actions/cache/restore@v4
-        with:
-          path: fprisc
-          key: fprisc-trixie-${{ needs.fprisc.outputs.rev }}
-          fail-on-cache-miss: true
-      - name: Sol build interpreter
-        run: |
-          mkdir -p "$RUNNER_TEMP/sol-bin"
-          ln -sf "$GITHUB_WORKSPACE/fprisc/fpr" "$RUNNER_TEMP/sol-bin/sol"
-          echo "$RUNNER_TEMP/sol-bin" >> "$GITHUB_PATH"
-          echo "SOL=$RUNNER_TEMP/sol-bin/sol" >> "$GITHUB_ENV"
-      - name: qos.py toolchain install --prefix
-        run: |
-          FPRISC_ROOT="$GITHUB_WORKSPACE/fprisc" ./qos.py toolchain install --prefix "$RUNNER_TEMP/qos-sdk"
-          du -sh "$RUNNER_TEMP/qos-sdk"
-          cat "$RUNNER_TEMP/qos-sdk/libexec/qos-fpr/sdk-version.json"
-          # the SDK layout: the prebuilt compiler, not its sources or tests
-          test ! -e "$RUNNER_TEMP/qos-sdk/libexec/qos-fpr/toolchain/compiler"
-          test ! -e "$RUNNER_TEMP/qos-sdk/libexec/qos-fpr/tests"
-      - name: new / run / pack --bundle outside the checkouts
-        run: |
-          set -e
-          cp tools/sdk-smoke.sh "$RUNNER_TEMP/sdk-smoke.sh"
-          # hide the qos checkout (and the fprisc checkout inside it)
-          hidden="$GITHUB_WORKSPACE.hidden"
-          mv "$GITHUB_WORKSPACE" "$hidden"
-          trap 'mv "$hidden" "$GITHUB_WORKSPACE"' EXIT
-          test ! -e "$GITHUB_WORKSPACE"
-          if command -v ghc || command -v cabal; then echo 'ghc/cabal on PATH'; exit 1; fi
-          cd "$RUNNER_TEMP"
-          env -u FPRISC_ROOT sh "$RUNNER_TEMP/sdk-smoke.sh" "$RUNNER_TEMP/qos-sdk" "$RUNNER_TEMP/smoke"
-
-  sdk-macos:
-    # NON-BLOCKING: the same loop on Apple Silicon (macos-15, arm64).  It
-    # builds fprisc from source with GHC (no cached Mac compiler yet); a red
-    # result here does not fail the workflow.
-    name: installed SDK app loop (macos-15 arm64, non-blocking)
-    runs-on: macos-15
-    continue-on-error: true
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v4
-      - id: lock
-        run: echo "rev=$(python3 -c 'import json;print(json.load(open("fprisc.lock.json"))["revision"])')" >> "$GITHUB_OUTPUT"
-      - name: brew deps
-        run: |
-          brew install libgit2 libarchive pkg-config lld
-          echo "$(brew --prefix lld)/bin" >> "$GITHUB_PATH"
-      - uses: haskell-actions/setup@v2
-        with:
-          ghc-version: '9.8'
-          cabal-version: '3.12'
-      - id: cache
-        uses: actions/cache@v4
-        with:
-          path: fprisc
-          key: fprisc-macos15-arm64-${{ steps.lock.outputs.rev }}
-      - name: clone + build fprisc at the locked revision
-        if: steps.cache.outputs.cache-hit != 'true'
-        run: |
-          git init -q fprisc
-          git -C fprisc remote add origin https://github.com/hyperswine/fprisc.git
-          git -C fprisc fetch -q --depth 1 origin "${{ steps.lock.outputs.rev }}"
-          git -C fprisc checkout -q FETCH_HEAD
-          cabal update
-          # fprisc's cabal.project.freeze pins the release plan (GHC 9.8.2 boot
-          # packages); CI runners ship other GHCs, so build against their own
-          # plan, as fprisc's own CI does.
-          rm -f fprisc/cabal.project.freeze
-          make -C fprisc fpr
-          rm -rf fprisc/dist-newstyle
-      - name: Sol build interpreter
-        run: |
-          mkdir -p "$RUNNER_TEMP/sol-bin"
-          ln -sf "$GITHUB_WORKSPACE/fprisc/fpr" "$RUNNER_TEMP/sol-bin/sol"
-          echo "$RUNNER_TEMP/sol-bin" >> "$GITHUB_PATH"
-          echo "SOL=$RUNNER_TEMP/sol-bin/sol" >> "$GITHUB_ENV"
-      - name: qos.py toolchain install --prefix
-        run: |
-          FPRISC_ROOT="$GITHUB_WORKSPACE/fprisc" ./qos.py toolchain install --prefix "$RUNNER_TEMP/qos-sdk"
-          du -sh "$RUNNER_TEMP/qos-sdk"
-          cat "$RUNNER_TEMP/qos-sdk/libexec/qos-fpr/sdk-version.json"
-          # the SDK layout: the prebuilt compiler, not its sources or tests
-          test ! -e "$RUNNER_TEMP/qos-sdk/libexec/qos-fpr/toolchain/compiler"
-          test ! -e "$RUNNER_TEMP/qos-sdk/libexec/qos-fpr/tests"
-      - name: new / run / pack --bundle outside the checkouts
-        run: |
-          set -e
-          cp tools/sdk-smoke.sh "$RUNNER_TEMP/sdk-smoke.sh"
-          hidden="$GITHUB_WORKSPACE.hidden"
-          mv "$GITHUB_WORKSPACE" "$hidden"
-          trap 'mv "$hidden" "$GITHUB_WORKSPACE"' EXIT
-          cd "$RUNNER_TEMP"
-          # GHC stays installed on this runner; the smoke script drops it from PATH
-          SDK_SMOKE_EXTRA_PATH="$(brew --prefix lld)/bin" \
-            env -u FPRISC_ROOT sh "$RUNNER_TEMP/sdk-smoke.sh" "$RUNNER_TEMP/qos-sdk" "$RUNNER_TEMP/smoke"
-
-  native:
-    name: QOS Native under QEMU (riscv64 virt)
-    needs: fprisc
+  sol-native:
     runs-on: ubuntu-latest
     container: debian:trixie
     timeout-minutes: 60
-    steps:
-      - name: tools
-        run: |
-          apt-get update
-          apt-get install -y --no-install-recommends git ca-certificates python3 zstd \
-            make gcc libc6-dev pkg-config libgit2-1.9 libarchive13t64 libcurl4t64 libegl1 libgl1 \
-            libgmp10 libffi8 libnuma1 gcc-riscv64-unknown-elf picolibc-riscv64-unknown-elf \
-            qemu-system-misc
-      - uses: actions/checkout@v4
-      - uses: actions/cache/restore@v4
-        with:
-          path: fprisc
-          key: fprisc-trixie-${{ needs.fprisc.outputs.rev }}
-          fail-on-cache-miss: true
-      # in a container job ${{ github.workspace }} is the HOST's path;
-      # $GITHUB_WORKSPACE is the one the container sees
-      - name: Sol build interpreter
-        run: |
-          mkdir -p "$RUNNER_TEMP/sol-bin"
-          ln -sf "$GITHUB_WORKSPACE/fprisc/fpr" "$RUNNER_TEMP/sol-bin/sol"
-          echo "$RUNNER_TEMP/sol-bin" >> "$GITHUB_PATH"
-          echo "SOL=$RUNNER_TEMP/sol-bin/sol" >> "$GITHUB_ENV"
-      - run: echo "FPRISC_ROOT=$GITHUB_WORKSPACE/fprisc" >> "$GITHUB_ENV"
-      - name: native smoke boot
-        run: ./qos.py native --smoke
-      - name: native legs
-        run: |
-          set -e
-          for t in tools/native-integrity-check.py tools/error-process-check.sh \
-                   tools/mailbox-process-check.sh tools/admission-check.sh \
-                   tools/native-inbox-check.py tools/virtio-check.py \
-                   tools/block-service-check.py tools/storage-fallback-check.py \
-                   tools/failure-injections-check.py tools/diagnostics-check.py; do
-            echo "::group::$t"
-            case "$t" in *.py) python3 "$t" ;; *) sh "$t" ;; esac
-            echo "::endgroup::"
-          done
-
-  portable-x64:
-    name: portable legs on x86-64
-    needs: fprisc
-    runs-on: ubuntu-latest
-    container: debian:trixie
-    timeout-minutes: 90
-    steps:
-      - name: tools
-        run: |
-          apt-get update
-          apt-get install -y --no-install-recommends git ca-certificates python3 zstd \
-            make gcc libc6-dev pkg-config libgit2-1.9 libarchive13t64 libcurl4t64 libegl1 libgl1 \
-            libgmp10 libffi8 libnuma1 libegl-dev libgl-dev curl \
-            gcc-riscv64-unknown-elf picolibc-riscv64-unknown-elf qemu-system-misc
-      - uses: actions/checkout@v4
-      - uses: actions/cache/restore@v4
-        with:
-          path: fprisc
-          key: fprisc-trixie-${{ needs.fprisc.outputs.rev }}
-          fail-on-cache-miss: true
-      # in a container job ${{ github.workspace }} is the HOST's path;
-      # $GITHUB_WORKSPACE is the one the container sees
-      - name: Sol build interpreter
-        run: |
-          mkdir -p "$RUNNER_TEMP/sol-bin"
-          ln -sf "$GITHUB_WORKSPACE/fprisc/fpr" "$RUNNER_TEMP/sol-bin/sol"
-          echo "$RUNNER_TEMP/sol-bin" >> "$GITHUB_PATH"
-          echo "SOL=$RUNNER_TEMP/sol-bin/sol" >> "$GITHUB_ENV"
-      - run: echo "FPRISC_ROOT=$GITHUB_WORKSPACE/fprisc" >> "$GITHUB_ENV"
-      # actions/checkout only marks the workspace safe under a temporary HOME;
-      # check-services.py runs `git ls-files` as root in the container, where
-      # the runner-owned checkout is otherwise "dubious ownership" (exit 128)
-      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-      - name: smoke set (qosp legs) + LiveView multi-client
-        run: |
-          make -C qos portable
-          ./qos.py test hello epecho filessvc gfxshare guishell mvutick tuiframes \
-            qdisk2 dtree bigfree eq dungeon web
-      # several of these also boot the same scenario on QOS Native (virt)
-      - name: services, storage and shutdown legs
-        run: python3 -u tools/check-services.py --jobs 2 --output "$RUNNER_TEMP/qos-services"
-      - name: Service test timings and failure logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: service-check-evidence
-          if-no-files-found: warn
-          path: |
-            ${{ runner.temp }}/qos-services/results.json
-            ${{ runner.temp }}/qos-services/snapshot.json
-            ${{ runner.temp }}/qos-services/prepare.log
-            ${{ runner.temp }}/qos-services/jobs/*/output.log
-            ${{ runner.temp }}/qos-services/jobs/*/processes.json
-
-  core-build:
-    name: core build and package without Python or Bash
-    needs: fprisc
-    runs-on: ubuntu-latest
-    container: debian:trixie
-    steps:
-      - name: native build tools
-        run: |
-          apt-get update
-          apt-get install -y --no-install-recommends git ca-certificates make gcc libc6-dev pkg-config \
-            libgit2-1.9 libarchive13t64 libcurl4t64 libgmp10 libffi8 libnuma1 libegl1 libgl1 libegl-dev libgl-dev
-      - uses: actions/checkout@v4
-      - uses: actions/cache/restore@v4
-        with:
-          path: fprisc
-          key: fprisc-trixie-${{ needs.fprisc.outputs.rev }}
-          fail-on-cache-miss: true
-      - name: build, pack and run with forbidden interpreters blocked
+    defaults:
+      run:
         shell: sh
+    steps:
+      - uses: actions/checkout@v4
+      - name: Native build dependencies
         run: |
-          export FPRISC_ROOT="$GITHUB_WORKSPACE/fprisc"
-          export FPR_HOME="$GITHUB_WORKSPACE" FPR_PATH="$FPRISC_ROOT"
-          mkdir -p "$RUNNER_TEMP/core-bin"
-          ln -s "$FPRISC_ROOT/fpr" "$RUNNER_TEMP/core-bin/sol"
-          printf '%s\n' '#include <stdio.h>' 'int main(void){fputs("forbidden core build interpreter\n",stderr);return 99;}' > "$RUNNER_TEMP/deny.c"
-          cc "$RUNNER_TEMP/deny.c" -o "$RUNNER_TEMP/core-bin/python3"
-          ln -s python3 "$RUNNER_TEMP/core-bin/python"
-          ln -s python3 "$RUNNER_TEMP/core-bin/bash"
-          export PATH="$RUNNER_TEMP/core-bin:$PATH" SOL="$RUNNER_TEMP/core-bin/sol"
-          "$SOL" qbuild pack tests/nativeabi.fpr --bundle --plugin tests/plugmini.fpr --out "$RUNNER_TEMP/core-package"
-          "$RUNNER_TEMP/core-package/run" | tee "$RUNNER_TEMP/core-run.out"
-          grep -q 'nativeabi: HOLDS' "$RUNNER_TEMP/core-run.out"
+          apt-get update
+          apt-get install -y --no-install-recommends git ca-certificates make gcc pkg-config ghc cabal-install libghc-megaparsec-dev libghc-network-dev libghc-utf8-string-dev libgit2-dev libarchive-dev libcurl4-openssl-dev libegl-dev libgl-dev jq
+      - name: Read compiler pin
+        id: pin
+        run: echo "revision=$(jq -r .revision fprisc.lock.json)" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          repository: hyperswine/fprisc
+          ref: ${{ steps.pin.outputs.revision }}
+          path: fprisc
+      - name: Build pinned compiler
+        working-directory: fprisc
+        run: |
+          rm -f cabal.project.freeze
+          cabal update
+          make fpr
+      - name: Sol policy, host and bundle smoke
+        env:
+          FPRISC_ROOT: ${{ github.workspace }}/fprisc
+          FPR_HOME: ${{ github.workspace }}
+          FPR_PATH: ${{ github.workspace }}/fprisc
+          SOL: /usr/local/bin/sol
+        run: |
+          ln -s "$FPRISC_ROOT/fpr" /usr/local/bin/sol
+          sol tools/sol-only-check.sol
+          sol tools/checkout.sol build host
+          sol tools/checkout.sol pack tests/sol-hello.fpr --out build/sol-smoke/hello --bundle
+          build/sol-smoke/hello/run
