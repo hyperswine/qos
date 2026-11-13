@@ -4,9 +4,8 @@
  *   - pread/pwrite carry their own offsets, so concurrent READS from
  *     any hart thread race against nothing.  Writes are serialized
  *     above by the storage actor being ONE actor (the same single-
- *     writer rule that keeps append-only sound on virt); the mutex
- *     here guards only first-open against two harts discovering the
- *     device at once.
+ *     writer rule that keeps append-only sound on virt); one-time initialization
+ *     publishes the open disk to every caller.
  *   - a short read past a fresh sparse file's materialized extent is
  *     still zeros by contract, so reads zero-fill the tail rather
  *     than failing: an unwritten page IS a zero page.
@@ -15,6 +14,7 @@
  * app registers its sink, the disk's open story is browsable at
  * /logs/host like every other host-side boot fact. */
 #include "blk_raw.h"
+#include "../../qos/appside/qos_abi.h"
 #include "hostlog.h"
 
 #include <errno.h>
@@ -26,21 +26,19 @@
 #endif
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/uio.h>
 #include <sys/file.h>
 #include <limits.h>
 #include <time.h>
 #include <unistd.h>
 
-static pthread_mutex_t blk_mu = PTHREAD_MUTEX_INITIALIZER;
+static pthread_once_t disk_once = PTHREAD_ONCE_INIT;
 static int blk_fd = -1;
 static int blk_dir_fd = -1;
-static int blk_tried;
+static int blk_name_synced;
 static uint64_t blk_npages;
 
-static void blk_open_locked(void) {
-  if (blk_tried) return;
-  blk_tried = 1;
-
+static void open_disk(void) {
   const char *path = getenv("FPR_DISK");
   if (!path || !*path) path = "qosp.disk";
 
@@ -141,9 +139,7 @@ static void blk_open_locked(void) {
 }
 
 void qos_blkraw_setup(void) {
-  pthread_mutex_lock(&blk_mu);
-  blk_open_locked();
-  pthread_mutex_unlock(&blk_mu);
+  pthread_once(&disk_once, open_disk);
 }
 
 int64_t qos_blkraw_pages(void) {
@@ -151,33 +147,84 @@ int64_t qos_blkraw_pages(void) {
   return (int64_t)blk_npages;
 }
 
-int64_t qos_blkraw_read(uint64_t page, char *dst) {
+static int64_t read_pages(uint64_t page, uint64_t count, char *dst) {
 #ifdef QOS_BLK_TEST
   /* test-only: a slow disk; QOS_BLK_TEST_DELAY_READS limits it to the
    * first N reads (a device that stalls, then recovers) */
   static unsigned long delayed;
   const char *delay = getenv("QOS_BLK_TEST_DELAY_US");
-  const char *count = getenv("QOS_BLK_TEST_DELAY_READS");
-  if (delay && (!count || __atomic_fetch_add(&delayed, 1, __ATOMIC_RELAXED) < strtoul(count, 0, 10)))
+  const char *limit = getenv("QOS_BLK_TEST_DELAY_READS");
+  if (delay && (!limit || __atomic_fetch_add(&delayed, 1, __ATOMIC_RELAXED) < strtoul(limit, 0, 10)))
     usleep((useconds_t)strtoul(delay, 0, 10));
 #endif
   qos_blkraw_setup();
-  if (blk_fd < 0 || page >= blk_npages) return -1;
-  ssize_t n = pread(blk_fd, dst, QOS_BLK_PAGE, (off_t)(page * QOS_BLK_PAGE));
-  if (n < 0) return -1;
-  /* sparse tail: unwritten bytes are zero by contract */
-  if ((uint64_t)n < QOS_BLK_PAGE) memset(dst + n, 0, QOS_BLK_PAGE - (uint64_t)n);
+  if (blk_fd < 0 || page >= blk_npages || count > blk_npages - page) return -1;
+  size_t bytes = count * QOS_BLK_PAGE;
+  for (size_t got = 0; got < bytes;) {
+    ssize_t n = pread(blk_fd, dst + got, bytes - got, (off_t)(page * QOS_BLK_PAGE + got));
+    if (n < 0 && errno == EINTR) continue;
+    if (n < 0) return -1;
+    if (!n) { memset(dst + got, 0, bytes - got); break; }
+    got += (size_t)n;
+  }
+  return 0;
+}
+
+int64_t qos_blkraw_read(uint64_t page, char *dst) { return read_pages(page, 1, dst); }
+
+static int64_t write_pages(uint64_t page, const char *data, uint64_t pages) {
+  qos_blkraw_setup();
+  if (blk_fd < 0 || page >= blk_npages || pages > blk_npages - page) return -1;
+  size_t bytes = pages * QOS_BLK_PAGE;
+  for (size_t done = 0; done < bytes;) {
+    ssize_t n = pwrite(blk_fd, data + done, bytes - done, (off_t)(page * QOS_BLK_PAGE + done));
+    if (n < 0 && errno == EINTR) continue;
+    if (n <= 0) return -1;
+    done += (size_t)n;
+  }
+  return 0;
+}
+
+static const char zero_page[QOS_BLK_PAGE];
+
+/* Advance the vector only when a short write leaves bytes outstanding. */
+static int write_spans(uint64_t page, size_t pages, struct iovec *spans, int count) {
+  qos_blkraw_setup();
+  if (blk_fd < 0 || page >= blk_npages || pages > blk_npages - page) return -1;
+  off_t offset = (off_t)(page * QOS_BLK_PAGE);
+  size_t remaining = pages * QOS_BLK_PAGE;
+  while (count) {
+    while (count && !spans->iov_len) { spans++; count--; }
+    if (!count) break;
+    ssize_t n = pwritev(blk_fd, spans, count, offset);
+    if (n < 0 && errno == EINTR) continue;
+    if (n <= 0) return -1;
+    if ((size_t)n == remaining) return 0;
+    remaining -= (size_t)n;
+    offset += n;
+    size_t consumed = (size_t)n;
+    while (count && consumed >= spans->iov_len) {
+      consumed -= spans->iov_len;
+      spans++;
+      count--;
+    }
+    if (consumed) {
+      spans->iov_base = (char *)spans->iov_base + consumed;
+      spans->iov_len -= consumed;
+    }
+  }
   return 0;
 }
 
 int64_t qos_blkraw_write(uint64_t page, const char *src, uint64_t len) {
-  qos_blkraw_setup();
-  if (blk_fd < 0 || page >= blk_npages || len > QOS_BLK_PAGE) return -1;
-  char buf[QOS_BLK_PAGE];
-  memcpy(buf, src, len);
-  memset(buf + len, 0, QOS_BLK_PAGE - len); /* whole pages, zero-padded */
-  ssize_t n = pwrite(blk_fd, buf, QOS_BLK_PAGE, (off_t)(page * QOS_BLK_PAGE));
-  return n == (ssize_t)QOS_BLK_PAGE ? (int64_t)len : -1;
+  if (len > QOS_BLK_PAGE || (len && !src)) return -1;
+  if (!len) return write_pages(page, zero_page, 1);
+  if (len == QOS_BLK_PAGE)
+    return write_pages(page, src, 1) == 0 ? (int64_t)len : -1;
+  struct iovec spans[] = {
+    {(void *)src, len}, {(void *)zero_page, QOS_BLK_PAGE - len}
+  };
+  return write_spans(page, 1, spans, 2) == 0 ? (int64_t)len : -1;
 }
 
 static int sync_fd(int fd) {
@@ -201,7 +248,6 @@ int64_t qos_blkraw_flush(void) {
 #endif
   qos_blkraw_setup();
   if (blk_fd < 0 || blk_dir_fd < 0) return -1;
-  if (sync_fd(blk_fd) < 0) return -1;
 #ifdef F_FULLFSYNC
   /* macOS fsync need not flush a drive's volatile cache.  Where the host
    * offers the stronger operation, a refusal is an error, not a successful
@@ -209,8 +255,15 @@ int64_t qos_blkraw_flush(void) {
   int rc;
   do { rc = fcntl(blk_fd, F_FULLFSYNC); } while (rc < 0 && errno == EINTR);
   if (rc < 0) return -1;
+#else
+  if (sync_fd(blk_fd) < 0) return -1;
 #endif
-  if (sync_fd(blk_dir_fd) < 0) return -1;
+  /* The backing file stays open and the disk worker only overwrites its
+   * contents. Persist its directory entry once per open, retrying errors. */
+  if (!__atomic_load_n(&blk_name_synced, __ATOMIC_ACQUIRE)) {
+    if (sync_fd(blk_dir_fd) < 0) return -1;
+    __atomic_store_n(&blk_name_synced, 1, __ATOMIC_RELEASE);
+  }
   return 0;
 }
 
@@ -230,12 +283,13 @@ int64_t qos_blkraw_flush(void) {
  * deadline (default 5000, the virt driver's). */
 typedef struct blk_job {
   struct blk_job *next;
-  unsigned refs, done;
+  unsigned refs, admissions;
   uint64_t page, len;
+  unsigned short header_bytes, payload_bytes;
   int operation;
   int64_t result;
   uint64_t submitted; /* monotonic ns */
-  char data[QOS_BLK_PAGE];
+  char data[];
 } blk_job;
 static pthread_mutex_t job_mu = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t job_cv = PTHREAD_COND_INITIALIZER;
@@ -243,7 +297,9 @@ static pthread_once_t worker_once = PTHREAD_ONCE_INIT;
 static blk_job *job_head, *job_tail;
 static int worker_ok;
 enum { BLK_MAX_PENDING = 64 };
-static unsigned job_count; /* queued + running, protected by job_mu */
+/* Writers serialize under job_mu. Atomic snapshots also let a writer refuse
+ * an already-full queue before allocating and copying its input. */
+static unsigned job_count;
 static uint64_t running_since; /* ns the worker's current job started; 0 idle (job_mu) */
 static uint64_t deadline_ns;
 static uint64_t mono_ns(void) {
@@ -253,27 +309,68 @@ static uint64_t mono_ns(void) {
 }
 void qos_blkraw_release(void *p) {
   blk_job *j = p;
-  if (__atomic_sub_fetch(&j->refs, 1, __ATOMIC_ACQ_REL) == 0) free(j);
+  if (__atomic_fetch_sub(&j->refs, 1, __ATOMIC_RELEASE) == 1) {
+    __atomic_thread_fence(__ATOMIC_ACQUIRE);
+    free(j);
+  }
+}
+/* Caller holds job_mu. Flushes can share a barrier only while adjacent. */
+static blk_job *take_batch(unsigned *count) {
+  blk_job *first = job_head;
+  *count = first->admissions;
+  job_head = first->next;
+  first->next = NULL;
+  if (!job_head) job_tail = NULL;
+  running_since = mono_ns();
+  return first;
 }
 static void *disk_worker(void *unused) {
   (void)unused;
+  blk_job *retired = NULL;
+  pthread_mutex_lock(&job_mu);
   for (;;) {
-    pthread_mutex_lock(&job_mu);
     while (!job_head) pthread_cond_wait(&job_cv, &job_mu);
-    blk_job *j = job_head;
-    job_head = j->next;
-    if (!job_head) job_tail = 0;
-    running_since = mono_ns();
+    unsigned batch;
+    blk_job *j = take_batch(&batch);
     pthread_mutex_unlock(&job_mu);
-    j->result = j->operation == QOS_BLK_FLUSH ? qos_blkraw_flush()
-              : j->operation == QOS_BLK_WRITE ? qos_blkraw_write(j->page, j->data, j->len)
-              : qos_blkraw_read(j->page, j->data);
+    if (retired) {
+      qos_blkraw_release(retired);
+      retired = NULL;
+    }
+    int64_t result;
+    switch (j->operation) {
+    case QOS_BLK_FLUSH: result = qos_blkraw_flush(); break;
+    case QOS_BLK_RECORD: {
+      if (!j->payload_bytes) {
+        result = qos_blkraw_write(j->page, j->data, j->header_bytes) < 0 ? -1 : 0;
+        break;
+      }
+      if (j->header_bytes + j->payload_bytes == j->len * QOS_BLK_PAGE) {
+        result = write_pages(j->page, j->data, j->len);
+        break;
+      }
+      struct iovec spans[] = {
+        {j->data, j->header_bytes},
+        {(void *)zero_page, QOS_BLK_PAGE - j->header_bytes},
+        {j->data + j->header_bytes, j->payload_bytes},
+        {(void *)zero_page, (j->len - 1) * QOS_BLK_PAGE - j->payload_bytes}
+      };
+      result = write_spans(j->page, j->len, spans, 4);
+      break;
+    }
+    case QOS_BLK_WRITE:
+      result = qos_blkraw_write(j->page, j->data, j->len);
+      break;
+    default:
+      result = read_pages(j->page, j->len, j->data);
+    }
     pthread_mutex_lock(&job_mu);
     running_since = 0;
-    job_count--;
-    pthread_mutex_unlock(&job_mu);
-    __atomic_store_n(&j->done, 1, __ATOMIC_RELEASE);
-    qos_blkraw_release(j);
+    unsigned remaining = __atomic_load_n(&job_count, __ATOMIC_RELAXED) - batch;
+    __atomic_store_n(&job_count, remaining, __ATOMIC_RELAXED);
+    __atomic_store_n(&j->result, result, __ATOMIC_RELEASE);
+    if (job_head) retired = j;
+    else qos_blkraw_release(j);
   }
   return 0;
 }
@@ -286,40 +383,105 @@ static void start_worker(void) {
     pthread_detach(t); worker_ok = 1;
   }
 }
+static blk_job *allocate_job(uint64_t page, uint64_t len, int operation, size_t bytes) {
+  blk_job *j = malloc(sizeof *j + bytes);
+  if (j) {
+    j->next = NULL;
+    j->refs = 2;
+    j->admissions = 1;
+    j->operation = operation;
+    j->page = page;
+    j->len = len;
+    /* Completed operations return -1 or a nonnegative byte count. */
+    j->result = INT64_MIN;
+  }
+  return j;
+}
 void *qos_blkraw_submit(uint64_t page, const char *src, uint64_t len, int operation) {
-  if (operation < QOS_BLK_READ || operation > QOS_BLK_FLUSH ||
+  if (operation < QOS_BLK_READ || operation > QOS_BLK_RECORD ||
+      (operation == QOS_BLK_RANGE && (src || !len || len > 8)) ||
       len > QOS_BLK_PAGE || (operation == QOS_BLK_WRITE && len && !src) ||
       (operation == QOS_BLK_FLUSH && (page || src || len))) return 0;
+  const qos_blk_record_t *record = (const qos_blk_record_t *)src;
+  if (operation == QOS_BLK_RECORD &&
+      (!record || !record->header || !record->payload || record->header_bytes > QOS_BLK_PAGE ||
+       record->payload_bytes > 7 * QOS_BLK_PAGE ||
+       len != 1 + (record->payload_bytes + QOS_BLK_PAGE - 1) / QOS_BLK_PAGE)) return 0;
+  if (operation == QOS_BLK_READ) {
+    operation = QOS_BLK_RANGE;
+    len = 1;
+  }
   pthread_once(&worker_once, start_worker);
   if (!worker_ok) return 0;
-  blk_job *j = calloc(1, sizeof *j);
-  if (!j) return 0;
-  j->refs = 2; j->page = page; j->len = len; j->operation = operation;
-  if (operation == QOS_BLK_WRITE && len) memcpy(j->data, src, len);
+  uint64_t pages = operation == QOS_BLK_FLUSH ? 0 : 1;
+  if (operation == QOS_BLK_RANGE || operation == QOS_BLK_RECORD) pages = len;
+  size_t buffer_bytes = operation == QOS_BLK_WRITE ? len : pages * QOS_BLK_PAGE;
+  if (operation == QOS_BLK_RECORD) buffer_bytes = record->header_bytes + record->payload_bytes;
+  blk_job *j = NULL;
+  int shareable = operation == QOS_BLK_FLUSH || operation == QOS_BLK_RANGE;
+  if (!shareable) {
+    if (__atomic_load_n(&job_count, __ATOMIC_RELAXED) >= BLK_MAX_PENDING) return NULL;
+    j = allocate_job(page, len, operation, buffer_bytes);
+    if (!j) return 0;
+    if (operation == QOS_BLK_WRITE && len) {
+      memcpy(j->data, src, len);
+    }
+    if (operation == QOS_BLK_RECORD) {
+      j->header_bytes = record->header_bytes;
+      j->payload_bytes = record->payload_bytes;
+      memcpy(j->data, record->header, j->header_bytes);
+      memcpy(j->data + j->header_bytes, record->payload, j->payload_bytes);
+    }
+  }
   pthread_mutex_lock(&job_mu);
+  unsigned admitted = __atomic_load_n(&job_count, __ATOMIC_RELAXED);
+  if (admitted >= BLK_MAX_PENDING) {
+    pthread_mutex_unlock(&job_mu);
+    free(j);
+    return NULL;
+  }
   uint64_t now = mono_ns();
-  j->submitted = now;
-  if (job_count >= BLK_MAX_PENDING ||
-      (running_since && now - running_since > deadline_ns) ||
+  if ((running_since && now - running_since > deadline_ns) ||
       (job_head && now - job_head->submitted > deadline_ns)) {
     /* stalled: refuse rather than queue behind a worker that is not draining */
     pthread_mutex_unlock(&job_mu);
     free(j);
     return 0;
   }
+  if (shareable) {
+    if (job_tail && job_tail->operation == operation && job_tail->page == page && job_tail->len == len) {
+      j = job_tail;
+      __atomic_fetch_add(&j->refs, 1, __ATOMIC_RELAXED);
+      j->admissions++;
+      __atomic_store_n(&job_count, admitted + 1, __ATOMIC_RELAXED);
+      pthread_mutex_unlock(&job_mu);
+      return j;
+    }
+    j = allocate_job(page, len, operation, buffer_bytes);
+    if (!j) {
+      pthread_mutex_unlock(&job_mu);
+      return NULL;
+    }
+  }
+  j->submitted = now;
   if (job_tail) job_tail->next = j; else job_head = j;
   job_tail = j;
-  job_count++;
-  pthread_cond_signal(&job_cv);
+  /* The sole worker checks the FIFO again after every running job. */
+  __atomic_store_n(&job_count, admitted + 1, __ATOMIC_RELAXED);
+  if (!admitted) pthread_cond_signal(&job_cv);
   pthread_mutex_unlock(&job_mu);
   return j;
 }
 int qos_blkraw_done(void *p) {
-  return __atomic_load_n(&((blk_job *)p)->done, __ATOMIC_ACQUIRE);
+  if (__atomic_load_n(&((blk_job *)p)->result, __ATOMIC_RELAXED) == INT64_MIN) return 0;
+  __atomic_thread_fence(__ATOMIC_ACQUIRE);
+  return 1;
 }
 int64_t qos_blkraw_result(void *p, char *dst) {
   blk_job *j = p;
-  if (!qos_blkraw_done(j)) return -1;
-  if (j->operation == QOS_BLK_READ && j->result == 0 && dst) memcpy(dst, j->data, QOS_BLK_PAGE);
-  return j->result;
+  int64_t result = __atomic_load_n(&j->result, __ATOMIC_ACQUIRE);
+  if (result == INT64_MIN) return -1;
+  if (result == 0 && dst && j->operation == QOS_BLK_RANGE)
+    memcpy(dst, j->data, j->len * QOS_BLK_PAGE);
+  return result;
 }

@@ -230,7 +230,7 @@ static fpr_lock_t g_plug_lock; /* serializes teardown against reaps on other har
 static void plug_image_quiet(uw pid) {
   fpr_lock(&g_plug_lock);
   plug_image_t *pi = (plug_image_t *)fpr_image_of_pid(pid);
-  if (!pi || pi->ending || fpr_pid_live(pid)) { fpr_unlock(&g_plug_lock); return; }
+  if (!pi || pi->ending || fpr_pid_has_live(pid)) { fpr_unlock(&g_plug_lock); return; }
   pi->ending = 1;
   fpr_image_remove(&pi->im);
   fpr_unlock(&g_plug_lock);

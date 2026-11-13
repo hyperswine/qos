@@ -3,12 +3,13 @@
 # Only System (pid 0) may compact the whole log. Apps receive grants to
 # their record prefix; opening a record does not give them a raw disk.
 unsafe module.
-Endpoint = use "leaseslots#efa81888e7fe1099".
+Endpoint = use "./leaseslots".
 EP = use "ep#c66ad65e68dd97f5".
 Storage = use "std/storageclient".
 SP = use "std/storageprotocol".
 AC = use "std/actor#201a0e9bf98a5154".
 
+serve : unsafe Int -> Int -> Unit .
 serve fs me = Endpoint.simpleUntil (readRecordUntil fs) (writeRecordUntil fs) me.
 result (Ok text) = Ok (EP.IStr text).
 result (Err why) = Err (SP.message why).
@@ -46,12 +47,12 @@ writeOp fs me key "replace-at" frame = case SP.replacementFrame key frame of
   | Ok op -> result (request me fs op).
 writeOp _ _ _ _ _ = Err "unknown file write operation".
 
-recordOp url =
-  rest = substr url 16 (strlen url - 16);
-  split rest (strlen rest - 1).
-split text i | i < 0 = ("", "").
-split text i | charAt text i == 47 = (substr text 0 i, substr text (i + 1) (strlen text - i - 1)).
-split text i = split text (i - 1).
+recordOp url = splitRecord url 16 (strlen url - 1).
+split text i = splitRecord text 0 i.
+splitRecord text start i | i < start = ("", "").
+splitRecord text start i | charAt text i == 47 =
+  (substr text start (i - start), substr text (i + 1) (strlen text - i - 1)).
+splitRecord text start i = splitRecord text start (i - 1).
 
 readRecordUntil fs until me client url | EP.strEq url "/services/files/status" = Ok (EP.IInt (if fs == 0 then 0 else 1)).
 readRecordUntil fs until me client url | EP.strEq url "/services/files/schema" = Ok (EP.IStr (SP.schema SP.FilesAdapter)).

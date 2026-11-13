@@ -1,9 +1,10 @@
 # Fresh-process probe for tools/portable-durable-check.py. The script substitutes
 # action, leaving all page operations on the routed block-service path.
 unsafe program.
-QL = use "../programs/mods/qlog#045dbfa936f832eb".
-B = use "std/blockio#8b4ffa1467ca03a5".
+QL = use "../programs/mods/qlog".
+B = use "std/blockio".
 SVC = use "svc#75479fb6d5f34670".
+Wire = use "std/storage#a8f7ee14e1efae76".
 action = 0.
 outcome r = case r of Ok s -> "Ok {s}" | Err why -> "Err {why}".
 inspect src h =
@@ -73,7 +74,7 @@ worker : unsafe Int -> Int -> Unit .
 worker boss self =
   block = B.serve self (device "blk");
   src = QL.routed block;
-  case (action == 5 or action == 9 or action == 11 or action == 12) of True -> QL.actorWith src self | False -> workerProbe boss src.
+  case (action == 5 or action == 9 or action == 11 or action == 12 or action == 13) of True -> QL.actorWith src self | False -> workerProbe boss src.
 workerProbe boss src =
   h = QL.ensure src;
   send boss (perform src h) >> Unit.
@@ -84,8 +85,34 @@ sendBulk child me =
   entries = if n == 2 then [("key", oversizedKey), ("new-key", secondChunk)] else chunks n;
   (bytes, count) = QL.bulkPack entries;
   if count == n then send child (SVC.Rpc me 7 "" bytes) else error "bulk count".
+openGate boss self =
+  target = receiveFrom self boss;
+  send target True >> Unit.
+gatedWorker boss gate self =
+  _ = receiveFrom self gate;
+  worker boss self.
+pairProbe me =
+  gate = spawn (openGate me);
+  child = Wire.spawn 8 Wire.inboxBytes (gatedWorker me gate);
+  _ = send child (SVC.Rpc me 12 "" "");
+  _ = send child (SVC.Rpc me 2 "pair-probe" "first");
+  _ = send child (SVC.Rpc me 2 "pair-probe" "second");
+  _ = send gate child;
+  before = case receiveFrom me child of Ok token -> QL.parseNum token | Err why -> error why;
+  first = receiveFrom me child;
+  second = receiveFrom me child;
+  _ = send child (SVC.Rpc me 3 "pair-probe" "");
+  replay = receiveFrom me child;
+  _ = send child (SVC.Rpc me 1 "pair-probe" "");
+  latest = receiveFrom me child;
+  _ = send child (SVC.Rpc me 12 "" "");
+  after = receiveFrom me child;
+  expected = before + 1;
+  if after == Ok "{expected}" and first == Ok "" and second == Ok "" and replay == Ok "firstsecond" and latest == Ok "second"
+  then "durable: pair acknowledged in order" else error "pair generation, acknowledgement or replay mismatch".
 main =
   me = myself 0;
-  child = spawn (worker me);
-  _ = case action of 5 -> send child (SVC.Rpc me 5 "" "") | 9 -> sendBulk child me | 11 -> sendBulk child me | 12 -> sendBulk child me | other -> Ok Unit;
-  "durable: {outcome (receiveFromRes me child)}".
+  if action == 13 then pairProbe me else
+    child = spawn (worker me);
+    _ = case action of 5 -> send child (SVC.Rpc me 5 "" "") | 9 -> sendBulk child me | 11 -> sendBulk child me | 12 -> sendBulk child me | other -> Ok Unit;
+    "durable: {outcome (receiveFromRes me child)}".

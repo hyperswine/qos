@@ -79,13 +79,13 @@ unsafe module.
 
 # ---- format helpers over the shared pure core -------------------------------
 SVC = use "svc#75479fb6d5f34670".
-Core = use "coreutil#00b87d7442c69e95".
+Core = use "./coreutil".
 Rpc = SVC.Rpc.
 Wire = use "std/storage#a8f7ee14e1efae76".
 
 # Page-source choice is explicit. Raw access is for standalone tools/tests;
 # all storage actors and native bootstrap use a routed block service.
-B = use "std/blockio#8b4ffa1467ca03a5".
+B = use "std/blockio".
 AC = use "std/actor#201a0e9bf98a5154".
 PageSource = Type (Direct Device | Routed Int | Bounded Int Int).
 baseSource source = case source of Bounded service until -> Routed service | other -> other.
@@ -165,31 +165,30 @@ hCombine a b = hFix (imod ((imod (a * 1000003) hprime) + b + 17) hprime).
 
 # ---- headers ---------------------------------------------------------------
 lf = chr 10.
-hdrLine tag np pl url = strcat "{tag} {np} {pl} {url}" lf.
-hdrLineH tag np pl url hh = strcat "{tag} {np} {pl} {url} h{hh}" lf.
-sbLine head = strcat "QLOG {head}" lf.
+hdrLine tag np pl url = "{tag} {np} {pl} {url}\n".
+hdrLineH tag np pl url hh = "{tag} {np} {pl} {url} h{hh}\n".
+sbLine head = "QLOG {head}\n".
 
 # parse "TAG NP PL URL [hHASH]"; -> Ok (RecH tag np pl url hh) | Err.
 # For QBLK the url slot carries the chunk COUNT word.
-parseHdrH s =
-  n = strlen s;
+parseHdrH s = parseHeaderPrefix s (strlen s).
+parseHeaderPrefix s n =
   (tag, i1) = takeWord s 0 n;
   case or2 (strEq tag "QREC") (or2 (strEq tag "QDEL") (strEq tag "QBLK")) of
     True -> phRest s n i1 tag
   | False -> Err "not a record header".
 phRest s n i1 tag =
-  (npw, i2) = takeWord s i1 n;
-  (plw, i3) = takeWord s i2 n;
+  (pages, i2) = numericWord s i1 n;
+  (size, i3) = numericWord s i2 n;
   (url, i4) = takeWord s i3 n;
-  Ok (RecH tag (parseNum npw) (parseNum plw) url (phHash s n i4)).
-# the url's delimiter was the newline on a v1 header: no hash field
-phHash s n i4 =
-  case charAt s (i4 - 1) == 10 of
-    True -> 0
-  | False -> phWord (takeWord s i4 n).
-phWord wp = case wp of (w, i) -> phTag w.
-phTag w = case strlen w >= 2 of False -> 0 | True -> phTag2 w.
-phTag2 w = case charAt w 0 == 104 of True -> fieldNum w | False -> 0.
+  Ok (RecH tag pages size url (phHash s n i4)).
+numericWord s start n =
+  end = Core.wordEnd s start n;
+  (Core.parseDigitsGo s start end 0, if end < n then end + 1 else end).
+# The URL's newline terminates a legacy header with no checksum.
+phHash s n i =
+  if i >= n or charAt s (i - 1) == 10 then 0 else
+    if charAt s i == 104 then Core.parseDigitsGo s (i + 1) n 0 else 0.
 
 # v1 shim: the historical 4-field header shape
 parseHdr s = case parseHdrH s of Err e -> Err e | Ok r -> phOld r.
@@ -204,7 +203,7 @@ Meta = Type (Meta head ver wflag cflag dend shead mroot).
 
 sbLineM m =
   Meta h v w c d sw mr = m;
-  strcat "QLOG {h} v{v} w{w} c{c} d{d} s{sw} m{mr}" lf.
+  "QLOG {h} v{v} w{w} c{c} d{d} s{sw} m{mr}\n".
 
 sbMeta s =
   n = strlen s;
@@ -213,12 +212,15 @@ sbMeta s =
     True -> sbMeta2 s n i1
   | False -> Err "unformatted".
 sbMeta2 s n i1 =
-  (hw, i2) = takeWord s i1 n;
-  case charAt s (i2 - 1) == 10 of
-    True -> Ok (Meta (parseNum hw) 1 0 1 0 0 0)
-  | False -> Ok (sbFields s i2 n (Meta (parseNum hw) 1 0 1 0 0 0)).
+  (head, i2) = numericWord s i1 n;
+  initial = Meta head 1 0 1 0 0 0;
+  if charAt s (i2 - 1) == 10 then Ok initial else Ok (sbFields s i2 n initial).
 sbFields : unsafe String -> Int -> Int -> Meta -> Meta .
-sbFields s i n m = case i >= n of True -> m | False -> sbF2 s n m (takeWord s i n).
+sbFields s i n m =
+  if i >= n then m else
+    end = Core.wordEnd s i n;
+    next = if end - i < 2 then m else sbPut2 m (charAt s i) (Core.parseDigitsGo s (i + 1) end 0);
+    if end >= n then next else if charAt s end == 10 then next else sbFields s (end + 1) n next.
 sbF2 : unsafe String -> Int -> Meta -> (String, Int) -> Meta .
 sbF2 s n m wp = case wp of (w, i2) -> sbF3 s n (sbPut m w) i2.
 sbF3 : unsafe String -> Int -> Meta -> Int -> Meta .
@@ -248,22 +250,26 @@ sealPrefix m gen stage =
   "QLOG {h} v3 w{w} c{c} d{d} s{sw} m{mr} g{gen} j{stage}".
 sealLine m gen stage =
   prefix = sealPrefix m gen stage;
-  strcat "{prefix} x{hashStr prefix}" lf.
+  "{prefix} x{hashStr prefix}\n".
 lineLen : unsafe String -> Int -> Int -> Int .
 lineLen s i n = case i >= n of True -> n | False -> case charAt s i == 10 of True -> i + 1 | False -> lineLen s (i + 1) n.
 firstLine s = substr s 0 (lineLen s 0 (strlen s)).
-extraNum : unsafe String -> Int -> Int -> Int -> Int .
-extraNum s i n key = case i >= n of True -> 0 | False -> extraWord s n key (takeWord s i n).
-extraWord : unsafe String -> Int -> Int -> (String, Int) -> Int .
-extraWord s n key wp = case wp of (w, i) -> case charAt w 0 == key of True -> fieldNum w | False -> extraNum s i n key.
-sealParse s np = case sbMeta s of Err e -> Err e | Ok m -> sealParseM (firstLine s) np m.
-sealParseM s np m =
+sealTrailer : unsafe String -> Int -> Int -> Int -> Int -> (Int, Int) .
+sealTrailer s i n gen stage =
+  if i >= n then (gen, stage) else
+    end = Core.wordEnd s i n;
+    key = charAt s i;
+    if key == 103 then sealTrailer s (end + 1) n (Core.parseDigitsGo s (i + 1) end 0) stage
+    else if key == 106 then (gen, Core.parseDigitsGo s (i + 1) end 0)
+    else sealTrailer s (end + 1) n gen stage.
+sealParse s np = case sbMeta s of Err e -> Err e | Ok m -> sealParsePrefix s (lineLen s 0 (strlen s)) np m.
+sealParseM s np m = sealParsePrefix s (strlen s) np m.
+sealParsePrefix s n np m =
   Meta h v w c d sw mr = m;
-  gen = extraNum s 0 (strlen s) 103;
-  stage = extraNum s 0 (strlen s) 106;
+  (gen, stage) = sealTrailer s 0 n 0 0;
   case and2 (v == 3) (and2 (gen > 0) (and2 (gen <= 1000000000) (validMeta m np))) of
     False -> Err "invalid durable superblock bounds"
-  | True -> case strEq s (sealLine m gen stage) of True -> Ok (Seal m gen stage) | False -> Err "superblock checksum/encoding mismatch".
+  | True -> case sameHeaderBytes s n (sealLine m gen stage) of True -> Ok (Seal m gen stage) | False -> Err "superblock checksum/encoding mismatch".
 validMeta m np =
   Meta h v w c d sw mr = m;
   bounds = and2 (np >= 3) (and2 (h >= 1) (and2 (h <= d) (and2 (d >= 1) (d <= np - 1))));
@@ -278,8 +284,12 @@ newerSeal sa sb =
   Seal ma ga ja = sa;
   Seal mb gb jb = sb;
   case ga == gb of
-    True -> (case strEq (sealLine ma ga ja) (sealLine mb gb jb) of True -> Ok sa | False -> Err "conflicting superblock generations")
+    True -> (case ja == jb and sameSealFields ma mb of True -> Ok sa | False -> Err "conflicting superblock generations")
   | False -> case ga > gb of True -> Ok sa | False -> Ok sb.
+sameSealFields ma mb =
+  Meta ha va wa ca da sa ra = ma;
+  Meta hb vb wb cb db sb rb = mb;
+  ha == hb and wa == wb and ca == cb and da == db and sa == sb and ra == rb.
 sealMeta s = Seal m g j = s; m.
 legacyMeta dev = legacyParse (pageRead dev 0) (pageCount dev).
 legacyParse s np = case sbMeta s of Err e -> Err e | Ok m -> legacyCheck (firstLine s) np m.
@@ -290,7 +300,13 @@ legacyCheck s np m =
   flags = or2 (and2 (w == 0) (c == 1)) (or2 (and2 (w == 1) (c == 0)) (and2 (w == 2) (c == 0)));
   swap = case d == 0 of True -> sw == 0 | False -> and2 (sw >= d) (or2 (sw < np) (and2 (sw == d) (d == np)));
   case and2 canonical (and2 bounds (and2 flags (and2 swap (mr >= 0)))) of True -> Ok m | False -> Err "invalid legacy superblock".
-openMeta dev = case latestSeal dev of Ok s -> Ok (sealMeta s) | Err e -> legacyMeta dev.
+openMeta dev =
+  np = pageCount dev;
+  primary = pageRead dev 0;
+  if np < 3 then legacyParse primary np else
+    case chooseSeal (sealParse primary np) (sealParse (pageRead dev (np - 1)) np) of
+      Ok s -> Ok (sealMeta s)
+    | Err why -> legacyParse primary np.
 metaOr dev head = case openMeta dev of Ok m -> m | Err why -> stop why.
 nextGen g = case g >= 1000000000 of True -> stop "superblock generation exhausted" | False -> g + 1.
 generationRoom dev needed = case latestSeal dev of Err why -> False | Ok s -> generationRoomSeal s needed.
@@ -298,11 +314,14 @@ generationRoomSeal s needed = Seal m gen stage = s; gen <= 1000000000 - needed.
 sealWrite dev m gen stage = pageWrite dev (case imod gen 2 == 0 of True -> 0 | False -> pageCount dev - 1) (sealLine m gen stage).
 sealCommit dev m stage = case latestSeal dev of Err why -> stop why | Ok s -> sealCommitFrom dev m stage s.
 sealCommitFrom dev m stage s =
+  _ = publishNextSeal dev m stage s;
+  Unit.
+publishNextSeal dev m stage s =
   Seal old gen oldStage = s;
   g2 = nextGen gen;
   _ = sealWrite dev m g2 stage;
   _ = durableFlush dev;
-  Unit.
+  Seal m g2 stage.
 # Public metadata updates remain available to tools; durable images always
 # alternate slots and flush before returning. Normalize a changed SWAP bound.
 sbW dev m =
@@ -314,17 +333,49 @@ sbW dev m =
 # ---- format / open ----------------------------------------------------------
 # Unsupported flush retains the explicitly buffered v2/native format.
 # Nonzero invalid metadata is never silently reformatted.
-ensure dev = case pageFlush dev of True -> ensureDurable dev | False -> ensureBuffered dev.
-ensureBuffered dev = case latestSeal dev of Ok s -> stop "durable image requires a flush-capable block service" | Err e -> case legacyMeta dev of Ok m -> ensureCk dev m | Err e -> freshOnly dev False.
-ensureDurable dev = case latestSeal dev of Ok s -> ensureSeal dev s | Err e -> case legacyMeta dev of Ok m -> migrate dev m | Err e -> freshOnly dev True.
+ensure dev = ensureStorage dev (pageFlush dev).
+ensureBuffered dev = ensureStorage dev False.
+ensureDurable dev = ensureStorage dev True.
+ensureStorage dev durable =
+  np = pageCount dev;
+  if np <= 0 then stop "no disk" else
+    first = pageRead dev 0;
+    if np < 3 then
+      (case legacyParse first np of
+          Ok m -> openLegacyStorage dev durable m
+        | Err why -> if fullBlankPage first and blankDisk dev 1 np then formatFresh dev durable
+            else stop "invalid nonzero metadata; refusing to format")
+    else
+      last = pageRead dev (np - 1);
+      a = sealParse first np;
+      b = sealParse last np;
+      case chooseSeal a b of
+        Err why -> (case legacyParse first np of
+            Ok m -> openLegacyStorage dev durable m
+          | Err invalid -> if fullBlankPage first and fullBlankPage last and blankDisk dev 1 (np - 1)
+              then formatFresh dev durable else stop "invalid nonzero metadata; refusing to format")
+      | Ok s -> if durable then
+          Seal m g stage = s;
+          ensureSeal dev s (if imod g 2 == 0 then b else a)
+        else stop "durable image requires a flush-capable block service".
+openLegacyStorage dev durable m = if durable then migrate dev m else ensureCk dev m.
+ensureLegacyDurable dev legacy = case legacy of Ok m -> migrate dev m | Err why -> freshOnly dev True.
 allZero : unsafe String -> Int -> Int -> Bool .
 allZero s i n = case i >= n of True -> True | False -> case charAt s i == 0 of True -> allZero s (i + 1) n | False -> False.
 zeroPage s = allZero s 0 (strlen s).
+fullBlankPage s = strlen s == pgsz and zeroPage s.
 freshOnly dev durable =
   np = pageCount dev;
   case np <= 0 of True -> stop "no disk" | False -> case blankDisk dev 0 np of True -> formatFresh dev durable | False -> stop "invalid nonzero metadata; refusing to format".
 blankDisk : unsafe PageSource -> Int -> Int -> Bool .
-blankDisk dev p np = case p >= np of True -> True | False -> case zeroPage (pageRead dev p) of True -> blankDisk dev (p + 1) np | False -> False.
+blankDisk dev p np =
+  if p >= np then True else
+    pages = minI 8 (np - p);
+    size = pages * pgsz;
+    blank = Sys.arena (fn unused ->
+      bytes = if pages == 1 then pageRead dev p else rangePrefix dev p pages size;
+      strlen bytes == size and zeroPage bytes);
+    if blank then blankDisk dev (p + pages) np else False.
 formatFresh dev durable = case durable of True -> initDurable dev (Meta 1 3 0 1 (durableEnd (pageCount dev) 1) (durableEnd (pageCount dev) 1) 0) | False -> ensureFmt dev.
 durableEnd np h =
   d0 = fmtDataEnd np;
@@ -347,20 +398,23 @@ migrate dev m =
   case and2 (h <= np - 1) (and2 (d2 <= np - 1) (w != 2)) of
     True -> initDurable dev (Meta h 3 0 1 d2 sw2 mr)
   | False -> stop "legacy image cannot safely migrate to durable format".
-ensureSeal dev s =
+ensureSeal dev s alternate =
   Seal m g stage = s;
   Meta h v w c d sw mr = m;
-  case w == 2 of True -> recoverCompact dev m stage | False -> case c == 0 of True -> ensureCk dev m | False -> retirePrepared dev s.
-retirePrepared dev s =
+  if w == 2 then recoverCompact dev s
+  else if c == 0 then
+    _ = sealCommitFrom dev (Meta h v 0 1 d sw mr) 0 s;
+    h
+  else retirePrepared dev s alternate.
+retirePrepared dev s alternate =
   Seal m g stage = s;
   Meta h v w c d sw mr = m;
-  otherPage = case imod g 2 == 0 of True -> pageCount dev - 1 | False -> 0;
-  _ = case sealParse (pageRead dev otherPage) (pageCount dev) of Err why -> sealCommit dev m 0 | Ok other -> retireOther dev m other;
+  _ = case alternate of Err why -> sealCommitFrom dev m 0 s | Ok other -> retireOther dev s other;
   h.
-retireOther dev m other =
+retireOther dev current other =
   Seal om og oj = other;
   Meta h v w c d sw mr = om;
-  case w == 2 of True -> sealCommit dev m 0 | False -> Unit.
+  case w == 2 of True -> sealCommitFrom dev (sealMeta current) 0 current | False -> Unit.
 ensureCk dev m =
   Meta h v w c d sw mr = m;
   case c == 0 of True -> ensureFix dev (Meta h v 0 1 d sw mr) | False -> h.
@@ -386,7 +440,16 @@ appendRes dev head tag url s =
   pl = strlen s;
   np = ceilDiv pl pgsz;
   hdr = hdrLineH tag np pl url (hashStr s);
-  case appendAdmission hdr s of Err why -> Err why | Ok u -> wrGo dev head hdr s pl np (metaOr dev head).
+  if strlen hdr > pgsz then Err "record header exceeds one page"
+  else if strEq tag "QREC" or strEq tag "QDEL" then
+    if validKey url and (pl == 0 or strEq tag "QREC")
+    then writeAdmitted dev head hdr s pl np else Err "invalid record fields"
+  else case appendAdmission hdr s of
+    Err why -> Err why
+  | Ok u -> writeAdmitted dev head hdr s pl np.
+writeAdmitted dev head hdr s pl np = case latestSeal dev of
+      Ok seal -> wrGo dev head hdr s pl np (sealMeta seal) (Ok seal)
+    | Err why -> (case legacyMeta dev of Ok m -> wrGo dev head hdr s pl np m (Err why) | Err invalid -> stop invalid).
 # Refusal must precede the first mutation: every acknowledged append must
 # also satisfy the framing verifier on its next startup.
 appendAdmission hdr pay =
@@ -398,26 +461,79 @@ appendAdmitRecord hdr pay rec =
   case and2 (headerCanonical hdr rec) (recordShape rec) of
     False -> Err "invalid record fields"
   | True -> case strEq tag "QBLK" of True -> (case bulkWellFormed pay 0 (strlen pay) (parseNum u) of True -> Ok Unit | False -> Err "invalid bulk framing") | False -> Ok Unit.
-wrGo dev head hdr s pl np m =
+wrGo dev head hdr s pl np m checked =
   Meta h v w c d sw mr = m;
-  case head == h of False -> Err "stale log head" | True -> wrCurrent dev head hdr s pl np m.
-wrCurrent dev head hdr s pl np m =
-  Meta h v w c d sw mr = m;
-  case and2 (d > 0) (head + 1 + np > d) of
-    True -> Err "data partition full"
-  | False -> case appendGenerationRoom dev v of False -> Err "superblock generation exhausted" | True -> wrDo dev head hdr s pl np (Meta head v 1 0 d sw mr).
-appendGenerationRoom dev v = case v == 3 of True -> generationRoom dev 1 | False -> True.
-wrDo dev head hdr s pl np m =
-  Meta h v w c d sw mr = m;
-  # A v3 append never overwrites committed DATA. Publish its new head only
-  # after the complete header/payload has crossed the durability barrier.
-  _ = case v == 3 of True -> Unit | False -> sbW dev m;
+  end = head + 1 + np;
+  if head != h then Err "stale log head"
+  else if and2 (d > 0) (end > d) then Err "data partition full"
+  else case checked of
+    Ok seal -> (case generationRoomSeal seal 1 of
+        False -> Err "superblock generation exhausted"
+      | True ->
+          _ = writeRecordPages dev head hdr s pl;
+          _ = durableFlush dev;
+          _ = sealCommitFrom dev (Meta end v 0 1 d sw mr) 0 seal;
+          Ok end)
+  | Err why ->
+      _ = sbW dev (Meta head v 1 0 d sw mr);
+      _ = writeRecordPages dev head hdr s pl;
+      _ = sbW dev (Meta end v 0 1 d sw mr);
+      Ok end.
+writeRecordPages dev head hdr s pl =
+  if pl == 0 then pageWrite dev head hdr else
+    if pl <= 7 * pgsz then writeRun dev head hdr s else
+      writeLargeRecord dev head hdr s pl.
+writeLargeRecord dev head hdr s pl =
+    take = 7 * pgsz;
+    first = substr s 0 take;
+    _ = writeRun dev head hdr first;
+    writeRemaining dev (head + 8) s take pl.
+# The first string occupies one page; the worker splits the rest over up to seven.
+writeRun dev page first rest = case dev of
+    Routed service -> writeReply (B.call (myself 0) service (B.WriteRecord page first rest))
+  | Bounded service until -> writeReply (B.callUntil until (myself 0) service (B.WriteRecord page first rest))
+  | Direct disk -> _ = blkWriteRecord disk page first rest; Unit.
+writeRemaining : unsafe PageSource -> Int -> String -> Int -> Int -> Unit .
+writeRemaining dev page bytes offset size =
+  if offset >= size then Unit else
+    take = minI (size - offset) (8 * pgsz);
+    firstSize = minI take pgsz;
+    first = substr bytes offset firstSize;
+    _ = if take == firstSize then pageWrite dev page first
+        else writeRun dev page first (substr bytes (offset + firstSize) (take - firstSize));
+    writeRemaining dev (page + 8) bytes (offset + take) size.
+writeRecordSeparate dev head hdr s pl =
   _ = pageWrite dev head hdr;
-  _ = writePages dev (head + 1) s 0 pl;
-  h2 = head + 1 + np;
-  _ = case v == 3 of True -> durableFlush dev | False -> Unit;
-  _ = sbW dev (Meta h2 v 0 1 d sw mr);
-  Ok h2.
+  writePages dev (head + 1) s 0 pl.
+# Two queued ordinary appends retain separate on-disk records and share
+# one publication. Admission failure leaves both available for individual retry.
+appendPairSealed dev head firstKey firstPay secondKey secondPay seal =
+  Meta h v w c d sw mr = sealMeta seal;
+  firstSize = strlen firstPay;
+  secondSize = strlen secondPay;
+  firstPages = ceilDiv firstSize pgsz;
+  secondPages = ceilDiv secondSize pgsz;
+  second = head + 1 + firstPages;
+  end = second + 1 + secondPages;
+  if v != 3 or h != head then Err "requires current durable head"
+  else if end > d then Err "data partition full"
+  else if validKey firstKey and validKey secondKey and generationRoomSeal seal 1 then
+    firstHeader = hdrLineH "QREC" firstPages firstSize firstKey (hashStr firstPay);
+    secondHeader = hdrLineH "QREC" secondPages secondSize secondKey (hashStr secondPay);
+    if strlen firstHeader > pgsz or strlen secondHeader > pgsz then Err "record header exceeds one page"
+    else
+      _ = writePairPages dev head firstHeader firstPay firstPages secondHeader secondPay secondPages;
+      _ = durableFlush dev;
+      _ = sealCommitFrom dev (Meta end v 0 1 d sw mr) 0 seal;
+      Ok (second, end)
+  else Err "pair admission refused".
+# Only interior page boundaries require explicit padding. The driver pads the final page.
+writePairPages dev head hdr first np nextHdr second nq =
+  if np + nq + 2 > 8 then
+    _ = writeRecordPages dev head hdr first (strlen first);
+    writeRecordPages dev (head + np + 1) nextHdr second (strlen second)
+  else
+    writeRun dev head hdr (blkPackPair first nextHdr second).
 # Publish an ordinary tombstone and record under one durable head change.
 # Existing replay, verification and compaction already interpret this pair.
 replaceRes dev head url pay = case latestSeal dev of
@@ -430,19 +546,21 @@ replaceSealed dev head url pay seal =
   pl = strlen pay;
   np = ceilDiv pl pgsz;
   end = head + 2 + np;
-  del = hdrLineH "QDEL" 0 0 url (hashStr "");
-  rec = hdrLineH "QREC" np pl url (hashStr pay);
   if h != head then Err "stale log head"
   else if end > d then Err "data partition full"
-  else case appendAdmission del "" of Err why -> Err why | Ok u ->
-    (case appendAdmission rec pay of Err why -> Err why | Ok ok ->
-      (case generationRoomSeal seal 1 of False -> Err "superblock generation exhausted" | True ->
-        _ = pageWrite dev head del;
-        _ = pageWrite dev (head + 1) rec;
-        _ = writePages dev (head + 2) pay 0 pl;
+  else
+    del = hdrLineH "QDEL" 0 0 url (hashStr "");
+    if strlen del > pgsz then Err "record header exceeds one page"
+    else if validKey url then
+      rec = hdrLineH "QREC" np pl url (hashStr pay);
+      if strlen rec > pgsz then Err "record header exceeds one page"
+      else if generationRoomSeal seal 1 then
+        _ = writePairPages dev head del "" 0 rec pay np;
         _ = durableFlush dev;
         _ = sealCommitFrom dev (Meta end v 0 1 d sw mr) 0 seal;
-        Ok end)).
+        Ok end
+      else Err "superblock generation exhausted"
+    else Err "invalid record fields".
 # v1 surface: on a full data partition the head simply does not move
 appendRec dev head tag url s =
   case appendRes dev head tag url s of Ok h2 -> h2 | Err _ -> head.
@@ -453,8 +571,11 @@ writePages dev p s i pl =
   | False -> writeOne dev p s i pl.
 writeOne : unsafe PageSource -> Int -> String -> Int -> Int -> Unit .
 writeOne dev p s i pl =
-  _ = pageWrite dev p (substr s i (minI pgsz (pl - i)));
-  writePages dev (p + 1) s (i + pgsz) pl.
+  take = minI pgsz (pl - i);
+  if i == 0 and take == strlen s and take == pl then pageWrite dev p s
+  else
+    _ = pageWrite dev p (substr s i take);
+    writePages dev (p + 1) s (i + pgsz) pl.
 
 # ---- BULK records -----------------------------------------------------------
 # many small chunks, ONE record: the packed payload is "<len> <url>\n"
@@ -463,83 +584,112 @@ bulkPack prs = packParts prs Nil 0.
 bpGo prs acc cnt = packParts prs (acc :: Nil) cnt.
 bpOne r acc cnt e = bpGo (e :: r) acc cnt.
 packParts : unsafe List (String, String) -> List String -> Int -> (String, Int) .
-packParts prs parts cnt = case prs of
+packParts prs parts cnt = packPartsWithKeys False prs parts cnt.
+packPartsWithKeys : unsafe Bool -> List (String, String) -> List String -> Int -> (String, Int) .
+packPartsWithKeys checkKeys prs parts cnt = case prs of
     Nil -> (strJoin "" (Core.revS parts Nil), cnt)
   | (url, pay) :: rest ->
-      header = "{strlen pay} {url}";
-      packParts rest (pay :: lf :: header :: parts) (cnt + 1).
+    if checkKeys and (not (validKey url)) then ("", 0 - 1) else
+      size = strlen pay;
+      header = "{size} {url}\n";
+      fields = header :: parts;
+      packPartsWithKeys checkKeys rest (if size == 0 then fields else pay :: fields) (cnt + 1).
 
-appendBulkRes dev head prs = abGo dev head (bulkPack prs).
+appendBulkRes dev head prs =
+  (pay, cnt) = packPartsWithKeys True prs Nil 0;
+  if cnt < 0 then Err "invalid bulk framing"
+  else writeCountedPack dev head pay (strlen pay) cnt.
 abGo dev head pc = case pc of (pay, cnt) -> appendPackedRes dev head pay cnt.
 appendBulk dev head prs =
   case appendBulkRes dev head prs of Ok h2 -> h2 | Err _ -> head.
 appendPackedRes dev head pay cnt =
-  appendRes dev head "QBLK" "{cnt}" pay.
+  pl = strlen pay;
+  actual = packedCount pay 0 pl 0;
+  if actual < 0 or actual != cnt then Err "invalid bulk framing"
+  else writeCountedPack dev head pay pl actual.
+writeCountedPack dev head pay pl count =
+  np = ceilDiv pl pgsz;
+  hdr = hdrLineH "QBLK" np pl "{count}" (hashStr pay);
+  writeAdmitted dev head hdr pay pl np.
 
 # walkers over a packed payload
+matchPackedKey pay start n url =
+  end = Core.wordEnd pay start n;
+  size = end - start;
+  matches = if size == strlen url then matchBytesAt pay start url 0 size else False;
+  (matches, if end < n then end + 1 else end).
+matchBytesAt : unsafe String -> Int -> String -> Int -> Int -> Bool .
+matchBytesAt pay start url i size =
+  if i >= size then True else if charAt pay (start + i) != charAt url i then False
+  else matchBytesAt pay start url (i + 1) size.
+
 bulkLast : unsafe String -> String -> Result String String -> Result String String .
-bulkLast pay url best = blGo pay url 0 (strlen pay) best.
-blGo : unsafe String -> String -> Int -> Int -> Result String String -> Result String String .
-blGo pay url i n best = case i >= n of True -> best | False -> blE pay url n best (takeWord pay i n).
-blE : unsafe String -> String -> Int -> Result String String -> (String, Int) -> Result String String .
-blE pay url n best wp = case wp of (lw, i2) -> blE2 pay url n best (parseNum lw) (takeWord pay i2 n).
-blE2 : unsafe String -> String -> Int -> Result String String -> Int -> (String, Int) -> Result String String .
-blE2 pay url n best len wp = case wp of (uw, i3) -> blE3 pay url n best len uw i3.
-blE3 : unsafe String -> String -> Int -> Result String String -> Int -> String -> Int -> Result String String .
-blE3 pay url n best len uw i3 =
-  case strEq uw url of
-    True -> blGo pay url (i3 + len) n (Ok (substr pay i3 len))
-  | False -> blGo pay url (i3 + len) n best.
+bulkLast pay url best = lastPackedSlice pay url 0 (strlen pay) (0 - 1) 0 best.
+lastPackedSlice : unsafe String -> String -> Int -> Int -> Int -> Int -> Result String String -> Result String String .
+lastPackedSlice pay url i n off size best =
+  if i >= n then (if off < 0 then best else Ok (substr pay off size))
+  else
+    (len, next) = numericWord pay i n;
+    (matches, start) = matchPackedKey pay next n url;
+    if matches then lastPackedSlice pay url (start + len) n start len best
+    else lastPackedSlice pay url (start + len) n off size best.
 
 bulkCat : unsafe String -> String -> String -> String .
-bulkCat pay url acc = bcGo pay url 0 (strlen pay) acc.
-bcGo : unsafe String -> String -> Int -> Int -> String -> String .
-bcGo pay url i n acc = case i >= n of True -> acc | False -> bcE pay url n acc (takeWord pay i n).
-bcE : unsafe String -> String -> Int -> String -> (String, Int) -> String .
-bcE pay url n acc wp = case wp of (lw, i2) -> bcE2 pay url n acc (parseNum lw) (takeWord pay i2 n).
-bcE2 : unsafe String -> String -> Int -> String -> Int -> (String, Int) -> String .
-bcE2 pay url n acc len wp = case wp of (uw, i3) -> bcE3 pay url n acc len uw i3.
-bcE3 : unsafe String -> String -> Int -> String -> Int -> String -> Int -> String .
-bcE3 pay url n acc len uw i3 =
-  case strEq uw url of
-    True -> bcGo pay url (i3 + len) n (strcat acc (substr pay i3 len))
-  | False -> bcGo pay url (i3 + len) n acc.
+bulkCat pay url acc = packedParts pay url 0 (strlen pay) Nil acc.
+packedParts : unsafe String -> String -> Int -> Int -> List String -> String -> String .
+packedParts pay url i n parts acc =
+  gathered = collectPackedParts pay url i n parts;
+  case gathered of
+    Nil -> acc
+  | one :: Nil -> if strlen acc == 0 then one else strJoin "" (acc :: one :: Nil)
+  | _ -> strJoin "" (acc :: Core.revS gathered Nil).
+collectPackedParts : unsafe String -> String -> Int -> Int -> List String -> List String .
+collectPackedParts pay url i n parts =
+  if i >= n then parts
+  else
+    (len, next) = numericWord pay i n;
+    (matches, start) = matchPackedKey pay next n url;
+    if len > 0 and matches then collectPackedParts pay url (start + len) n (substr pay start len :: parts)
+    else collectPackedParts pay url (start + len) n parts.
 
 bulkCnt : unsafe String -> String -> Int .
 bulkCnt pay url = bnGo pay url 0 (strlen pay) 0.
 bnGo : unsafe String -> String -> Int -> Int -> Int -> Int .
-bnGo pay url i n c = case i >= n of True -> c | False -> bnE pay url n c (takeWord pay i n).
-bnE : unsafe String -> String -> Int -> Int -> (String, Int) -> Int .
-bnE pay url n c wp = case wp of (lw, i2) -> bnE2 pay url n c (parseNum lw) (takeWord pay i2 n).
-bnE2 : unsafe String -> String -> Int -> Int -> Int -> (String, Int) -> Int .
-bnE2 pay url n c len wp = case wp of (uw, i3) -> bnE3 pay url n c len uw i3.
-bnE3 : unsafe String -> String -> Int -> Int -> Int -> String -> Int -> Int .
-bnE3 pay url n c len uw i3 =
-  case strEq uw url of
-    True -> bnGo pay url (i3 + len) n (c + 1)
-  | False -> bnGo pay url (i3 + len) n c.
+bnGo pay url i n c =
+  if i >= n then c else
+    (len, next) = numericWord pay i n;
+    (matches, start) = matchPackedKey pay next n url;
+    bnGo pay url (start + len) n (if matches then c + 1 else c).
 
 bulkCntAll : unsafe String -> Int .
 bulkCntAll pay = baGo pay 0 (strlen pay) 0.
 baGo : unsafe String -> Int -> Int -> Int -> Int .
-baGo pay i n c = case i >= n of True -> c | False -> baE pay n c (takeWord pay i n).
-baE : unsafe String -> Int -> Int -> (String, Int) -> Int .
-baE pay n c wp = case wp of (lw, i2) -> baE2 pay n c (parseNum lw) (takeWord pay i2 n).
-baE2 : unsafe String -> Int -> Int -> Int -> (String, Int) -> Int .
-baE2 pay n c len wp = case wp of (uw, i3) -> baGo pay (i3 + len) n (c + 1).
+baGo pay i n c =
+  if i >= n then c else
+    (len, next) = numericWord pay i n;
+    end = Core.wordEnd pay next n;
+    start = if end < n then end + 1 else end;
+    baGo pay (start + len) n (c + 1).
 
 bulkUrls : unsafe String -> List String .
-bulkUrls pay = buGo pay 0 (strlen pay) Nil.
-buGo : unsafe String -> Int -> Int -> List String -> List String .
-buGo pay i n acc = case i >= n of True -> acc | False -> buE pay n acc (takeWord pay i n).
-buE : unsafe String -> Int -> List String -> (String, Int) -> List String .
-buE pay n acc wp = case wp of (lw, i2) -> buE2 pay n acc (parseNum lw) (takeWord pay i2 n).
-buE2 : unsafe String -> Int -> List String -> Int -> (String, Int) -> List String .
-buE2 pay n acc len wp = case wp of (uw, i3) -> buGo pay (i3 + len) n (append acc (uw :: Nil)).
+bulkUrls pay = Core.revS (packedKeysRev pay 0 (strlen pay) Nil) Nil.
+packedKeysRev : unsafe String -> Int -> Int -> List String -> List String .
+packedKeysRev pay i n keys =
+  if i >= n then keys else
+    (len, j) = numericWord pay i n;
+    (key, start) = takeWord pay j n;
+    packedKeysRev pay (start + len) n (key :: keys).
 
 # ---- reads -------------------------------------------------------------------
 # payload of the record whose header is at page p (paylen pl)
-readPayload dev p pl = Sys.arena (fn u -> strJoin "" (Core.revS (rpParts dev (p + 1) pl Nil) Nil)).
+readPayload dev p pl =
+  if pl <= 0 then "" else
+    Sys.arena (fn u -> if pl <= pgsz then pagePrefix dev (p + 1) pl
+      else if pl <= 8 * pgsz then rangePrefix dev (p + 1) (ceilDiv pl pgsz) pl
+      else strJoin "" (Core.revS (rpParts dev (p + 1) pl Nil) Nil)).
+pagePrefix dev p take =
+  bytes = pageRead dev p;
+  if strlen bytes == take then bytes else substr bytes 0 take.
 # Gather once and join once: no successively larger prefixes. Only the
 # resulting String escapes; routed page replies die with the scratch arena.
 rpParts : unsafe PageSource -> Int -> Int -> List String -> List String .
@@ -547,8 +697,23 @@ rpParts dev p left acc =
   case left <= 0 of
     True -> acc
   | False ->
-      take = minI pgsz left;
-      rpParts dev (p + 1) (left - take) (substr (pageRead dev p) 0 take :: acc).
+      pages = minI 8 (ceilDiv left pgsz);
+      if pages == 1 then rpSingle dev p left acc else
+        take = minI left (pages * pgsz);
+        bytes = rangePrefix dev p pages take;
+        rpParts dev (p + pages) (left - take) (bytes :: acc).
+rpSingle dev p left acc =
+  take = minI pgsz left;
+  rpParts dev (p + 1) (left - take) (pagePrefix dev p take :: acc).
+rangePrefix dev p pages take =
+  reply = case dev of
+      Routed service -> B.call (myself 0) service (B.ReadRange p pages)
+    | Bounded service until -> B.callUntil until (myself 0) service (B.ReadRange p pages)
+    | Direct device -> B.readRange device p pages;
+  bytes = readReply reply;
+  received = pages * pgsz;
+  if strlen bytes != received then stop "block: short range reply" else
+    if take == received then bytes else substr bytes 0 take.
 rpGo : unsafe PageSource -> Int -> Int -> String -> String .
 rpGo dev p left acc =
   case left <= 0 of
@@ -561,65 +726,48 @@ rpOne dev p left acc =
 
 # readLatest: STREAM the log, keep the last live record for url.
 #   -> Ok content | Err "no such file"
-readLatest dev head url = rlGo dev head url 1 (Err "no such file").
-rlGo : unsafe PageSource -> Int -> String -> Int -> Result String String -> Result String String .
-rlGo dev head url p best =
-  case p >= head of
-    True -> best
-  | False -> rlStep dev head url p best (parseHdrH (pageRead dev p)).
-rlStep : unsafe PageSource -> Int -> String -> Int -> Result String String -> Result RecH String -> Result String String .
-rlStep dev head url p best h =
-  case h of
-    Err _ -> best
-  | Ok rec -> rlHit dev head url p best rec.
-rlHit : unsafe PageSource -> Int -> String -> Int -> Result String String -> RecH -> Result String String .
-rlHit dev head url p best rec =
-  RecH tag np pl u hh = rec;
-  case strEq tag "QBLK" of
-    True -> rlGo dev head url (p + 1 + np) (bulkLast (readPayload dev p pl) url best)
-  | False -> rlHit2 dev head url p best rec.
-rlHit2 : unsafe PageSource -> Int -> String -> Int -> Result String String -> RecH -> Result String String .
-rlHit2 dev head url p best rec =
-  RecH tag np pl u hh = rec;
-  case strEq u url of
-    True -> rlTake dev head url p pl (strEq tag "QDEL") np
-  | False -> rlGo dev head url (p + 1 + np) best.
-rlTake : unsafe PageSource -> Int -> String -> Int -> Int -> Bool -> Int -> Result String String .
-rlTake dev head url p pl dead np =
-  case dead of
-    True -> rlGo dev head url (p + 1 + np) (Err "no such file")
-  | False -> rlGo dev head url (p + 1 + np) (Ok (readPayload dev p pl)).
+LatestCandidate = Type (LatestMissing | LatestPage Int Int | LatestBytes String).
+readLatest dev head url = latestScan dev head url 1 LatestMissing.
+latestResult dev best = case best of
+    LatestMissing -> Err "no such file"
+  | LatestPage p pl -> Ok (readPayload dev p pl)
+  | LatestBytes bytes -> Ok bytes.
+latestScan : unsafe PageSource -> Int -> String -> Int -> LatestCandidate -> Result String String .
+latestScan dev head url p best =
+  if p >= head then latestResult dev best else case parseHdrH (pageRead dev p) of
+    Err _ -> latestResult dev best
+  | Ok (RecH tag np pl key hh) ->
+      next = p + 1 + np;
+      if strEq tag "QBLK" then
+        hit = bulkLast (readPayload dev p pl) url (Err "no such file");
+        latestScan dev head url next (case hit of Ok bytes -> LatestBytes bytes | Err _ -> best)
+      else if strEq key url then
+        latestScan dev head url next (if strEq tag "QDEL" then LatestMissing else LatestPage p pl)
+      else latestScan dev head url next best.
 
 # replayAll: concatenate EVERY live record for url, log order (the
 # event-source read; a QDEL resets the stream -- "forget my history").
-replayAll dev head url = raGo dev head url 1 "".
-raGo : unsafe PageSource -> Int -> String -> Int -> String -> String .
-raGo dev head url p acc =
-  case p >= head of
-    True -> acc
-  | False -> raStep dev head url p acc (parseHdrH (pageRead dev p)).
-raStep : unsafe PageSource -> Int -> String -> Int -> String -> Result RecH String -> String .
-raStep dev head url p acc h =
-  case h of
-    Err _ -> acc
-  | Ok rec -> raHit dev head url p acc rec.
-raHit : unsafe PageSource -> Int -> String -> Int -> String -> RecH -> String .
-raHit dev head url p acc rec =
-  RecH tag np pl u hh = rec;
-  case strEq tag "QBLK" of
-    True -> raGo dev head url (p + 1 + np) (bulkCat (readPayload dev p pl) url acc)
-  | False -> raHit2 dev head url p acc rec.
-raHit2 : unsafe PageSource -> Int -> String -> Int -> String -> RecH -> String .
-raHit2 dev head url p acc rec =
-  RecH tag np pl u hh = rec;
-  case strEq u url of
-    True -> raTake dev head url (p + 1 + np) acc (strEq tag "QDEL") (readPayload dev p pl)
-  | False -> raGo dev head url (p + 1 + np) acc.
-raTake : unsafe PageSource -> Int -> String -> Int -> String -> Bool -> String -> String .
-raTake dev head url pnext acc dead pay =
-  case dead of
-    True -> raGo dev head url pnext ""
-  | False -> raGo dev head url pnext (strcat acc pay).
+replayAll dev head url = replayParts dev head url 1 Nil.
+replayParts : unsafe PageSource -> Int -> String -> Int -> List String -> String .
+replayParts dev head url p parts =
+  if p >= head then joinReplayParts parts
+  else case parseHdrH (pageRead dev p) of
+    Err _ -> joinReplayParts parts
+  | Ok (RecH tag np pl key hh) ->
+      next = p + 1 + np;
+      if strEq tag "QBLK" then
+        pay = readPayload dev p pl;
+        replayParts dev head url next (collectPackedParts pay url 0 (strlen pay) parts)
+      else if strEq key url then
+        if strEq tag "QDEL" then replayParts dev head url next Nil
+        else if pl > 0 then replayParts dev head url next (readPayload dev p pl :: parts)
+        else replayParts dev head url next parts
+      else replayParts dev head url next parts.
+
+joinReplayParts parts = case parts of
+    Nil -> ""
+  | one :: Nil -> one
+  | _ -> strJoin "" (Core.revS parts Nil).
 
 # count live records for url (replay length without the bytes)
 countRecs dev head url = crGo dev head url 1 0.
@@ -655,84 +803,104 @@ crTake dev head url p n dead np =
 # Every committed page must belong to a well-formed bounded record. A bad
 # header before head is corruption, never a verified prefix. Legacy records
 # without stored hashes remain readable; their framing is still checked.
-verifyLog dev head = case and2 (head >= 1) (head <= pageCount dev) of True -> vGo dev head 1 0 | False -> Err "invalid committed head".
-vGo : unsafe PageSource -> Int -> Int -> Int -> Result String String .
-vGo dev head p cnt =
-  case p == head of
-    True -> Ok "verified {cnt} records"
-  | False -> case p > head of True -> Err "record crosses committed head" | False -> vPage dev head p cnt (firstLine (pageRead dev p)).
-vPage dev head p cnt line = vStep dev head p cnt line (parseHdrH line).
-vStep : unsafe PageSource -> Int -> Int -> Int -> String -> Result RecH String -> Result String String .
-vStep dev head p cnt line h =
-  case h of
-    Err why -> Err "invalid record header at page {p}"
-  | Ok rec -> case headerCanonical line rec of False -> Err "invalid record encoding at page {p}" | True -> vBounds dev head p cnt rec.
-headerCanonical line rec =
+verifyLog dev head = case verifiedScan False dev head of
+    Err why -> Err why
+  | Ok (cnt, entries) -> Ok "verified {cnt} records".
+verifiedScan build dev head = if head >= 1 and head <= pageCount dev then vGo build dev head 1 0 Nil else Err "invalid committed head".
+vGo : unsafe Bool -> PageSource -> Int -> Int -> Int -> List Ent -> Result (Int, List Ent) String .
+vGo build dev head p cnt entries =
+  if p == head then Ok (cnt, entries) else if p > head then Err "record crosses committed head" else
+    page = pageRead dev p;
+    n = lineLen page 0 (strlen page);
+    case parseHeaderPrefix page n of
+      Err why -> Err "invalid record header at page {p}"
+    | Ok rec -> if headerPrefixCanonical page n rec then vBounds build dev head p cnt entries rec else Err "invalid record encoding at page {p}".
+headerCanonical line rec = headerPrefixCanonical line (strlen line) rec.
+headerPrefixCanonical line n rec =
   RecH tag np pl u hh = rec;
-  encoded = or2 (strEq line (hdrLineH tag np pl u hh)) (and2 (hh == 0) (strEq line (hdrLine tag np pl u)));
+  encoded = if sameHeaderBytes line n (hdrLineH tag np pl u hh) then True
+    else if hh == 0 then sameHeaderBytes line n (hdrLine tag np pl u) else False;
   and2 encoded (validKey u).
+sameHeaderBytes line n expected = if strlen expected != n then False else matchBytesAt line 0 expected 0 n.
 validKey u = case strlen u > 0 of False -> False | True -> keyChars u 0 (strlen u).
 keyChars : unsafe String -> Int -> Int -> Bool .
-keyChars u i n = case i >= n of True -> True | False -> case and2 (charAt u i > 32) (charAt u i != 127) of False -> False | True -> keyChars u (i + 1) n.
-vBounds dev head p cnt rec =
+keyChars u i n =
+  if i >= n then True else
+    ch = charAt u i;
+    if ch <= 32 or ch == 127 then False else keyChars u (i + 1) n.
+vBounds build dev head p cnt entries rec =
   RecH tag np pl u hh = rec;
   bounds = and2 (np >= 0) (and2 (np <= head - p - 1) (and2 (pl >= 0) (pl <= np * pgsz)));
-  case bounds of False -> Err "invalid record bounds at page {p}" | True -> vShape dev head p cnt rec.
-vShape dev head p cnt rec =
-  case recordShape rec of False -> Err "invalid record shape at page {p}" | True -> vHit dev head p cnt rec.
+  if bounds then
+    if recordShape rec then vHit build dev head p cnt entries rec else Err "invalid record shape at page {p}"
+  else Err "invalid record bounds at page {p}".
 recordShape rec =
   RecH tag np pl u hh = rec;
   pages = np == ceilDiv pl pgsz;
   tombstone = case strEq tag "QDEL" of True -> and2 (np == 0) (pl == 0) | False -> True;
   bulk = case strEq tag "QBLK" of True -> strEq u "{parseNum u}" | False -> True;
   and2 pages (and2 tombstone bulk).
-vHit : unsafe PageSource -> Int -> Int -> Int -> RecH -> Result String String .
-vHit dev head p cnt rec =
-  RecH tag np pl u hh = rec;
-  case strEq tag "QBLK" of
-    True -> vPayload dev head p cnt rec (readPayload dev p pl)
-  | False -> vRecord dev head p cnt np pl hh.
-# QREC blobs include large .qa images. Hash one page at a time, carrying the
-# polynomial state, rather than concatenating the entire payload at startup.
-# Keep legacy absent-hash semantics and the packed QBLK framing check above.
-vRecord dev head p cnt np pl hh =
-  ok = case hh == 0 of True -> True | False -> hh == hashPayload dev (p + 1) pl 7;
-  case ok of True -> vGo dev head (p + 1 + np) (cnt + 1) | False -> Err "hash mismatch at page {p}".
+vHit build dev head p cnt entries rec =
+  RecH tag np pl key hh = rec;
+  next = p + 1 + np;
+  if strEq tag "QBLK" then
+    pay = readPayload dev p pl;
+    if hh != 0 and hh != hashStr pay then Err "hash mismatch at page {p}"
+    else if bulkWellFormed pay 0 (strlen pay) (parseNum key) then
+      updated = if build then packedEntriesRev pay p pl 0 (strlen pay) entries else entries;
+      vGo build dev head next (cnt + 1) updated
+    else Err "invalid bulk framing at page {p}"
+  else if build and hh != 0 and np == 1 then
+    pay = Sys.arena (fn u ->
+      bytes = pageRead dev (p + 1);
+      if strlen bytes != pgsz then stop "short payload page during verification"
+      else if pl == pgsz then bytes else substr bytes 0 pl);
+    if hh != hashStr pay then Err "hash mismatch at page {p}"
+    else vGo build dev head next (cnt + 1) (Ent key p pl 0 pl (Cached pay) :: entries)
+  else if hh != 0 and hh != hashPayload dev (p + 1) pl 7 then Err "hash mismatch at page {p}"
+  else
+    updated = if build then (if strEq tag "QDEL" then dropUrlE entries key else Ent key p pl 0 pl Uncached :: entries) else entries;
+    vGo build dev head next (cnt + 1) updated.
 hashPayload : unsafe PageSource -> Int -> Int -> Int -> Int .
 hashPayload dev p left acc =
   case left <= 0 of
     True -> hFix acc
   | False ->
-      # Only the polynomial state leaves this page's scratch pool. A large
-      # archive must not retain every routed reply until verification ends.
-      next = Sys.arena (fn u -> hashPayloadPage dev p left acc (pageRead dev p));
-      hashPayload dev (p + 1) (left - minI pgsz left) next.
-hashPayloadPage : unsafe PageSource -> Int -> Int -> Int -> String -> Int .
-hashPayloadPage dev p left acc bytes =
-  take = minI pgsz left;
-  case strlen bytes == pgsz of
-    False -> stop "short payload page during verification"
-  | True -> hGo bytes 0 take acc.
-vPayload dev head p cnt rec pay =
-  RecH tag np pl u hh = rec;
-  hashed = case hh == 0 of True -> True | False -> hh == hashStr pay;
-  case hashed of False -> Err "hash mismatch at page {p}" | True -> vBulk dev head p cnt rec pay.
-vBulk dev head p cnt rec pay =
-  RecH tag np pl u hh = rec;
-  ok = case strEq tag "QBLK" of True -> bulkWellFormed pay 0 (strlen pay) (parseNum u) | False -> True;
-  case ok of
-    True -> vGo dev head (p + 1 + np) (cnt + 1)
-  | False -> Err "invalid bulk framing at page {p}".
+      pages = minI 8 (ceilDiv left pgsz);
+      capacity = pages * pgsz;
+      take = minI capacity left;
+      next = Sys.arena (fn u ->
+        bytes = if pages == 1 then pageRead dev p else rangePrefix dev p pages capacity;
+        if strlen bytes != capacity then stop "short payload page during verification"
+        else hGo bytes 0 take acc);
+      hashPayload dev (p + pages) (left - take) next.
 bulkWellFormed : unsafe String -> Int -> Int -> Int -> Bool .
-bulkWellFormed pay i n remaining =
-  case i == n of True -> remaining == 0 | False -> case and2 (i < n) (remaining > 0) of False -> False | True -> bulkFrame pay i n remaining (takeWord pay i n).
-bulkFrame : unsafe String -> Int -> Int -> Int -> (String, Int) -> Bool .
-bulkFrame pay i n remaining wp = case wp of (lw, j) -> bulkFrameUrl pay i n remaining (parseNum lw) (takeWord pay j n).
-bulkFrameUrl : unsafe String -> Int -> Int -> Int -> Int -> (String, Int) -> Bool .
-bulkFrameUrl pay i n remaining len wp = case wp of (u, j) ->
-  bounds = and2 (len >= 0) (and2 (j > i) (and2 (j <= n) (len <= n - j)));
-  canonical = strEq (substr pay i (j - i)) (strcat "{len} {u}" lf);
-  case and2 bounds (and2 canonical (validKey u)) of False -> False | True -> bulkWellFormed pay (j + len) n (remaining - 1).
+bulkWellFormed pay i n remaining = remaining >= 0 and packedCount pay i n 0 == remaining.
+packedCount : unsafe String -> Int -> Int -> Int -> Int .
+packedCount pay i n count =
+  if i == n then count else if i < 0 or i > n then (0 - 1)
+  else packedLength pay i i n count 0.
+packedLength : unsafe String -> Int -> Int -> Int -> Int -> Int -> Int .
+packedLength pay start i n count len =
+  if i >= n then (0 - 1) else
+    ch = charAt pay i;
+    if ch == 32 then
+      if i == start then (0 - 1) else packedKey pay (i + 1) (i + 1) n count len
+    else if ch < 48 or ch > 57 then (0 - 1)
+    else if i > start and len == 0 then (0 - 1)
+    else
+      digit = ch - 48;
+      if digit > n or len > (n - digit) / 10 then (0 - 1)
+      else packedLength pay start (i + 1) n count (len * 10 + digit).
+packedKey : unsafe String -> Int -> Int -> Int -> Int -> Int -> Int .
+packedKey pay start i n count len =
+  if i >= n then (0 - 1) else
+    ch = charAt pay i;
+    if ch == 10 then
+      if i == start or len > n - i - 1 then (0 - 1)
+      else packedCount pay (i + 1 + len) n (count + 1)
+    else if ch <= 32 or ch == 127 then (0 - 1)
+    else packedKey pay start (i + 1) n count len.
 verifyDurable dev head =
   Meta h v w c d sw mr = metaOr dev head;
   case v == 3 of True -> (case verifyLog dev head of Ok s -> Unit | Err why -> stop why) | False -> Unit.
@@ -768,21 +936,15 @@ swapRead dev p = pageRead dev p.
 # buffered w2/c0 marker alone does not provide crash-atomic compaction.
 RI = Type (RI page np del urls).
 
-scanRIs dev head = riGo dev head 1 Nil.
-riGo : unsafe PageSource -> Int -> Int -> List RI -> List RI .
-riGo dev head p acc =
-  case p >= head of
-    True -> acc
-  | False -> riStep dev head p acc (parseHdrH (pageRead dev p)).
-riStep : unsafe PageSource -> Int -> Int -> List RI -> Result RecH String -> List RI .
-riStep dev head p acc h =
-  case h of
-    Err _ -> acc
-  | Ok rec -> riHit dev head p acc rec.
-riHit : unsafe PageSource -> Int -> Int -> List RI -> RecH -> List RI .
-riHit dev head p acc rec =
-  RecH tag np pl u hh = rec;
-  riGo dev head (p + 1 + np) (append acc ((RI p np (strEq tag "QDEL") (riUrls dev tag p pl u)) :: Nil)).
+scanRIs dev head = reverseRecords (scanRecordsRev dev head 1 Nil) Nil.
+scanRecordsRev : unsafe PageSource -> Int -> Int -> List RI -> List RI .
+scanRecordsRev dev head p records =
+  if p >= head then records else case parseHdrH (pageRead dev p) of
+      Err _ -> records
+    | Ok rec ->
+        RecH tag np pl key hh = rec;
+        record = RI p np (strEq tag "QDEL") (riUrls dev tag p pl key);
+        scanRecordsRev dev head (p + 1 + np) (record :: records).
 riUrls dev tag p pl u =
   case strEq tag "QBLK" of
     True -> bulkUrls (readPayload dev p pl)
@@ -833,37 +995,60 @@ heStep r u dp ri =
 heStep2 : unsafe List RI -> String -> Int -> Bool -> Bool .
 heStep2 r u dp hit = case hit of True -> True | False -> hasEarlier r u dp.
 
-kaAdd acc ri keep = case keep of True -> append acc (ri :: Nil) | False -> acc.
-# pass 1: the kept DATA records (any live chunk)
+reverseRecords : unsafe List RI -> List RI -> List RI .
+reverseRecords xs acc = case xs of Nil -> acc | x :: rest -> reverseRecords rest (x :: acc).
+# Pass one finds live data. Pass two also retains tombstones needed by those records.
 kaGo : unsafe List RI -> List (String, Int) -> List RI -> List RI .
-kaGo ris ld acc = case ris of Nil -> acc | ri :: r -> kaStep r ld acc ri.
-kaStep : unsafe List RI -> List (String, Int) -> List RI -> RI -> List RI .
-kaStep r ld acc ri =
-  RI p np del urls = ri;
-  case del of
-    True -> kaGo r ld acc
-  | False -> kaGo r ld (kaAdd acc ri (anyLive ld urls p)).
-# pass 2: everything kept, in log order (tombstones included when needed)
+kaGo ris ld acc = append acc (reverseRecords (collectData ris ld Nil) Nil).
+collectData : unsafe List RI -> List (String, Int) -> List RI -> List RI .
+collectData ris ld rev = case ris of
+    Nil -> rev
+  | ri :: rest ->
+      RI p np del urls = ri;
+      if del then collectData rest ld rev
+      else if anyLive ld urls p then collectData rest ld (ri :: rev)
+      else collectData rest ld rev.
 kGo : unsafe List RI -> List (String, Int) -> List RI -> List RI -> List RI .
-kGo ris ld keptA acc = case ris of Nil -> acc | ri :: r -> kStep r ld keptA acc ri.
-kStep : unsafe List RI -> List (String, Int) -> List RI -> List RI -> RI -> List RI .
-kStep r ld keptA acc ri =
-  RI p np del urls = ri;
-  case del of
-    True -> kGo r ld keptA (kaAdd acc ri (hasEarlier keptA (headUrl urls) p))
-  | False -> kGo r ld keptA (kaAdd acc ri (anyLive ld urls p)).
+kGo ris ld keptA acc = append acc (reverseRecords (collectKept ris ld keptA Nil) Nil).
+collectKept : unsafe List RI -> List (String, Int) -> List RI -> List RI -> List RI .
+collectKept ris ld keptA rev = case ris of
+    Nil -> rev
+  | ri :: rest ->
+      RI p np del urls = ri;
+      keepRecord = if del then hasEarlier keptA (headUrl urls) p else anyLive ld urls p;
+      collectKept rest ld keptA (if keepRecord then ri :: rev else rev).
 
+# Read in disk order and prepend to one reversed buffer across all records.
+readPagesRev : unsafe PageSource -> Int -> Int -> List String -> List String .
+readPagesRev dev p cnt rev =
+  if cnt <= 0 then rev else
+    if cnt == 1 then pageRead dev p :: rev else
+      pages = minI 8 cnt;
+      chunk = rangePrefix dev p pages (pages * pgsz);
+      readPagesRev dev (p + pages) (cnt - pages) (prependPages chunk 0 pages rev).
+prependPages : unsafe String -> Int -> Int -> List String -> List String .
+prependPages chunk i pages rev =
+  if i == pages then rev else
+    prependPages chunk (i + 1) pages (substr chunk (i * pgsz) pgsz :: rev).
 rpsGo : unsafe PageSource -> Int -> Int -> List String -> List String .
-rpsGo dev p cnt acc =
-  case cnt <= 0 of
-    True -> acc
-  | False -> rpsGo dev (p + 1) (cnt - 1) (append acc ((pageRead dev p) :: Nil)).
+rpsGo dev p cnt acc = Core.revS (readPagesRev dev p cnt (Core.revS acc Nil)) Nil.
 bufPages : unsafe PageSource -> List RI -> List String -> List String .
-bufPages dev kept acc = case kept of Nil -> acc | ri :: r -> bufStep dev r acc ri.
+bufPages dev kept acc = bufPagesRev dev kept (Core.revS acc Nil).
+bufPagesRev : unsafe PageSource -> List RI -> List String -> List String .
+bufPagesRev dev kept rev = case kept of
+    Nil -> Core.revS rev Nil
+  | ri :: rest ->
+      RI p np del urls = ri;
+      bufPageRun dev rest p (np + 1) rev.
+# Span record boundaries when consecutive retained records occupy adjacent pages.
+bufPageRun : unsafe PageSource -> List RI -> Int -> Int -> List String -> List String .
+bufPageRun dev remaining start count rev = case remaining of
+    Nil -> Core.revS (readPagesRev dev start count rev) Nil
+  | RI next np del urls :: rest ->
+      if next == start + count then bufPageRun dev rest start (count + np + 1) rev
+      else bufPageRun dev rest next (np + 1) (readPagesRev dev start count rev).
 bufStep : unsafe PageSource -> List RI -> List String -> RI -> List String .
-bufStep dev r acc ri =
-  RI p np del urls = ri;
-  bufPages dev r (append acc (rpsGo dev p (np + 1) Nil)).
+bufStep dev r acc ri = bufPages dev (ri :: r) acc.
 
 # merkle leaves: the kept records' chunk hashes (recomputed when a v1
 # header stored none)
@@ -879,7 +1064,7 @@ recLeaf dev p = recLeaf2 dev p (parseHdrH (pageRead dev p)).
 recLeaf2 dev p h = case h of Err _ -> 0 | Ok rec -> recLeaf3 dev p rec.
 recLeaf3 dev p rec =
   RecH tag np pl u hh = rec;
-  case hh == 0 of True -> hashStr (readPayload dev p pl) | False -> hh.
+  case hh == 0 of True -> hashPayload dev (p + 1) pl 7 | False -> hh.
 
 mkRoot : unsafe List Int -> Int .
 mkRoot ls = case ls of Nil -> 0 | x :: r -> mkRoot2 ls r x.
@@ -910,65 +1095,101 @@ compactCurrent dev head m =
 compactVerified dev head m =
   ris = scanRIs dev head;
   ld = lastDels ris;
-  kept = kGo ris ld (kaGo ris ld Nil) Nil;
-  cpDo dev m (bufPages dev kept Nil) (mkRoot (lvGo dev kept Nil)).
-compact dev head = case compactRes dev head of Ok h -> h | Err why -> head.
-cpDo dev m pages root =
+  kept = kGo ris ld (collectData ris ld Nil) Nil;
   Meta h v w c d sw mr = m;
-  case v == 3 of True -> cpDurable dev m pages root | False -> cpBuffered dev m pages root.
+  if v == 3 then cpDurable dev m kept else
+    pages = bufPages dev kept Nil;
+    cpBuffered dev m pages (mkRoot (bufferLeaves pages Nil)).
+# Both metadata and legacy payload hashes come from the pages being published.
+bufferLeaves : unsafe List String -> List Int -> List Int .
+bufferLeaves pages rev = case pages of
+    Nil -> reverseLeaves rev Nil
+  | hdr :: payload -> (case parseHdrH hdr of Err why -> stop why | Ok rec ->
+      RecH tag np pl key hash = rec;
+      bufferLeafPages payload np pl hash 7 (strEq tag "QDEL") rev).
+bufferLeafPages : unsafe List String -> Int -> Int -> Int -> Int -> Bool -> List Int -> List Int .
+bufferLeafPages pages np left hash acc del rev =
+  if np == 0 then bufferLeaves pages (if del then rev else (if hash == 0 then hFix acc else hash) :: rev)
+  else case pages of
+      Nil -> stop "short compacted record"
+    | bytes :: rest ->
+        take = minI left pgsz;
+        next = if hash == 0 and not del then hGo bytes 0 take acc else acc;
+        bufferLeafPages rest (np - 1) (left - take) hash next del rev.
+reverseLeaves : unsafe List Int -> List Int -> List Int .
+reverseLeaves xs rev = case xs of Nil -> rev | x :: rest -> reverseLeaves rest (x :: rev).
+compact dev head = case compactRes dev head of Ok h -> h | Err why -> head.
 cpBuffered dev m pages root =
   Meta h v w c d sw mr = m;
   _ = sbW dev (Meta h v 2 0 d sw mr);
   h2 = writeBuf dev 1 pages;
   _ = sbW dev (Meta h2 v 0 1 d sw root);
   Ok h2.
-pageListCount : unsafe List String -> Int -> Int .
-pageListCount pages n = case pages of Nil -> n | pg :: r -> pageListCount r (n + 1).
+keptPageCount : unsafe List RI -> Int -> Int .
+keptPageCount kept count = case kept of
+    Nil -> count
+  | RI p np del urls :: rest -> keptPageCount rest (count + np + 1).
 pagesHash : unsafe List String -> Int -> Int .
 pagesHash pages acc = case pages of Nil -> hFix acc | pg :: r -> pagesHash r (hCombine acc (hashStr pg)).
-cpDurable dev m pages root =
+cpDurable dev m kept =
   Meta h v w c d sw mr = m;
-  cnt = pageListCount pages 0;
+  cnt = keptPageCount kept 0;
   case or2 (cnt > swapEnd dev v - d) (cnt + 1 > d) of
     True -> Err "compaction staging partition too small"
-  | False -> case generationRoom dev 4 of False -> Err "superblock generation exhausted" | True -> cpStage dev (Meta (cnt + 1) 3 2 0 d d root) pages (pagesHash pages 7).
-cpStage dev prepared pages stage =
+  | False -> case latestSeal dev of
+      Err why -> Err "superblock generation exhausted"
+    | Ok seal -> if generationRoomSeal seal 4 then
+        pages = bufPages dev kept Nil;
+        root = mkRoot (bufferLeaves pages Nil);
+        cpStage dev (Meta (cnt + 1) 3 2 0 d d root) pages seal
+      else Err "superblock generation exhausted".
+writeStage : unsafe PageSource -> Int -> List String -> Int -> Int .
+writeStage dev page pages acc = case pages of
+    Nil -> hFix acc
+  | bytes :: rest ->
+      next = hCombine acc (hashStr bytes);
+      _ = pageWrite dev page bytes;
+      writeStage dev (page + 1) rest next.
+cpStage dev prepared pages seal =
   Meta h v w c d sw mr = prepared;
-  _ = writeBuf dev d pages;
+  stage = writeStage dev d pages 7;
   _ = durableFlush dev;
-  _ = sealCommit dev prepared stage;
+  first = publishNextSeal dev prepared stage seal;
   # Retire the old DATA interpretation in BOTH slots before overwriting it.
   # A damaged newest slot can then only fall back to the same staged image.
-  _ = sealCommit dev prepared stage;
+  second = publishNextSeal dev prepared stage first;
   _ = writeBuf dev 1 pages;
   _ = durableFlush dev;
-  _ = finishCompact dev prepared;
+  _ = finishCompactFrom dev prepared second;
   Ok h.
 # The PREPARED descriptor remains authoritative while DATA is overwritten.
 # Recovery validates the entire staged image, then repeats the copy. Both
 # slots become stable before SWAP is reusable or the caller is acknowledged.
-recoverCompact dev m stage =
+recoverCompact dev seal =
+  Seal m generation stage = seal;
   Meta h v w c d sw mr = m;
   cnt = h - 1;
   case cnt <= swapEnd dev v - d of
     False -> stop "invalid compaction staging bounds"
-  | True -> recoverPages dev m stage (rpsGo dev d cnt Nil).
-recoverPages dev m stage pages =
-  Meta h v w c d sw mr = m;
+  | True -> recoverPages dev seal (rpsGo dev d cnt Nil).
+recoverPages dev seal pages =
+  Seal m generation stage = seal;
   case stage == pagesHash pages 7 of
     False -> stop "compaction staging checksum mismatch"
-  | True -> recoverCopy dev m pages.
-recoverCopy dev m pages =
+  | True -> recoverCopy dev seal pages.
+recoverCopy dev seal pages =
+  m = sealMeta seal;
   Meta h v w c d sw mr = m;
   _ = writeBuf dev 1 pages;
   _ = durableFlush dev;
-  _ = finishCompact dev m;
+  _ = finishCompactFrom dev m seal;
   h.
-finishCompact dev m =
+finishCompact dev m = case latestSeal dev of Err why -> stop why | Ok seal -> finishCompactFrom dev m seal.
+finishCompactFrom dev m seal =
   Meta h v w c d sw mr = m;
   stable = Meta h 3 0 1 d d mr;
-  _ = sealCommit dev stable 0;
-  _ = sealCommit dev stable 0;
+  first = publishNextSeal dev stable 0 seal;
+  _ = sealCommitFrom dev stable 0 first;
   Unit.
 
 # ---- the boot-scan INDEX -----------------------------------------------------
@@ -985,13 +1206,14 @@ finishCompact dev m =
 # this every replay re-read one page per record through the block service.
 # Larger records stay on disk; what a replay returns already holds the
 # cached bytes, so the index holds at most what a replay of every url would.
-Body = Type (Uncached | Cached String).
+Body = Type (Uncached | Cached String | PackedBody String).
 Ent = Type (Ent url page pl off len body).
 
 entRead dev e =
   Ent u p pl off len b = e;
   case b of
     Cached bytes -> bytes
+  | PackedBody bytes -> substr bytes off len
   | Uncached -> entReadDisk dev p pl off len.
 entReadDisk dev p pl off len =
   if off < 0 then substr (readPayload dev p pl) off len else
@@ -1002,58 +1224,60 @@ entReadDisk dev p pl off len =
       if skip == 0 then readPayload dev (page - 1) size else
         Sys.arena (fn unused -> readUnaligned dev page skip size).
 readUnaligned dev page skip size =
-  take = minI size (pgsz - skip);
-  first = substr (pageRead dev page) skip take;
-  if take == size then first else
-    strJoin "" (Core.revS (rpParts dev (page + 1) (size - take) (first :: Nil)) Nil).
+  if size <= pgsz - skip then substr (pageRead dev page) skip size else
+    firstSize = minI size (8 * pgsz - skip);
+    pages = ceilDiv (skip + firstSize) pgsz;
+    first = substr (rangePrefix dev page pages (pages * pgsz)) skip firstSize;
+    if size == firstSize then first else
+      strJoin "" (Core.revS (rpParts dev (page + pages) (size - firstSize) (first :: Nil)) Nil).
 # a single-page record's bytes, kept in its entry once known
 cacheable pay = case strlen pay <= pgsz of True -> Cached pay | False -> Uncached.
 
-scanIdxE dev head = sxGo dev head 1 Nil.
-sxGo : unsafe PageSource -> Int -> Int -> List Ent -> List Ent .
-sxGo dev head p idx =
-  case p >= head of
-    True -> idx
-  | False -> sxStep dev head p idx (parseHdrH (pageRead dev p)).
-sxStep : unsafe PageSource -> Int -> Int -> List Ent -> Result RecH String -> List Ent .
-sxStep dev head p idx h =
-  case h of
-    Err _ -> idx
-  | Ok rec -> sxHit dev head p idx rec.
-sxHit : unsafe PageSource -> Int -> Int -> List Ent -> RecH -> List Ent .
-sxHit dev head p idx rec =
-  RecH tag np pl u hh = rec;
-  case strEq tag "QDEL" of
-    True -> sxGo dev head (p + 1 + np) (dropUrlE idx u)
-  | False -> sxHit2 dev head p idx rec.
-sxHit2 : unsafe PageSource -> Int -> Int -> List Ent -> RecH -> List Ent .
-sxHit2 dev head p idx rec =
-  RecH tag np pl u hh = rec;
-  case strEq tag "QBLK" of
-    True -> sxGo dev head (p + 1 + np) (append idx (bulkEnts (readPayload dev p pl) p pl))
-  | False -> sxGo dev head (p + 1 + np) (append idx ((Ent u p pl 0 pl Uncached) :: Nil)).
+# Prepend while walking disk order, then restore chronological order once.
+scanIdxE dev head = revEnts (scanEntriesRev dev head 1 Nil) Nil.
+scanEntriesRev : unsafe PageSource -> Int -> Int -> List Ent -> List Ent .
+scanEntriesRev dev head p entries =
+  if p >= head then entries else case parseHdrH (pageRead dev p) of
+    Err _ -> entries
+  | Ok rec ->
+      RecH tag np pl key hh = rec;
+      next = p + 1 + np;
+      if strEq tag "QDEL" then scanEntriesRev dev head next (dropUrlE entries key)
+      else if strEq tag "QBLK" then
+        pay = readPayload dev p pl;
+        scanEntriesRev dev head next (packedEntriesRev pay p pl 0 (strlen pay) entries)
+      else scanEntriesRev dev head next (Ent key p pl 0 pl Uncached :: entries).
 
 bulkEnts : unsafe String -> Int -> Int -> List Ent .
-bulkEnts pay page pl = beGo pay page pl 0 (strlen pay) Nil.
-beGo : unsafe String -> Int -> Int -> Int -> Int -> List Ent -> List Ent .
-beGo pay page pl i n acc = case i >= n of True -> acc | False -> beE pay page pl n acc (takeWord pay i n).
-beE : unsafe String -> Int -> Int -> Int -> List Ent -> (String, Int) -> List Ent .
-beE pay page pl n acc wp = case wp of (lw, i2) -> beE2 pay page pl n acc (parseNum lw) (takeWord pay i2 n).
-beE2 : unsafe String -> Int -> Int -> Int -> List Ent -> Int -> (String, Int) -> List Ent .
-beE2 pay page pl n acc len wp =
-  case wp of (uw, i3) ->
-    beGo pay page pl (i3 + len) n (append acc ((Ent uw page pl i3 len Uncached) :: Nil)).
+bulkEnts pay page pl = revEnts (packedEntriesRev pay page pl 0 (strlen pay) Nil) Nil.
+packedEntriesRev : unsafe String -> Int -> Int -> Int -> Int -> List Ent -> List Ent .
+packedEntriesRev pay page pl i n entries =
+  body = if pl <= pgsz then PackedBody pay else Uncached;
+  packedEntriesBody pay page pl i n entries body.
+packedEntriesBody : unsafe String -> Int -> Int -> Int -> Int -> List Ent -> Body -> List Ent .
+packedEntriesBody pay page pl i n entries body =
+  if i >= n then entries else
+    (len, next) = numericWord pay i n;
+    (key, start) = takeWord pay next n;
+    packedEntriesBody pay page pl (start + len) n (Ent key page pl start len body :: entries) body.
 
 append xs ys = Core.listAppend xs ys.
 dropUrlE : unsafe List Ent -> String -> List Ent .
-dropUrlE idx u =
-  case idx of
+dropUrlE idx u = dropThrough idx u (lastKeyPosition idx u 0 (0 - 1)).
+lastKeyPosition : unsafe List Ent -> String -> Int -> Int -> Int .
+lastKeyPosition idx url position last = case idx of
+    Nil -> last
+  | Ent key page pl off len body :: rest ->
+      lastKeyPosition rest url (position + 1) (if strEq key url then position else last).
+dropThrough : unsafe List Ent -> String -> Int -> List Ent .
+dropThrough idx url remaining =
+  if remaining < 0 then idx else case idx of
     Nil -> Nil
-  | e :: r -> dropUrlE2 r u e.
-dropUrlE2 : unsafe List Ent -> String -> Ent -> List Ent .
-dropUrlE2 r u e =
-  Ent eu ep epl eo el eb = e;
-  case strEq eu u of True -> dropUrlE r u | False -> e :: dropUrlE r u.
+  | entry :: rest ->
+      if remaining == 0 then rest else
+        Ent key page pl off len body = entry;
+        if strEq key url then dropThrough rest url (remaining - 1)
+        else entry :: dropThrough rest url (remaining - 1).
 
 # index reads
 # latest reads only the last matching entry (it used to read every match)
@@ -1073,42 +1297,84 @@ ilStepE r url best e =
     True -> ilGoE r url (LastEnt e)
   | False -> ilGoE r url best.
 idxReplayE : unsafe PageSource -> List Ent -> String -> String -> String .
-idxReplayE dev idx url acc = case idxReplayF dev idx url of (bytes, kept) -> strcat acc bytes.
+idxReplayE dev idx url acc = case replayFill False False acc dev idx idx url Nil Nil 0 (0 - 1) "" of (bytes, kept) -> bytes.
 # The storage actor's replay: the answer, and the index back with the url's
 # single-page entries cached. Entries in a packed record share the same
 # immutable payload: its bytes are read once per replay, including across
 # intervening unrelated keys.
 idxReplayF : unsafe PageSource -> List Ent -> String -> (String, List Ent) .
-idxReplayF dev idx url = replayFill dev idx url ("" :: Nil) Nil (0 - 1) "".
-replayFill dev idx url parts kept previous payload = case idx of
-    Nil -> (strJoin "" (Core.revS parts Nil), revEnts kept Nil)
+idxReplayF dev idx url = replayFill True False "" dev idx idx url Nil Nil 0 (0 - 1) "".
+# A single matching entry already owns immutable reply bytes.
+finishReplay newestFirst prefix parts = case parts of
+    Nil -> prefix
+  | piece :: rest -> (case rest of
+      Nil -> if strlen prefix == 0 then piece else strcat prefix piece
+    | _ ->
+        ordered = if newestFirst then parts else Core.revS parts Nil;
+        strJoin "" (if strlen prefix == 0 then ordered else prefix :: ordered)).
+replayFill fillCache newestFirst prefix dev pending idx url parts rebuilt gap previous payload = case idx of
+    Nil ->
+      (finishReplay newestFirst prefix parts, revEnts rebuilt pending)
   | e :: rest ->
       Ent key page pl off len b = e;
       case len != 0 and strEq key url of
-        False -> replayFill dev rest url parts (e :: kept) previous payload
+        False -> replayFill fillCache newestFirst prefix dev pending rest url parts rebuilt (gap + 1) previous payload
       | True -> (case b of
-          Cached bytes -> replayFill dev rest url (bytes :: parts) (e :: kept) previous payload
-        | Uncached ->
+          Cached bytes -> replayFill fillCache newestFirst prefix dev pending rest url (bytes :: parts) rebuilt (gap + 1) previous payload
+        | PackedBody bytes -> replayFill fillCache newestFirst prefix dev pending rest url (substr bytes off len :: parts) rebuilt (gap + 1) previous payload
+        | Uncached -> if pl > 8 * pgsz and len <= pgsz and page != previous and sparseReplayTail rest page url then
+            piece = entReadDisk dev page pl off len;
+            replayFill fillCache newestFirst prefix dev pending rest url (piece :: parts) rebuilt (gap + 1) previous payload
+          else
             whole = if page == previous then payload else readPayload dev page pl;
-            piece = substr whole off len;
-            filled = if pl <= pgsz then Ent key page pl off len (Cached piece) else e;
-            replayFill dev rest url (piece :: parts) (filled :: kept) page whole).
+            piece = if off == 0 and len == strlen whole then whole else substr whole off len;
+            if fillCache and pl <= pgsz then
+              replacement = Ent key page pl off len (Cached piece);
+              prefixRev = prependIndexGap pending gap rebuilt;
+              replayFill fillCache newestFirst prefix dev rest rest url (piece :: parts) (replacement :: prefixRev) 0 page whole
+            else replayFill fillCache newestFirst prefix dev pending rest url (piece :: parts) rebuilt (gap + 1) page whole).
+# Disk-order index entries for one packed record are consecutive.
+sparseReplayTail : unsafe List Ent -> Int -> String -> Bool .
+sparseReplayTail entries page url = case entries of
+    Nil -> True
+  | Ent key next pl off len body :: rest ->
+      if next != page then True else if len > 0 and strEq key url then False
+      else sparseReplayTail rest page url.
+# Carry unchanged entries into the rebuilt prefix only when a later cache fill needs them.
+prependIndexGap : unsafe List Ent -> Int -> List Ent -> List Ent .
+prependIndexGap entries gap rebuilt =
+  if gap == 0 then rebuilt else case entries of
+    Nil -> error "Qlog cache gap outside index"
+  | entry :: rest -> prependIndexGap rest (gap - 1) (entry :: rebuilt).
 revEnts : unsafe List Ent -> List Ent -> List Ent .
 revEnts xs acc = case xs of
     Nil -> acc
   | x :: r -> revEnts r (x :: acc).
 idxCountE : unsafe List Ent -> String -> Int .
-idxCountE idx url =
-  case idx of
-    Nil -> 0
-  | e :: r -> icStepE r url e.
-icStepE : unsafe List Ent -> String -> Ent -> Int .
-icStepE r url e =
-  Ent u p pl off len b = e;
-  case strEq u url of True -> 1 + idxCountE r url | False -> idxCountE r url.
+idxCountE idx url = countEntries idx url 0.
+countEntries : unsafe List Ent -> String -> Int -> Int .
+countEntries idx url count = case idx of
+    Nil -> count
+  | Ent key p pl off len body :: rest ->
+      countEntries rest url (if strEq key url then count + 1 else count).
+icStepE r url e = countEntries (e :: r) url 0.
 
 # ---- the v1 tuple index (kept for API compat; skips bulk records) -----------
-scanIdx dev head = siGo dev head 1 Nil.
+scanIdx dev head = scanTupleIndex dev head 1 Nil.
+scanTupleIndex : unsafe PageSource -> Int -> Int -> List (String, Int, Int) -> List (String, Int, Int) .
+scanTupleIndex dev head page newest =
+  if page >= head then reverseTupleIndex newest Nil else
+    case parseHdrH (pageRead dev page) of
+      Err why -> reverseTupleIndex newest Nil
+    | Ok (RecH tag np size key hh) ->
+        next = page + 1 + np;
+        if strEq tag "QDEL" then scanTupleIndex dev head next (dropUrl newest key)
+        else if strEq tag "QBLK" then scanTupleIndex dev head next newest
+        else scanTupleIndex dev head next ((key, page, size) :: newest).
+reverseTupleIndex : unsafe List (String, Int, Int) -> List (String, Int, Int) -> List (String, Int, Int) .
+reverseTupleIndex entries acc = case entries of
+    Nil -> acc
+  | entry :: rest -> reverseTupleIndex rest (entry :: acc).
 siGo : unsafe PageSource -> Int -> Int -> List (String, Int, o287) -> List (String, Int, o287) .
 siGo dev head p idx =
   case p >= head of
@@ -1139,36 +1405,36 @@ dropUrl idx u =
       case strEq eu u of True -> dropUrl r u | False -> e :: dropUrl r u.
 idxLatest dev idx url = ilGo dev idx url (Err "no such file").
 ilGo : unsafe PageSource -> List (String, Int, Int) -> String -> Result String y287 -> Result String y287 .
-ilGo dev idx url best =
-  case idx of
+ilGo dev idx url best = case idx of
     Nil -> best
-  | e :: r -> ilStep dev r url best e.
-ilStep : unsafe PageSource -> List (String, Int, Int) -> String -> Result String a288 -> (String, Int, Int) -> Result String a288 .
-ilStep dev r url best e =
-  case e of (u, p, pl) ->
-    case strEq u url of
-      True -> ilGo dev r url (Ok (readPayload dev p pl))
-    | False -> ilGo dev r url best.
+  | (key, page, size) :: rest ->
+      if strEq key url then readLastIndexed dev rest url page size else ilGo dev rest url best.
+readLastIndexed : unsafe PageSource -> List (String, Int, Int) -> String -> Int -> Int -> Result String a .
+readLastIndexed dev idx url page size = case idx of
+    Nil -> Ok (readPayload dev page size)
+  | (key, nextPage, nextSize) :: rest ->
+      if strEq key url then readLastIndexed dev rest url nextPage nextSize
+      else readLastIndexed dev rest url page size.
+ilStep dev r url best e = ilGo dev (e :: r) url best.
 idxReplay : unsafe PageSource -> List (String, Int, Int) -> String -> String -> String .
 idxReplay dev idx url acc =
-  case idx of
-    Nil -> acc
-  | e :: r -> irStep dev r url acc e.
-irStep : unsafe PageSource -> List (String, Int, Int) -> String -> String -> (String, Int, Int) -> String .
-irStep dev r url acc e =
-  case e of (u, p, pl) ->
-    case strEq u url of
-      True -> idxReplay dev r url (strcat acc (readPayload dev p pl))
-    | False -> idxReplay dev r url acc.
+  indexedReplayParts dev idx url (if strlen acc == 0 then Nil else acc :: Nil).
+indexedReplayParts : unsafe PageSource -> List (String, Int, Int) -> String -> List String -> String .
+indexedReplayParts dev idx url parts = case idx of
+    Nil -> joinReplayParts parts
+  | (key, page, size) :: rest ->
+      if strEq key url and size > 0 then
+        indexedReplayParts dev rest url (readPayload dev page size :: parts)
+      else indexedReplayParts dev rest url parts.
+irStep dev r url acc e = idxReplay dev (e :: r) url acc.
 idxCount : unsafe List (String, d288, e288) -> String -> Int .
-idxCount idx url =
-  case idx of
-    Nil -> 0
-  | e :: r -> icStep r url e.
-icStep : unsafe List (String, f288, g288) -> String -> (String, f288, g288) -> Int .
-icStep r url e =
-  case e of (u, _, _) ->
-    case strEq u url of True -> 1 + idxCount r url | False -> idxCount r url.
+idxCount idx url = countTupleEntries idx url 0.
+countTupleEntries : unsafe List (String, a, b) -> String -> Int -> Int .
+countTupleEntries idx url count = case idx of
+    Nil -> count
+  | (key, page, size) :: rest ->
+      countTupleEntries rest url (if strEq key url then count + 1 else count).
+icStep r url e = countTupleEntries (e :: r) url 0.
 
 # ---- the storage actor -------------------------------------------------------
 # System.qa spawns `actor dev`; the actor owns (dev, head, idx) and is
@@ -1182,8 +1448,10 @@ actorWith source me = case Wire.deadline Wire.defaultMs of
 actorWithUntil until source me = actorStart (withDeadline source until) me.
 actorStart dev me =
   head = Sys.arena (fn u -> ensure dev);
-  _ = Sys.arena (fn u -> verifyDurable dev head);
-  idx = Sys.arena (fn u -> scanIdxE dev head);
+  idx = Sys.arena (fn u ->
+    Meta h version w c d sw mr = metaOr dev head;
+    if version == 3 then (case verifiedScan True dev head of Err why -> stop why | Ok (count, entries) -> entries)
+    else scanEntriesRev dev head 1 Nil);
   # Reclaim boot temporaries before publishing the first reply. Thereafter
   # reclaim adaptively: copying a large index on every read is unnecessary.
   aAgain me (AC.tidied me 1048576 (AC.boundary me (baseSource dev, head, idx))).
@@ -1193,32 +1461,77 @@ aAgain : unsafe Int -> ((PageSource, Int, List Ent), AC.Tidy) -> zz .
 aAgain me fresh =
   ((dev, head, idx), tidy) = fresh;
   borrowed = receive me;
-  m = keep borrowed;
-  _ = drop borrowed;
-  case m of
-      SVC.TimedRpc from id until tag url pay -> aTimed (baseSource dev) me head idx tidy (from, id, True) until tag url pay
+  case borrowed of
+      SVC.TimedRpc from id until tag url pay -> aTimed (baseSource dev) me head idx tidy borrowed (from, id, True) until tag url pay
     | SVC.Rpc replyTo tag url pay -> case Wire.deadline Wire.defaultMs of
           Err why -> stop why
-        | Ok until -> aTimed (baseSource dev) me head idx tidy (replyTo, 0, False) until tag url pay.
-aTimed dev me head idx tidy ret until tag url pay =
-  if Wire.expired until then _ = Wire.reply ret (Err "storage: deadline exceeded before execution"); aLoop dev me head idx tidy
+        | Ok until -> aTimed (baseSource dev) me head idx tidy borrowed (replyTo, 0, False) until tag url pay.
+usesRequestKey tag = tag == 1 or tag == 2 or tag == 3 or tag == 4 or tag == 5 or tag == 9 or tag == 10 or tag == 11.
+usesRequestPayload tag = tag == 2 or tag == 7 or tag == 9 or tag == 11 or tag == 13.
+aTimed dev me head idx tidy message ret until tag url pay =
+  if Wire.expired until then
+    _ = drop message;
+    _ = Wire.reply ret (Err "storage: deadline exceeded before execution");
+    aLoop dev me head idx tidy
   else case Wire.validate url pay of
-      Err why -> _ = Wire.reply ret (Err why); aLoop dev me head idx tidy
-    | Ok u -> aServe (withDeadline dev until) me head idx tidy ret tag url pay.
+      Err why -> _ = drop message; _ = Wire.reply ret (Err why); aLoop dev me head idx tidy
+    | Ok u ->
+        # Block calls can receive again. Retain only fields the operation uses.
+        key = if usesRequestKey tag then keep url else "";
+        bytes = if usesRequestPayload tag then keep pay else "";
+        _ = drop message;
+        if tag == 2 then case receiveNow me of
+            Err empty -> aServe (withDeadline dev until) me head idx tidy ret tag key bytes
+          | Ok queued -> (case queued of
+                SVC.TimedRpc from id due op k v -> queueAfter dev me head idx tidy ret until key bytes queued (from, id, True) due op k v
+              | SVC.Rpc from op k v -> (case Wire.deadline Wire.defaultMs of
+                    Err why -> stop why
+                  | Ok due -> queueAfter dev me head idx tidy ret until key bytes queued (from, 0, False) due op k v))
+        else aServe (withDeadline dev until) me head idx tidy ret tag key bytes.
+queueAfter dev me head idx tidy first until key bytes queued second due op k v =
+  checked = Wire.validate k v;
+  accepted = case checked of Ok u -> True | Err why -> False;
+  nextKey = if accepted and usesRequestKey op then keep k else "";
+  nextPay = if accepted and usesRequestPayload op then keep v else "";
+  _ = drop queued;
+  shared = withDeadline dev (minI until due);
+  pair = if op == 2 and not (Wire.expired (minI until due)) then case checked of
+      Err why -> Err why
+    | Ok u -> (case latestSeal shared of Err why -> Err why | Ok seal -> appendPairSealed shared head key bytes nextKey nextPay seal)
+    else Err "separate requests";
+  case pair of
+    Ok (mid, end) ->
+      updated = ordinaryEntry nextKey mid nextPay :: ordinaryEntry key head bytes :: idx;
+      _ = Wire.reply first (Ok "");
+      _ = Wire.reply second (Ok "");
+      aLoop dev me end updated tidy
+  | Err ignored ->
+      result = appendRes (withDeadline dev until) head "QREC" key bytes;
+      (newHead, updated) = case result of
+          Err why -> Wire.reply first (Err why) >> (head, idx)
+        | Ok end -> Wire.reply first (Ok "") >> (end, ordinaryEntry key head bytes :: idx);
+      if Wire.expired due then Wire.reply second (Err "storage: deadline exceeded before execution") >> aLoop dev me newHead updated tidy
+      else case checked of
+          Err why -> Wire.reply second (Err why) >> aLoop dev me newHead updated tidy
+        | Ok u -> aServe (withDeadline dev due) me newHead updated tidy second op nextKey nextPay.
+ordinaryEntry key page bytes =
+  size = strlen bytes;
+  Ent key page size 0 size (cacheable bytes).
 aServe : unsafe PageSource -> Int -> Int -> List Ent -> AC.Tidy -> (Int, Int, Bool) -> Int -> String -> String -> zz .
 aServe dev me head idx tidy replyTo tag url pay =
   case tag of
-    1 -> pageProbe dev >> Wire.reply replyTo (idxLatestE dev idx url) >> aLoop dev me head idx tidy
+    1 -> pageProbe dev >> Wire.reply replyTo (latestNewest dev idx url) >> aLoop dev me head idx tidy
   | 2 -> aAppend dev me head idx tidy replyTo "QREC" url pay
   | 3 -> aReplay dev me head idx tidy replyTo url
   | 4 -> aAppend dev me head idx tidy replyTo "QDEL" url ""
   | 5 -> Wire.reply replyTo (Ok (aStats dev head idx url))     >> aLoop dev me head idx tidy
   | 6 -> aCompact dev me head tidy replyTo
   | 7 -> aAppendBulk dev me head idx tidy replyTo pay
+  | 13 -> aAppendBulk dev me head idx tidy replyTo pay
   | 8 -> Wire.reply replyTo (verifyLog dev head)               >> aLoop dev me head idx tidy
   | 9 -> aReplace dev me head idx tidy replyTo url pay
   | 12 -> Wire.reply replyTo (saveGeneration dev) >> aLoop dev me head idx tidy
-  | 10 -> Wire.reply replyTo (snapshotReplay dev idx url) >> aLoop dev me head idx tidy
+  | 10 -> Wire.reply replyTo (snapshotNewest dev idx url) >> aLoop dev me head idx tidy
   | 11 -> (case transactionSeal dev of
       Err why -> Wire.reply replyTo (Err why) >> aLoop dev me head idx tidy
     | Ok seal -> (case payloadAtSeal seal pay of
@@ -1239,16 +1552,39 @@ transactionSeal dev = case latestSeal dev of
   | Err why -> case legacyMeta dev of
       Ok legacy -> Err "storage generations require durable v3 storage"
     | Err invalid -> Err why.
+latestNewest : unsafe PageSource -> List Ent -> String -> Result String String .
+latestNewest dev idx url = case idx of
+    Nil -> Err "no such file"
+  | e :: rest ->
+      Ent key page pl off len body = e;
+      if strEq key url then Ok (entRead dev e) else latestNewest dev rest url.
+snapshotNewest dev idx url = case transactionSeal dev of
+    Err why -> Err why
+  | Ok (Seal m generation stage) ->
+      (bytes, kept) = replayFill False True "{generation}\n" dev idx idx url Nil Nil 0 (0 - 1) "";
+      Ok bytes.
 snapshotReplay dev idx url = case transactionSeal dev of
     Err why -> Err why
-  | Ok (Seal m generation stage) -> Ok (strcat "{generation}\n" (idxReplayE dev idx url "")).
+  | Ok (Seal m generation stage) -> Ok (idxReplayE dev idx url "{generation}\n").
 checkedPayload dev pay = case transactionSeal dev of Err why -> Err why | Ok seal -> payloadAtSeal seal pay.
 payloadAtSeal seal pay =
   Seal m generation stage = seal;
-  split = strIndexOf lf (substr pay 0 11);
+  split = generationLineEnd pay 0 (minI 11 (strlen pay));
   if split < 1 then Err "invalid generation frame"
-  else if substr pay 0 split != "{generation}" then Err "storage generation conflict"
-  else Ok (substr pay (split + 1) (strlen pay - split - 1)).
+  else if generationMatches pay (split - 1) generation then Ok (substr pay (split + 1) (strlen pay - split - 1))
+  else Err "storage generation conflict".
+# Compare canonical decimal digits from the units position without formatting.
+generationMatches : unsafe String -> Int -> Int -> Bool .
+generationMatches pay i value =
+  rest = value / 10;
+  if charAt pay i != 48 + (value - rest * 10) then False
+  else if i == 0 then rest == 0
+  else if rest == 0 then False
+  else generationMatches pay (i - 1) rest.
+generationLineEnd : unsafe String -> Int -> Int -> Int .
+generationLineEnd pay i end =
+  if i >= end then (0 - 1) else if charAt pay i == 10 then i
+  else generationLineEnd pay (i + 1) end.
 aReplace dev me head idx tidy replyTo url bytes =
   replaceReply dev me head idx tidy replyTo url bytes (replaceRes dev head url bytes).
 replaceReply dev me head idx tidy replyTo url bytes result = case result of
@@ -1257,7 +1593,7 @@ replaceReply dev me head idx tidy replyTo url bytes result = case result of
 aReplay : unsafe PageSource -> Int -> Int -> List Ent -> AC.Tidy -> (Int, Int, Bool) -> String -> zz .
 aReplay dev me head idx tidy replyTo url =
   _ = pageProbe dev;
-  (bytes, idx2) = idxReplayF dev idx url;
+  (bytes, idx2) = replayFill True True "" dev idx idx url Nil Nil 0 (0 - 1) "";
   _ = Wire.reply replyTo (Ok bytes);
   aLoop dev me head idx2 tidy.
 aStats dev head idx url = aStats2 head idx url (metaOr dev head).
@@ -1271,34 +1607,30 @@ aAppend dev me head idx tidy replyTo tag url pay =
   | Ok h2 -> aAppendOk dev me head idx tidy replyTo tag url pay h2.
 aAppendOk : unsafe PageSource -> Int -> Int -> List Ent -> AC.Tidy -> (Int, Int, Bool) -> String -> String -> String -> Int -> zz .
 aAppendOk dev me head idx tidy replyTo tag url pay h2 =
-  # OWN COPY of the url before it goes into the long-lived index: the
-  # message's url string lives in the SENDER's slab -- freed when that
-  # actor is reaped, or bulk-freed with a loaded process's whole arena
-  # on exit (the syscall trampoline allocates it from the process
-  # heap).  strcat always allocates fresh in the CURRENT actor's slab,
-  # and aAppendOk runs in the storage actor, so this pins ownership here.
-  # The cached payload is copied for the same reason.
-  u2 = strcat url "";
+  # aTimed keeps the key and payload in this actor before dropping its
+  # mailbox root. Conditional replacement bytes are sliced from that copy.
+  size = strlen pay;
   idx2 = case strEq tag "QDEL" of
            True -> dropUrlE idx url
-         | False -> append idx ((Ent u2 head (strlen pay) 0 (strlen pay) (cacheable (strcat pay ""))) :: Nil);
+         | False -> Ent url head size 0 size (cacheable pay) :: idx;
   _ = Wire.reply replyTo (Ok "");
   aLoop dev me h2 idx2 tidy.
 aAppendBulk : unsafe PageSource -> Int -> Int -> List Ent -> AC.Tidy -> (Int, Int, Bool) -> String -> zz .
 aAppendBulk dev me head idx tidy replyTo pay =
-  case appendPackedRes dev head pay (bulkCntAll pay) of
+  pl = strlen pay;
+  count = packedCount pay 0 pl 0;
+  admitted = if count < 0 then Err "invalid bulk framing" else writeCountedPack dev head pay pl count;
+  case admitted of
     Err e -> Wire.reply replyTo (Err e) >> aLoop dev me head idx tidy
   | Ok h2 -> aAppendBulkOk dev me head idx tidy replyTo pay h2.
 aAppendBulkOk : unsafe PageSource -> Int -> Int -> List Ent -> AC.Tidy -> (Int, Int, Bool) -> String -> Int -> zz .
 aAppendBulkOk dev me head idx tidy replyTo pay h2 =
-  # bulkEnts rebuilds each chunk url via takeWord/strcat, so the index
-  # entries own their strings in THIS actor's slab (same discipline as
-  # aAppendOk's u2)
-  idx2 = append idx (bulkEnts pay head (strlen pay));
+  # Parsed keys belong to the storage actor.
+  idx2 = packedEntriesRev pay head (strlen pay) 0 (strlen pay) idx;
   _ = Wire.reply replyTo (Ok "");
   aLoop dev me h2 idx2 tidy.
 aCompact : unsafe PageSource -> Int -> Int -> AC.Tidy -> (Int, Int, Bool) -> zz .
 aCompact dev me head tidy replyTo =
   case compactRes dev head of
-    Err why -> Wire.reply replyTo (Err why) >> aLoop dev me head (scanIdxE dev head) tidy
-  | Ok h2 -> Wire.reply replyTo (Ok "compacted head={h2}") >> aLoop dev me h2 (scanIdxE dev h2) tidy.
+    Err why -> Wire.reply replyTo (Err why) >> aLoop dev me head (scanEntriesRev dev head 1 Nil) tidy
+  | Ok h2 -> Wire.reply replyTo (Ok "compacted head={h2}") >> aLoop dev me h2 (scanEntriesRev dev h2 1 Nil) tidy.

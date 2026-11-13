@@ -1,0 +1,24 @@
+#: expect blockrange: HOLDS
+unsafe program.
+B = use "std/blockio".
+# Compare the range reply with independent single-page reads. This works on
+# seeded disks as well as blank ones and never changes their contents.
+single me worker p = case B.call me worker (B.Read p) of
+    Ok (B.Page bytes) -> bytes
+  | other -> error "single-page read failed".
+expected me worker p left = if left == 0 then "" else
+  strcat (single me worker p) (expected me worker (p + 1) (left - 1)).
+main =
+  me = myself 0;
+  worker = B.serve me (device "blk");
+  n = case B.capacity me worker of Ok size -> size | Err why -> error why;
+  start = n - 8;
+  reference = expected me worker start 8;
+  bytes = case B.call me worker (B.ReadRange start 8) of
+      Ok (B.Page data) -> data
+    | Err why -> error why
+    | other -> error "invalid range reply";
+  outside = B.call me worker (B.ReadRange (start + 1) 8);
+  wide = B.call me worker (B.ReadRange 0 9);
+  if strlen bytes == 32768 and bytes == reference and outside == Err "block: page out of range" and wide == Err "block: range must contain 1 to 8 pages"
+    then "blockrange: HOLDS" else error "range boundary failure".

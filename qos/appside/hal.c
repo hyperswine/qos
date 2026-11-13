@@ -9,6 +9,7 @@
  * safety mechanisms live in the FPRISC layer above, not here.
  */
 #include "fpr.h"
+#include "blk_pack.h"
 #include "qos_abi.h"
 
 extern const qos_hal_t *qos_hal; /* entry.c installs it first thing */
@@ -313,24 +314,27 @@ FPR_FN(fpr_g_netClose, h_netClose, 1);
 #endif
 static int64_t disk_wait(uint64_t page, const char *src, uint64_t len, int write, char *dst) {
 #ifdef QOS_DISK_TEST_SYNC
-  if (write != 2) return write ? qos_hal->blk_write(page, src, len) : qos_hal->blk_read(page, dst);
+  if (write < 2) return write ? qos_hal->blk_write(page, src, len) : qos_hal->blk_read(page, dst);
 #endif
   if (!qos_hal->blk_submit || !qos_hal->blk_done || !qos_hal->blk_result || !qos_hal->blk_release)
     fpr_cpanic("blk: asynchronous disk capability not granted");
   void *job = qos_hal->blk_submit(page, src, len, write);
   if (!job) fpr_actor_fail("blk: request refused (the disk worker is stalled past its deadline, or cannot take requests)");
-  fpr_actor_cleanup_set(qos_hal->blk_release, job);
-  uint64_t start = hal_mtime();
-  while (!qos_hal->blk_done(job)) {
-    if (hal_mtime() - start >= QOS_BLK_DEADLINE_TICKS) {
-      fpr_actor_cleanup_clear(job);
-      qos_hal->blk_release(job); /* the worker's reference keeps the buffer */
-      fpr_actor_fail("blk: request timed out (the disk worker stalled)");
-    }
-    fpr_actor_sleep_us(200);
+  if (!qos_hal->blk_done(job)) {
+    fpr_actor_cleanup_set(qos_hal->blk_release, job);
+    uint64_t start = hal_mtime();
+    do {
+      fpr_actor_sleep_us(200);
+      if (qos_hal->blk_done(job)) break;
+      if (hal_mtime() - start >= QOS_BLK_DEADLINE_TICKS) {
+        fpr_actor_cleanup_clear(job);
+        qos_hal->blk_release(job); /* the worker's reference keeps the buffer */
+        fpr_actor_fail("blk: request timed out (the disk worker stalled)");
+      }
+    } while (1);
+    fpr_actor_cleanup_clear(job);
   }
   int64_t result = qos_hal->blk_result(job, dst);
-  fpr_actor_cleanup_clear(job);
   qos_hal->blk_release(job);
   return result;
 }
@@ -346,11 +350,48 @@ static V h_blkRead(V d, V pv) {
   if (!ISINT(pv)) fpr_cpanic("blkRead: page must be an Int");
   if (!qos_hal->blk_read)
     fpr_cpanic("blk: capability not granted by this host's HAL table");
-  char buf[4096];
-  if (disk_wait((uint64_t)UNTAG(pv), 0, 0, 0, buf) < 0)
+  str_t *page = (str_t *)fpr_alloc(sizeof(str_t) + 4096);
+  page->tid = T_STR; page->var = 0; page->len = 4096;
+  if (disk_wait((uint64_t)UNTAG(pv), 0, 0, 0, (char *)page->bytes) < 0)
     fpr_actor_fail("blk: read failed (page out of range, or an I/O error)");
-  return (V)fpr_mkstr((const uint8_t *)buf, 4096);
+  return (V)page;
 }
+static void check_block_range(uw page, uw count) {
+  int64_t capacity = qos_hal->blk_pages ? qos_hal->blk_pages() : 0;
+  if (capacity < (int64_t)count || page > (uint64_t)capacity - count)
+    fpr_actor_fail("blk: page out of range");
+}
+static V h_blkReadRange(V d, V pv, V nv) {
+  (void)d;
+  fpr_confined_refuse("blkReadRange (the raw disk)");
+  if (!ISINT(pv) || !ISINT(nv) || UNTAG(pv) < 0 || UNTAG(nv) < 1 || UNTAG(nv) > 8)
+    fpr_actor_fail("blk: invalid page range");
+  uw page = (uw)UNTAG(pv), count = (uw)UNTAG(nv);
+  check_block_range(page, count);
+  if (!qos_hal->blk_read) fpr_cpanic("blk: read capability not granted");
+  str_t *s = (str_t *)fpr_alloc(sizeof(str_t) + count * 4096);
+  s->tid = T_STR; s->var = 0; s->len = count * 4096;
+  if (disk_wait(page, 0, count, 3, (char *)s->bytes) < 0) fpr_actor_fail("blk: range read failed");
+  return (V)s;
+}
+FPR_FN(fpr_g_blkReadRange, h_blkReadRange, 3);
+static V h_blkWriteRecord(V d, V pv, V hv, V sv) {
+  (void)d;
+  fpr_confined_refuse("blkWriteRecord (the raw disk)");
+  if (!ISINT(pv) || UNTAG(pv) < 0 || ISINT(hv) || TID(hv) != T_STR ||
+      ISINT(sv) || TID(sv) != T_STR) fpr_actor_fail("blk: invalid record write");
+  str_t *header = (str_t *)hv, *payload = (str_t *)sv;
+  if (header->len > 4096 || payload->len > 7 * 4096) fpr_actor_fail("blk: record too large");
+  uw page = (uw)UNTAG(pv), pages = 1 + (payload->len + 4095) / 4096;
+  check_block_range(page, pages);
+  if (!qos_hal->blk_write) fpr_cpanic("blk: write capability not granted");
+  qos_blk_record_t record = {(const char *)header->bytes, (const char *)payload->bytes,
+                             header->len, payload->len};
+  if (disk_wait(page, (const char *)&record, pages, 4, 0) < 0)
+    fpr_actor_fail("blk: record batch write failed");
+  return TAG((sw)(header->len + payload->len));
+}
+FPR_FN(fpr_g_blkWriteRecord, h_blkWriteRecord, 4);
 static V h_blkWrite(V d, V pv, V sv) {
   fpr_confined_refuse("blkWrite (the raw disk)");
   (void)d;
@@ -375,6 +416,14 @@ static V h_blkFlush(V d) {
   return TAG((sw)disk_wait(0, 0, 0, 2, 0));
 }
 FPR_FN(fpr_g_blkFlush, h_blkFlush, 1);
+
+extern int fpr_wait_any_until_c(V, uint64_t) __attribute__((weak));
+static V h_blkWaitInbox(V me, V until) {
+  sw us = UNTAG(until);
+  if (!fpr_wait_any_until_c || us < 0 || (uint64_t)us > UINT64_MAX / 10) return TAG(0);
+  return TAG(fpr_wait_any_until_c(me, (uint64_t)us * 10));
+}
+FPR_FN(fpr_g_blkWaitInbox, h_blkWaitInbox, 2);
 
 /* ---- gfx: the nullable table tier ----------------------------------
  * The renderer (and Mesa's dynamic linking) lives in the HOST image --

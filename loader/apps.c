@@ -8,7 +8,7 @@
  * the co-compiled name->entry table and Apps.entry/Apps.run are gone.
  *
  * The table, generated into apps_data.c by tools/qa-registry.sol:
- *   fpr_qa_blobs[]   : { id, bytes, len }   the .qa archives
+ *   fpr_qa_blobs[]   : { id, archive }   the .qa archives
  *
  * FPRISC surface (fpr_g_*):
  *   Apps.list  Unit   -> String   newline-joined app ids present in rodata
@@ -17,10 +17,12 @@
  */
 #include "fpr.h"
 
-typedef struct { const char *id; const unsigned char *bytes; uw len; } qa_blob_t;
+typedef struct { const char *id; const str_t *archive; } qa_blob_t;
 typedef struct { const char *symbol; const pap0_t *pap; } app_entry_t;
 
 extern const qa_blob_t fpr_qa_blobs[];   /* apps_data.c, zero-terminated */
+
+extern const str_t *const fpr_qa_listing;
 
 static int streq_cs(const char *c, const str_t *s) {
   uw n = 0; while (c[n]) n++;
@@ -31,17 +33,7 @@ static int streq_cs(const char *c, const str_t *s) {
 
 static V g_apps_list(V unit) {
   (void)unit;
-  /* build "id1\nid2\n..." with strcat via the render buffer would need
-   * a String builder; instead concatenate through fpr_mkstr + strcat */
-  V acc = (V)fpr_mkstr((const uint8_t *)"", 0);
-  extern V fpr_prim_fn_strcat(V, V);
-  for (const qa_blob_t *b = fpr_qa_blobs; b->id; b++) {
-    uw n = 0; while (b->id[n]) n++;
-    V line = (V)fpr_mkstr((const uint8_t *)b->id, n);
-    acc = fpr_prim_fn_strcat(acc, line);
-    acc = fpr_prim_fn_strcat(acc, (V)fpr_mkstr((const uint8_t *)"\n", 1));
-  }
-  return acc;
+  return (V)fpr_qa_listing;
 }
 
 static V g_apps_read(V id) {
@@ -49,7 +41,7 @@ static V g_apps_read(V id) {
   const str_t *s = (const str_t *)id;
   for (const qa_blob_t *b = fpr_qa_blobs; b->id; b++)
     if (streq_cs(b->id, s))
-      return (V)fpr_mkstr(b->bytes, b->len);
+      return (V)b->archive;
   return (V)fpr_mkstr((const uint8_t *)"", 0); /* absent: empty */
 }
 

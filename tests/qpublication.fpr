@@ -1,7 +1,8 @@
 #: plugins tests/mathv1.fpr tests/mathv2.fpr
 #: expect publication: old=20 new=30 rows=2 owned=stopped PASS
 unsafe program.
-FS = use "std/fs#19932fc6492e8a87".
+FS = use "std/fs".
+B = use "std/blockio".
 P = use "std/qpublication".
 C = use "std/reloadcatalog".
 LR = use "std/mvureload".
@@ -38,7 +39,7 @@ proxy fs mode me =
   (ret, (until, (tag, url, bytes))) = SVC.requestFields m;
   _ = SVC.reply ret (proxyReply fs mode me tag url bytes);
   proxy fs mode me.
-proxyReply fs mode me tag url bytes = case mode of
+proxyReply fs mode me tag url bytes = if tag == 13 and (mode == "image" or mode == "journal") then Err "storage: unknown request tag" else case mode of
     "read" -> Err "injected storage read failure"
   | "malformed" -> Ok "invalid row\n"
   | "image" -> (case tag == 2 and url != P.journal Unit of True -> Err "injected image write" | False -> FS.rpc me fs tag url bytes)
@@ -53,7 +54,8 @@ failPublish me fs mode candidate qa =
   Unit.
 main =
   me = myself 0;
-  fs = FS.serve (device "blk");
+  block = B.serve me (device "blk");
+  fs = ok (FS.startBlock me block);
   qa1 = ok (FS.readLatest me fs "apps/mathv1.qa");
   qa2 = ok (FS.readLatest me fs "apps/mathv2.qa");
   h1 = identify qa1;

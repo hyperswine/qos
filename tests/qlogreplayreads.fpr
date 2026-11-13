@@ -1,7 +1,7 @@
 #: expect qlogreplayreads: HOLDS
 unsafe program.
 Q = use "../programs/mods/qlog".
-B = use "std/blockio#8b4ffa1467ca03a5".
+B = use "std/blockio".
 AC = use "std/actor#201a0e9bf98a5154".
 Str = use "std/string".
 # Return real page-sized payloads and require the exact sequence of block RPCs.
@@ -10,20 +10,30 @@ pages parent expected me = case expected of
   | p :: rest ->
       (from, id, command) = receive me;
       case command of
-        B.Timed until (B.Read n) -> if n == p then
-          _ = AC.reply (from, id) (Ok (B.Page (Str.repeat 4096 (if p == 11 then "A" else if p == 12 then "B" else "C"))));
+        B.Timed until (B.Read n) -> if n == p and p == 21 then
+          _ = AC.reply (from, id) (Ok (B.Page (Str.repeat 4096 "C")));
           pages parent rest me
           else error "expected page {p}, got {n}"
+      | B.Timed until (B.ReadRange start count) -> if (p == 40 or p == 11) and start == p and count == 2 then
+          _ = AC.reply (from, id) (Ok (B.Page (strcat (Str.repeat 4096 (if p == 11 then "A" else "X")) (Str.repeat 4096 (if p == 11 then "B" else "Y")))));
+          pages parent rest me
+          else error "unexpected range {start}, {count}"
       | other -> error "unexpected block request".
 main =
   me = myself 0;
-  owner = spawn (pages me [11, 12, 21, 11, 12, 21, 21]);
+  owner = spawn (pages me [11, 21, 11, 21, 21, 40, 11, 21, 11, 11, 11]);
   source = Q.routed owner;
-  idx = [Q.Ent "key" 10 4098 4095 2, Q.Ent "other" 30 1 0 1,
-         Q.Ent "key" 30 16 8 0,
-         Q.Ent "key" 10 4098 4097 1, Q.Ent "key" 20 1 0 1];
+  idx = [Q.Ent "key" 10 4098 4095 2 Q.Uncached, Q.Ent "other" 30 1 0 1 Q.Uncached,
+         Q.Ent "key" 30 16 8 0 Q.Uncached,
+         Q.Ent "key" 10 4098 4097 1 Q.Uncached, Q.Ent "key" 20 1 0 1 Q.Uncached];
   first = Q.idxReplayE source idx "key" "prefix";
   second = Q.idxReplayE source idx "key" "";
   latest = Q.idxLatestE source idx "key";
-  if first == "prefixABBC" and second == "ABBC" and latest == Ok "C" and receiveFrom me owner
+  range = Q.readPayload source 39 8192;
+  (cold, filled) = Q.idxReplayF source idx "key";
+  (warm, reused) = Q.idxReplayF source filled "key";
+  cachedLatest = Q.idxLatestE source reused "key";
+  crossing = Q.entReadDisk source 10 4098 4095 2;
+  digest = Q.hashPayload source 11 4098 7;
+  if digest == Q.hashStr (strcat (Str.repeat 4096 "A") "BB") and crossing == "AB" and cold == "ABBC" and warm == cold and cachedLatest == Ok "C" and range == strcat (Str.repeat 4096 "X") (Str.repeat 4096 "Y") and first == "prefixABBC" and second == "ABBC" and latest == Ok "C" and receiveFrom me owner
     then "qlogreplayreads: HOLDS" else error "wrong replay or read count".

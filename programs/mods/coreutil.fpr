@@ -37,7 +37,14 @@ linesEnd acc = case strlen acc == 0 of True -> Nil | False -> acc :: Nil.
 # Read a space/newline-delimited token at 0-based i (n = the end, exclusive),
 # returning the next byte index.
 wordAt : unsafe String -> Int -> Int -> (String, Int) .
-wordAt s i n = wordGo s i n "".
+wordAt s i n =
+  end = wordEnd s i n;
+  (substr s i (end - i), if end < n then end + 1 else end).
+wordEnd : unsafe String -> Int -> Int -> Int .
+wordEnd s i n =
+  if i >= n then i else
+    c = charAt s i;
+    if c == 32 or c == 10 then i else wordEnd s (i + 1) n.
 wordGo : unsafe String -> Int -> Int -> String -> (String, Int) .
 wordGo s i n acc = case i >= n of
     True -> (acc, i)

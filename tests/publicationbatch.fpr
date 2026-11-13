@@ -1,0 +1,24 @@
+#: expect publicationbatch: HOLDS
+unsafe program.
+FS = use "std/fs".
+B = use "std/blockio".
+P = use "std/qpublication".
+must r = case r of Ok v -> v | Err why -> error why.
+main =
+  me = myself 0;
+  block = B.serve me (device "blk");
+  fs = must (FS.startBlock me block);
+  info = {name = "batch", version = "1", from = "", to = "first"};
+  key = P.imageKey info;
+  row = P.catalogRow "" info;
+  _ = case FS.readLatest me fs "batch-baseline" of
+      Err "no such file" ->
+        _ = must (FS.append me fs "batch-baseline" "seed");
+        (before, _) = must (FS.snapshot me fs "batch-baseline");
+        _ = must (P.publishPair me fs "" info "archive bytes");
+        (after, _) = must (FS.snapshot me fs "batch-baseline");
+        if after == before + 1 then Unit else error "publication required multiple commits"
+    | Ok "seed" -> Unit
+    | other -> error "unexpected baseline";
+  if must (FS.readLatest me fs key) == "archive bytes" and must (FS.readLatest me fs (P.journal Unit)) == row
+    then "publicationbatch: HOLDS" else error "publication keys disagree".

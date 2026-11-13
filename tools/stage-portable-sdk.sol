@@ -47,6 +47,7 @@ platformSources root fprisc =
   + [("store_abi.h", "{root}/qos/store_abi.h"),
      ("portable/sha256.c", "{root}/qos/portable/sha256.c"),
      ("loader/qaimg.c", "{root}/loader/qaimg.c"),
+     ("hal/blk_pack.h", "{root}/hal/blk_pack.h"),
      ("hal/net_actor_bridge.c", "{root}/hal/net_actor_bridge.c"),
      ("machine/unix/ctx_a64.S", "{fprisc}/machine/unix/ctx_a64.S")]
   + List.map (fn n -> ("runtime/{n}", "{fprisc}/runtime/{n}"))

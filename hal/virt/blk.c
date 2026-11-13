@@ -25,8 +25,7 @@
  *   - one virtqueue, one outstanding request, actor-parked timed poll for
  *     completion — the UART discipline again. A request is the standard
  *     3-descriptor chain: 16-byte header, 4 KiB data, 1 status byte.
- *   - no feature negotiation beyond VERSION_1 on modern: we need none
- *     of RO/FLUSH/SEG_MAX for a PoC, and QEMU is fine with that.
+ *   - negotiates FLUSH when offered, plus VERSION_1 on modern devices.
  *
  * Failure (2026-10-01, docs/2026-10-01-DISK-HARDENING.md): nothing here
  * halts the machine and nothing waits without a deadline.  A request the
@@ -40,6 +39,7 @@
  * every later request is refused at once.
  */
 #include "fpr.h"
+#include "../blk_pack.h"
 #include "blockpolicy.h"
 #if __riscv_xlen == 64
 #include "virtio.h"
@@ -93,8 +93,9 @@ static void bputdec(u64 v) {
 #define ST_FEAT_OK    8
 
 static volatile u32 *blk;   /* MMIO base, NULL until probed */
+static int blk_can_flush;
 static int blk_version;     /* 1 legacy, 2 modern */
-static u64 blk_sectors;     /* capacity from config space */
+static u64 blk_pages;       /* complete pages advertised by the device */
 
 static u32 rr(u32 off) { FENCE_IO(); u32 v = blk[off / 4]; FENCE_IO(); return v; }
 static void wr(u32 off, u32 v) { FENCE_IO(); blk[off / 4] = v; FENCE_IO(); }
@@ -110,7 +111,6 @@ typedef struct { u16 flags, idx; vq_uelem_t ring[QSZ]; u16 avail_event; } __attr
 
 static struct {
   u8 mem[8192] __attribute__((aligned(4096)));
-  u16 last_used;
   u16 avail_shadow;
 } q;
 #define QDESC  ((volatile vq_desc_t *)(q.mem))
@@ -123,10 +123,19 @@ static struct {
 #define SEC_PER_PAGE (PAGE_SZ / SEC_SZ)
 
 /* one outstanding request: header + data + status, physically static */
+#define BLK_F_FLUSH (1u << 9)
+#define BLK_T_FLUSH 4
 #define BLK_T_IN  0   /* device -> memory (read)  */
 #define BLK_T_OUT 1   /* memory -> device (write) */
 static struct { u32 type, reserved; u64 sector; } __attribute__((packed, aligned(16))) breq;
-static u8 bdata[PAGE_SZ] __attribute__((aligned(PAGE_SZ)));
+enum { BLK_RANGE_MAX = 8 };
+static u8 bdata[BLK_RANGE_MAX * PAGE_SZ] __attribute__((aligned(PAGE_SZ)));
+/* Under blk_lock, bytes from this offset to the first page end are zero.
+ * bdata starts in BSS. A read invalidates the bound before handing it to DMA. */
+static uw first_page_dirty;
+/* Known-zero interval relative to the start of the record payload. */
+static uw payload_zero_start, payload_zero_end = (BLK_RANGE_MAX - 1) * PAGE_SZ;
+
 static u8 bstatus __attribute__((aligned(16)));
 
 /* The deadline: how long a request may take before the device counts as
@@ -158,13 +167,6 @@ static blk_budget blk_budget_get(void) {
 }
 static uint64_t blk_budget_ticks(blk_budget b) { return (uint64_t)b.us * 10; }
 static uint64_t blk_budget_parks(blk_budget b) { return ((uint64_t)b.us + 199) / 200; }
-static blk_budget blk_active_budget(void) {
-  blk_budget b = {0};
-  b.us = __atomic_load_n(&active_deadline_us, __ATOMIC_ACQUIRE);
-  b.probes = __atomic_load_n(&active_reset_probes, __ATOMIC_ACQUIRE);
-  return b;
-}
-
 /* One atomic ownership word. Every non-idle state reserves the DMA backing;
  * offline is terminal. Only a successful policy transition grants effects. */
 static unsigned blk_owner;
@@ -315,7 +317,7 @@ static int blk_reset(void) {
   blk_test_pause_reset(2);
 #endif
   int confirmed = 0;
-  int limit = blk_active_budget().probes;
+  int limit = __atomic_load_n(&active_reset_probes, __ATOMIC_ACQUIRE);
   for (int i = 0;; i++) {
     /* Exhaustion is decided before another MMIO probe. */
     if (blk_reset_step(1, i, limit) == 2) break;
@@ -336,13 +338,17 @@ static int blk_reset(void) {
   return blk_init();
 }
 
+static int blk_orphan_expired(uint64_t parks) {
+  blk_budget budget = {.us = __atomic_load_n(&active_deadline_us, __ATOMIC_ACQUIRE)};
+  return blk_expired(blk_since, parks, blk_budget_ticks(budget), blk_budget_parks(budget));
+}
+
 /* The observation that selected a claim can be stale (an orphan-state ABA).
  * Revalidate DMA facts under exclusive ownership before effects or release. */
 static int blk_claim_step(unsigned state, uint64_t parks) {
   FENCE();
   int completed = QUSED->idx != blk_before;
-  blk_budget budget = blk_active_budget();
-  int reset_due = !completed && blk_expired(blk_since, parks, blk_budget_ticks(budget), blk_budget_parks(budget));
+  int reset_due = !completed && blk_orphan_expired(parks);
 #if __riscv_xlen == 64
   return qos_blk_claim_step(state, completed, reset_due);
 #else
@@ -352,20 +358,25 @@ static int blk_claim_step(unsigned state, uint64_t parks) {
 }
 
 static void blk_lock(void) {
-  blk_budget waiting_budget = blk_budget_get();
-  uint64_t t0 = hal_mtime();
-  uint64_t parks = 0;
-  for (;;) {
-    if (blk_state_get() == BLK_OFFLINE)
-      fpr_actor_fail("blk: the disk is offline (recovery did not finish) -- request refused");
-    if (blk_change(BLK_IDLE, BLK_ACQUIRE)) break;
+  uint64_t t0 = 0, wait_ticks = 0, wait_parks = 0, parks = 0;
+  int waiting = 0;
+  while (!blk_change(BLK_IDLE, BLK_ACQUIRE)) {
     /* A killed or timed-out owner cannot release DMA storage before the
      * device is done with it: completion, or a confirmed reset. */
     unsigned state = blk_state_get();
+    if (state == BLK_OFFLINE)
+      fpr_actor_fail("blk: the disk is offline (recovery did not finish) -- request refused");
+    if (!waiting) {
+      t0 = hal_mtime();
+      blk_budget budget = blk_budget_get();
+      wait_ticks = budget.factor * blk_budget_ticks(budget);
+      wait_parks = budget.factor * blk_budget_parks(budget);
+      waiting = 1;
+    }
     FENCE();
     int completed = state == BLK_ORPHAN && QUSED->idx != blk_before;
-    int reset_due = state == BLK_ORPHAN && !completed && blk_expired(blk_since, parks, blk_budget_ticks(blk_active_budget()), blk_budget_parks(blk_active_budget()));
-    int wait_due = state != BLK_ORPHAN && blk_expired(t0, parks, waiting_budget.factor * blk_budget_ticks(waiting_budget), waiting_budget.factor * blk_budget_parks(waiting_budget));
+    int reset_due = state == BLK_ORPHAN && !completed && blk_orphan_expired(parks);
+    int wait_due = state != BLK_ORPHAN && blk_expired(t0, parks, wait_ticks, wait_parks);
 #if __riscv_xlen == 64
     int action = qos_blk_waiting(state, completed, reset_due, wait_due);
 #else
@@ -388,7 +399,6 @@ static void blk_lock(void) {
 #ifdef QOS_BLK_TEST
           blk_test_pause_reset(3);
 #endif
-          q.last_used = QUSED->idx;
           wr(R_INTACK, 3);
           fpr_actor_cleanup_clear(&blk_owner);
           (void)blk_change(BLK_RECLAIMING, BLK_FINISH);
@@ -439,8 +449,17 @@ static void blk_unlock(void) {
 
 static void vq_setup(void) {
   for (u32 i = 0; i < sizeof(q.mem); i++) q.mem[i] = 0;
-  q.last_used = 0;
   q.avail_shadow = 0;
+  /* Every available slot names head zero. Queue reset cleared the ring. */
+  volatile vq_desc_t *desc = QDESC;
+  desc[0].addr = (u64)(uintptr_t)&breq;
+  desc[0].len = sizeof breq;
+  desc[0].flags = D_NEXT;
+  desc[1].addr = (u64)(uintptr_t)bdata;
+  desc[1].next = 2;
+  desc[2].addr = (u64)(uintptr_t)&bstatus;
+  desc[2].len = 1;
+  desc[2].flags = D_WRITE;
 #if __riscv_xlen == 64
   if (!qos_virtio_queue(blk, 0, QSZ, q.mem)) fpr_cpanic("blk: queue too small");
 #else
@@ -464,15 +483,20 @@ static void vq_setup(void) {
  * (boot, and recovery after a stalled request).  0 = the device refused */
 static int blk_init(void) {
 #if __riscv_xlen == 64
-  if (!qos_virtio_negotiate(blk, 0)) return 0;
+  if (!qos_virtio_negotiate(blk, BLK_F_FLUSH)) return 0;
+  wr(R_DEVFEATSEL, 0);
+  blk_can_flush = (rr(R_DEVFEAT) & BLK_F_FLUSH) != 0;
   vq_setup();
   qos_virtio_ready(blk);
   return 1;
 #else
   wr(R_STATUS, ST_ACK);
   wr(R_STATUS, ST_ACK | ST_DRIVER);
+  wr(R_DEVFEATSEL, 0);
+  u32 low = rr(R_DEVFEAT) & BLK_F_FLUSH;
+  blk_can_flush = low != 0;
   wr(R_DRVFEATSEL, 0);
-  wr(R_DRVFEAT, 0);                         /* accept no feature bits 0..31 */
+  wr(R_DRVFEAT, low);
   if (blk_version == 2) {
     wr(R_DEVFEATSEL, 1);
     u32 feat1 = rr(R_DEVFEAT);
@@ -489,6 +513,13 @@ static int blk_init(void) {
 #endif
 }
 
+static u64 blk_probe_pages(void) {
+  u64 sectors = 0;
+  for (int byte = 7; byte >= 0; byte--)
+    sectors = (sectors << 8) | ((volatile u8 *)blk)[R_CONFIG + byte];
+  return sectors / SEC_PER_PAGE;
+}
+
 #if __riscv_xlen == 64
 static int blk_probe(void) {
   blk = qos_virtio_probe(2);
@@ -496,12 +527,10 @@ static int blk_probe(void) {
   blk_version = rr(R_VERSION);
   wr(R_STATUS, 0);
   if (!blk_init()) fpr_cpanic("blk: FEATURES_OK refused");
-  blk_sectors = 0;
-  for (int b = 7; b >= 0; b--)
-    blk_sectors = (blk_sectors << 8) | ((volatile u8 *)blk)[R_CONFIG + b];
+  blk_pages = blk_probe_pages();
   bputs("[blk] virtio-blk v"); hal_putc('0' + blk_version);
   bputs(" slot "); hal_putc('0' + ((uintptr_t)blk - VIRTIO_SLOT0) / VIRTIO_STRIDE);
-  bputs(", "); bputdec(blk_sectors / SEC_PER_PAGE); bputs(" pages of 4096 bytes\n");
+  bputs(", "); bputdec(blk_pages); bputs(" pages of 4096 bytes\n");
   return 1;
 }
 #else
@@ -517,16 +546,14 @@ static int blk_probe(void) {
     if (!blk_init()) fpr_cpanic("blk: FEATURES_OK refused");
 
     /* capacity: u64 sector count at config+0, byte reads for alignment */
-    blk_sectors = 0;
-    for (int b = 7; b >= 0; b--)
-      blk_sectors = (blk_sectors << 8) | ((volatile u8 *)blk)[R_CONFIG + b];
+    blk_pages = blk_probe_pages();
 
     bputs("[blk] virtio-blk v");
     hal_putc('0' + blk_version);
     bputs(" slot ");
     hal_putc('0' + i);
     bputs(", ");
-    bputdec(blk_sectors / SEC_PER_PAGE);
+    bputdec(blk_pages);
     bputs(" pages of 4096 bytes\n");
     return 1;
   }
@@ -535,7 +562,7 @@ static int blk_probe(void) {
 }
 #endif
 
-/* one page transfer through the 3-descriptor chain; the caller holds the
+/* One contiguous transfer through the 3-descriptor chain; the caller holds the
  * lock.  On return the transfer is complete and the status good; every
  * other outcome fail-stops the caller (see the header). */
 #ifdef QOS_REPLAY_BLK_PROFILE
@@ -545,22 +572,27 @@ void qos_replay_device_stamps(uw page, uint64_t submitted, uint64_t observed);
 extern unsigned qos_trial_poll_us;
 void qos_trial_polls(uw page, uw count, uint64_t parked);
 #endif
-static void blk_rw(u64 page, int is_write) {
-
-  breq.type = is_write ? BLK_T_OUT : BLK_T_IN;
-  breq.reserved = 0;
+static void blk_rw(u64 page, u32 bytes, u32 type) {
+  int is_write = type != BLK_T_IN;
+  breq.type = type;
   breq.sector = page * SEC_PER_PAGE;
   bstatus = 0xff;
 
   volatile vq_desc_t *d = QDESC;
-  d[0].addr = (u64)(uintptr_t)&breq;   d[0].len = 16;      d[0].flags = D_NEXT;                          d[0].next = 1;
-  d[1].addr = (u64)(uintptr_t)bdata;   d[1].len = PAGE_SZ; d[1].flags = (u16)(D_NEXT | (is_write ? 0 : D_WRITE)); d[1].next = 2;
-  d[2].addr = (u64)(uintptr_t)&bstatus; d[2].len = 1;      d[2].flags = D_WRITE;                         d[2].next = 0;
+  d[0].next = type == BLK_T_FLUSH ? 2 : 1;
+  if (!is_write && bytes) {
+    first_page_dirty = PAGE_SZ;
+    if (bytes > PAGE_SZ && bytes - PAGE_SZ > payload_zero_start)
+      payload_zero_start = bytes - PAGE_SZ;
+  }
+  if (type != BLK_T_FLUSH) {
+    d[1].len = bytes;
+    d[1].flags = (u16)(D_NEXT | (is_write ? 0 : D_WRITE));
+  }
 
   volatile vq_avail_t *av = QAVAIL;
   u16 before = QUSED->idx;
   blk_before = before;
-  av->ring[q.avail_shadow % QSZ] = 0;
   FENCE();
   av->idx = ++q.avail_shadow;
   FENCE();
@@ -577,29 +609,34 @@ static void blk_rw(u64 page, int is_write) {
   uint64_t parked = 0;
   uw empty = 0;
 #endif
-  uint64_t parks = 0;
-  for (;;) {
-    FENCE();
-    if (QUSED->idx != before) break;
-    if (blk_expired(start, start ? parks : ++parks, blk_budget_ticks(blk_active_budget()), blk_budget_parks(blk_active_budget()))) {
-      /* the device may still DMA into the buffers: they stay reserved (an
-       * orphan) until it completes or a later caller resets it */
-      fpr_actor_cleanup_clear(&blk_owner);
-      (void)blk_change(BLK_HELD, BLK_ABANDON);
-      fpr_actor_fail("blk: request timed out (the device stalled); its buffers stay reserved until it completes or is reset");
-    }
+  FENCE();
+  if (QUSED->idx == before) {
+    /* A pending request retains its deadline until it releases ownership. */
+    blk_budget budget = {.us = __atomic_load_n(&active_deadline_us, __ATOMIC_ACQUIRE)};
+    uint64_t ticks = blk_budget_ticks(budget), park_limit = blk_budget_parks(budget);
+    uint64_t parks = 0;
+    do {
+      if (blk_expired(start, start ? parks : ++parks, ticks, park_limit)) {
+        /* the device may still DMA into the buffers: they stay reserved (an
+         * orphan) until it completes or a later caller resets it */
+        fpr_actor_cleanup_clear(&blk_owner);
+        (void)blk_change(BLK_HELD, BLK_ABANDON);
+        fpr_actor_fail("blk: request timed out (the device stalled); its buffers stay reserved until it completes or is reset");
+      }
 #ifdef QOS_POLL_TRIAL
 #ifdef QOS_REPLAY_BLK_PROFILE
-    uint64_t park_start = hal_mtime();
+      uint64_t park_start = hal_mtime();
 #endif
-    fpr_actor_sleep_us(is_write ? 200 : qos_trial_poll_us);
+      fpr_actor_sleep_us(is_write ? 200 : qos_trial_poll_us);
 #ifdef QOS_REPLAY_BLK_PROFILE
-    parked += hal_mtime() - park_start;
-    ++empty;
+      parked += hal_mtime() - park_start;
+      ++empty;
 #endif
 #else
-    fpr_actor_sleep_us(200);
+      fpr_actor_sleep_us(200);
 #endif
+      FENCE();
+    } while (QUSED->idx == before);
   }
 #ifdef QOS_REPLAY_BLK_PROFILE
   if (!is_write) qos_replay_device_stamps(page, submitted, hal_mtime());
@@ -607,19 +644,27 @@ static void blk_rw(u64 page, int is_write) {
 #if defined(QOS_POLL_TRIAL) && defined(QOS_REPLAY_BLK_PROFILE)
   if (!is_write) qos_trial_polls(page, empty, parked);
 #endif
-  q.last_used = QUSED->idx;
   wr(R_INTACK, 3);
   FENCE();
   if (bstatus != 0) {
     blk_unlock();
     fpr_actor_fail("blk: device reported an I/O error");
   }
+  /* Modern used.len covers the device-writable data and the status byte.
+   * A short successful read must never expose the previous transfer's tail.
+   * Legacy devices do not reliably report used.len. */
+  volatile vq_uelem_t *completed = &QUSED->ring[before % QSZ];
+  if (completed->id != 0 || (blk_version >= 2 &&
+      ((!is_write && completed->len != bytes + 1) || (type == BLK_T_FLUSH && completed->len != 1)))) {
+    blk_unlock();
+    fpr_actor_fail("blk: incomplete or invalid device completion");
+  }
 }
 
 /* a request that cannot be made: refused, the caller fail-stops */
 static void blk_check(V pv) {
   if (!blk) fpr_actor_fail("blk: no disk (boot QEMU with `make run-disk`)");
-  if ((u64)UNTAG(pv) >= blk_sectors / SEC_PER_PAGE) fpr_actor_fail("blk: page out of range");
+  if ((u64)UNTAG(pv) >= blk_pages) fpr_actor_fail("blk: page out of range");
 }
 
 /* ---- device table hook + FPRISC surface -------------------------------- */
@@ -632,7 +677,7 @@ void blk_setup(void) {
 
 static V h_blkPages(V d) {
   (void)d;
-  return TAG(blk ? (sw)(blk_sectors / SEC_PER_PAGE) : 0);
+  return TAG(blk ? (sw)(blk_pages) : 0);
 }
 
 #ifdef QOS_REPLAY_BLK_PROFILE
@@ -643,6 +688,8 @@ static V h_blkRead(V d, V pv) {
   (void)d;
   if (!ISINT(pv)) fpr_cpanic("blkRead: page must be an Int");
   blk_check(pv);
+  str_t *result = (str_t *)fpr_alloc(sizeof(str_t) + PAGE_SZ);
+  result->tid = T_STR; result->var = 0; result->len = PAGE_SZ;
 #ifdef QOS_REPLAY_BLK_PROFILE
   uint64_t start = hal_mtime();
 #endif
@@ -650,11 +697,11 @@ static V h_blkRead(V d, V pv) {
 #ifdef QOS_REPLAY_BLK_PROFILE
   uint64_t acquired = hal_mtime();
 #endif
-  blk_rw((u64)UNTAG(pv), 0);
+  blk_rw((u64)UNTAG(pv), PAGE_SZ, 0);
 #ifdef QOS_REPLAY_BLK_PROFILE
   uint64_t transferred = hal_mtime();
 #endif
-  V result = (V)fpr_mkstr(bdata, PAGE_SZ);
+  __builtin_memcpy(result->bytes, bdata, PAGE_SZ);
 #ifdef QOS_REPLAY_BLK_PROFILE
   uint64_t copied = hal_mtime();
 #endif
@@ -662,9 +709,74 @@ static V h_blkRead(V d, V pv) {
 #ifdef QOS_REPLAY_BLK_PROFILE
   qos_replay_blk_cost((uw)UNTAG(pv), acquired - start, transferred - acquired, copied - transferred);
 #endif
-  return result;
+  return (V)result;
 }
 
+static V h_blkReadRange(V d, V pv, V nv) {
+  (void)d;
+  if (!ISINT(pv) || !ISINT(nv) || UNTAG(pv) < 0 || UNTAG(nv) < 1 || UNTAG(nv) > BLK_RANGE_MAX)
+    fpr_actor_fail("blk: invalid page range");
+  uw page = (uw)UNTAG(pv), count = (uw)UNTAG(nv);
+  if (!blk || blk_pages < count || page > blk_pages - count) fpr_actor_fail("blk: page out of range");
+  str_t *s = (str_t *)fpr_alloc(sizeof(str_t) + count * PAGE_SZ);
+  s->tid = T_STR; s->var = 0; s->len = count * PAGE_SZ;
+  /* DMA always targets driver storage. On timeout or caller death the
+   * existing orphan/reset protocol retains this entire range buffer. */
+  blk_lock();
+  blk_rw(page, (u32)s->len, 0);
+  __builtin_memcpy(s->bytes, bdata, s->len);
+  blk_unlock();
+  return (V)s;
+}
+FPR_FN(fpr_g_blkReadRange, h_blkReadRange, 3);
+/* The transfer may cover a partial final page; pad only the unused suffix. */
+static void stage_bytes(u8 *dst, const str_t *src, uw capacity) {
+  __builtin_memcpy(dst, src->bytes, src->len);
+  if (src->len < capacity) __builtin_memset(dst + src->len, 0, capacity - src->len);
+}
+
+static void stage_first_page(const str_t *src) {
+  stage_bytes(bdata, src, first_page_dirty);
+  first_page_dirty = src->len;
+}
+
+static void stage_payload(const str_t *src, uw capacity) {
+  if (!capacity) return;
+  u8 *dst = bdata + PAGE_SZ;
+  uw len = src->len;
+  __builtin_memcpy(dst, src->bytes, len);
+  if (len < capacity) {
+    if (payload_zero_start >= payload_zero_end || capacity <= payload_zero_start ||
+        len >= payload_zero_end) {
+      __builtin_memset(dst + len, 0, capacity - len);
+    } else {
+      if (len < payload_zero_start)
+        __builtin_memset(dst + len, 0, payload_zero_start - len);
+      if (capacity > payload_zero_end)
+        __builtin_memset(dst + payload_zero_end, 0, capacity - payload_zero_end);
+    }
+  }
+  if (capacity < payload_zero_start || capacity > payload_zero_end)
+    payload_zero_end = capacity;
+  payload_zero_start = len;
+}
+
+static V h_blkWriteRecord(V d, V pv, V hv, V sv) {
+  if (!ISINT(pv) || UNTAG(pv) < 0 || ISINT(hv) || TID(hv) != T_STR ||
+      ISINT(sv) || TID(sv) != T_STR) fpr_actor_fail("blk: invalid record write");
+  str_t *header = (str_t *)hv, *payload = (str_t *)sv;
+  if (header->len > PAGE_SZ || payload->len > (BLK_RANGE_MAX - 1) * PAGE_SZ) fpr_actor_fail("blk: record too large");
+  uw page = (uw)UNTAG(pv), pages = 1 + (payload->len + PAGE_SZ - 1) / PAGE_SZ;
+  (void)d;
+  if (!blk || blk_pages < pages || page > blk_pages - pages) fpr_actor_fail("blk: page out of range");
+  blk_lock();
+  stage_first_page(header);
+  stage_payload(payload, (pages - 1) * PAGE_SZ);
+  blk_rw(page, pages * PAGE_SZ, 1);
+  blk_unlock();
+  return TAG((sw)(header->len + payload->len));
+}
+FPR_FN(fpr_g_blkWriteRecord, h_blkWriteRecord, 4);
 static V h_blkWrite(V d, V pv, V sv) {
   (void)d;
   if (!ISINT(pv)) fpr_cpanic("blkWrite: page must be an Int");
@@ -673,8 +785,8 @@ static V h_blkWrite(V d, V pv, V sv) {
   if (s->len > PAGE_SZ) fpr_cpanic("blkWrite: payload exceeds one page");
   blk_check(pv);
   blk_lock();
-  for (u64 i = 0; i < PAGE_SZ; i++) bdata[i] = i < s->len ? s->bytes[i] : 0;
-  blk_rw((u64)UNTAG(pv), 1);
+  stage_first_page(s);
+  blk_rw((u64)UNTAG(pv), PAGE_SZ, 1);
   blk_unlock();
   return TAG((sw)s->len);
 }
@@ -682,10 +794,24 @@ static V h_blkWrite(V d, V pv, V sv) {
 FPR_FN(fpr_g_blkPages, h_blkPages, 1);
 FPR_FN(fpr_g_blkRead, h_blkRead, 2);
 FPR_FN(fpr_g_blkWrite, h_blkWrite, 3);
-/* Native has not negotiated/implemented VIRTIO_BLK_F_FLUSH yet. Never
- * present a completed page write as a durable device barrier. */
-static V h_blkFlush(V d) { (void)d; return TAG(1); }
+static V h_blkFlush(V d) {
+  (void)d;
+  if (!blk) return TAG(1);
+  blk_lock();
+  if (!blk_can_flush) { blk_unlock(); return TAG(1); }
+  blk_rw(0, 0, BLK_T_FLUSH);
+  blk_unlock();
+  return TAG(0);
+}
 FPR_FN(fpr_g_blkFlush, h_blkFlush, 1);
+
+extern int fpr_wait_any_until_c(V, uint64_t) __attribute__((weak));
+static V h_blkWaitInbox(V me, V until) {
+  sw us = UNTAG(until);
+  if (!fpr_wait_any_until_c || us < 0 || (uint64_t)us > UINT64_MAX / 10) return TAG(0);
+  return TAG(fpr_wait_any_until_c(me, (uint64_t)us * 10));
+}
+FPR_FN(fpr_g_blkWaitInbox, h_blkWaitInbox, 2);
 
 /* Native-only policy mechanism. (version, deadline microseconds, reset probes,
  * waiter factor). Negative configure codes: invalid -1, busy -2, stale -3,

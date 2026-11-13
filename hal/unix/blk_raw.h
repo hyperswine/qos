@@ -45,14 +45,15 @@ int64_t qos_blkraw_write(uint64_t page, const char *src, uint64_t len);
  * any host sync error.  Actor callers submit QOS_BLK_FLUSH below instead. */
 int64_t qos_blkraw_flush(void);
 
-enum { QOS_BLK_READ = 0, QOS_BLK_WRITE = 1, QOS_BLK_FLUSH = 2 };
+enum { QOS_BLK_READ = 0, QOS_BLK_WRITE = 1, QOS_BLK_FLUSH = 2, QOS_BLK_RANGE = 3, QOS_BLK_RECORD = 4 };
 
-/* Worker-owned buffers; release abandons a pending job safely. At most 64
- * queued+running jobs are admitted, including abandoned jobs. All jobs use
- * one FIFO worker.  A FLUSH (page=0, src=NULL, len=0) completes after every
- * previously admitted read/write and before any later job.  Its result is
- * 0 or -1; dst is ignored.  Completion only says what the host fsync calls
- * guarantee, not that arbitrary hardware has been power-loss qualified. */
+/* Each successful submission owns one reference and consumes one of 64
+ * admission slots until completion, even if its caller releases it early.
+ * Adjacent matching reads or flushes at the FIFO tail can return the same
+ * handle. Release once per successful submission. The worker owns its data,
+ * so each read caller can copy the result to its own destination before release.
+ * A FLUSH (page=0, src=NULL, len=0) observes all preceding writes. It returns
+ * 0 on host sync success or -1 on failure, and ignores the result destination. */
 void *qos_blkraw_submit(uint64_t page, const char *src, uint64_t len, int operation);
 int qos_blkraw_done(void *job);
 int64_t qos_blkraw_result(void *job, char *dst);

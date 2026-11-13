@@ -1,54 +1,95 @@
 E = use "elf-symbols".
+
 # STL vertices are little-endian IEEE binary32. Decode exactly into a double.
 coordinate bytes offset =
-  bits = E.number bytes True offset 4; exponent = (bits / 8388608) % 256;
-  fraction = bits % 8388608; sign = if bits >= 2147483648 then -1 else 1;
+  bits = E.number bytes True offset 4;
+  exponent = (bits / 8388608) % 256;
+  fraction = bits % 8388608;
+  sign = if bits >= 2147483648 then -1 else 1;
   power = if exponent == 0 then -149 else exponent - 150;
   mantissa = sign * (if exponent == 0 then fraction else fraction + 8388608);
-  if exponent == 255 then error "non-finite STL coordinate" else
-    if power < 0 then Num.div mantissa (2 ^ (0 - power)) else mantissa * (2 ^ power).
-vertex bytes offset = (coordinate bytes offset,coordinate bytes (offset + 4),coordinate bytes (offset + 8)).
-asciiVertex line = case Str.words (Str.replace "\t" " " (Str.trim line)) of
-    ["vertex",x,y,z] -> [(parseNum x,parseNum y,parseNum z)] | _ -> [].
+
+  if exponent == 255 then
+    error "non-finite STL coordinate"
+  else
+    if power < 0 then
+      Num.div mantissa (2 ^ (0 - power))
+    else
+      mantissa * (2 ^ power).
+
+vertex bytes offset = (coordinate bytes offset, coordinate bytes (offset + 4), coordinate bytes (offset + 8)).
+
+asciiVertex line =
+  case Str.words (Str.replace "\t" " " (Str.trim line)) of
+    ["vertex", x, y, z] -> [(parseNum x, parseNum y, parseNum z)]
+  | _ -> [].
+
 vertices path =
   bytes = E.readFile path; size = Bytes.len bytes;
   count = if size >= 84 then E.number bytes True 80 4 else 0;
-  binary = size >= 84 and (size == 84 + 50 * count or
-    Str.lower (case Utf8.decode (unwrap (Bytes.slice 0 5 bytes)) of Ok s -> s | Err _ -> "") != "solid");
+  binary = size >= 84 and (size == 84 + 50 * count or Str.lower (case Utf8.decode (unwrap (Bytes.slice 0 5 bytes)) of Ok s -> s | Err _ -> "") != "solid");
+
   if binary then
-    if size < 84 + 50 * count then error "truncated STL: {path}" else
-      List.concat (List.map (fn i -> start = 96 + 50 * i;
-        [vertex bytes start,vertex bytes (start + 12),vertex bytes (start + 24)]) (E.indices count))
-  else rows = List.concat (List.map asciiVertex (Str.lines (unwrap (Utf8.decode bytes))));
-       List.take (3 * (List.len rows / 3)) rows.
+    if size < 84 + 50 * count then
+      error "truncated STL: {path}"
+    else
+      List.concat
+        (List.map (fn i ->
+            start = 96 + 50 * i;
+            [vertex bytes start, vertex bytes (start + 12), vertex bytes (start + 24)])
+          (E.indices count))
+  else
+    rows = List.concat (List.map asciiVertex (Str.lines (unwrap (Utf8.decode bytes))));
+    List.take (3 * (List.len rows / 3)) rows.
+
 chunks : unsafe List String -> List String .
-chunks words = case words of [] -> [] | _ ->
-  ("\"" + Str.join " " (List.take 48 words) + " \"") :: chunks (List.drop 48 words).
-part : unsafe Int -> Bool -> String -> (String,String) .
+chunks words =
+  case words of
+    [] -> []
+  | _  -> ("\"" + Str.join " " (List.take 48 words) + " \"") :: chunks (List.drop 48 words).
+
+part : unsafe Int -> Bool -> String -> (String, String) .
 part scale floorIt spec =
   fields = Str.split 61 spec;
+
   case fields of name :: first :: rest ->
     path = Str.join "=" (first :: rest); points = vertices path;
-    mapped = List.map (fn p -> (x,y,z) = p; (x * scale,z * scale,(0 - y) * scale)) points;
-    low = case mapped of [] -> 0 | h :: t ->
-      (_,initial,_) = h; if floorIt then List.fold (fn m p -> (_,y,_) = p; if y < m then y else m) initial t else 0;
-    words = List.map (fn p -> (x,y,z) = p;
-      "{Num.round (x * 1000)} {Num.round ((y - low) * 1000)} {Num.round (z * 1000)}") mapped;
+    mapped = List.map (fn p -> (x, y, z) = p; (x * scale, z * scale, (0 - y) * scale)) points;
+
+    low = case mapped of
+      [] -> 0
+    | h :: t ->
+        (_, initial, _) = h;
+        if floorIt then
+          List.fold (fn m p -> (_, y, _) = p;
+                               if y < m then y else m)
+                    initial t
+        else
+          0;
+
+    words = List.map (fn p -> (x,y,z) = p; "{Num.round (x * 1000)} {Num.round ((y - low) * 1000)} {Num.round (z * 1000)}") mapped;
     n = List.len points / 3;
+
     _ = print "{name}: {n} triangles";
+
     (name,"# {name}: {n} triangles from {path}\n{name} = " + Str.join "\n  + " (chunks words) + ".")
   | _ -> error "expected NAME=STL".
-options : unsafe Int -> Bool -> List String -> List String -> (Int,Bool,List String) .
+
+options : unsafe Int -> Bool -> List String -> List String -> (Int, Bool, List String) .
 options scale floorIt paths argv = case argv of
-    [] -> (scale,floorIt,List.rev paths)
+    [] -> (scale, floorIt, List.rev paths)
   | "--scale" :: value :: rest -> options (parseNum value) floorIt paths rest
   | "--floor" :: rest -> options scale True paths rest
   | p :: rest -> options scale floorIt (p :: paths) rest.
+
 main : unsafe Unit -> Unit .
+
 > (scale,floorIt,paths) = options 1.0 False [] (args Unit);
-  case paths of out :: spec :: rest ->
-    parts = List.map (part scale floorIt) (spec :: rest);
-    declarations = List.map (fn p -> (_,body) = p; body) parts;
-    entries = List.map (fn p -> (name,_) = p; "(\"{name}\", {name})") parts;
-    writePath out (Str.join "\n" (["# generated by tools/mkmesh.sol -- do not edit; triangles as milli ints (x y z) x 3","unsafe module.",""] + declarations + ["","meshes = " + Str.join " :: " entries + " :: Nil.",""]))
-  | _ -> error "usage: mkmesh.sol OUT NAME=STL... [--scale S] [--floor]".
+  case paths of
+    out :: spec :: rest ->
+      parts = List.map (part scale floorIt) (spec :: rest);
+      declarations = List.map (fn p -> (_,body) = p; body) parts;
+      entries = List.map (fn p -> (name,_) = p; "(\"{name}\", {name})") parts;
+      writePath out (Str.join "\n" (["# generated by tools/mkmesh.sol -- do not edit; triangles as milli ints (x y z) x 3","unsafe module.",""] + declarations + ["","meshes = " + Str.join " :: " entries + " :: Nil.",""]))
+    | _ ->
+      error "usage: mkmesh.sol OUT NAME=STL... [--scale S] [--floor]".

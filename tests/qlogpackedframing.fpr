@@ -1,0 +1,11 @@
+#: expect qlogpackedframing: HOLDS
+unsafe program.
+Q = use "../programs/mods/qlog".
+reject frames = case frames of
+    Nil -> True
+  | f :: rest -> Q.packedCount f 0 (strlen f) 0 < 0 and reject rest.
+main =
+  frame = strJoin "" ["0 empty\n", "3 binary\n", chr 0, chr 10, chr 255];
+  bad = ["01 k\na", "-1 k\n", "1 \na", "2 k\na", "0 a b\n", "0 k", "0 k\nx", "999999999999999999999999 k\n"];
+  if Q.bulkWellFormed frame 0 (strlen frame) 2 and not (Q.bulkWellFormed frame 0 (strlen frame) 1) and Q.bulkWellFormed "" 0 0 0 and reject bad
+    then "qlogpackedframing: HOLDS" else error "incorrect batch framing".

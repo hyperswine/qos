@@ -54,23 +54,43 @@ publishChecked me fs text info bytes parsed =
   last = latest candidates "";
   case last == info.to or last == info.from of
     False -> Err "publication: stale predecessor"
-  | True -> case immutable me fs info bytes of
-      Err why -> Err why
-    | Ok u -> case last == info.to of
-        True -> Ok text
-      | False -> advertise me fs text info.
+  | True -> case Storage.request me (Storage.Owner fs) (SP.ReadLatest (imageKey info)) of
+      Ok existing -> if existing != bytes then Err "publication: immutable image collision" else
+        if last == info.to then Ok text else advertise me fs text info
+    | Err why -> if not (SP.missing why) then Err "publication image read: {SP.message why}" else
+        if last == info.to then writeMissing me fs info bytes text else
+          publishPair me fs text info bytes.
+# One publication owns both keys. Older Files owners and per-key namespace
+# adapters explicitly refuse this operation before writing either key.
+publishPair me fs text info bytes =
+  next = catalogRow text info;
+  key = imageKey info;
+  log = journal Unit;
+  prefix = "{strlen bytes} {key}\n";
+  suffix = "{strlen next} {log}\n";
+  if strlen prefix + strlen bytes + strlen suffix + strlen next > 4194304 then
+    publishPreparedSeparate me fs key bytes log next
+  else case FS.rpc me fs 13 "" (strJoin "" [prefix, bytes, suffix, next]) of
+      Ok u -> Ok next
+    | Err why -> if why == "storage: unknown request tag" or why == "unknown storage operation" then
+        publishPreparedSeparate me fs key bytes log next else Err "publication batch: {batchFailure why}".
+batchFailure why = if S.startsWith "storage service:" why and not (S.contains "outcome unknown" why) then "{why} (outcome unknown)" else why.
+publishPreparedSeparate me fs key bytes log next = case FS.append me fs key bytes of
+    Err why -> Err "publication image: {why}"
+  | Ok u -> appendCatalog me fs log next.
+writeMissing me fs info bytes text = case FS.append me fs (imageKey info) bytes of
+    Ok u -> Ok text
+  | Err why -> Err "publication image: {why}".
 latest : unsafe List C.Candidate -> String -> String .
 latest candidates acc = case candidates of
     Nil -> acc
   | c :: rest -> info = C.identity c; latest rest info.to.
-immutable me fs info bytes = case Storage.request me (Storage.Owner fs) (SP.ReadLatest (imageKey info)) of
-    Ok existing -> (case existing == bytes of True -> Ok Unit | False -> Err "publication: immutable image collision")
-  | Err why -> case SP.missing why of
-      True -> (case FS.append me fs (imageKey info) bytes of Ok u -> Ok Unit | Err why -> Err "publication image: {why}")
-    | False -> Err "publication image read: {SP.message why}".
+catalogRow text info = "{text}{info.name}\t{info.version}\t{info.from}\t{info.to}\t{archive info}\n".
 advertise me fs text info =
-  next = "{text}{info.name}\t{info.version}\t{info.from}\t{info.to}\t{archive info}\n";
-  case FS.append me fs (journal Unit) next of
+  next = catalogRow text info;
+  appendCatalog me fs (journal Unit) next.
+appendCatalog me fs log next =
+  case FS.append me fs log next of
     Ok u -> Ok next
   | Err why -> Err "publication journal: {why}".
 poll me fs name cursor = case snapshot me fs of Err why -> Err why | Ok text -> C.parse text name cursor.

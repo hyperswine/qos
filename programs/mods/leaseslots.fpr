@@ -51,21 +51,44 @@ freeHandle slots h now remaining = if h <= 0 or remaining <= 0 then 0 else
 access slots h client now = case lookup slots (h % 64) 32 of
     Occupied id url owner until -> if h == id and client == owner and now < until and Sys.alive owner then url else ""
   | other -> "".
-close slots h client = case lookup slots (h % 64) 32 of
-    Occupied id url owner until -> if h == id and client == owner then clear slots (h % 64) 32 else slots
-  | other -> slots.
+close slots h client =
+  (updated, changed) = closeBranch slots (h % 64) 32 h client;
+  updated.
+closeBranch : unsafe Slots -> Int -> Int -> Int -> Int -> (Slots, Bool) .
+closeBranch slots index width h client = case slots of
+    Empty -> (Empty, False)
+  | Occupied id url owner until -> if id == h and owner == client then (Empty, True) else (slots, False)
+  | Branch left right -> if index < width then
+        (updated, changed) = closeBranch left index (width / 2) h client;
+        if changed then (pruned updated right, True) else (slots, False)
+      else
+        (updated, changed) = closeBranch right (index - width) (width / 2) h client;
+        if changed then (pruned left updated, True) else (slots, False).
 
+simpleUntil : unsafe (Int -> Int -> Int -> String -> Result EP.IoV String) -> (Int -> Int -> Int -> String -> EP.IoV -> Result EP.IoV String) -> Int -> Unit .
 simpleUntil rd wr me = _ = Sys.loop (Empty, 1, 0) (step rd wr me); Unit.
 step rd wr me state =
   (slots, next, cursor) = state;
   msg = receive me;
-  live = sweep slots cursor (AC.nowUs Unit);
+  (live, following) = sweepCursor slots slots cursor 0 64;
   changed = case msg of
     (client, id, command) -> dispatch rd wr me live next (client, id) client command
   | stale -> (live, next);
   _ = drop msg;
   (after, serial) = changed;
-  (True, (after, serial, (cursor + 1) % 64)).
+  (True, (after, serial, following)).
+# An empty subtree covers a consecutive run of indices. Visit its successor
+# next turn; a later insertion into the skipped run is picked up on wrap.
+sweepCursor : unsafe Slots -> Slots -> Int -> Int -> Int -> (Slots, Int) .
+sweepCursor root node cursor base size = case node of
+    Empty -> (root, (base + size) % 64)
+  | Branch left right ->
+      half = size / 2;
+      if cursor < base + half then sweepCursor root left cursor base half
+      else sweepCursor root right cursor (base + half) half
+  | Occupied handle url client until ->
+      live = if AC.nowUs Unit >= until or not (Sys.alive client) then clear root cursor 32 else root;
+      (live, (cursor + 1) % 64).
 dispatch rd wr me slots next ret client command = case command of
     EP.Open url mode ->
       now = AC.nowUs Unit;
@@ -76,16 +99,20 @@ dispatch rd wr me slots next ret client command = case command of
           after = put slots (h % 64) 32 (Occupied h (strcat url "") client (now + 60000000));
           _ = AC.reply ret (EP.Opened h);
           (after, nextHandle h))
-  | EP.Timed until q -> if AC.nowUs Unit >= until then
+  | EP.Timed until q ->
+      now = AC.nowUs Unit;
+      if now >= until then
       _ = AC.reply ret (Err "endpoint: deadline exceeded before execution"); (slots, next)
-      else operate rd wr me slots next ret client until q
-  | other -> operate rd wr me slots next ret client (AC.nowUs Unit + 10000000) other.
-operate rd wr me slots next ret client until command = case command of
+      else operateAt rd wr me slots next ret client now until q
+  | other ->
+      now = AC.nowUs Unit;
+      operateAt rd wr me slots next ret client now (now + 10000000) other.
+operateAt rd wr me slots next ret client now until command = case command of
     EP.Close h -> _ = AC.reply ret (Ok 0); (close slots h client, next)
-  | EP.Read h n -> url = access slots h client (AC.nowUs Unit);
+  | EP.Read h n -> url = access slots h client now;
       _ = AC.reply ret (if url == "" then Err "no such handle" else rd until me client url);
       (slots, next)
-  | EP.Write h v -> url = access slots h client (AC.nowUs Unit);
+  | EP.Write h v -> url = access slots h client now;
       _ = AC.reply ret (if url == "" then Err "no such handle" else wr until me client url v);
       (slots, next)
   | other -> _ = AC.reply ret (Err "endpoint: invalid timed operation"); (slots, next).

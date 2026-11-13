@@ -31,6 +31,10 @@ sndMusic : String -> Int -> Int .
 
 # ---- block and net devices  (hal/virt/blk.c, net.c natively; hal/unix/*_raw.c portably)
 blkPages : a -> Int .
+blkPackPair : String -> String -> String -> String .
+blkWriteRecord : Device -> Int -> String -> String -> Int .
+blkWaitInbox : Int -> Int -> Int .
+blkReadRange : Device -> Int -> Int -> String .
 blkRead : a -> Int -> b .
 blkWrite : a -> Int -> b -> Unit .
 # 0 = durable host barrier, 1 = unsupported, negative = failed/outcome unknown.

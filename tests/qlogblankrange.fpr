@@ -1,0 +1,18 @@
+#: expect qlogblankrange: HOLDS
+unsafe program.
+Q = use "../programs/mods/qlog".
+B = use "std/blockio".
+AC = use "std/actor#201a0e9bf98a5154".
+Str = use "std/string".
+worker last me =
+  (a, id, cmd) = receive me;
+  _ = case cmd of
+      B.Timed until (B.ReadRange 0 8) -> AC.reply (a, id) (Ok (B.Page (Str.repeat 32768 (chr 0))))
+    | _ -> error "expected eight-page blank scan";
+  (b, next, tail) = receive me;
+  case tail of B.Timed until (B.Read 8) -> AC.reply (b, next) (Ok (B.Page last))
+             | _ -> error "expected single tail page".
+scan tail = Q.blankDisk (Q.routed (spawn (worker tail))) 0 9.
+main =
+  if scan (Str.repeat 4096 (chr 0)) and not (scan (strcat (Str.repeat 4095 (chr 0)) "X")) and not (scan "")
+    then "qlogblankrange: HOLDS" else error "invalid blank-disk decision".

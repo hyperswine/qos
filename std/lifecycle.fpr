@@ -7,7 +7,7 @@
 AC = use "std/actor#201a0e9bf98a5154".
 Net = use "std/net#464ca3ee0d89bc64".
 FS = use "std/fs".
-IO = use "std/blockio#8b4ffa1467ca03a5".
+IO = use "std/blockio".
 
 Context = Type (Context Int Int Int Int).
 Request = Type (Stop).

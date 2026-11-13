@@ -19,7 +19,12 @@
 
 #include <stdint.h>
 
-#define QOS_ABI_VERSION 22u /* v22: the host's memory size (run budgets); v21: worker-backed compile (tag 7 retired); v20: app worker doorbells and timer parking; v19: explicit lifecycle; v18: tag 4 checks RELOC and IMPORT against LOAD's relsha */
+typedef struct {
+  const char *header, *payload;
+  uint64_t header_bytes, payload_bytes;
+} qos_blk_record_t;
+
+#define QOS_ABI_VERSION 24u /* v24: block operation 4 writes a padded record batch; v23: block operation 3 reads len consecutive pages; v22: the host's memory size (run budgets); v21: worker-backed compile (tag 7 retired); v20: app worker doorbells and timer parking; v19: explicit lifecycle; v18: tag 4 checks RELOC and IMPORT against LOAD's relsha */
 
 /* ---- the address plan (linux-x86-64) --------------------------------
  * The host is linked non-PIE (default 0x400000 text); the arena is a
@@ -232,7 +237,8 @@ typedef struct {
    * the app's buddy frees a large block: give its pages back to the OS
    * (the arena is a reservation; only the host can un-commit it) */
   void (*heap_release)(void *p, uint64_t bytes);
-  /* v15: worker-backed disk requests, with copied buffers. */
+  /* v15: worker-backed disk requests with owned buffers. Release one reference
+   * per successful submit, including when two submissions return equal handles. */
   void *(*blk_submit)(uint64_t page, const char *src, uint64_t len, int write);
   int (*blk_done)(void *job);
   int64_t (*blk_result)(void *job, char *dst);

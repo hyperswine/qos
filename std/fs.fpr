@@ -21,10 +21,10 @@
 # payloads are first-class -- records are length-carried end to end.
 # ============================================================================
 
-QL = use "../programs/mods/qlog#045dbfa936f832eb".
+QL = use "../programs/mods/qlog".
 SVC = use "../programs/mods/svc#75479fb6d5f34670".
 AC = use "std/actor#201a0e9bf98a5154".
-B = use "std/blockio#8b4ffa1467ca03a5".
+B = use "std/blockio".
 EP = use "../programs/mods/ep#c66ad65e68dd97f5".
 Wire = use "std/storage#a8f7ee14e1efae76".
 ED = use "../programs/mods/epdeadline#08a8ecf9d7c57d85".
@@ -56,28 +56,50 @@ readyBlock me fs = case stats me fs "" of
 owner hart block admin me =
   _ = Sys.loop (0, "", 0) (ownerStep hart block admin me); Unit.
 ownerStep hart block admin me state =
-  (child, offline, attempts) = state;
-  borrowed = receive me;
-  request = keep borrowed;
-  _ = drop borrowed;
+  request = receive me;
   case request of
     SVC.TimedRpc caller id until tag key payload -> ownerDispatch hart block admin me state request
   | SVC.Rpc caller tag key payload -> ownerDispatch hart block admin me state request
-  | stale -> (True, state).
+  | stale -> _ = drop request; (True, state).
 ownerDispatch hart block admin me state request =
   (child, offline, attempts) = state;
   (ret, (until, (tag, key, payload))) = requestFields request;
   (caller, id, correlated) = ret;
   (next, reason, used, answer) = if Wire.expired until then
+      _ = drop request;
       (child, offline, attempts, Err "storage: deadline exceeded before execution")
     else case Wire.validate key payload of
-        Err why -> (child, offline, attempts, Err why)
+        Err why -> _ = drop request; (child, offline, attempts, Err why)
       | Ok u -> if tag == 7 then
+          _ = drop request;
           (n, r, result) = quiesceOwner admin caller child offline;
           (n, r, attempts, result)
-        else ownerBudgetUntil until hart block child offline attempts me tag key payload;
+        else if child != 0 and offline == "" then
+          (n, r, result) = forwardRunning until me child (if tag == 13 then 7 else tag) key payload request;
+          (n, r, attempts, result)
+        else
+          # A cold start can receive a child handshake before forwarding.
+          # Retain the two wire fields across that receive.
+          ownedKey = keep key;
+          ownedPayload = keep payload;
+          _ = drop request;
+          ownerBudgetUntil until hart block child offline attempts me (if tag == 13 then 7 else tag) ownedKey ownedPayload;
   _ = Wire.reply ret answer;
   (True, (next, reason, used)).
+# Send while the incoming envelope owns its fields. Release it before the
+# selective receive, which may itself retire earlier mailbox roots.
+forwardRunning until me child tag key payload request =
+  id = Sys.nextId Unit;
+  admission = if Wire.expired until then Err "storage service: deadline exceeded before admission"
+    else case send child (SVC.TimedRpc me id until tag key payload) of
+        Err why -> Err "storage service: {why}"
+      | Ok u -> Ok Unit;
+  _ = drop request;
+  case admission of
+      Err why -> ownerAnswer child (Err why)
+    | Ok u -> (case AC.awaitReplyUntil until me child id of
+          Err why -> ownerAnswer child (Err "storage service: {Wire.uncertain tag why}")
+        | Ok result -> (child, "", result)).
 ownerBudgetUntil until hart block child offline attempts me tag key payload =
   if offline != "" then (0, offline, attempts, Err "storage offline: {offline}") else
   if child == 0 and attempts >= 3 then
@@ -158,7 +180,9 @@ ownerPreparedUntil until ready me tag key payload = case ready of
 ownerAnswer : unsafe Int -> Result (Result String String) String -> (Int, String, Result String String) .
 ownerAnswer child reply = case reply of
     Ok answer -> (child, "", answer)
-  | Err why -> _ = kill child; (0, "", Err why).
+  | Err why -> if why == "storage service: mailbox full" or why == "storage service: deadline exceeded before admission"
+      then (child, "", Err why)
+      else _ = kill child; (0, "", Err why).
 
 # the send is checked, and a Files service that refused the request or has
 # ended is an Err like any other storage failure -- never a caller left

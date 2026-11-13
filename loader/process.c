@@ -136,7 +136,7 @@ static proc_image_t *image_of_pid(uw pid) {
 static void image_quiet(uw pid) {
   fpr_lock(&g_img_lock);
   proc_image_t *pi = image_of_pid(pid);
-  if (!pi || pi->ending || pi->placing || fpr_pid_live(pid)) { fpr_unlock(&g_img_lock); return; }
+  if (!pi || pi->ending || pi->placing || fpr_pid_has_live(pid)) { fpr_unlock(&g_img_lock); return; }
   pi->ending = 1;
   fpr_image_remove(&pi->im);
   fpr_unlock(&g_img_lock);
@@ -170,6 +170,20 @@ void qos_trace_received(V owner, V caller, V id, uint64_t received);
 
 /* Older release runtimes retain the deadline-bounded poll fallback. */
 extern int fpr_wait_from_until_c(V me, V from, uint64_t deadline_ticks) __attribute__((weak));
+
+extern int fpr_receive_from_status_c(V me, V from, V *message) __attribute__((weak));
+
+static int store_poll(V me, V owner, V *message) {
+  if (fpr_receive_from_status_c) return fpr_receive_from_status_c(me, owner, message);
+  V result = fpr_receive_from_now_c(me, owner);
+  if (((hdr_t *)result)->var == 0) {
+    *message = FPR_FLD(result, 0);
+    return 1;
+  }
+  str_t *why = (str_t *)FPR_FLD(result, 0);
+  return why->len == 5 && why->bytes[0] == 'e' && why->bytes[1] == 'm' &&
+         why->bytes[2] == 'p' && why->bytes[3] == 't' && why->bytes[4] == 'y' ? 0 : -1;
+}
 
 sw qos_store_call(uw tag, const char *pay, uw plen, char *out, uw outcap) {
   V owner = g_store_actor;
@@ -212,11 +226,10 @@ sw qos_store_call(uw tag, const char *pay, uw plen, char *out, uw outcap) {
     if (now >= until)
       return store_refused(tag == 2 ? "storage service: deadline exceeded (outcome unknown)" :
                            "storage service: deadline exceeded", out, outcap);
-    V polled = fpr_receive_from_now_c((V)me, owner);
-    if (((hdr_t *)polled)->var != 0) {
-      str_t *why = (str_t *)FPR_FLD(polled, 0);
-      if (why->len == 5 && why->bytes[0] == 'e' && why->bytes[1] == 'm' &&
-          why->bytes[2] == 'p' && why->bytes[3] == 't' && why->bytes[4] == 'y') {
+    V message;
+    int poll_status = store_poll((V)me, owner, &message);
+    if (poll_status <= 0) {
+      if (poll_status == 0) {
         int waited = fpr_wait_from_until_c ? fpr_wait_from_until_c((V)me, owner, until * 10) : 0;
         if (waited) {
 #if QOS_STORE_WAIT_STATS
@@ -243,7 +256,6 @@ sw qos_store_call(uw tag, const char *pay, uw plen, char *out, uw outcap) {
 #ifdef QOS_STORE_REPLY_TRACE
     uint64_t received = hal_mtime();
 #endif
-    V message = FPR_FLD(polled, 0);
     if (ISINT(message) || TID(message) != T_TUP2) {
       fpr_arc_decref(message);
       return store_refused(tag == 2 ? "storage: invalid correlated reply (outcome unknown)" :

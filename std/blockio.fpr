@@ -7,7 +7,7 @@ Wire = use "std/storage#a8f7ee14e1efae76".
 
 Sys.alive : Int -> Bool .
 
-Request = Type (Timed Int Request | Capacity | Read Int | Write Int String | GetBudget | Configure (Int, Int, Int, Int) | Status | Cancel Int | CancelFor Int Int | Drain | Completed (Result Reply String) | Flush).
+Request = Type (Timed Int Request | Capacity | Read Int | Write Int String | GetBudget | Configure (Int, Int, Int, Int) | Status | Cancel Int | CancelFor Int Int | Drain | Completed (Result Reply String) | Flush | ReadRange Int Int | WriteRecord Int String String).
 Reply = Type (Pages Int | Page String | Written Int | Budget (Int, Int, Int, Int) | State Int Int Bool | Cancelled Bool | Drained | Flushed Bool).
 
 # State = admission mode (0 open, 1 draining, 2 drained), queued I/O, active.
@@ -15,7 +15,8 @@ Context = Type (Context Int Device (Unit -> Result Reply String) ((Int, Int, Int
 Pending = Type (Pending Int Int Int Request).
 Active = Type (Idle Int Int Int | Running Int Int Int Int Bool Int Int | Offline).
 Mode = Type (Open | Closing Int Int | Closed).
-Owner = Type (Owner Active (List Pending) Int Mode).
+Queue = Type (Queue (List Pending) (List Pending)).
+Owner = Type (Owner Active Queue Int Mode).
 
 unsupported q = Err "block: native budgets unsupported".
 
@@ -57,7 +58,7 @@ flatten : Result (Result Reply String) String -> Result Reply String .
 flatten r = case r of Ok reply -> reply | Err why -> Err "block service: {why}".
 
 actor : unsafe Context -> Int -> Unit .
-actor ctx me = _ = Sys.loop (ctx, Owner (Idle 0 0 16) Nil 0 Open) (blockStep me); Unit.
+actor ctx me = _ = Sys.loop (ctx, Owner (Idle 0 0 16) (Queue Nil Nil) 0 Open) (blockStep me); Unit.
 
 loop : unsafe Context -> Owner -> Int -> Unit .
 loop ctx state me = _ = Sys.loop (ctx, state) (blockStep me); Unit.
@@ -65,34 +66,47 @@ loop ctx state me = _ = Sys.loop (ctx, state) (blockStep me); Unit.
 blockStep : unsafe Int -> (Context, Owner) -> (Bool, (Context, Owner)) .
 blockStep me (ctx, state) =
   ready = advance ctx state me;
-  polled = case ready of
-      Owner (Idle worker relay remaining) Nil count mode -> Ok (receive me)
-    | Owner Offline Nil count mode -> Ok (receive me)
-    | other -> receiveNow me;
-  next = case polled of
-      Err why -> _ = Sys.sleepUs 100; ready
-    | Ok borrowed ->
-        (from, id, q) = keep borrowed;
-        _ = drop borrowed;
-        case q of
-            Timed until command -> handleUntil until ctx ready me from id command
-          | legacy -> handleUntil (AC.nowUs Unit + 10000000) ctx ready me from id legacy;
+  next = case ready of
+      Owner (Idle worker relay remaining) (Queue Nil Nil) count mode -> handleMessage ctx ready me (receive me)
+    | Owner Offline (Queue Nil Nil) count mode -> handleMessage ctx ready me (receive me)
+    | Owner (Running from id worker relay cancelled until remaining) queue count mode -> pollActive ctx ready me until
+    | other -> (case receiveNow me of Err why -> ready | Ok message -> handleMessage ctx ready me message);
   (True, (ctx, next)).
+
+handleMessage ctx ready me borrowed =
+  (from, id, q) = borrowed;
+  handled = case q of
+      Completed result -> finish ready from id result
+    | Timed until command -> handleUntil until ctx ready me from id command
+    | legacy -> handleUntil (AC.nowUs Unit + 10000000) ctx ready me from id legacy;
+  _ = drop borrowed;
+  handled.
+
+# Return the next owner state directly so successful receives need no extra Result.
+pollActive ctx ready me until = case receiveNow me of
+    Ok message -> handleMessage ctx ready me message
+  | Err why -> if AC.nowUs Unit >= until then ready else
+      _ = if blkWaitInbox me until == 0 then Sys.sleepUs 100 else Unit;
+      if AC.nowUs Unit >= until then ready else pollActive ctx ready me until.
 
 handleUntil : unsafe Int -> Context -> Owner -> Int -> Int -> Int -> Request -> Owner .
 handleUntil until ctx state me from id q =
   if AC.nowUs Unit >= until then respond state from id (Err "block: deadline exceeded before I/O") else
   case q of
       Read p -> admitUntil until ctx state me from id q
+    | ReadRange p count -> admitUntil until ctx state me from id q
     | Write p bytes -> if strlen bytes > 4096 then respond state from id (Err "block: payload exceeds one page") else admitUntil until ctx state me from id q
+    | WriteRecord p header payload -> if strlen header > 4096 or strlen payload > 7 * 4096 then respond state from id (Err "block: record exceeds request limit") else admitUntil until ctx state me from id q
     | Flush -> flushRequestUntil until ctx state me from id
     | Timed inner command -> handleUntil (if inner < until then inner else until) ctx state me from id command
     | other -> handle ctx state me from id other.
 
 advance ctx (Owner Offline queue count mode) me =
-  _ = failPending queue;
+  Queue front back = queue;
+  _ = failPending front;
+  _ = failPending (reversePending back Nil);
   _ = case mode of Closing from id -> AC.reply (from, id) (Err "block: helper restart budget exhausted") | other -> Ok Unit;
-  Owner Offline Nil 0 (case mode of Closing from id -> Closed | other -> mode).
+  Owner Offline (Queue Nil Nil) 0 (case mode of Closing from id -> Closed | other -> mode).
 
 failPending : unsafe List Pending -> Unit .
 failPending Nil = Unit.
@@ -103,12 +117,14 @@ again : unsafe (Context, Owner) -> Int -> Unit .
 again pair me = (ctx, state) = pair; loop ctx state me.
 
 advance : unsafe Context -> Owner -> Int -> Owner .
-advance ctx (Owner (Idle worker relay remaining) queue count mode) me = case queue of
+advance ctx (Owner (Idle worker relay remaining) (Queue front back) count mode) me = case front of
     Pending from id until q :: rest -> if AC.nowUs Unit >= until then
       _ = AC.reply (from, id) (Err "block: deadline exceeded before I/O");
-      advance ctx (Owner (Idle worker relay remaining) rest (count - 1) mode) me
-    else Owner (start ctx worker relay remaining me from id until q) rest (count - 1) mode
-  | Nil -> drained me worker relay remaining mode.
+      advance ctx (Owner (Idle worker relay remaining) (Queue rest back) (count - 1) mode) me
+    else Owner (start ctx worker relay remaining me from id until q) (Queue rest back) (count - 1) mode
+  | Nil -> (case back of
+      Nil -> drained me worker relay remaining mode
+    | _ -> advance ctx (Owner (Idle worker relay remaining) (Queue (reversePending back Nil) Nil) count mode) me).
 advance ctx (Owner (Running from id worker relay cancelled until remaining) queue count mode) me =
   if AC.nowUs Unit < until then Owner (Running from id worker relay cancelled until remaining) queue count mode else
     _ = kill worker;
@@ -117,8 +133,8 @@ advance ctx (Owner (Running from id worker relay cancelled until remaining) queu
     advance ctx (Owner (Idle 0 0 remaining) queue count mode) me.
 
 drained me worker relay remaining mode = case mode of
-    Closing from id -> _ = AC.reply (from, id) (Ok Drained); Owner (Idle worker relay remaining) Nil 0 Closed
-  | other -> Owner (Idle worker relay remaining) Nil 0 other.
+    Closing from id -> _ = AC.reply (from, id) (Ok Drained); Owner (Idle worker relay remaining) (Queue Nil Nil) 0 Closed
+  | other -> Owner (Idle worker relay remaining) (Queue Nil Nil) 0 other.
 
 # Keep one worker and one relay across successful I/O. Actor identities are
 # immortal, so spawning these per request would grow the global ledger forever.
@@ -165,10 +181,25 @@ completionTurn : unsafe Int -> Int -> (Int, Int) -> Unit .
 completionTurn owner me message =
   (worker, token) = message;
   _ = drop message;
-  result = flattenIO (AC.awaitReply me worker token);
-  case AC.sendSure me owner (me, token, Completed result) of
-      False -> Unit
-    | True -> fresh = AC.boundary me owner; completion fresh me.
+  relayWorkerReply owner me worker token.
+
+# A worker reply remains borrowed until the next receive. Send it to the
+# owner before dropping the envelope, including any mailbox-full retries.
+relayWorkerReply : unsafe Int -> Int -> Int -> Int -> Unit .
+relayWorkerReply owner me worker token = case receiveFromRes me worker of
+    Err why -> relayNext owner me (AC.sendSure me owner (me, token, Completed (Err "block device: {why}")))
+  | Ok envelope ->
+      (rid, result) = envelope;
+      if rid != token then
+        _ = drop envelope;
+        relayWorkerReply owner me worker token
+      else
+        sent = AC.sendSure me owner (me, token, Completed result);
+        _ = drop envelope;
+        relayNext owner me sent.
+relayNext owner me sent = case sent of
+    False -> Unit
+  | True -> fresh = AC.boundary me owner; completion fresh me.
 
 flattenIO : Result (Result Reply String) String -> Result Reply String .
 flattenIO r = case r of Ok reply -> reply | Err why -> Err "block device: {why}".
@@ -226,12 +257,16 @@ admitUntil until ctx state me from id q = case state of Owner active queue count
     Open -> if isOffline active then respond state from id (Err "block: helper restart budget exhausted") else if count >= 64 then respond state from id (Err "block: queue full") else enqueueUntil until ctx active queue count me from id q
   | other -> respond state from id (Err "block: draining").
 
-enqueueUntil : unsafe Int -> Context -> Active -> List Pending -> Int -> Int -> Int -> Int -> Request -> Owner .
+enqueueUntil : unsafe Int -> Context -> Active -> Queue -> Int -> Int -> Int -> Int -> Request -> Owner .
 enqueueUntil until ctx (Idle worker relay remaining) queue count me from id q = Owner (start ctx worker relay remaining me from id until q) queue count Open.
-enqueueUntil until ctx active queue count me from id q = Owner active (push queue (Pending from id until q)) (count + 1) Open.
+enqueueUntil until ctx active (Queue front back) count me from id q = Owner active (Queue front (Pending from id until (keep q) :: back)) (count + 1) Open.
 
 isOffline Offline = True.
 isOffline _ = False.
+
+reversePending : unsafe List Pending -> List Pending -> List Pending .
+reversePending Nil acc = acc.
+reversePending (entry :: rest) acc = reversePending rest (entry :: acc).
 
 push : unsafe List Pending -> Pending -> List Pending .
 push Nil item = item :: Nil.
@@ -261,20 +296,43 @@ cancel state from id caller target = case state of Owner active queue count mode
   | Idle worker relay remaining -> cancelQueued state from id caller target
   | Offline -> cancelQueued state from id caller target.
 
+Removal = Type (Absent | Removed (List Pending)).
 cancelQueued : unsafe Owner -> Int -> Int -> Int -> Int -> Owner .
-cancelQueued state from id caller target = case state of Owner active queue count mode ->
-  (found, rest) = remove queue caller target;
-  respond (Owner active rest (if found then count - 1 else count) mode) from id (Ok (Cancelled found)).
+cancelQueued state from id caller target = case state of Owner active (Queue front back) count mode ->
+  case removePending front caller target of
+      Removed rest -> respond (Owner active (Queue rest back) (count - 1) mode) from id (Ok (Cancelled True))
+    | Absent -> (case removeOldestBack back caller target of
+          Absent -> respond state from id (Ok (Cancelled False))
+        | Removed rest -> respond (Owner active (Queue front rest) (count - 1) mode) from id (Ok (Cancelled True))).
 
-remove : unsafe List Pending -> Int -> Int -> (Bool, List Pending) .
-remove Nil caller target = (False, Nil).
-remove (Pending from id until q :: rest) caller target =
+# The back is newest first. Inspect older entries before choosing a matching token.
+removeOldestBack : unsafe List Pending -> Int -> Int -> Removal .
+removeOldestBack Nil caller target = Absent.
+removeOldestBack (entry :: rest) caller target =
+  case removeOldestBack rest caller target of
+      Removed tail -> Removed (entry :: tail)
+    | Absent ->
+        Pending from id until q = entry;
+        if from == caller and id == target then
+          _ = AC.reply (from, id) (Err "block: request cancelled before I/O");
+          Removed rest
+        else Absent.
+
+removePending : unsafe List Pending -> Int -> Int -> Removal .
+removePending Nil caller target = Absent.
+removePending (entry :: rest) caller target =
+  Pending from id until q = entry;
   if from == caller and id == target then
     _ = AC.reply (from, id) (Err "block: request cancelled before I/O");
-    (True, rest)
-  else
-    (found, tail) = remove rest caller target;
-    (found, Pending from id until q :: tail).
+    Removed rest
+  else case removePending rest caller target of
+      Absent -> Absent
+    | Removed tail -> Removed (entry :: tail).
+
+remove : unsafe List Pending -> Int -> Int -> (Bool, List Pending) .
+remove queue caller target = case removePending queue caller target of
+    Absent -> (False, queue)
+  | Removed rest -> (True, rest).
 
 drain state from id = case state of Owner active queue count mode ->
   case mode of
@@ -290,9 +348,8 @@ io owner dev me = case receiveFromRes me owner of
 ioTurn : unsafe Int -> Device -> Int -> (Int, Int, Request) -> Unit .
 ioTurn owner dev me message =
   (relay, rid, borrowed) = message;
-  q = keep borrowed;
+  result = operate dev borrowed;
   _ = drop message;
-  result = operate dev q;
   case AC.sendSure me relay (rid, result) of
       False -> Unit
     | True -> fresh = AC.boundary me (owner, dev); ioAgain fresh me.
@@ -302,7 +359,9 @@ ioAgain pair me = (owner, dev) = pair; io owner dev me.
 
 operate dev q = case q of
     Read p -> readOne dev p
+  | ReadRange p count -> readRange dev p count
   | Write p bytes -> writeOne dev p bytes
+  | WriteRecord p header payload -> writeRecord dev p header payload
   | Flush -> flushOne dev
   | other -> Err "block: invalid I/O request".
 
@@ -313,8 +372,22 @@ flushOne dev = case blkFlush dev of
 
 readOne dev p = if validPage dev p then Ok (Page (blkRead dev p)) else Err "block: page out of range".
 
+# One owner admission and reply for up to eight consecutive 4 KiB pages.
+# Check the complete interval before starting the first device operation.
+readRange dev p count =
+  if count < 1 or count > 8 then Err "block: range must contain 1 to 8 pages" else
+    if p < 0 or p > blkPages dev - count then Err "block: page out of range" else
+      Ok (Page (blkReadRange dev p count)).
+
 writeOne dev p bytes = if not (validPage dev p) then Err "block: page out of range" else if strlen bytes > 4096 then Err "block: payload exceeds one page" else written dev p bytes.
 
 written dev p bytes = _ = blkWrite dev p bytes; Ok (Written (strlen bytes)).
 
 validPage dev p = p >= 0 and p < blkPages dev.
+
+# Admit a header and up to seven payload pages under one worker request.
+writeRecord dev p header payload =
+  size = strlen payload;
+  if strlen header > 4096 or size > 7 * 4096 then Err "block: record exceeds request limit"
+  else if p < 0 or p > blkPages dev - 1 - (size + 4095) / 4096 then Err "block: page out of range"
+  else Ok (Written (blkWriteRecord dev p header payload)).

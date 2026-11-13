@@ -148,8 +148,8 @@ $(BUILD)/qa0/%.qa: $(FPR)/apps/%.toml $(FPR)/tools/qa-placeholder.sol
 	@mkdir -p $(BUILD)/qa0
 	"$(SOL)" "$(FPR)/tools/qa-placeholder.sol" "$<" "$@"
 
-$(BUILD)/apps_data.c: $(patsubst %,$(BUILD)/qa0/%.qa,$(QAPPS)) $(FPR)/tools/qa-registry.sol
-	"$(SOL)" "$(FPR)/tools/qa-registry.sol" "$@" $(patsubst %,$(BUILD)/qa0/%.qa,$(QAPPS))
+$(BUILD)/apps_data.c: $(patsubst %,$(BUILD)/qa0/%.qa,$(QAPPS)) ../tools/qa-registry.sol
+	"$(SOL)" "../tools/qa-registry.sol" "$@" $(patsubst %,$(BUILD)/qa0/%.qa,$(QAPPS))
 
 # SYSTEM: the kernel program (a test kernel, e.g. tests/nativeimage.fpr,
 # can stand in for it; pair it with KERNEL=<another elf>)
