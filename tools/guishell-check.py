@@ -306,7 +306,7 @@ def check(out):
         f'PLUG_OUT={profile / "plugmini.qa"}', f'BUILD={out / "mini-build"}')
     (profile / 'broken.qa').write_bytes(b'not a QA archive')
     disk = out / 'check.disk'
-    run('python3', 'tools/mkdisk.py', disk, 32,
+    run(os.environ.get("SOL", "sol"), 'tools/mkdisk.sol', disk, 32,
         *[profile / (name + '.qa') for name in ['clock', 'logs', 'browser', 'disk', 'terminal', 'editor', 'plugmini', 'broken']])
     run('make', '-s', 'qos-app', 'PROG=tests/guishell.fpr',
         f'QA_OUT={out / "unit.qa"}', f'BUILD={out / "unit-build"}')

@@ -46,7 +46,7 @@ directories or thread app.qa paths by hand again.
     ./qos.py serve tests/mvuweb.fpr --port 8080 LiveView app, URL printed
     ./qos.py native                 kernel + disk + interactive QEMU boot
     ./qos.py native --apps a.qa b.qa --smoke    seeded, scripted boot check
-    ./qos.py disk my.img 8 a.qa     seed a QLOG image (mkdisk)
+    ./qos.py disk seed my.img 8 a.qa     seed a QLOG image (mkdisk)
     ./qos.py commit mods/qlog.fpr   fpr commit (the .fpr store)
     ./qos.py lock --check           every `use "x#hash"` pin has a committed
                                     version; fpr.lock is current
@@ -92,8 +92,7 @@ QOS = ROOT / "qos"
 # ROOT is written -- every artifact goes to the workspace
 INSTALLED = (ROOT / ".installed").is_file()
 if INSTALLED:
-    # tools/mkimports.py and mkexports.py import mkqa; without this the
-    # first build would leave tools/__pycache__/ inside the installed tree
+    # Keep Python bytecode caches out of the installed tree.
     os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 
 
@@ -365,11 +364,9 @@ def build_app(prog, harts=None, out=None, build=None, manifest=None):
     out.mkdir(parents=True, exist_ok=True)
     qa = out / f"{Path(prog).stem}.qa"
     say(f"qos-app {prog} -> {rel(qa)}")
-    target = "qos-app"  # qos-app.mk picks the image this host's qosp runs
-    cmd = ["make", "-s", target, f"PROG={prog}", f"QA_OUT={qa}",
-           f"BUILD={build or WS.build}"] + manifest_make_vars(manifest)
-    if harts:
-        cmd.append(f"HARTS={harts}")
+    cmd = [os.environ.get("SOL", "sol"), ROOT / "tools/build-checkout-app.sol",
+           "app", prog, qa, build or WS.build, str(harts) if harts else "",
+           *manifest_make_vars(manifest)]
     sh(cmd, cwd=ROOT, quiet=True)
     return qa
 
@@ -378,19 +375,16 @@ def build_plugins(prog, plugins, size_mb=8):
     """Build each .fpr as a (relocatable) plugin .qa, seed a fresh QLOG
     image named after the program, return its path: one plugin-qa per
     module, then mkdisk."""
-    qas = []
+    pairs = []
     for p in plugins:
         r = resolve_prog(p)
         out = WS.build / f"{Path(r).stem}.qa"
         say(f"plugin-qa {r}")
-        sh(["make", "-s", "plugin-qa",
-            f"PROG={r}", f"PLUG_OUT={out}"] + WS.make_vars(),
-           cwd=ROOT, quiet=True)
-        qas.append(str(out))
+        pairs.extend([r, out])
     img = WS.build / f"plugdisk-{Path(prog).stem}.img"
-    say(f"disk: {rel(img)} <- {' '.join(Path(q).name for q in qas)}")
-    sh([sys.executable, str(ROOT / "tools" / "mkdisk.py"), str(img), str(size_mb)] + qas,
-       cwd=WS.build, quiet=True)
+    say(f"disk: {rel(img)} <- {' '.join(q.name for q in pairs[1::2])}")
+    sh([os.environ.get("SOL", "sol"), ROOT / "tools/build-checkout-app.sol", "plugins",
+        WS.build, ROOT / "tools/mkdisk.sol", img, str(size_mb), *pairs], cwd=ROOT, quiet=True)
     return img
 
 
@@ -1178,7 +1172,7 @@ def cmd_native(a):
     if a.apps:
         disk = WS.path("disk-seeded.img")
         say(f"seeding {disk.name} with {len(a.apps)} app(s)")
-        sh([sys.executable, str(ROOT / "tools" / "mkdisk.py"), str(disk),
+        sh([os.environ.get("SOL", "sol"), str(ROOT / "tools" / "mkdisk.sol"), str(disk),
             "8"] + [str(Path(p).resolve()) for p in a.apps], cwd=WS.out)
     qemu = ["qemu-system-riscv64", "-accel", "tcg,thread=multi",
             "-machine", "virt", "-smp", str(a.smp), "-m", a.mem,
@@ -1214,9 +1208,8 @@ def cmd_native(a):
     return subprocess.call(qemu, cwd=WS.out)
 
 def cmd_disk(a):
-    build_fpr()  # apps may have just been rebuilt; mkdisk itself is pure
     say(f"mkdisk {a.img} ({a.size_mb}MB, {len(a.apps)} app(s))")
-    sh([sys.executable, str(ROOT / "tools" / "mkdisk.py"), a.img, str(a.size_mb)] + a.apps, cwd=Path.cwd())
+    sh([os.environ.get("SOL", "sol"), str(ROOT / "tools" / "mkdisk.sol"), a.img, str(a.size_mb)] + a.apps, cwd=Path.cwd())
 
 # ---- fprisc: the one path, and its pin for releases ---------------------------
 

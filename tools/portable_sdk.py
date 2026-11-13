@@ -306,6 +306,12 @@ def native():
     fail(f"desktop SDK v2 does not support {machine}")
 
 
+def sol_tool(sdk, name):
+    runtime = os.environ.get("SOL")
+    launcher = [runtime] if runtime else [sdk / "compiler/fpr", "sol"]
+    return [*launcher, sdk / "tools" / (name + ".sol")]
+
+
 def environment(sdk):
     # Do not inherit checkout/module overrides from a contributor's shell.
     env = {k: v for k, v in os.environ.items() if not k.startswith("FPR_") and k != "FPRISC_ROOT"}
@@ -381,7 +387,7 @@ def build(where, compiler=None, verbose=False):
         first, image, moved = (work / x for x in ("first.elf", "image.elf", "moved.elf"))
         command(common + ["--defsym=PLUG_BASE=0", "--unresolved-symbols=ignore-all", *objects, "-o", first])
         stub = work / "imports.s"
-        command([sys.executable, sdk / "tools/mkimports.py", "--arch", imports_arch, first, "-o", stub])
+        command([*sol_tool(sdk, "mkimports"), imports_arch, first, stub])
         stub_obj = work / "imports.o"
         command([clang, f"--target={triple}", "-c", stub, "-o", stub_obj])
         for base, dest in (("0", image), ("0x10000000", moved)):
@@ -394,8 +400,7 @@ def build(where, compiler=None, verbose=False):
         manifest = work / "manifest.toml"
         manifest.write_text("".join(f"{k} = {json.dumps(v, ensure_ascii=False)}\n" for k, v in fields.items()))
         archive = work / "app.qa"
-        command([sys.executable, sdk / "tools/mkqa.py", manifest, image, "-o", archive,
-             "--relocatable", "--imports", "--check-moved", moved, "--delta", "0x10000000"])
+        command([*sol_tool(sdk, "qa-pack"), "plugin", manifest, image, moved, str(0x10000000), archive])
         destination = out / f'{app["id"]}.qa'
         archive.replace(destination)
     print(f"Built {destination}")
@@ -545,7 +550,7 @@ def build_app(sdk, meta, fpr, found, verbose):
         # plugins import from by name is generated, and the real link has it.
         command(common + ["--defsym=QOS_SLOT_BASE=0", "--unresolved-symbols=ignore-all", *program, *platform, "-o", first])
         exports = work / "exports.s"
-        command([sys.executable, sdk / "tools/mkexports.py", first, "-o", exports])
+        command([*sol_tool(sdk, "mkexports"), first, exports])
         exports_obj = work / "exports.o"
         command([clang, f"--target={triple}", "-c", exports, "-o", exports_obj])
         for base, dest in (("0", image), (MOVED_DELTA, moved)):
@@ -565,8 +570,7 @@ def build_app(sdk, meta, fpr, found, verbose):
             text += "\n[[platformOverrides]]\n" + "".join(f"{k} = {json.dumps(v, ensure_ascii=False)}\n" for k, v in row.items())
         manifest.write_text(text)
         archive = work / "app.qa"
-        command([sys.executable, sdk / "tools/mkqa.py", manifest, image, "-o", archive,
-                 "--relocatable", "--check-moved", moved, "--delta", MOVED_DELTA])
+        command([*sol_tool(sdk, "qa-pack"), "process", manifest, image, moved, str(int(MOVED_DELTA, 0)), archive])
         destination = out / f'{app["id"]}.qa'
         archive.replace(destination)
     print(f"Built {destination}")

@@ -5,7 +5,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 HERE=Path(__file__).resolve().parent
-script=HERE/'board/qosp/star64/post-build.sh'
+script=HERE/'board/qosp/star64/post-build.sol'
 with tempfile.TemporaryDirectory(prefix='star64-console-') as temporary:
     root=Path(temporary)
     target=root/'target'; host=root/'host'; images=root/'images'
@@ -14,9 +14,9 @@ with tempfile.TemporaryDirectory(prefix='star64-console-') as temporary:
         p=host/'bin'/name;p.write_text(text);p.chmod(0o755)
     table=target/'etc/inittab'
     table.write_text('ttyS0::respawn:/sbin/getty -L ttyS0 0 vt100\n')
-    env=dict(os.environ,TARGET_DIR=str(target),HOST_DIR=str(host),BINARIES_DIR=str(images),QOSP_STAR64_AUTHORIZED_KEYS='')
+    env=dict(os.environ,BR2_EXTERNAL_QOSP_PATH=str(HERE),TARGET_DIR=str(target),HOST_DIR=str(host),BINARIES_DIR=str(images),QOSP_STAR64_AUTHORIZED_KEYS='')
     def build(expected=0):
-        p=subprocess.run(['sh',str(script)],env=env,capture_output=True,text=True)
+        p=subprocess.run([os.environ.get('SOL','sol'),str(script)],env=env,capture_output=True,text=True)
         assert p.returncode==expected,p.stdout+p.stderr
         return p
     build(); assert 'tty1::respawn:' in table.read_text()

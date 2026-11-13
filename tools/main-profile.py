@@ -95,10 +95,12 @@ def build(output, arch=None, cc=None, force=False):
         ROOT / 'core/foreign.fpr', ROOT / 'qos-app.mk', ROOT / 'dependency.mk',
         ROOT / 'qos/appside/qos_abi.h', ROOT / 'qos/appside/link-qosplug.ld',
         ROOT / 'qos/appside/link-qosplug-rv64.ld',
-        ROOT / 'tools/mkimports.py', ROOT / 'tools/mkqa.py', profile_path,
+        ROOT / 'tools/app-manifest.sol', ROOT / 'tools/mkimports.sol', ROOT / 'tools/sdk/sort.sol', ROOT / 'tools/elf-symbols.sol',
+        ROOT / 'tools/qa-pack.sol', ROOT / 'tools/elf-image.sol', ROOT / 'tools/qa-relocations.sol', ROOT / 'tools/qa-moved.sol', ROOT / 'tools/qa-imports.sol', profile_path,
     }
     common_app = common_plug | {
-        ROOT / 'tools/mkexports.py', ROOT / 'loader/qaimg.c', ROOT / 'qos/portable/sha256.c',
+        ROOT / 'tools/ccobj.sol', ROOT / 'tools/ccobj-worker.sol', ROOT / 'tools/sdk/sdk.sol',
+        ROOT / 'tools/mkexports.sol', ROOT / 'loader/qaimg.c', ROOT / 'qos/portable/sha256.c',
         ROOT / 'qos/appside/entry.c', ROOT / 'qos/appside/hal.c', ROOT / 'qos/appside/support.c',
         ROOT / 'qos/appside/link-qosapp.ld', ROOT / 'qos/appside/link-qosapp-a64.ld',
         ROOT / 'qos/appside/link-qosapp-rv64.ld',
@@ -130,9 +132,9 @@ def build(output, arch=None, cc=None, force=False):
     stamp_file.write_text(want_stamp)
     disk = output / 'Main.disk'
     if not disk.exists():
-        run('python3', 'tools/mkdisk.py', disk, 32, *archives)
+        run(os.environ.get('SOL', 'sol'), 'tools/mkdisk.sol', disk, 32, *archives)
     elif rebuilt_plug or not is_fresh(disk, archives):
-        run('python3', 'tools/mkdisk.py', '--preserve', disk, 32, *archives)
+        run(os.environ.get('SOL', 'sol'), 'tools/mkdisk.sol', '--preserve', disk, 32, *archives)
     else:
         print(f'Preserving existing onboard disk: {disk}', flush=True)
     return output

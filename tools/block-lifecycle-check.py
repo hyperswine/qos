@@ -59,7 +59,7 @@ with tempfile.TemporaryDirectory(prefix='qos-block-lifecycle-') as d:
         for modern in (False, True):
             for name, kernel in (('blocklifecycle', lifecycle), ('blocknamespace', endpoint), ('blockmemory', memory)):
                 disk = temp / f'{name}-{harts}-{modern}.disk'
-                run(['python3', ROOT / 'tools/mkdisk.py', disk, '8'])
+                run([os.environ.get("SOL", "sol"), ROOT / 'tools/mkdisk.sol', disk, '8'])
                 # 8,192 native reads take about 28-30 seconds on a loaded
                 # two-hart emulator. Keep functional checks independent of
                 # that host scheduling boundary; per-request deadlines hold.

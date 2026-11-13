@@ -124,7 +124,8 @@ PACKAGES = {}
 def reachable():
     home, root = Path(os.environ["FPR_HOME"]), Path(FPRISC_ROOT)
     files = [Path(COMPILER), home / "qos/appside/qos_abi.h", home / "qos-app.mk",
-             home / "tools/mkqa.py", home / "tools/mkimports.py", home / "core/foreign.fpr",
+             home / "tools/app-manifest.sol", home / "tools/qa-pack.sol", home / "tools/elf-image.sol", home / "tools/qa-relocations.sol",
+             home / "tools/qa-moved.sol", home / "tools/qa-imports.sol", home / "tools/mkimports.sol", home / "tools/sdk/sort.sol", home / "tools/elf-symbols.sol", home / "core/foreign.fpr",
              home / "core/trusted-modules.txt"]
     files += sorted(home.glob("qos/appside/link-qosplug*.ld"))
     for top in (home / "std", home / "programs/mods", root / "std", root / "core"):

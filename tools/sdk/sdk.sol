@@ -23,23 +23,11 @@ status argv = case Proc.runNow (P.withTimeout 1800000 (P.spec argv)) of
 trimEnd t = Str.trim t.
 drop n t = Str.slice t n (Str.len t).
 
-# merge sort by a String key (byte order, as Python sorts ASCII)
+Sort = use "sort".
 sortBy : unsafe (a -> String) -> List a -> List a .
-sortBy key xs = case xs of
-    [] -> []
-  | [x] -> [x]
-  | _ ->
-      half = List.len xs / 2;
-      merge key (sortBy key (List.take half xs)) (sortBy key (List.drop half xs)).
-merge : unsafe (a -> String) -> List a -> List a -> List a .
-merge key a b = case (a, b) of
-    ([], _) -> b
-  | (_, []) -> a
-  | (x :: xs, y :: ys) -> (case strCmp (key x) (key y) <= 0 of
-      True -> x :: merge key xs b
-    | False -> y :: merge key a ys).
+sortBy key xs = Sort.sortBy key xs.
 sortText : unsafe List String -> List String .
-sortText xs = sortBy (fn x -> x) xs.
+sortText xs = Sort.sortText xs.
 lines text = List.filter (fn s -> s != "") (Str.split 10 text).
 
 exists path = status ["/bin/test", "-e", path] == 0.

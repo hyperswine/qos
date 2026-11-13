@@ -69,10 +69,10 @@ def check(out, names):
                     manifest = out / (identity + '.toml')
                     manifest.write_text(f'name = "{identity}"\nid = "{identity}"\nentry = "n/a"\nloadMode = "process"\nversion = "1"\n')
                     qa = out / (identity + '.qa')
-                    run(['tools/build-process-app.sh', f'tests/{source}.fpr', manifest, qa])
+                    run([os.environ.get("SOL", "sol"), "tools/build-process-app.sol", f'tests/{source}.fpr', manifest, qa])
                     archives.append(qa)
                 disk = out / 'disk'
-                run(['python3', 'tools/mkdisk.py', disk, '8', *archives])
+                run([os.environ.get("SOL", "sol"), 'tools/mkdisk.sol', disk, '8', *archives])
             for harts in (1, 2):
                 kernel = out / f'{name}-{harts}.elf'
                 run(['make', '-s', '-C', 'qos', 'native', f'SYSTEM={ROOT}/tests/{name}.fpr',

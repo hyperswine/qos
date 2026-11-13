@@ -19,6 +19,7 @@
 include ../dependency.mk
 
 HAL    = ../hal
+SOL    ?= sol
 FPR    = ..
 
 HARTS ?= 2
@@ -143,12 +144,12 @@ CFLAGS = $(FPR_LAYOUT_CFLAGS) $(ARCHFLAGS) -DFPR_NHARTS=$(HARTS) \
 
 # the rodata fallback registry: placeholder .qa's from the manifests
 QAPPS = TUIAppLauncher TUINotes TUIClock HelloProc
-$(BUILD)/qa0/%.qa: $(FPR)/apps/%.toml $(FPR)/tools/mkqa.py
+$(BUILD)/qa0/%.qa: $(FPR)/apps/%.toml $(FPR)/tools/qa-placeholder.sol
 	@mkdir -p $(BUILD)/qa0
-	python3 $(FPR)/tools/mkqa.py $< -o $@
+	"$(SOL)" "$(FPR)/tools/qa-placeholder.sol" "$<" "$@"
 
-$(BUILD)/apps_data.c: $(patsubst %,$(BUILD)/qa0/%.qa,$(QAPPS)) $(FPR)/tools/genapps.py
-	python3 $(FPR)/tools/genapps.py --entries --out $@ -- $(patsubst %,$(BUILD)/qa0/%.qa,$(QAPPS))
+$(BUILD)/apps_data.c: $(patsubst %,$(BUILD)/qa0/%.qa,$(QAPPS)) $(FPR)/tools/qa-registry.sol
+	"$(SOL)" "$(FPR)/tools/qa-registry.sol" "$@" $(patsubst %,$(BUILD)/qa0/%.qa,$(QAPPS))
 
 # SYSTEM: the kernel program (a test kernel, e.g. tests/nativeimage.fpr,
 # can stand in for it; pair it with KERNEL=<another elf>)
@@ -174,8 +175,8 @@ native: portable/sha256.c $(BUILD)/system.s $(BUILD)/apps_data.c $(RT_VIRT) $(VI
 	  ../loader/apps.c $(BUILD)/apps_data.c ../loader/qaimg.c ../loader/process.c portable/sha256.c $(NATIVE_TEST_SRC) \
 	  -o $(KERNEL)
 
-$(DISK): $(FPR)/tools/mkdisk.py
-	python3 $(FPR)/tools/mkdisk.py $(DISK) 8
+$(DISK): $(FPR)/tools/mkdisk.sol $(FPR)/tools/qlog-seed.sol $(FPR)/tools/qlog-preserve.sol
+	"$(SOL)" $(FPR)/tools/mkdisk.sol $(DISK) 8
 
 # ---- the portable disk ---------------------------------------------------
 # qosp.disk is a QLOG image -- the SAME format native-run's disk.img
@@ -184,8 +185,8 @@ $(DISK): $(FPR)/tools/mkdisk.py
 # `make disk-seed QAS="a.qa b.qa"` installs built .qa apps onto it as
 # apps/<Id>.qa records plus the apps/index, ready for the System.qa
 # loading path.
-disk-seed: $(FPR)/tools/mkdisk.py
-	python3 $(FPR)/tools/mkdisk.py $(PDISK) 8 $(QAS)
+disk-seed: $(FPR)/tools/mkdisk.sol $(FPR)/tools/qlog-seed.sol $(FPR)/tools/qlog-preserve.sol
+	"$(SOL)" $(FPR)/tools/mkdisk.sol $(PDISK) 8 $(QAS)
 
 native-run: native $(DISK)
 	$(TIMEOUT) 25 $(QEMU) $(ACCEL) -machine virt -smp $(HARTS) -m 256M \

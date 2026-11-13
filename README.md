@@ -55,6 +55,14 @@ python3 -m unittest discover -s tests -p 'test_*.py'
 `./qos.py run` warns when `../fprisc` is not at the release pin in
 `fprisc.lock.json`. CI builds the pinned revision.
 
+## Build scripts
+
+Write build scripts only in Sol. Use Sol 0.13.1 or any compatible version, and keep scripts runnable on 0.13.1. Do not add build logic in Bash or Python.
+
+Some existing commands still invoke Bash or Python during the migration. When changing one, move its build logic into Sol, verify the replacement through the existing command, and remove the superseded implementation.
+
+The checkout CLI still coordinates builds in `qos.py`. The installed Portable SDK uses its native `qos` command. The parity check also runs the older `tools/portable_sdk.py` builder against the same inputs. Keep that comparison working when migrating the remaining checkout build logic.
+
 ## App loop today: install, new, run, pack
 
 This loop works today against an installed toolchain, outside any checkout and with no GHC

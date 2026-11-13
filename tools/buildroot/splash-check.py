@@ -29,7 +29,7 @@ with tempfile.TemporaryDirectory(prefix='qosp-splash-check-') as name:
     cmdline.write_text('root=PARTUUID=fixture rootwait console=tty1 console=ttyAMA0,115200 loglevel=7\n')
     env = dict(os.environ, BR2_CONFIG=str(config), BINARIES_DIR=str(images))
     for _ in range(2):
-        subprocess.run(['sh', str(HERE / 'board/qosp/rpi4/post-build.sh'), str(target)], env=env, check=True)
+        subprocess.run([os.environ.get('SOL', 'sol'), str(HERE / 'board/qosp/rpi4/post-build.sol'), str(target)], env=env, check=True)
     args = cmdline.read_text().split()
     assert 'root=PARTUUID=fixture' in args and 'rootwait' in args
     assert 'console=ttyAMA0,115200' in args and 'console=tty1' not in args
@@ -39,6 +39,6 @@ with tempfile.TemporaryDirectory(prefix='qosp-splash-check-') as name:
     assert 'console::respawn:' in table.read_text()
     assert (target / 'etc/default/qosp').read_text().count('export FPR_BOOT_SPLASH=1') == 1
     (target / 'usr/bin/qosp-splash').unlink()
-    result = subprocess.run(['sh', str(HERE / 'board/qosp/rpi4/post-build.sh'), str(target)], env=env, capture_output=True)
+    result = subprocess.run([os.environ.get('SOL', 'sol'), str(HERE / 'board/qosp/rpi4/post-build.sol'), str(target)], env=env, capture_output=True)
     assert result.returncode != 0
 print('Splash boot policy: serial/root preserved, HDMI quiet, recovery VT, idempotent build, missing helper refusal PASS')

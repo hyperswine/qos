@@ -56,9 +56,11 @@ so build that first — `br.sh` deliberately will not guess:
 
     make -C ~/qos qos-app PROG=programs/terra2.fpr    # writes qos/app.qa
 
-Then:
+Install Sol 0.13.1 or a compatible version on the build host and put its
+`sol` executable on `PATH`. Buildroot uses it for the Pi 4 and STAR64
+post-build hooks. From the QOS checkout, build the image with:
 
-    ~/qos/tools/buildroot/br.sh qemu        # or: rpi4
+    sol tools/buildroot/br.sol "$PWD/tools/buildroot" qemu        # or: rpi4
 
 Output lands in `~/.cache/qosp-br/<target>/images`. Anything after the target
 goes to Buildroot, so `br.sh qemu menuconfig` and `br.sh qemu qosp-rebuild`

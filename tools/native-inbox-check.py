@@ -3,7 +3,6 @@
 import argparse
 import os
 from pathlib import Path
-import shlex
 import subprocess
 import tempfile
 ROOT = Path(__file__).resolve().parents[1]
@@ -21,18 +20,14 @@ with tempfile.TemporaryDirectory(prefix='qos-native-inbox-') as tmp:
         return p.stdout+p.stderr
     # Test-only C pointer observation linked into the process, with no new
     # production primitive or change to the standard process builder.
-    script = (ROOT/'tools/build-process-app.sh').read_text()
-    line = next(x for x in script.splitlines() if x.startswith('ROOT='))
-    script = script.replace(line,'ROOT='+shlex.quote(str(ROOT)))
-    script = script.replace('RT="$VIRT_FPR', 'RT="'+str(FPR/'tests/base/inbox_probe.c')+' $VIRT_FPR')
+    link_inputs = [FPR / 'tests/base/inbox_probe.c']
     if credit:
-        script = script.replace('"${LAYOUT_FLAGS[@]}" $ARCHFLAGS',
-                                '"${LAYOUT_FLAGS[@]}" -DFPR_SENDER_CREDITS=1 $ARCHFLAGS')
-    builder = out/'build-process.sh';builder.write_text(script);builder.chmod(0o755)
+        link_inputs.append('-DFPR_SENDER_CREDITS=1')
     manifest = out/'CkInbox.toml'
     manifest.write_text('name = "CkInbox"\nid = "CkInbox"\nentry = "n/a"\nloadMode = "process"\nversion = "1"\n')
     qa = out/'CkInbox.qa'
-    run([builder,'tests/inboxproc.fpr',manifest,qa])
+    run([os.environ.get('SOL', 'sol'), 'tools/build-process-app.sol',
+         'tests/inboxproc.fpr', manifest, qa, '--', *link_inputs])
     assembly = (ROOT/'build/inboxproc.s').read_text()
     builder_body = assembly.split('\nfpr_fn_build:\n', 1)[1].split('\n# fn ', 1)[0]
     assert 'call fpr_g_Sys_x2esendConcat_call3' in builder_body and 'fpr_prim_fn_strcat' not in builder_body
@@ -43,7 +38,7 @@ with tempfile.TemporaryDirectory(prefix='qos-native-inbox-') as tmp:
         run(['make','-s','-C','qos','native',f'SYSTEM={ROOT}/tests/nativeinbox.fpr',f'KERNEL={kernel}',f'BUILD={out}/build-{harts}',f'HARTS={harts}', *(['NATIVE_CFLAGS_EXTRA=-DFPR_SENDER_CREDITS=1'] if credit else [])])
         for modern in ((True,) if credit else (False,True)):
             disk=out/f'disk-{harts}-{modern}'
-            run(['python3','tools/mkdisk.py',disk,8,qa])
+            run([os.environ.get("SOL", "sol"),'tools/mkdisk.sol',disk,8,qa])
             args=['qemu-system-riscv64','-machine','virt','-smp',str(harts),'-m','256M','-nographic','-bios','none','-kernel',kernel,
                   '-drive',f'file={disk},if=none,format=raw,id=hd0','-device','virtio-blk-device,drive=hd0']
             if modern: args += ['-global','virtio-mmio.force-legacy=false']

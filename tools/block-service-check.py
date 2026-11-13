@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Native versioned block budgets and correlated service failure boundaries."""
+import os
 import shutil
 import subprocess
 import tempfile
@@ -23,7 +24,7 @@ with tempfile.TemporaryDirectory(prefix='qos-block-service-') as d:
     for modern in (False, True):
         for harts in (1, 2):
             disk = temp / f'service-{modern}-{harts}.disk'
-            run(['python3', ROOT / 'tools/mkdisk.py', disk, '8'])
+            run([os.environ.get("SOL", "sol"), ROOT / 'tools/mkdisk.sol', disk, '8'])
             args = ['qemu-system-riscv64', '-machine', 'virt', '-smp', harts, '-m', '256M', '-nographic',
                     '-bios', 'none', '-kernel', kernels[harts], '-drive', f'file={disk},if=none,format=raw,id=hd0',
                     '-device', 'virtio-blk-device,drive=hd0']

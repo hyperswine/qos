@@ -21,7 +21,7 @@ QOS_BASE_FLAG  = -DQOS_ARENA_BASE=$(QOS_SLOT_BASE)ul
 # the host's (found as random corruption past ~220 sessions): docs/2026-09-19-BOUNDS.md
 QOSHARTS ?= 8
 # The runtime's C sources compile once per (compiler, flags, preprocessed
-# source) into QOS_OBJ_CACHE (tools/ccobj.py); an image's three links, and
+# source) into QOS_OBJ_CACHE (tools/ccobj.sol); an image's three links, and
 # every later app build with the same flags, take the objects.  A sweep
 # points every private build directory at one cache.
 QOS_OBJ_CACHE ?= $(BUILD)/rtobj
@@ -37,7 +37,7 @@ $(BUILD)/qosapp-prog.s: fprc $(SOURCE) $(FPRISC_ROOT)/core/prelude.fpr FORCE
 
 # FORCE: the .s is regenerated every time, and a make with 1-second mtimes
 # (Apple's 3.81) otherwise packs the PREVIOUS program's image into this .qa
-# Two links: the first learns the image's symbols, tools/mkexports.py writes
+# Two links: the first learns the image's symbols, tools/mkexports.sol writes
 # the export table plugins complete their imports from (by NAME), and the
 # second links it in (docs/2026-10-01-IMPORT-TABLE.md)
 QOSAPP_X64_CC = gcc -O2 -Wall -Wextra -ffreestanding -nostdlib -nostartfiles -static \
@@ -52,20 +52,22 @@ QOSAPP_X64_LINK = $(QOSAPP_X64_CC) \
 
 # FORCE: the .s is regenerated every time, and a make with 1-second mtimes
 # (Apple's 3.81) otherwise packs the PREVIOUS program's image into this .qa
-$(BUILD)/qosapp.elf: $(BUILD)/qosapp-prog.s $(QOSAPP_RT) $(QOS)/appside/link-qosapp.ld tools/mkexports.py FORCE
-	python3 tools/ccobj.py $(QOS_OBJ_CACHE) $(QOSAPP_X64_CC) -- $(BUILD)/qosapp-prog.s $$(cat $(BUILD)/qosapp-prog.s.units) $(QOSAPP_RT) > $(BUILD)/qosapp-prog.objs
+$(BUILD)/qosapp.elf: $(BUILD)/qosapp-prog.s $(QOSAPP_RT) $(QOS)/appside/link-qosapp.ld tools/mkexports.sol tools/elf-symbols.sol FORCE
+	SOL="$(SOL)" "$(SOL)" tools/ccobj.sol tools/ccobj-worker.sol $(QOS_OBJ_CACHE) $(QOSAPP_X64_CC) -- $(BUILD)/qosapp-prog.s $$(cat $(BUILD)/qosapp-prog.s.units) $(QOSAPP_RT) > $(BUILD)/qosapp-prog.objs
 	$(QOSAPP_X64_LINK) -Wl,--defsym=QOS_SLOT_BASE=0 -Wl,--unresolved-symbols=ignore-all -o $(BUILD)/qosapp.pre.elf
-	python3 tools/mkexports.py $(BUILD)/qosapp.pre.elf -o $(BUILD)/qosapp-exports.s
+	"$(SOL)" tools/mkexports.sol $(BUILD)/qosapp.pre.elf $(BUILD)/qosapp-exports.s
 	$(QOSAPP_X64_LINK) -Wl,--defsym=QOS_SLOT_BASE=0 $(BUILD)/qosapp-exports.s -o $@
 	$(QOSAPP_X64_LINK) -Wl,--defsym=QOS_SLOT_BASE=0x10000000 $(BUILD)/qosapp-exports.s -o $(BUILD)/qosapp.moved.elf
 
-qos-app-x64: $(BUILD)/qosapp.elf tools/mkqa.py
-	@MF=$(BUILD)/qosapp-gen.toml; ID=$(if $(QA_ID),$(QA_ID),$$(basename $(SOURCE) .fpr)); NM="$(if $(QA_NAME),$(QA_NAME),$$ID)"; VER="$(if $(QA_VERSION),$(QA_VERSION),1)"; \
-	ABIV=$$(grep -m1 'define QOS_ABI_VERSION' $(QOS)/appside/qos_abi.h | grep -o '[0-9]\+' | head -1); \
-	REV=$$(cat $(BUILD)/qosapp-prog.s.abirev 2>/dev/null || echo 0); \
-	printf 'name = "%s"\nid = "%s"\nentry = "n/a"\nversion = "%s"\nloadMode = "process"\nabi = "%s.%s"\n' "$$NM" $$ID "$$VER" $$ABIV $$REV > $$MF; \
-	python3 tools/mkqa.py $$MF $(BUILD)/qosapp.elf -o $(QA_OUT) \
-	  --relocatable --check-moved $(BUILD)/qosapp.moved.elf --delta 0x10000000
+QA_PACK_SOURCES = $(addprefix tools/,qa-pack.sol elf-image.sol elf-symbols.sol qa-relocations.sol qa-moved.sol qa-imports.sol sdk/sort.sol)
+QOS_APP_ID = $(if $(QA_ID),$(QA_ID),$(basename $(notdir $(SOURCE))))
+QOS_APP_NAME = $(if $(QA_NAME),$(QA_NAME),$(QOS_APP_ID))
+QOS_APP_VERSION = $(if $(QA_VERSION),$(QA_VERSION),1)
+QOS_APP_MANIFEST = "$(SOL)" tools/app-manifest.sol "$(QOS)/appside/qos_abi.h" "$(1).abirev" $(2) "$(BUILD)/qosapp-gen.toml" "$(QOS_APP_ID)" "$(QOS_APP_NAME)" "$(QOS_APP_VERSION)"
+
+qos-app-x64: $(BUILD)/qosapp.elf $(QA_PACK_SOURCES)
+	@$(call QOS_APP_MANIFEST,$(BUILD)/qosapp-prog.s,optional)
+	"$(SOL)" tools/qa-pack.sol process "$(BUILD)/qosapp-gen.toml" "$(BUILD)/qosapp.elf" "$(BUILD)/qosapp.moved.elf" 268435456 "$(QA_OUT)"
 	@echo "$(QA_OUT) built (relocatable) — run with: (make -C qos portable && qos/qosp --yes $(QA_OUT))"
 
 # ---- QOS app for an AArch64 host: Apple Silicon, arm64 Linux (a Pi 4) --------
@@ -88,20 +90,16 @@ QOSAPP_A64_LINK = $(QOSAPP_A64_CC) -fuse-ld=lld \
 	  -Wl,--defsym=_heap_start=_proc_image_end -Wl,--defsym=_heap_end=_proc_image_end \
 	  $$(cat $(BUILD)/qosapp-a64.objs)
 
-$(BUILD)/qosapp-a64.elf: $(BUILD)/qosapp-a64.s $(QOSAPP_RT_COMMON) $(FMACHINE)/unix/ctx_a64.S $(QOS)/appside/link-qosapp-a64.ld tools/mkexports.py FORCE
-	python3 tools/ccobj.py $(QOS_OBJ_CACHE) $(QOSAPP_A64_CC) -- $(BUILD)/qosapp-a64.s $$(cat $(BUILD)/qosapp-a64.s.units) $(QOSAPP_RT_COMMON) $(FMACHINE)/unix/ctx_a64.S > $(BUILD)/qosapp-a64.objs
+$(BUILD)/qosapp-a64.elf: $(BUILD)/qosapp-a64.s $(QOSAPP_RT_COMMON) $(FMACHINE)/unix/ctx_a64.S $(QOS)/appside/link-qosapp-a64.ld tools/mkexports.sol tools/elf-symbols.sol FORCE
+	SOL="$(SOL)" "$(SOL)" tools/ccobj.sol tools/ccobj-worker.sol $(QOS_OBJ_CACHE) $(QOSAPP_A64_CC) -- $(BUILD)/qosapp-a64.s $$(cat $(BUILD)/qosapp-a64.s.units) $(QOSAPP_RT_COMMON) $(FMACHINE)/unix/ctx_a64.S > $(BUILD)/qosapp-a64.objs
 	$(QOSAPP_A64_LINK) -Wl,--defsym=QOS_SLOT_BASE=0 -Wl,--unresolved-symbols=ignore-all -o $(BUILD)/qosapp-a64.pre.elf
-	python3 tools/mkexports.py $(BUILD)/qosapp-a64.pre.elf -o $(BUILD)/qosapp-a64-exports.s
+	"$(SOL)" tools/mkexports.sol $(BUILD)/qosapp-a64.pre.elf $(BUILD)/qosapp-a64-exports.s
 	$(QOSAPP_A64_LINK) -Wl,--defsym=QOS_SLOT_BASE=0 $(BUILD)/qosapp-a64-exports.s -o $@
 	$(QOSAPP_A64_LINK) -Wl,--defsym=QOS_SLOT_BASE=0x10000000 $(BUILD)/qosapp-a64-exports.s -o $(BUILD)/qosapp-a64.moved.elf
 
-qos-app-a64: $(BUILD)/qosapp-a64.elf tools/mkqa.py
-	@MF=$(BUILD)/qosapp-a64-gen.toml; ID=$(if $(QA_ID),$(QA_ID),$$(basename $(SOURCE) .fpr)); NM="$(if $(QA_NAME),$(QA_NAME),$$ID)"; VER="$(if $(QA_VERSION),$(QA_VERSION),1)"; \
-	ABIV=$$(grep -m1 'define QOS_ABI_VERSION' $(QOS)/appside/qos_abi.h | grep -o '[0-9]\+' | head -1); \
-	REV=$$(cat $(BUILD)/qosapp-a64.s.abirev 2>/dev/null || echo 0); \
-	printf 'name = "%s"\nid = "%s"\nentry = "n/a"\nversion = "%s"\nloadMode = "process"\nabi = "%s.%s"\n' "$$NM" $$ID "$$VER" $$ABIV $$REV > $$MF; \
-	python3 tools/mkqa.py $$MF $(BUILD)/qosapp-a64.elf -o $(QA_OUT) \
-	  --relocatable --check-moved $(BUILD)/qosapp-a64.moved.elf --delta 0x10000000
+qos-app-a64: $(BUILD)/qosapp-a64.elf $(QA_PACK_SOURCES)
+	@$(call QOS_APP_MANIFEST,$(BUILD)/qosapp-a64.s,optional)
+	"$(SOL)" tools/qa-pack.sol process "$(BUILD)/qosapp-gen.toml" "$(BUILD)/qosapp-a64.elf" "$(BUILD)/qosapp-a64.moved.elf" 268435456 "$(QA_OUT)"
 	@echo "$(QA_OUT) built for Apple Silicon (relocatable)"
 
 # ---- plugin .qa: a library image loaded into a RUNNING app -----------------
@@ -111,7 +109,7 @@ qos-app-a64: $(BUILD)/qosapp-a64.elf tools/mkqa.py
 # 0 with --emit-relocs, and the app places it in a block of its own heap.  The
 # runtime it calls is the app's, reached BY NAME:
 #   1. a first link leaves the runtime's symbols unresolved;
-#   2. tools/mkimports.py writes a stub (a jump through a slot) per function
+#   2. tools/mkimports.sol writes a stub (a jump through a slot) per function
 #      and a placeholder per data object it imports;
 #   3. the real link at 0, and a second at 256 MiB that mkqa --check-moved
 #      compares against the RELOC list;
@@ -121,27 +119,25 @@ qos-app-a64: $(BUILD)/qosapp-a64.elf tools/mkqa.py
 # loads it, and one that does not says which names are missing.
 PLUGID    = $(basename $(notdir $(SOURCE)))
 PLUG_OUT ?= $(PLUGID).qa
-PLUG_MF   = printf 'name = "%s"\nid = "%s"\nentry = "fpr_modtab"\nversion = "1"\nloadMode = "plugin"\nabi = "%s.%s"\n' $(PLUGID) $(PLUGID) \
-	  $$(grep -m1 'define QOS_ABI_VERSION' $(QOS)/appside/qos_abi.h | grep -o '[0-9]\+' | head -1) $$(cat $(1).abirev 2>/dev/null || echo 0)
+PLUG_MF = "$(SOL)" tools/app-manifest.sol plugin "$(QOS)/appside/qos_abi.h" "$(1).s.abirev" "$(1)-gen.toml" "$(PLUGID)"
 
 PLUG_X64_LINK = gcc -O2 -Wall -Wextra -ffreestanding -nostdlib -nostartfiles -static \
 	  -fno-stack-protector -fno-asynchronous-unwind-tables -fno-pic \
 	  -T $(QOS)/appside/link-qosplug.ld -Wl,--build-id=none -Wl,-z,noexecstack \
 	  -Wl,--no-relax -Wl,--emit-relocs -Wl,--no-warn-rwx-segments
 
-plugin-qa-x64: fprc $(FPRISC_ROOT)/core/prelude.fpr tools/mkimports.py tools/mkqa.py
+plugin-qa-x64: fprc $(FPRISC_ROOT)/core/prelude.fpr tools/mkimports.sol tools/elf-symbols.sol tools/sdk/sort.sol $(QA_PACK_SOURCES)
 	@mkdir -p $(BUILD)
 	LC_ALL=C.UTF-8 "$(FPRC)" --target=qx64 --plugin --prelude=$(FPRISC_ROOT)/core/prelude.fpr $(SOURCE) $(BUILD)/plug-$(PLUGID).s
 	$(PLUG_X64_LINK) -Wl,--defsym=PLUG_BASE=0 -Wl,--unresolved-symbols=ignore-all \
 	  $(BUILD)/plug-$(PLUGID).s $$(cat $(BUILD)/plug-$(PLUGID).s.units) -o $(BUILD)/plug-$(PLUGID).u.elf
-	python3 tools/mkimports.py --arch x64 $(BUILD)/plug-$(PLUGID).u.elf -o $(BUILD)/plug-$(PLUGID).imp.s
+	"$(SOL)" tools/mkimports.sol x64 $(BUILD)/plug-$(PLUGID).u.elf $(BUILD)/plug-$(PLUGID).imp.s
 	$(PLUG_X64_LINK) -Wl,--defsym=PLUG_BASE=0 \
 	  $(BUILD)/plug-$(PLUGID).s $$(cat $(BUILD)/plug-$(PLUGID).s.units) $(BUILD)/plug-$(PLUGID).imp.s -o $(BUILD)/plug-$(PLUGID).elf
 	$(PLUG_X64_LINK) -Wl,--defsym=PLUG_BASE=0x10000000 \
 	  $(BUILD)/plug-$(PLUGID).s $$(cat $(BUILD)/plug-$(PLUGID).s.units) $(BUILD)/plug-$(PLUGID).imp.s -o $(BUILD)/plug-$(PLUGID).moved.elf
-	@$(call PLUG_MF,$(BUILD)/plug-$(PLUGID).s) > $(BUILD)/plug-$(PLUGID)-gen.toml
-	python3 tools/mkqa.py $(BUILD)/plug-$(PLUGID)-gen.toml $(BUILD)/plug-$(PLUGID).elf -o $(PLUG_OUT) \
-	  --relocatable --imports --check-moved $(BUILD)/plug-$(PLUGID).moved.elf --delta 0x10000000
+	@$(call PLUG_MF,$(BUILD)/plug-$(PLUGID))
+	"$(SOL)" tools/qa-pack.sol plugin "$(BUILD)/plug-$(PLUGID)-gen.toml" "$(BUILD)/plug-$(PLUGID).elf" "$(BUILD)/plug-$(PLUGID).moved.elf" 268435456 "$(PLUG_OUT)"
 	@echo "$(PLUG_OUT) built (relocatable) -- install: make -C ../qos disk-seed QAS=..."
 
 # Native Pi SDKs assemble and link these freestanding units with GNU tools;
@@ -150,19 +146,18 @@ PLUG_A64_LINK ?= clang --target=aarch64-none-elf -fuse-ld=lld \
 	  -nostdlib -nostartfiles \
 	  -T $(QOS)/appside/link-qosplug.ld -Wl,--emit-relocs
 
-plugin-qa-a64: fprc $(FPRISC_ROOT)/core/prelude.fpr tools/mkimports.py tools/mkqa.py
+plugin-qa-a64: fprc $(FPRISC_ROOT)/core/prelude.fpr tools/mkimports.sol tools/elf-symbols.sol tools/sdk/sort.sol $(QA_PACK_SOURCES)
 	@mkdir -p $(BUILD)
 	LC_ALL=C.UTF-8 "$(FPRC)" --target=qa64 --plugin --prelude=$(FPRISC_ROOT)/core/prelude.fpr $(SOURCE) $(BUILD)/plug-$(PLUGID)-a64.s
 	$(PLUG_A64_LINK) -Wl,--defsym=PLUG_BASE=0 -Wl,--unresolved-symbols=ignore-all \
 	  $(BUILD)/plug-$(PLUGID)-a64.s $$(cat $(BUILD)/plug-$(PLUGID)-a64.s.units) -o $(BUILD)/plug-$(PLUGID)-a64.u.elf
-	python3 tools/mkimports.py --arch a64 $(BUILD)/plug-$(PLUGID)-a64.u.elf -o $(BUILD)/plug-$(PLUGID)-a64.imp.s
+	"$(SOL)" tools/mkimports.sol a64 $(BUILD)/plug-$(PLUGID)-a64.u.elf $(BUILD)/plug-$(PLUGID)-a64.imp.s
 	$(PLUG_A64_LINK) -Wl,--defsym=PLUG_BASE=0 \
 	  $(BUILD)/plug-$(PLUGID)-a64.s $$(cat $(BUILD)/plug-$(PLUGID)-a64.s.units) $(BUILD)/plug-$(PLUGID)-a64.imp.s -o $(BUILD)/plug-$(PLUGID)-a64.elf
 	$(PLUG_A64_LINK) -Wl,--defsym=PLUG_BASE=0x10000000 \
 	  $(BUILD)/plug-$(PLUGID)-a64.s $$(cat $(BUILD)/plug-$(PLUGID)-a64.s.units) $(BUILD)/plug-$(PLUGID)-a64.imp.s -o $(BUILD)/plug-$(PLUGID)-a64.moved.elf
-	@$(call PLUG_MF,$(BUILD)/plug-$(PLUGID)-a64.s) > $(BUILD)/plug-$(PLUGID)-a64-gen.toml
-	python3 tools/mkqa.py $(BUILD)/plug-$(PLUGID)-a64-gen.toml $(BUILD)/plug-$(PLUGID)-a64.elf -o $(PLUG_OUT) \
-	  --relocatable --imports --check-moved $(BUILD)/plug-$(PLUGID)-a64.moved.elf --delta 0x10000000
+	@$(call PLUG_MF,$(BUILD)/plug-$(PLUGID)-a64)
+	"$(SOL)" tools/qa-pack.sol plugin "$(BUILD)/plug-$(PLUGID)-a64-gen.toml" "$(BUILD)/plug-$(PLUGID)-a64.elf" "$(BUILD)/plug-$(PLUGID)-a64.moved.elf" 268435456 "$(PLUG_OUT)"
 	@echo "$(PLUG_OUT) built (relocatable) -- install: make -C ../qos disk-seed QAS=..."
 
 qos-app-a64-run: qos-app-a64
@@ -221,32 +216,27 @@ QOSAPP_RV64_LINK = $(QOS_RV64_CC) $(RV64_IMAGE_FLAGS) \
   $(BUILD)/qosapp-rv64.s $$(cat $(BUILD)/qosapp-rv64.s.units) \
   $(QOSAPP_RT_COMMON) $(FMACHINE)/unix/ctx_rv64.S
 
-$(BUILD)/qosapp-rv64.elf: $(BUILD)/qosapp-rv64.s $(QOSAPP_RT_COMMON) $(FMACHINE)/unix/ctx_rv64.S $(QOS)/appside/link-qosapp-rv64.ld tools/mkexports.py FORCE
+$(BUILD)/qosapp-rv64.elf: $(BUILD)/qosapp-rv64.s $(QOSAPP_RT_COMMON) $(FMACHINE)/unix/ctx_rv64.S $(QOS)/appside/link-qosapp-rv64.ld tools/mkexports.sol tools/elf-symbols.sol FORCE
 	$(QOSAPP_RV64_LINK) -Wl,--defsym=QOS_SLOT_BASE=0 -Wl,--unresolved-symbols=ignore-all -o $(BUILD)/qosapp-rv64.pre.elf
-	python3 tools/mkexports.py $(BUILD)/qosapp-rv64.pre.elf -o $(BUILD)/qosapp-rv64-exports.s
+	"$(SOL)" tools/mkexports.sol $(BUILD)/qosapp-rv64.pre.elf $(BUILD)/qosapp-rv64-exports.s
 	$(QOSAPP_RV64_LINK) -Wl,--defsym=QOS_SLOT_BASE=0 $(BUILD)/qosapp-rv64-exports.s -o $@
 	$(QOSAPP_RV64_LINK) -Wl,--defsym=QOS_SLOT_BASE=0x10000000 $(BUILD)/qosapp-rv64-exports.s -o $(BUILD)/qosapp-rv64.moved.elf
 
-qos-app-rv64: $(BUILD)/qosapp-rv64.elf tools/mkqa.py
-	@MF=$(BUILD)/qosapp-rv64-gen.toml; ID=$(if $(QA_ID),$(QA_ID),$$(basename $(SOURCE) .fpr)); NM="$(if $(QA_NAME),$(QA_NAME),$$ID)"; VER="$(if $(QA_VERSION),$(QA_VERSION),1)"; \
-	ABIV=$$(grep -m1 'define QOS_ABI_VERSION' $(QOS)/appside/qos_abi.h | grep -o '[0-9]\+' | head -1); \
-	REV=$$(cat $(BUILD)/qosapp-rv64.s.abirev); \
-	printf 'name = "%s"\nid = "%s"\nentry = "n/a"\nversion = "%s"\nloadMode = "process"\nabi = "%s.%s"\n' "$$NM" $$ID "$$VER" $$ABIV $$REV > $$MF; \
-	python3 tools/mkqa.py $$MF $(BUILD)/qosapp-rv64.elf -o $(QA_OUT) \
-	  --relocatable --check-moved $(BUILD)/qosapp-rv64.moved.elf --delta 0x10000000
+qos-app-rv64: $(BUILD)/qosapp-rv64.elf $(QA_PACK_SOURCES)
+	@$(call QOS_APP_MANIFEST,$(BUILD)/qosapp-rv64.s,required)
+	"$(SOL)" tools/qa-pack.sol process "$(BUILD)/qosapp-gen.toml" "$(BUILD)/qosapp-rv64.elf" "$(BUILD)/qosapp-rv64.moved.elf" 268435456 "$(QA_OUT)"
 	@echo "$(QA_OUT) built for Linux RV64 (relocatable)"
 
 PLUG_RV64_LINK = $(QOS_RV64_CC) $(RV64_IMAGE_FLAGS) -T $(QOS)/appside/link-qosplug-rv64.ld
-plugin-qa-rv64: fprc $(FPRISC_ROOT)/core/prelude.fpr tools/mkimports.py tools/mkqa.py
+plugin-qa-rv64: fprc $(FPRISC_ROOT)/core/prelude.fpr tools/mkimports.sol tools/elf-symbols.sol tools/sdk/sort.sol $(QA_PACK_SOURCES)
 	@mkdir -p $(BUILD)
 	LC_ALL=C.UTF-8 "$(FPRC)" --target=qrv64 --plugin --prelude=$(FPRISC_ROOT)/core/prelude.fpr $(SOURCE) $(BUILD)/plug-$(PLUGID)-rv64.s
 	$(PLUG_RV64_LINK) -Wl,--defsym=PLUG_BASE=0 -Wl,--unresolved-symbols=ignore-all \
 	  $(BUILD)/plug-$(PLUGID)-rv64.s $$(cat $(BUILD)/plug-$(PLUGID)-rv64.s.units) -o $(BUILD)/plug-$(PLUGID)-rv64.u.elf
-	python3 tools/mkimports.py --arch rv64 $(BUILD)/plug-$(PLUGID)-rv64.u.elf -o $(BUILD)/plug-$(PLUGID)-rv64.imp.s
+	"$(SOL)" tools/mkimports.sol rv64 $(BUILD)/plug-$(PLUGID)-rv64.u.elf $(BUILD)/plug-$(PLUGID)-rv64.imp.s
 	$(PLUG_RV64_LINK) -Wl,--defsym=PLUG_BASE=0 \
 	  $(BUILD)/plug-$(PLUGID)-rv64.s $$(cat $(BUILD)/plug-$(PLUGID)-rv64.s.units) $(BUILD)/plug-$(PLUGID)-rv64.imp.s -o $(BUILD)/plug-$(PLUGID)-rv64.elf
 	$(PLUG_RV64_LINK) -Wl,--defsym=PLUG_BASE=0x10000000 \
 	  $(BUILD)/plug-$(PLUGID)-rv64.s $$(cat $(BUILD)/plug-$(PLUGID)-rv64.s.units) $(BUILD)/plug-$(PLUGID)-rv64.imp.s -o $(BUILD)/plug-$(PLUGID)-rv64.moved.elf
-	@$(call PLUG_MF,$(BUILD)/plug-$(PLUGID)-rv64.s) > $(BUILD)/plug-$(PLUGID)-rv64-gen.toml
-	python3 tools/mkqa.py $(BUILD)/plug-$(PLUGID)-rv64-gen.toml $(BUILD)/plug-$(PLUGID)-rv64.elf -o $(PLUG_OUT) \
-	  --relocatable --imports --check-moved $(BUILD)/plug-$(PLUGID)-rv64.moved.elf --delta 0x10000000
+	@$(call PLUG_MF,$(BUILD)/plug-$(PLUGID)-rv64)
+	"$(SOL)" tools/qa-pack.sol plugin "$(BUILD)/plug-$(PLUGID)-rv64-gen.toml" "$(BUILD)/plug-$(PLUGID)-rv64.elf" "$(BUILD)/plug-$(PLUGID)-rv64.moved.elf" 268435456 "$(PLUG_OUT)"

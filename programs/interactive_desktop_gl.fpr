@@ -4,7 +4,7 @@
 #   make qos-app-macos PROG=programs/interactive_desktop_gl.fpr \
 #     QA_OUT=interactive_desktop_gl.qa
 # Seed a dedicated QLOG disk image:
-#   python3 tools/mkdisk.py ../qos/interactive_desktop_gl.disk 8 \
+#   sol tools/mkdisk.sol ../qos/interactive_desktop_gl.disk 8 \
 #     interactive_desktop_gl.qa
 # Run under QOS Portable from the qos directory:
 #   FPR_DISK=interactive_desktop_gl.disk ./qosp-gl --yes \

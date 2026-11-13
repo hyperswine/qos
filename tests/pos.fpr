@@ -7,7 +7,7 @@
 #   (cd qos && FPR_PORT=8123 ./qosp --yes ../app.qa)
 #   open http://127.0.0.1:8123/
 #
-# With FPR_DISK set (tools/mkdisk.py disk 4) the store survives restarts:
+# With FPR_DISK set (sol tools/mkdisk.sol disk 4) the store survives restarts:
 # revenue, stock and the receipt log are one record (pos/state) on the
 # storage service, rewritten at every checkout and restock.
 #

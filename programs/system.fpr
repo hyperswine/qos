@@ -811,7 +811,7 @@ processEnded con m = case m of
 # SHIPPED APPS  -- each is "just an app": it receives caps and uses ONLY
 # svcWrite / svcReadKey / svcClock. No device access, no launcher internals.
 # Every app's entry symbol is the FPRISC global fprc emits as fpr_g_<name>,
-# which tools/genapps.py wires into the rodata entry table.
+# which tools/qa-registry.sol wires into the rodata entry table.
 # ============================================================================
 
 # ---- helpers apps share -----------------------------------------------------

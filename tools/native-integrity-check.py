@@ -60,9 +60,9 @@ def native_checks(out):
     manifest=out/'CkVector.toml'
     manifest.write_text('name = "CkVector"\nid = "CkVector"\nentry = "n/a"\nloadMode = "process"\nversion = "1"\n')
     original=out/'CkVector.qa'
-    run(['tools/build-process-app.sh','tests/vectorproc.fpr',manifest,original])
+    run([os.environ.get("SOL", "sol"), "tools/build-process-app.sol",'tests/vectorproc.fpr',manifest,original])
     sections=unpack(original.read_bytes())
-    native_abi,actors_abi,memory_abi=[value.encode() for value in run(['python3','tools/native-abis.py',FPRISC]).stdout.split()]
+    native_abi,actors_abi,memory_abi=[value.encode() for value in run([os.environ.get('SOL','sol'),'tools/native-abis.sol',FPRISC]).stdout.split()]
     assert b'nativeabi '+native_abi+b'\n' in sections['LOAD'], sections['LOAD']
     assert sections['IMAGE'] and sections['RELOC'] and not sections.get('IMPORT',b'')
     archives=[original]
@@ -96,7 +96,7 @@ def native_checks(out):
         parts=dict(parts)
         parts['MANIFEST']=parts['MANIFEST'].replace(b'CkVector',name.encode())
         qa=out/(name+'.qa');qa.write_bytes(pack(parts));archives.append(qa)
-    disk=out/'disk.img';run(['python3','tools/mkdisk.py',disk,'16',*archives])
+    disk=out/'disk.img';run([os.environ.get("SOL", "sol"),'tools/mkdisk.sol',disk,'16',*archives])
     for modern in (False,True):
         for harts in (1,2):
             args=['qemu-system-riscv64','-accel','tcg,thread=multi','-machine','virt','-smp',str(harts),

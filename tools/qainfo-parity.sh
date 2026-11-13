@@ -40,7 +40,7 @@ for toml in apps/*.toml "$WORK/gen/big.toml"; do
   name=$(basename "$toml" .toml)
   # stamp the abi the host gates on, and launch as a process image
   { grep -v '^abi\|^loadMode' "$toml" | awk -v abi="$ABI" 'NR==1{print "abi = \"" abi "\"\nloadMode = \"process\""} {print}'; } > "$WORK/$name.toml"
-  python3 tools/mkqa.py "$WORK/$name.toml" "$ELF" -o "$WORK/$name.qa" >/dev/null
+  "${SOL:-sol}" tools/qa-pack.sol fixed "$WORK/$name.toml" "$ELF" "$WORK/$name.qa" >/dev/null
   (cd "$WORK" && "$ROOT/qos/qosp" --yes "$name.qa" 2>/dev/null </dev/null) \
     | sed -n '/^CAPS-BEGIN$/,/^CAPS-END$/p' | sed '1d;$d' > "$WORK/$name.host"
   "$WORK/qainfo" "$WORK/$name.qa" --caps > "$WORK/$name.fpr"

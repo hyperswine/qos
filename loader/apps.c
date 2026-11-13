@@ -7,7 +7,7 @@
  * Every app runs as a loaded process (Sys.placeImageAt, loader/process.c);
  * the co-compiled name->entry table and Apps.entry/Apps.run are gone.
  *
- * The table, generated into apps_data.c by tools/genapps.py:
+ * The table, generated into apps_data.c by tools/qa-registry.sol:
  *   fpr_qa_blobs[]   : { id, bytes, len }   the .qa archives
  *
  * FPRISC surface (fpr_g_*):

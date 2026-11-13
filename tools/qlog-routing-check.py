@@ -48,18 +48,18 @@ with tempfile.TemporaryDirectory(prefix='qos-qlog-routing-') as d:
             build(fixture.name, stalled, temp / f'stalled-{harts}', harts, '-DQOS_BLK_TEST -DBLK_DEADLINE_TICKS=1000000ULL')
         for modern in (False, True):
             disk = temp / f'probe-{modern}-{harts}.disk'
-            run(['python3', ROOT / 'tools/mkdisk.py', disk, '8'])
+            run([os.environ.get("SOL", "sol"), ROOT / 'tools/mkdisk.sol', disk, '8'])
             out = boot(probe, harts, modern, disk)
             assert ('qlogblock: before=True aborted=True partial=True stale=True alive=True recovered=True write=True '
                     'replay=beforenext verified=True lost=True fast=True HOLDS') in out, out
             print(f'Qlog route: virtio v{2 if modern else 1}, {harts} hart(s), partial append/restart/service death HOLDS', flush=True)
             disk = temp / f'owner-{modern}-{harts}.disk'
-            run(['python3', ROOT / 'tools/mkdisk.py', disk, '8'])
+            run([os.environ.get("SOL", "sol"), ROOT / 'tools/mkdisk.sol', disk, '8'])
             out = boot(owner, harts, modern, disk)
             assert 'budgetOffline=True HOLDS' in out and 'FAILED' not in out, out
             print(f'Files owner: virtio v{2 if modern else 1}, {harts} hart(s), recovery/no replay/latched offline HOLDS', flush=True)
             disk = temp / f'boot-{modern}-{harts}.disk'
-            run(['python3', ROOT / 'tools/mkdisk.py', disk, '8'])
+            run([os.environ.get("SOL", "sol"), ROOT / 'tools/mkdisk.sol', disk, '8'])
             for count in (1, 2):
                 out = boot(system, harts, modern, disk, 'yyyyq')
                 assert f'storage: disk online -- boot #{count} on this log' in out, out
@@ -68,7 +68,7 @@ with tempfile.TemporaryDirectory(prefix='qos-qlog-routing-') as d:
             print(f'System routing: virtio v{2 if modern else 1}, {harts} hart(s), two persistent boots HOLDS', flush=True)
             # The first metadata read fails before readiness publication.
             disk = temp / f'stalled-{modern}-{harts}.disk'
-            run(['python3', ROOT / 'tools/mkdisk.py', disk, '8'])
+            run([os.environ.get("SOL", "sol"), ROOT / 'tools/mkdisk.sol', disk, '8'])
             out = boot(stalled, harts, modern, disk, 'yyyyq', expected=1)
             assert 'storage startup failed: storage service: dead actor' in out, out
             assert 'storage: disk online' not in out and 'System.qa: startup app returned; halting.' not in out, out
@@ -82,12 +82,12 @@ with tempfile.TemporaryDirectory(prefix='qos-qlog-routing-') as d:
     manifest, archive = temp / 'StoreOwner.toml', temp / 'StoreOwner.qa'
     manifest.write_text('name = "StoreOwner"\nid = "StoreOwner"\nentry = "n/a"\nloadMode = "process"\nversion = "1"\n')
     compiler = os.environ.get('FPRISC_ROOT') or ((ROOT / 'fprisc.path').read_text().strip() if (ROOT / 'fprisc.path').exists() else str(ROOT.parent / 'fprisc'))
-    run(['tools/build-process-app.sh', 'tests/storeownerprobe.fpr', manifest, archive], env={'FPRISC_ROOT': compiler})
+    run([os.environ.get("SOL", "sol"), "tools/build-process-app.sol", 'tests/storeownerprobe.fpr', manifest, archive], env={'FPRISC_ROOT': compiler})
     kernel = temp / 'nativeowner.elf'
     build(ROOT / 'tests/nativeowner.fpr', kernel, temp / 'nativeowner', 2, '-DQOS_BLK_TEST')
     for modern in (False, True):
         disk = temp / f'nativeowner-{modern}.disk'
-        run(['python3', ROOT / 'tools/mkdisk.py', disk, '8', archive])
+        run([os.environ.get("SOL", "sol"), ROOT / 'tools/mkdisk.sol', disk, '8', archive])
         out = boot(kernel, 2, modern, disk)
         assert 'nativeowner:' in out and 'freed=True HOLDS' in out and 'FAILED' not in out, out
         print(f'Process storage ABI: virtio v{2 if modern else 1}, stable binding/recovery/no replay/mailbox preservation HOLDS', flush=True)

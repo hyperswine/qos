@@ -9,10 +9,20 @@ import subprocess
 import time
 from pathlib import Path
 
-from mkdisk import PG, chunk_hash
 from replay_profile import PROFILE_QLOG, replay_kernel
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+PG = 4096
+HP = 1000000007
+
+
+def chunk_hash(payload: bytes) -> int:
+    h = 7
+    for b in payload:
+        h = (h * 31 + b) % HP
+    return h or 1
 
 
 def seed(path, count, layout, mode):

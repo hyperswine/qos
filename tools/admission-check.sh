@@ -8,8 +8,8 @@ W=$(mktemp -d /tmp/qos-admission.XXXXXX)
 trap 'rm -rf "$W"' EXIT INT TERM
 make -s -C qos native SYSTEM="$PWD/tests/admissionnative.fpr" KERNEL="$W/k.elf" >"$W/k.log" 2>&1 || { tail -25 "$W/k.log"; exit 1; }
 printf 'name = "Memory admission probe"\nid = "CkMemory"\nentry = "n/a"\nloadMode = "process"\nversion = "1"\n' > "$W/app.toml"
-tools/build-process-app.sh tests/memoryproc.fpr "$W/app.toml" "$W/CkMemory.qa" >"$W/a.log" 2>&1 || { tail -25 "$W/a.log"; exit 1; }
-python3 tools/mkdisk.py "$W/d.img" 8 "$W/CkMemory.qa" >/dev/null
+"${SOL:-sol}" tools/build-process-app.sol tests/memoryproc.fpr "$W/app.toml" "$W/CkMemory.qa" >"$W/a.log" 2>&1 || { tail -25 "$W/a.log"; exit 1; }
+"${SOL:-sol}" tools/mkdisk.sol "$W/d.img" 8 "$W/CkMemory.qa" >/dev/null
 for harts in 1 2; do
   timeout 120 qemu-system-riscv64 -accel tcg,thread=multi -machine virt -smp "$harts" -m 256M -nographic -bios none \
     -kernel "$W/k.elf" -drive file="$W/d.img",if=none,format=raw,id=hd0 -device virtio-blk-device,drive=hd0 \

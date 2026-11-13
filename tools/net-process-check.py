@@ -14,13 +14,13 @@ def run(args,cwd=ROOT,timeout=240):
 with tempfile.TemporaryDirectory(prefix='qos-netprocess-') as d:
     temp=Path(d);manifest=temp/'NetOwner.toml';qa=temp/'NetOwner.qa'
     manifest.write_text('name = "NetOwner"\nid = "NetOwner"\nentry = "n/a"\nloadMode = "process"\nversion = "1"\n')
-    run(['tools/build-process-app.sh','tests/netactorprocess.fpr',manifest,qa])
+    run([os.environ.get("SOL", "sol"), "tools/build-process-app.sol",'tests/netactorprocess.fpr',manifest,qa])
     for harts in (1,2):
         kernel=temp/f'kernel-{harts}.elf'
         run(['make','-s','native',f'SYSTEM={ROOT}/tests/native-netowner.fpr',f'KERNEL={kernel}',f'BUILD={temp}/build-{harts}',f'HARTS={harts}'],cwd=ROOT/'qos')
         for modern in (False,True):
             disk=temp/f'disk-{harts}-{modern}'
-            run(['python3',ROOT/'tools/mkdisk.py',disk,'8',qa])
+            run([os.environ.get("SOL", "sol"),ROOT/'tools/mkdisk.sol',disk,'8',qa])
             args=['qemu-system-riscv64','-machine','virt','-smp',harts,'-m','256M','-nographic','-bios','none','-kernel',kernel,
                   '-drive',f'file={disk},if=none,format=raw,id=d0','-device','virtio-blk-device,drive=d0',
                   '-netdev','user,id=n0','-device','virtio-net-device,netdev=n0']

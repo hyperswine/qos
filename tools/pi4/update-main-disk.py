@@ -84,7 +84,7 @@ def valid_key(key):
 
 
 def app_index(apps):
-    """The canonical newline-separated index written by tools/mkdisk.py."""
+    """The canonical newline-separated index written by tools/mkdisk.sol."""
     return ''.join(a + '\n' for a in apps).encode()
 
 

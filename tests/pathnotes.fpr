@@ -34,7 +34,7 @@
 #   make plugin-qa PROG=tests/notesed1.fpr
 #   make plugin-qa PROG=tests/notesed2.fpr
 #   make plugin-qa PROG=tests/notesedbad.fpr
-#   python3 tools/mkdisk.py /tmp/pn.img 8 notesed1.qa notesed2.qa notesedbad.qa
+#   "${SOL:-sol}" tools/mkdisk.sol /tmp/pn.img 8 notesed1.qa notesed2.qa notesedbad.qa
 #   (cd qos && FPR_DISK=/tmp/pn.img ./qosp --yes ../app.qa)
 #
 # Expected (one line, plus the inspector block on stdout; cap=2 keeps

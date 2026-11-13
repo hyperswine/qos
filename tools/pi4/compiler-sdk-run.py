@@ -27,6 +27,7 @@ def environment(work):
                FPR_HOME=str(ROOT / "qos"), FPR_PATH=str(ROOT / "fprisc"),
                FPR_FOREIGN=str(ROOT / "qos/core/foreign.fpr"),
                FPRD_BUILD=str(work / "build"), TMPDIR=str(temporary),
+               SOL=str(ROOT / "bin/sol"), XDG_STATE_HOME=str(work / "state"),
                XDG_CACHE_HOME=str(work / "cache"),
                # Built with -rtsopts: bound live managed heap and stack. The
                # large GHC virtual reservation is not resident application data.

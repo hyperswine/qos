@@ -14,10 +14,13 @@ ghc -O0 -threaded -rtsopts -with-rtsopts=-V0.001 -i. -main-is PiEditorCompiler \
   -o /out/fpr-editor /work/qos/tools/pi4/EditorCompiler.hs
 ```
 
-Then package and exercise the SDK:
+The packaging container needs a 0.13.1-compatible Sol runner and Info-ZIP
+`zip` to create the Python standard-library archive.
+
+Package and exercise the SDK with the following commands.
 
 ```sh
-python3 tools/pi4/compiler-sdk.py --qos /work/qos --fprisc /work/fprisc \
+sol tools/pi4/compiler-sdk.sol --qos /work/qos --fprisc /work/fprisc \
   --compiler /out/fpr-editor --compiler-kind editor --output /out/compiler-sdk.tar.gz \
   --qos-revision "$QOS_REVISION" --fprisc-revision "$FPRISC_REVISION"
 mkdir /tmp/compiler-sdk-check

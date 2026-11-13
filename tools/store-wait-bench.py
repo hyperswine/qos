@@ -46,7 +46,7 @@ def main():
     manifest.write_text('name = "CkSlow"\nid = "CkSlow"\nentry = "n/a"\n'
                         'loadMode = "process"\nversion = "1"\n')
     app = out / "CkSlow.qa"
-    run(["tools/build-process-app.sh", "tests/storewaitbench.fpr", manifest, app])
+    run([os.environ.get("SOL", "sol"), "tools/build-process-app.sol", "tests/storewaitbench.fpr", manifest, app])
     if args.reply_trace:
         # Compile a temporary copy of the release runtime. Fail on source drift
         # rather than silently observing a different stage of delivery.
@@ -89,7 +89,7 @@ def main():
             for counters in ((1,) if args.files_check else order):
                 name = f"{harts}h-stats{counters}-run{repeat + 1}"
                 disk = out / f"{name}.img"
-                run(["python3", "tools/mkdisk.py", disk, "16", app])
+                run([os.environ.get("SOL", "sol"), "tools/mkdisk.sol", disk, "16", app])
                 command = ["qemu-system-riscv64", "-machine", "virt", "-smp", str(harts),
                            "-m", "256M", "-nographic", "-bios", "none", "-kernel", str(kernels[counters]),
                            "-drive", f"file={disk},if=none,format=raw,id=hd0", "-device", "virtio-blk-device,drive=hd0"]

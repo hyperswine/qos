@@ -24,7 +24,7 @@ for name, output in zip(("RELOC", "IMPORT"), sys.argv[2:]):
     t[off + n // 2] ^= 0xFF
     open(output, "wb").write(t)
 PY
-python3 tools/mkdisk.py "$W/disk.img" 8 "$W/plugmini.qa" "$W/plugneeds.qa" "$W/plugtamp.qa" "$W/plugimporttamp.qa" >/dev/null
+"${SOL:-sol}" tools/mkdisk.sol "$W/disk.img" 8 "$W/plugmini.qa" "$W/plugneeds.qa" "$W/plugtamp.qa" "$W/plugimporttamp.qa" >/dev/null
 make -s qos-app PROG=tests/qload.fpr QA_OUT="$W/a.qa" >/dev/null
 run_shell() {
   if ! FPR_DISK="$W/disk.img" timeout 60 "$W/qosp" --yes "$1" >"$W/run.log" 2>&1; then

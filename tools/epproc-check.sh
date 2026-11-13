@@ -11,8 +11,8 @@ export FPRISC_ROOT
 W=$(mktemp -d /tmp/epproc.XXXXXX)
 trap 'rm -rf "$W"' EXIT INT TERM
 make -s -C qos native >"$W/k.log" 2>&1 || { tail -20 "$W/k.log"; exit 1; }
-tools/build-process-app.sh tests/epproc.fpr tests/EpProc.toml "$W/EpProc.qa" >"$W/a.log" 2>&1 || { tail -20 "$W/a.log"; exit 1; }
-python3 tools/mkdisk.py "$W/d.img" 8 "$W/EpProc.qa" >/dev/null
+"${SOL:-sol}" tools/build-process-app.sol tests/epproc.fpr tests/EpProc.toml "$W/EpProc.qa" >"$W/a.log" 2>&1 || { tail -20 "$W/a.log"; exit 1; }
+"${SOL:-sol}" tools/mkdisk.sol "$W/d.img" 8 "$W/EpProc.qa" >/dev/null
 (printf 'yyyy'; sleep 6; printf '1'; sleep 3; printf 'yyy'; sleep 14) | timeout 40 qemu-system-riscv64 -accel tcg,thread=multi -machine virt -smp 2 -m 256M -nographic -bios none \
   -kernel qos/qos-native.elf -drive file="$W/d.img",if=none,format=raw,id=hd0 -device virtio-blk-device,drive=hd0 \
   2>/dev/null | tr -d '\r' > "$W/out.txt" || true

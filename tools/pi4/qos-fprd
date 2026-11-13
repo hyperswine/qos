@@ -1,0 +1,7 @@
+#!/bin/sh
+set -eu
+SDK=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+export PYTHONHOME="$SDK/python"
+export PYTHONNOUSERSITE=1
+export LD_LIBRARY_PATH="$SDK/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+exec "$SDK/bin/python3" -S "$SDK/run.py" "$@"

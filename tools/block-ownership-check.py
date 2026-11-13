@@ -48,7 +48,7 @@ with tempfile.TemporaryDirectory(prefix='qos-block-ownership-') as d:
             build(name, kernel, temp / f'{name}-{harts}', harts)
             for modern in (False, True):
                 disk = temp / f'{name}-{harts}-{modern}.disk'
-                run(['python3', ROOT / 'tools/mkdisk.py', disk, '8'])
+                run([os.environ.get("SOL", "sol"), ROOT / 'tools/mkdisk.sol', disk, '8'])
                 out = boot(kernel, disk, harts, modern)
                 assert f'{name}:' in out and 'HOLDS' in out and 'FAILED' not in out and 'PANIC' not in out, out
                 if name == 'diskreclaimcancel':
@@ -66,7 +66,7 @@ with tempfile.TemporaryDirectory(prefix='qos-block-ownership-') as d:
     kernel = temp / 'stale-policy.elf'
     build('diskclaimrace', kernel, temp / 'stale-policy', 2, badhal)
     disk = temp / 'stale-policy.disk'
-    run(['python3', ROOT / 'tools/mkdisk.py', disk, '8'])
+    run([os.environ.get("SOL", "sol"), ROOT / 'tools/mkdisk.sol', disk, '8'])
     out = boot(kernel, disk, 2, True)
     assert 'diskclaimrace:' in out and 'FAILED' in out and 'HOLDS' not in out, out
     print('Stale completion policy mutation: race fixture rejects unsafe release HOLDS', flush=True)

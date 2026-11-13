@@ -30,7 +30,7 @@ with tempfile.TemporaryDirectory(prefix='qos-files-shutdown-') as d:
         run(['make', '-s', 'native', f'SYSTEM={ROOT}/tests/filesshutdownactive.fpr', f'KERNEL={active}', f'BUILD={temp}/active-{harts}', f'HARTS={harts}', 'NATIVE_CFLAGS_EXTRA=-DQOS_BLK_TEST'], cwd=ROOT / 'qos')
         for modern in (False, True):
             disk = temp / f'disk-{harts}-{modern}'
-            run(['python3', ROOT / 'tools/mkdisk.py', disk, '8'])
+            run([os.environ.get("SOL", "sol"), ROOT / 'tools/mkdisk.sol', disk, '8'])
             args = ['qemu-system-riscv64', '-machine', 'virt', '-smp', harts, '-m', '256M', '-nographic', '-bios', 'none', '-kernel', kernel,
                     '-drive', f'file={disk},if=none,format=raw,id=hd0', '-device', 'virtio-blk-device,drive=hd0']
             if modern: args += ['-global', 'virtio-mmio.force-legacy=false']
@@ -39,7 +39,7 @@ with tempfile.TemporaryDirectory(prefix='qos-files-shutdown-') as d:
             print(f'Files shutdown: virtio v{2 if modern else 1}, {harts} hart(s) HOLDS', flush=True)
 
             activeDisk = temp / f'active-disk-{harts}-{modern}'
-            run(['python3', ROOT / 'tools/mkdisk.py', activeDisk, '8'])
+            run([os.environ.get("SOL", "sol"), ROOT / 'tools/mkdisk.sol', activeDisk, '8'])
             args[args.index(kernel)] = active
             args[args.index(f'file={disk},if=none,format=raw,id=hd0')] = f'file={activeDisk},if=none,format=raw,id=hd0'
             out = run(args, timeout=30)

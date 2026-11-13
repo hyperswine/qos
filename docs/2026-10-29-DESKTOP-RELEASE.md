@@ -26,11 +26,11 @@ driver must use the same native ABI and API/session as the selected compiler
 and SDK. Then:
 
 ```sh
-python3 tools/stage-portable-sdk.py --fprisc ../fprisc \
+sol tools/stage-portable-sdk.sol --fprisc ../fprisc \
   --profile .qos/sdk-profile --output /tmp/qos-release-sdk
-python3 tools/compiler-licenses.py --plan ../fprisc/dist-newstyle/cache/plan.json \
+sol ../fprisc/tools/compiler-licenses.sol --plan ../fprisc/dist-newstyle/cache/plan.json \
   --output /tmp/qos-release-notices
-python3 tools/package-portable-sdk.py --sdk /tmp/qos-release-sdk \
+sol tools/package-portable-sdk.sol --sdk /tmp/qos-release-sdk \
   --compiler-licenses /tmp/qos-release-notices --version 0.1.0 \
   --output /tmp/qos-release-0.1.0
 ```

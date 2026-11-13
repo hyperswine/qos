@@ -267,7 +267,7 @@ class Installer(unittest.TestCase):
 
     def test_legacy_disk_refused_without_writes(self):
         legacy = self.base / 'legacy.disk'
-        subprocess.run([sys.executable, Path(install.__file__).parent / 'mkdisk.py', legacy, '1',
+        subprocess.run([os.environ.get('SOL', 'sol'), Path(install.__file__).parent / 'mkdisk.sol', legacy, '1',
                         self.sdk / 'profile/seed.qa'], check=True, capture_output=True)
         before = legacy.read_bytes()
         with self.assertRaisesRegex(ValueError, 'no valid durable QLOG v3'):

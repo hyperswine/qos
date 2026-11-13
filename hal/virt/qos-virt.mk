@@ -10,28 +10,12 @@
 # add $(QOS_VIRT_HAL) to the link's inputs and prerequisites.  The PLIC driver
 # is FP-RISC over typed layouts, a raw library unit (rv64; plic.c is the rv32
 # fallback and is empty on rv64).
-QOS_PLIC_EXPORTS = irqOpen:hal_irq_open,irqClaim:hal_irq_claim,irqAck:hal_irq_ack
+SOL ?= sol
+QOS_HAL_TOOLS := $(QOS_HAL)/../tools
+QOS_VIRT_ASM := $(addprefix $(BUILD)/qos-,plic.s virtio.s blockpolicy.s netpolicy.s)
+$(QOS_VIRT_ASM): $(BUILD)/qos-%.s: $(QOS_HAL)/virt/%.fpr $(FPRC) $(QOS_HAL_TOOLS)/build-virt-hal.sol $(QOS_HAL_TOOLS)/virt-hal.sol
+	@mkdir -p "$(BUILD)"
+	"$(SOL)" "$(QOS_HAL_TOOLS)/build-virt-hal.sol" "$(FPRC)" "$(QOS_HAL)" "$(BUILD)" "$*"
 
-$(BUILD)/qos-plic.s: $(QOS_HAL)/virt/plic.fpr $(FPRC)
-	@mkdir -p $(BUILD)
-	"$(FPRC)" --profile=bare-metal-builtin --arc --raw --lib --export=$(QOS_PLIC_EXPORTS) $< $@ >/dev/null
-
-QOS_VIRT_HAL = $(BUILD)/qos-plic.s $(QOS_HAL)/virt/plic.c $(QOS_HAL)/virt/net.c $(QOS_HAL)/net_actor_bridge.c \
+QOS_VIRT_HAL = $(QOS_VIRT_ASM) $(QOS_HAL)/virt/plic.c $(QOS_HAL)/virt/net.c $(QOS_HAL)/net_actor_bridge.c \
                $(QOS_HAL)/virt/blk.c $(QOS_HAL)/virt/pins.c $(QOS_HAL)/virt/devices.c $(QOS_HAL)/core/lifecycle.c
-
-# Both device drivers share allocation-free probe/feature/queue policy on RV64.
-QOS_VIRTIO_EXPORTS = probe:qos_virtio_probe,probeAt:qos_virtio_probe_at,negotiate:qos_virtio_negotiate,queue:qos_virtio_queue,ready:qos_virtio_ready
-$(BUILD)/qos-virtio.s: $(QOS_HAL)/virt/virtio.fpr $(FPRC)
-	@mkdir -p $(BUILD)
-	"$(FPRC)" --profile=bare-metal-builtin --arc --raw --lib --export=$(QOS_VIRTIO_EXPORTS) $< $@ >/dev/null
-QOS_VIRT_HAL += $(BUILD)/qos-virtio.s
-
-$(BUILD)/qos-blockpolicy.s: $(QOS_HAL)/virt/blockpolicy.fpr $(FPRC)
-	@mkdir -p $(BUILD)
-	"$(FPRC)" --profile=bare-metal-builtin --arc --raw --lib --export=expired:qos_blk_expired,waiting:qos_blk_waiting,resetStep:qos_blk_reset_step,budgetValid:qos_blk_budget_valid,ownership:qos_blk_ownership,claimStep:qos_blk_claim_step $< $@ >/dev/null
-QOS_VIRT_HAL += $(BUILD)/qos-blockpolicy.s
-
-$(BUILD)/qos-netpolicy.s: $(QOS_HAL)/virt/netpolicy.fpr $(FPRC)
-	@mkdir -p $(BUILD)
-	"$(FPRC)" --profile=bare-metal-builtin --arc --raw --lib --export=receive:qos_net_receive,emit:qos_net_emit,poll:qos_net_poll,readSize:qos_net_read_size,consume:qos_net_consume,segment:qos_net_segment,connection:qos_net_connection,close:qos_net_close $< $@ >/dev/null
-QOS_VIRT_HAL += $(BUILD)/qos-netpolicy.s

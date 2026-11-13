@@ -14,9 +14,9 @@ make -s -C qos native SYSTEM="$PWD/tests/nativeimage.fpr" KERNEL="$W/k.elf" >"$W
 for a in CkSlow:slowproc CkLinger:lingerproc; do
   id=${a%%:*}; src=${a##*:}
   printf 'name = "%s"\nid = "%s"\nentry = "n/a"\nloadMode = "process"\nversion = "1"\n' "$id" "$id" >"$W/$id.toml"
-  tools/build-process-app.sh "tests/$src.fpr" "$W/$id.toml" "$W/$id.qa" >"$W/$id.log" 2>&1 || { tail -20 "$W/$id.log"; exit 1; }
+  "${SOL:-sol}" tools/build-process-app.sol "tests/$src.fpr" "$W/$id.toml" "$W/$id.qa" >"$W/$id.log" 2>&1 || { tail -20 "$W/$id.log"; exit 1; }
 done
-python3 tools/mkdisk.py "$W/d.img" 8 "$W/CkSlow.qa" "$W/CkLinger.qa" >/dev/null
+"${SOL:-sol}" tools/mkdisk.sol "$W/d.img" 8 "$W/CkSlow.qa" "$W/CkLinger.qa" >/dev/null
 # the kernel build above left build/system.s as the test kernel's
 trap 'rm -rf "$W"; make -s -C qos native >/dev/null 2>&1 || true' EXIT INT TERM
 timeout 180 qemu-system-riscv64 -accel tcg,thread=multi -machine virt -smp 2 -m 256M -nographic -bios none \

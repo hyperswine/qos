@@ -27,7 +27,8 @@ import subprocess
 import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
-PYTHON_BUILDER = ("portable_sdk.py", "mkimports.py", "mkexports.py", "mkqa.py", "qos_archive.py",
+PYTHON_BUILDER = ("portable_sdk.py", "mkimports.sol", "mkexports.sol", "elf-symbols.sol", "sdk/sort.sol",
+                  "qa-pack.sol", "elf-image.sol", "qa-relocations.sol", "qa-moved.sol", "qa-imports.sol", "qos_archive.py",
                   "qos_disk.py", "desktop_install.py")
 
 APP_HEAD = '''manifest = 2
@@ -78,7 +79,9 @@ def main():
             p.chmod(p.stat().st_mode | 0o200)
     sdk = prefix / "libexec/qos-portable"
     for name in PYTHON_BUILDER:
-        shutil.copy2(ROOT / "tools" / name, sdk / "tools" / name)
+        destination = sdk / "tools" / name
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(ROOT / "tools" / name, destination)
     lld = shutil.which("ld.lld")
     base = {k: v for k, v in os.environ.items() if not k.startswith(("FPR", "QOS", "GHCRTS"))}
     native_env = dict(base, PATH="/usr/bin:/bin", HOME=str(out / "home"), XDG_CACHE_HOME=str(out / "cache"))

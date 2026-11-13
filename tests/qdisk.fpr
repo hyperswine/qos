@@ -2,7 +2,7 @@
 # with ALL record policy in FPRISC (mods/qlog) over the policy-free
 # page tier (hal/unix/blk_raw.c, HAL table v5).  The same qlog module
 # System.qa runs over virtio-blk on native runs here over a host file;
-# tools/mkdisk.py seeds either.
+# tools/mkdisk.sol seeds either.
 #
 #   make qos-app PROG=tests/qdisk.fpr && (cd qos && make portable \
 #     && ./qosp --yes ../app.qa)

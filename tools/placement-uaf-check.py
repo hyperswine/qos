@@ -44,9 +44,9 @@ with tempfile.TemporaryDirectory(prefix='qos-placement-uaf-') as name:
     manifest = tmp / 'CkVector.toml'
     manifest.write_text('name = "CkVector"\nid = "CkVector"\nentry = "n/a"\nloadMode = "process"\nversion = "1"\n')
     qa = tmp / 'CkVector.qa'
-    run(['tools/build-process-app.sh', 'tests/vectorproc.fpr', manifest, qa])
+    run([os.environ.get("SOL", "sol"), "tools/build-process-app.sol", 'tests/vectorproc.fpr', manifest, qa])
     disk = tmp / 'disk.img'
-    run(['python3', 'tools/mkdisk.py', disk, '16', qa])
+    run([os.environ.get("SOL", "sol"), 'tools/mkdisk.sol', disk, '16', qa])
     kernel = tmp / 'kernel.elf'
     run(['make', '-s', '-C', 'qos', 'native', f'SYSTEM={ROOT}/tests/placeuaf.fpr', f'BUILD={tmp}/kernel',
          f'KERNEL={kernel}', 'NATIVE_CFLAGS_EXTRA=-DQOS_PROCESS_TEST'])

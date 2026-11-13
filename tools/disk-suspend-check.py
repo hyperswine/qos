@@ -34,7 +34,7 @@ with tempfile.TemporaryDirectory(prefix='qos-disk-wait-') as d:
         kernel=tmp/'disk.elf';disk=tmp/'native.disk'
         run(['make','-s','native',f'SYSTEM={ROOT}/tests/disknative.fpr',
              f'KERNEL={kernel}',f'BUILD={tmp}/native'],cwd=ROOT/'qos')
-        run(['python3',ROOT/'tools/mkdisk.py',disk,'8'])
+        run([os.environ.get("SOL", "sol"),ROOT/'tools/mkdisk.sol',disk,'8'])
         p=run(['qemu-system-riscv64','-machine','virt','-smp','2','-m','256M',
                '-nographic','-bios','none','-kernel',kernel,
                '-drive',f'file={disk},if=none,format=raw,id=hd0',

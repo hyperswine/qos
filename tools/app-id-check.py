@@ -53,12 +53,19 @@ def portable(tmp):
     run(['make', '-s', 'portable', f'QOSP_OUT={host}'], cwd=ROOT / 'qos')
     build = tmp / 'app'
     run(['make', '-s', 'qos-app', 'PROG=tests/appidproc.fpr', f'QA_OUT={base}', f'BUILD={build}'])
+    # The Make target names the primary and displaced images for its architecture.
+    moved, = build.glob('qosapp*.moved.elf')
+    image = moved.with_name(moved.name.replace('.moved.elf', '.elf'))
+
+    def pack(metadata, archive):
+        run([os.environ.get('SOL', 'sol'), 'tools/qa-pack.sol', 'process', metadata,
+             image, moved, '268435456', archive])
+
     global ABI
     ABI = next(l.split('"')[1] for l in (build / 'qosapp-gen.toml').read_text().splitlines() if l.startswith('abi'))
     for n, (app_id, why) in enumerate(BAD.items()):
         qa = tmp / f'bad{n}.qa'
-        run(['python3', 'tools/mkqa.py', manifest(tmp / f'bad{n}.toml', app_id), build / 'qosapp.elf', '-o', qa,
-             '--relocatable', '--check-moved', build / 'qosapp.moved.elf', '--delta', '0x10000000'])
+        pack(manifest(tmp / f'bad{n}.toml', app_id), qa)
         work = tmp / f'badrun{n}' / 'work'
         work.mkdir(parents=True)
         p = run([host, '--yes', qa], cwd=work, timeout=60, extra={'FPR_HARTS': '2', 'FPR_PORT': '0'}, check=False)
@@ -69,8 +76,7 @@ def portable(tmp):
     print(f'app-id portable: {len(BAD)} bad ids (incl. "../escaped") refused by name, nothing written: PASS', flush=True)
     for n, app_id in enumerate(GOOD):
         qa = tmp / f'good{n}.qa'
-        run(['python3', 'tools/mkqa.py', manifest(tmp / f'good{n}.toml', app_id), build / 'qosapp.elf', '-o', qa,
-             '--relocatable', '--check-moved', build / 'qosapp.moved.elf', '--delta', '0x10000000'])
+        pack(manifest(tmp / f'good{n}.toml', app_id), qa)
         work = tmp / f'goodrun{n}'
         work.mkdir()
         text = run([host, '--yes', qa], cwd=work, timeout=60, extra={'FPR_HARTS': '2', 'FPR_PORT': '0'}).stdout
@@ -88,11 +94,11 @@ def native(tmp):
         mf = tmp / f'{name}.toml'
         mf.write_text(f'name = "{name}"\nid = "{app_id}"\nentry = "n/a"\nloadMode = "process"\nversion = "1"\n')
         qa = tmp / f'{name}.qa'
-        run(['tools/build-process-app.sh', 'tests/appidproc.fpr', mf, qa])
+        run([os.environ.get("SOL", "sol"), "tools/build-process-app.sol", 'tests/appidproc.fpr', mf, qa])
         archives.append(qa)
     disk = tmp / 'disk'
     # mkdisk names a disk entry by the archive's file name
-    run(['python3', 'tools/mkdisk.py', disk, '16', *archives])
+    run([os.environ.get("SOL", "sol"), 'tools/mkdisk.sol', disk, '16', *archives])
     for harts in (1, 2):
         kernel = tmp / f'appidnative-{harts}.elf'
         run(['make', '-s', '-C', 'qos', 'native', f'SYSTEM={ROOT}/tests/appidnative.fpr',

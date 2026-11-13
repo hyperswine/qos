@@ -47,10 +47,10 @@ def native(tmp):
     manifest = tmp / 'CkSlow.toml'
     manifest.write_text('name = "CkSlow"\nid = "CkSlow"\nentry = "n/a"\nloadMode = "process"\nversion = "1"\n')
     qa = tmp / 'CkSlow.qa'
-    run(['tools/build-process-app.sh', 'tests/kvlarge.fpr', manifest, qa])
+    run([os.environ.get("SOL", "sol"), "tools/build-process-app.sol", 'tests/kvlarge.fpr', manifest, qa])
     for harts in (1, 2):
         disk = tmp / f'disk-{harts}'
-        run(['python3', 'tools/mkdisk.py', disk, '32', qa])
+        run([os.environ.get("SOL", "sol"), 'tools/mkdisk.sol', disk, '32', qa])
         kernel = tmp / f'kvlargenative-{harts}.elf'
         run(['make', '-s', '-C', 'qos', 'native', f'SYSTEM={ROOT}/tests/kvlargenative.fpr',
              f'KERNEL={kernel}', f'BUILD={tmp}/native-{harts}', f'HARTS={harts}'])

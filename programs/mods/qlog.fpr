@@ -153,7 +153,7 @@ pgsz = 4096.
 
 # ---- the chunk hash ---------------------------------------------------------
 # 31-polynomial over the payload bytes mod 1e9+7, pinned to nonzero so
-# that "0" can mean "v1 header, no hash stored".  mkdisk.py computes
+# that "0" can mean "v1 header, no hash stored".  mkdisk.sol computes
 # the SAME fold when it seeds an image.
 hprime = 1000000007.
 hFix h = case h == 0 of True -> 1 | False -> h.

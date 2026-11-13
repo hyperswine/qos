@@ -44,7 +44,7 @@ with tempfile.TemporaryDirectory(prefix='qos-disk-harden-') as d:
             for harts in (1, 2):
                 # Fresh state: this test deliberately leaves the disk offline.
                 disk = tmp / f'native-v{2 if modern else 1}-{harts}.disk'
-                run(['python3', ROOT / 'tools/mkdisk.py', disk, '8'])
+                run([os.environ.get("SOL", "sol"), ROOT / 'tools/mkdisk.sol', disk, '8'])
                 args = ['qemu-system-riscv64', '-machine', 'virt', '-smp', str(harts), '-m', '256M', '-nographic', '-bios', 'none',
                         '-kernel', kernels[harts], '-drive', f'file={disk},if=none,format=raw,id=hd0',
                         '-device', 'virtio-blk-device,drive=hd0']
@@ -71,7 +71,7 @@ with tempfile.TemporaryDirectory(prefix='qos-disk-harden-') as d:
             for modern in (False, True):
                 for harts in (1, 2):
                     disk = tmp / f'cancel-{phase}-{modern}-{harts}.disk'
-                    run(['python3', ROOT / 'tools/mkdisk.py', disk, '8'])
+                    run([os.environ.get("SOL", "sol"), ROOT / 'tools/mkdisk.sol', disk, '8'])
                     args = ['qemu-system-riscv64', '-machine', 'virt', '-smp', str(harts), '-m', '256M', '-nographic', '-bios', 'none',
                             '-kernel', kernels[harts], '-drive', f'file={disk},if=none,format=raw,id=hd0', '-device', 'virtio-blk-device,drive=hd0']
                     if modern:
