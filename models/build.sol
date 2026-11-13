@@ -11,7 +11,8 @@ part compiler dir name =
   command ["xvfb-run","-a","openscad","-o","{path}.stl","-D","$fn=10","{path}.scad"].
 render compiler (dir, names) = List.map (part compiler dir) names.
 pack (dir, names) = inputs = List.map (fn name -> "{name}={dir}/{name}.stl") names;
-  command (List.append ["python3","../tools/mkmesh.py","{dir}/{dir}.fpr"] inputs).
+  runner = (case unwrap (Env.get "SOL") of EnvText value -> value | EnvMissing -> "sol");
+  command (List.append [runner,"../tools/mkmesh.sol","{dir}/{dir}.fpr"] inputs).
 > compiler = (case unwrap (Env.get "COSCAD") of EnvText value -> if value == "" then "coscad" else value | EnvMissing -> "coscad");
   _ = List.map (render compiler) groups;
   _ = List.map pack groups; Unit.
