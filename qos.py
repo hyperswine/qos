@@ -52,7 +52,7 @@ directories or thread app.qa paths by hand again.
                                     version; fpr.lock is current
     ./qos.py release 0.2.0 --push   cut a release: commit the modules, lock,
                                     smoke, stamped dist bundles, tag v0.2.0
-    ./qos.py test                   the fast smoke set;  --all = check-all.sh
+    ./qos.py test                   the fast smoke set;  --all = ./sweep --in-place
     ./qos.py toolchain install --prefix DIR   the app SDK: DIR/bin/{fpr,qos,sol} (--full: the whole tree)
     ./qos.py clean
 
@@ -1434,9 +1434,9 @@ def cmd_release(a):
     say(f"fpr.lock: {sum(1 for l in text.splitlines() if l and not l.startswith('#'))} pin(s)")
     # 3. proof: the smoke set (the full sweep is --full)
     if a.full:
-        say("the full sweep (check-all.sh)")
-        if subprocess.call(["bash", "check-all.sh"], cwd=ROOT) != 0:
-            die("check-all.sh failed; not releasing")
+        say("the full sweep (./sweep --in-place)")
+        if subprocess.call([str(ROOT / "sweep"), "--in-place"], cwd=ROOT) != 0:
+            die("./sweep --in-place failed; not releasing")
     elif not a.skip_tests:
         cmd_test(argparse.Namespace(all=False, legs=[], jobs=0))
     # 4. the artifacts: one stamped bundle per app
@@ -1534,8 +1534,8 @@ def _smoke_one(label, prog, backend, expect, index, out_root, jobs):
 
 def cmd_test(a):
     if a.all:
-        say("the full sweep (check-all.sh; the summary prints pass/fail/skip counts)")
-        return subprocess.call(["bash", "check-all.sh"], cwd=ROOT)
+        say("the full sweep (./sweep --in-place; the summary prints pass/fail/skip counts)")
+        return subprocess.call([str(ROOT / "sweep"), "--in-place"], cwd=ROOT)
     build_fpr()
     build_qosp()
     t0 = time.time()
@@ -1837,7 +1837,7 @@ def main():
     p = sub.add_parser("release", help="cut vX.Y.Z: fpr commit the modules, lock, smoke, pack stamped bundles, tag")
     p.add_argument("version", nargs="?", help="X.Y.Z (default: release.toml's version)")
     p.add_argument("--push", action="store_true", help="push the branch and the tag (publication itself is manual after the split)")
-    p.add_argument("--full", action="store_true", help="run the full sweep (check-all.sh) instead of the smoke set")
+    p.add_argument("--full", action="store_true", help="run the full sweep (./sweep --in-place) instead of the smoke set")
     p.add_argument("--skip-tests", action="store_true", help="no tests (CI builds after the sweep already ran)")
     p.add_argument("--no-git", action="store_true", help="build the dist bundles only: no commit, no tag (what CI runs)")
     p.set_defaults(f=cmd_release)

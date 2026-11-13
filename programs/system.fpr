@@ -721,7 +721,7 @@ runProcess con qa caps =
   | Ok load -> case QAR.extent qa "IMAGE" of
       Err e -> putLn con (strcat "No IMAGE section in this .qa: " e)
     | Ok r -> (case QAR.extent qa "RELOC" of
-        Err e -> putLn con "process load failed: no RELOC section (an image linked for a fixed slot): rebuild it with tools/build-process-app.sh"
+        Err e -> putLn con "process load failed: no RELOC section (an image linked for a fixed slot): rebuild it with sol tools/build-process-app.sol"
       | Ok rel -> runProcessAt con qa load r rel caps).
 
 runProcessAt : unsafe (Int, Int) -> String -> String -> (Int, Int) -> (Int, Int) -> Caps -> Unit .

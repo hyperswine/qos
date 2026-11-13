@@ -19,14 +19,14 @@ Inside the VM, download and extract Buildroot 2026.08 into
 `~/buildroot-2026.08`, then run from this checkout:
 
 ```sh
-tools/buildroot/br.sh star64
+sol tools/buildroot/br.sol "$PWD/tools/buildroot" star64
 ```
 
 To personalize SSH access, provide an OpenSSH public-key file on the Linux
 build machine. Keep this input outside the tracked overlay:
 
 ```sh
-QOSP_STAR64_AUTHORIZED_KEYS=/path/to/authorized_keys tools/buildroot/br.sh star64
+QOSP_STAR64_AUTHORIZED_KEYS=/path/to/authorized_keys sol tools/buildroot/br.sol "$PWD/tools/buildroot" star64
 ```
 
 The post-build hook installs it as root's `authorized_keys`, with the directory

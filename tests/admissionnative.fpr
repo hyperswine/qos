@@ -49,9 +49,9 @@ run me qa =
   images0 = Sys.images 0;
   free0 = Sys.arenaFree 0;
   (old, oldWhy, oldRoot) = placeAbi qa (0 - 2);
-  missing = old == 0 and oldRoot == 0 and oldWhy == "native runtime ABI missing: rebuild the process with tools/build-process-app.sh" and Sys.images 0 == images0;
+  missing = old == 0 and oldRoot == 0 and oldWhy == "native runtime ABI missing: rebuild the process with sol tools/build-process-app.sol" and Sys.images 0 == images0;
   (bad, why, rootBad) = placeAbi qa 999;
-  rejected = missing and bad == 0 and rootBad == 0 and why == "native runtime ABI mismatch: rebuild the process with tools/build-process-app.sh" and Sys.images 0 == images0;
+  rejected = missing and bad == 0 and rootBad == 0 and why == "native runtime ABI mismatch: rebuild the process with sol tools/build-process-app.sol" and Sys.images 0 == images0;
   (ok, msg, root) = place qa;
   reply = case ok == 2 of True -> result me root | False -> msg;
   _ = settle images0 400;

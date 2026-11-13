@@ -11,7 +11,7 @@ with no desktop, no compositor and no window system anywhere in the picture.
       configs/qosp_star64_defconfig         STAR64 Linux bring-up (no qosp yet)
       package/qosp/                         the package that builds qosp
       board/qosp/                           kernel fragment, Pi config.txt
-      br.sh                                 build
+      br.sol                                 build
       boot.sh                               boot the QEMU image
       qosp-check.py                         boot it and assert what came up
 
@@ -52,7 +52,7 @@ Inside it, once:
       https://gitlab.com/buildroot.org/buildroot.git ~/buildroot
 
 An image hosts **one** application, and which one is the point of the image,
-so build that first — `br.sh` deliberately will not guess:
+so build that first — `br.sol` deliberately will not guess:
 
     make -C ~/qos qos-app PROG=programs/terra2.fpr    # writes qos/app.qa
 
@@ -63,7 +63,7 @@ post-build hooks. From the QOS checkout, build the image with:
     sol tools/buildroot/br.sol "$PWD/tools/buildroot" qemu        # or: rpi4
 
 Output lands in `~/.cache/qosp-br/<target>/images`. Anything after the target
-goes to Buildroot, so `br.sh qemu menuconfig` and `br.sh qemu qosp-rebuild`
+goes to Buildroot, so `sol tools/buildroot/br.sol "$PWD/tools/buildroot" qemu menuconfig` and `sol tools/buildroot/br.sol "$PWD/tools/buildroot" qemu qosp-rebuild`
 work as usual.
 
 ### How `qosp` gets built
@@ -127,7 +127,7 @@ builds them in, and the card is there before userspace is. `mdev` is enabled
 as well, for everything that legitimately arrives later — the Broadcom wifi
 module, and anything plugged in after boot.
 
-`br.sh rpi4` writes `images/sdcard.img`, which is a whole card:
+`sol tools/buildroot/br.sol "$PWD/tools/buildroot" rpi4` writes `images/sdcard.img`, which is a whole card:
 
     # pick the right disk very carefully
     diskutil list
@@ -174,7 +174,7 @@ The first is shared setup, the second is Pi-specific networking, and the last
 is private settings. The Pi defconfig already selects the tracked directories
 and leaves `BR2_SYSTEM_DHCP` empty: its overlay supplies Ethernet configuration.
 Existing cached target configs
-must be updated explicitly: `br.sh` preserves their `.config`.
+must be updated explicitly: `br.sol` preserves their `.config`.
 
 `S41wifi` loads `brcmfmac` after the firmware filesystem is available, waits
 up to five seconds for `wlan0`, then starts `wpa_supplicant` and DHCP. In the Pi

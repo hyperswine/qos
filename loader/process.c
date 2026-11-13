@@ -345,22 +345,22 @@ static const char *check_image(V qastr, V extv, V numsv, V shav, V relshav, uw e
   if (!fpr_list_ints(extv, ext, 6))
     return "native image extents must cover IMAGE, RELOC and IMPORT";
   if (!fpr_list_ints(numsv, nums, 8))
-    return "native runtime ABI missing: rebuild the process with tools/build-process-app.sh";
+    return "native runtime ABI missing: rebuild the process with sol tools/build-process-app.sol";
   if (nums[5] != FPR_NATIVE_ABI)
-    return "native runtime ABI mismatch: rebuild the process with tools/build-process-app.sh";
+    return "native runtime ABI mismatch: rebuild the process with sol tools/build-process-app.sol";
   /* the two plane contracts (fpr.h): declared apart from the layout version,
    * so either table can move without the other; -1 = not declared */
   if (nums[6] == (uw)-1 || nums[7] == (uw)-1)
-    return "plane contract versions missing: rebuild the process with tools/build-process-app.sh";
+    return "plane contract versions missing: rebuild the process with sol tools/build-process-app.sol";
   if (nums[6] != FPR_PLANE_ACTORS_ABI)
-    return "plane actors ABI mismatch: rebuild the process with tools/build-process-app.sh";
+    return "plane actors ABI mismatch: rebuild the process with sol tools/build-process-app.sol";
   if (nums[7] != FPR_PLANE_MEMORY_ABI)
-    return "plane memory ABI mismatch: rebuild the process with tools/build-process-app.sh";
+    return "plane memory ABI mismatch: rebuild the process with sol tools/build-process-app.sol";
   str_t *qa = (str_t *)qastr;
   for (uw i = 0; i < 6; i += 2)
     if (ext[i] > qa->len || ext[i+1] > qa->len - ext[i]) return "native image section outside archive";
   if (nums[0] != 0)
-    return "not a relocatable image (linked for a fixed slot): rebuild it with tools/build-process-app.sh";
+    return "not a relocatable image (linked for a fixed slot): rebuild it with sol tools/build-process-app.sol";
   if (!nums[4] || ext[1] > nums[4] || nums[2] > ext[1] || nums[1] >= nums[2] || nums[3] > nums[4])
     return "native image LOAD spans inconsistent";
   if (!digest_is(shav, qa->bytes + ext[0], ext[1], 0, 0))

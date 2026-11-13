@@ -160,9 +160,9 @@ V fpr_process_entry(void *heap_base, uw heap_size, fpr_grant_t (*grow)(uw want_b
      * spawned, the kernel reads `refused` and frees the image */
     sb->refused = 0;
     if (!sb->actors || sb->actors->abi != FPR_PLANE_ACTORS_ABI)
-      sb->refused = "plane actors ABI mismatch: rebuild the process with tools/build-process-app.sh";
+      sb->refused = "plane actors ABI mismatch: rebuild the process with sol tools/build-process-app.sol";
     else if (!sb->memory || sb->memory->abi != FPR_PLANE_MEMORY_ABI)
-      sb->refused = "plane memory ABI mismatch: rebuild the process with tools/build-process-app.sh";
+      sb->refused = "plane memory ABI mismatch: rebuild the process with sol tools/build-process-app.sol";
     if (sb->refused) { sb->root = 0; return (V)&fpr_unit; }
     fpr_plane_actors = sb->actors;
     fpr_plane_memory = sb->memory;

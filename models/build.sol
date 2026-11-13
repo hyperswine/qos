@@ -1,4 +1,4 @@
-# Run in models/. The .sh entry locates this directory for external callers.
+# Run from models/: sol build.sol.
 groups = [("tank", ["tank_hull","tank_turret"]),
           ("infantry", ["infantry","infantry_kit","infantry_rifle"]),
           ("truck", ["truck","truck_kit","truck_canvas"]),

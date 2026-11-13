@@ -5,7 +5,7 @@
 # 24.04 does not ship.  The compiler is built once from the revision pinned
 # in fprisc.lock.json and cached by that revision.
 #
-# Not covered here: the full check-all.sh sweep (GL/GLFW hosts, Sol/compiler
+# Not covered here: the full ./sweep --in-place sweep (GL/GLFW hosts, Sol/compiler
 # legs, Pi 4/STAR64 hardware); run `./qos.py test --all` locally for it.
 name: ci
 

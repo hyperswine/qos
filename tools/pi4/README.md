@@ -12,7 +12,7 @@ toolchain rather than the VM's newer glibc:
 
 ```sh
 tools/arm64-vm/vm.sh sync
-tools/arm64-vm/vm.sh ssh 'bash ~/qos/tools/pi4/build.sh'
+tools/arm64-vm/vm.sh ssh 'cd ~/qos && sol tools/pi4-build.sol $HOME/qos'
 ```
 
 `TARGET_CC` and `FPRISC_ROOT` override the SDK and compiler paths. The output

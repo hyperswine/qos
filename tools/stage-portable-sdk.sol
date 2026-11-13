@@ -7,7 +7,7 @@
 # Run from inside the QOS checkout. The installed `qos` command is FP-RISC
 # (tools/qos/), compiled here by the SDK's own compiler and runtime, so the
 # SDK ships no Python. It needs Clang on PATH, and lld unless --lld gives the
-# static ld.lld the SDK ships (tools/build-sdk-lld.sh). --profile supplies the
+# static ld.lld the SDK ships (sol tools/build-sdk-lld.sol). --profile supplies the
 # matching prebuilt Main and apps; the hosts come from this tree's qos/qosp
 # and qos/qosp-gl, built beforehand.
 K = use "sdk/sdk".
@@ -82,7 +82,7 @@ opt parsed key = CLI.valueOr "" key parsed.
 
 shipLinker root sdk lld =
   lldReal = K.realpath lld;
-  _ = K.check "{lldReal} links libraries outside the system; build it with tools/build-sdk-lld.sh" (systemOnly lldReal);
+  _ = K.check "{lldReal} links libraries outside the system; build it with sol tools/build-sdk-lld.sol" (systemOnly lldReal);
   _ = K.copy lldReal "{sdk}/toolchain/ld.lld";
   _ = K.copy "{root}/packaging/llvm/LICENSE.TXT" "{sdk}/toolchain/LICENSE-LLVM.txt";
   [("ld.lld", J.JStr (K.sha256 "{sdk}/toolchain/ld.lld"))].

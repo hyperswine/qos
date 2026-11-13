@@ -20,5 +20,6 @@ build directory driver =
   _ = runTool ["cmake","-S","{source}/lld","-B",out,"-G","Ninja","-DLLVM_DIR={cfg}","-DCMAKE_BUILD_TYPE=Release","-DLLVM_INCLUDE_TESTS=OFF","-DCMAKE_C_COMPILER=/usr/bin/clang","-DCMAKE_CXX_COMPILER=/usr/bin/clang++","-DCMAKE_OSX_DEPLOYMENT_TARGET={deployment}","-DLLVM_USE_STATIC_ZSTD=ON","-Dzstd_LIBRARY={zstd}/lib/libzstd.a","-Dzstd_STATIC_LIBRARY={zstd}/lib/libzstd.a"];
   _ = runTool ["ninja","-C",out,"lldELF","lldCommon","lld"];
   Link.link work llvm driver deployment.
-> case args Unit of [driver,directory] -> build directory driver
-  | _ -> error "usage: build-sdk-lld.sh WORKDIR".
+> case args Unit of [directory] -> build directory "tools/sdk/ld-elf.cpp"
+  | [driver,directory] -> build directory driver
+  | _ -> error "usage: sol tools/build-sdk-lld.sol [DRIVER] WORKDIR".
