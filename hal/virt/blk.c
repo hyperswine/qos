@@ -805,10 +805,9 @@ static V h_blkFlush(V d) {
 }
 FPR_FN(fpr_g_blkFlush, h_blkFlush, 1);
 
-extern int fpr_wait_any_until_c(V, uint64_t) __attribute__((weak));
 static V h_blkWaitInbox(V me, V until) {
   sw us = UNTAG(until);
-  if (!fpr_wait_any_until_c || us < 0 || (uint64_t)us > UINT64_MAX / 10) return TAG(0);
+  if (us < 0 || (uint64_t)us > UINT64_MAX / 10) return TAG(0);
   return TAG(fpr_wait_any_until_c(me, (uint64_t)us * 10));
 }
 FPR_FN(fpr_g_blkWaitInbox, h_blkWaitInbox, 2);
