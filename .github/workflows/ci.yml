@@ -45,6 +45,8 @@ jobs:
           SOL: /usr/local/bin/sol
         run: |
           ln -s "$FPRISC_ROOT/fpr" /usr/local/bin/sol
+          # the workspace belongs to the runner's user and this container runs as root
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           sol tools/sol-only-check.sol
           sol tools/checkout.sol build host
           sol tools/checkout.sol pack tests/sol-hello.fpr --out build/sol-smoke/hello --bundle
