@@ -5,7 +5,8 @@ systemLibrary name =
   Str.startsWith "ld-linux" name or List.any (fn base -> name == base or Str.startsWith (base + ".") name) bases.
 dependency dest state line =
   (seen,pending) = state;
-  case Str.words line of
+  # ldd indents with a tab, which Str.words does not split on
+  case Str.words (Str.replace (Str.fromCode 9) " " line) of
     name :: "=>" :: path :: _ ->
       if Str.startsWith "/" path then
         if systemLibrary name or List.any (fn prior -> prior == name) seen then state else
