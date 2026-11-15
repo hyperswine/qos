@@ -204,3 +204,4 @@ Source-adjacent READMEs under `tools/` stay beside the tools they explain.
 | 2026-11-12 | [Exokernels, microkernels, and capability-bounded memory](https://github.com/hyperswine/fprisc/blob/main/docs/research/2026-11-12-EXOKERNELS-MICROKERNELS-AND-CAPABILITY-BOUNDED-MEMORY.md) | Shared FP-RISC/QOS research and proposed file-service placement, accounting and restart experiment |
 
 - [Core builds and packages in Sol](2026-11-13-CORE-SOL-BUILDS.md) documents the contributor command, Main builder, native bundles and optional Pi daemon.
+- [Pi 4B candidate on FP-RISC 0.14.0](2026-11-15-PI-FPRISC-0.14.0-CANDIDATE.md): pin 566870c3 and the weak-reference fix build and pass isolated checks on the device; install held, with the steps a full migration needs.
