@@ -28,7 +28,10 @@ compileBundle qos fpr out cc =
       _ = List.map (program fpr out cc "") extraTests;
       _ = List.map (program fpr out cc "bench/") benchmarks;
       _ = command fpr ["cp","tests/base/strprims.expected","{out}/strprims.expected"];
-      _ = List.map (archive qos out "qos-app-a64" "QA_OUT") applications;
+      # QOS_PI4_SKIP (comma separated) leaves named applications out; the
+      # checks report their cases as skipped, never as passed
+      skip = (case unwrap (Env.get "QOS_PI4_SKIP") of EnvText s -> Str.split 44 s | EnvMissing -> []);
+      _ = List.map (archive qos out "qos-app-a64" "QA_OUT") (List.filter (fn n -> not (List.has n skip)) applications);
       _ = List.map (archive qos out "plugin-qa-a64" "PLUG_OUT") plugins;
       sol = (case unwrap (Env.get "SOL") of EnvText path -> path | EnvMissing -> "sol");
       command qos [sol,"tools/mkdisk.sol","{out}/qsys.disk","8","{out}/plugmini.qa","{out}/plughello.qa"].
