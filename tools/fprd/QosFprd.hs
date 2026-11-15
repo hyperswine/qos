@@ -184,10 +184,13 @@ data Ran = Ran ExitCode B.ByteString -- the exit, then stderr followed by stdout
 -- group is killed and the answer is Nothing.
 run :: Cfg -> FilePath -> Int -> [String] -> IO (Maybe Ran)
 run cfg dir seconds argv = do
-  let (cmd, cmdArgs) = case argv of
+  let (name, cmdArgs) = case argv of
         c : rest -> (c, rest)
         [] -> error "run: empty command"
-      cp =
+  -- process looks a bare name up on the daemon's own PATH, not the child's:
+  -- resolve it on the child's (the SDK's bin/ comes first there)
+  cmd <- resolveOn (fromMaybe "" (lookup "PATH" (cfEnv cfg))) name
+  let cp =
         (proc cmd cmdArgs)
           { cwd = Just dir,
             env = Just (cfEnv cfg),
@@ -221,6 +224,18 @@ run cfg dir seconds argv = do
       when (st == Nothing) (getPid ph >>= killGroup >> () <$ waitForProcess ph)
       mapM_ hClose o
       mapM_ hClose e
+
+resolveOn :: String -> FilePath -> IO FilePath
+resolveOn path name
+  | '/' `elem` name = pure name
+  | otherwise = go (splitOn ':' path)
+  where
+    go [] = pure name
+    go (d : ds) = do
+      let candidate = (if null d then "." else d) </> name
+      ok <- doesFileExist candidate
+      x <- if ok then executable <$> getPermissions candidate else pure False
+      if x then pure candidate else go ds
 
 killGroup :: Maybe CPid -> IO ()
 killGroup Nothing = pure ()
