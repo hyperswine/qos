@@ -1,0 +1,10 @@
+['create', 'apps/hello.sxa'] ['created apps/hello.sxa']
+['cat', 'apps/hello.sxa'] ['53584131a00000001bc77731970200009382420223a0a200170300006700c301970200009382020183a202006780020000000000130101ff232611002324810013040101170500001305050397000000e78040fd1305a0021315150013651500130e04008320c4ff032484ff13010e006780000028230000000000002c00000068656c6c6f2066726f6d20612073657061726174656c7920636f6d70696c65642046502d5249534320617070']
+['ls'] ['apps/hello.sxa', 'notes/prompt-4f0db519.txt', 'notes/prompt-df19f9e6.txt', 'notes/spectre.txt']
+['run', 'apps/hello.sxa'] ['hello from a separately compiled FP-RISC app', 'exit 42']
+['run', 'apps/hello.sxa'] ['hello from a separately compiled FP-RISC app', 'exit 42']
+['run', 'notes/spectre.txt'] ['run: invalid app or exit status']
+['cat', 'notes/spectre.txt'] ['hello from Spectre']
+b'Spectre SD boot OK\nqos> '
+['run', 'apps/hello.sxa'] ['hello from a separately compiled FP-RISC app', 'exit 42']
+['cat', 'notes/spectre.txt'] ['hello from Spectre']

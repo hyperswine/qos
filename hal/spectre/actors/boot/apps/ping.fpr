@@ -1,0 +1,6 @@
+profile builtin.
+peerSend : unsafe Int -> Int .
+mailReceive : unsafe Int -> Int .
+main =
+  _ = peerSend 37;
+  mailReceive 0.

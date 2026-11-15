@@ -159,7 +159,14 @@ hprime = 1000000007.
 hFix h = case h == 0 of True -> 1 | False -> h.
 hashStr s = hFix (hGo s 0 (strlen s) 7).
 hGo : unsafe String -> Int -> Int -> Int -> Int .
-hGo s i n acc = case i >= n of True -> acc | False -> hGo s (i + 1) n (imod (acc * 31 + charAt s i) hprime).
+# Split the residue at floor(p/31). 31*split == p-(p mod 31);
+# both products below fit a tagged RV32 Int, preserving the disk hash.
+hashByte acc byte =
+  split = hprime / 31;
+  q = acc / split;
+  raw = (acc - q * split) * 31 + byte - q * (hprime - split * 31);
+  if raw < 0 then raw + hprime else if raw >= hprime then raw - hprime else raw.
+hGo s i n acc = case i >= n of True -> acc | False -> hGo s (i + 1) n (hashByte acc (charAt s i)).
 # interior merkle node over two child hashes
 hCombine a b = hFix (imod ((imod (a * 1000003) hprime) + b + 17) hprime).
 
@@ -1517,10 +1524,19 @@ queueAfter dev me head idx tidy first until key bytes queued second due op k v =
 ordinaryEntry key page bytes =
   size = strlen bytes;
   Ent key page size 0 size (cacheable bytes).
+# Standalone Files owner: enumerate the live index, one row per name.
+# Namespace clients do not forward this whole-volume operation.
+indexNames : unsafe List Ent -> List String -> String -> String .
+indexNames idx seen rows = case idx of
+    Nil -> rows
+  | (Ent key page pl off len body) :: rest -> if member seen key then indexNames rest seen rows
+      else indexNames rest (key :: seen) (if rows == "" then key else "{rows}\n{key}").
+
 aServe : unsafe PageSource -> Int -> Int -> List Ent -> AC.Tidy -> (Int, Int, Bool) -> Int -> String -> String -> zz .
 aServe dev me head idx tidy replyTo tag url pay =
   case tag of
     1 -> pageProbe dev >> Wire.reply replyTo (latestNewest dev idx url) >> aLoop dev me head idx tidy
+  | 14 -> pageProbe dev >> Wire.reply replyTo (Ok (indexNames idx Nil "")) >> aLoop dev me head idx tidy
   | 2 -> aAppend dev me head idx tidy replyTo "QREC" url pay
   | 3 -> aReplay dev me head idx tidy replyTo url
   | 4 -> aAppend dev me head idx tidy replyTo "QDEL" url ""

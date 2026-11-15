@@ -1,0 +1,5 @@
+profile builtin.
+spectrePut : String -> Unit .
+main =
+  _ = spectrePut "hello from a separately compiled FP-RISC app";
+  42.

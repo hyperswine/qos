@@ -1,0 +1,4 @@
+profile builtin.
+spin : unsafe Int -> Int .
+spin n = spin n.
+main = spin 0.

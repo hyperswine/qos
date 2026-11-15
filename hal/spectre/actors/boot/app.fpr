@@ -1,0 +1,38 @@
+unsafe program.
+FS = use "std/fs".
+QL = use "programs/mods/qlog".
+spectreRun : unsafe String -> Int .
+spectreJob : unsafe Int -> Int -> Int .
+spectreTicks : unsafe Int -> Int .
+spectrePrompt : unsafe Unit -> String .
+space : unsafe String -> Int -> Int .
+space line i = if i >= strlen line then i else if charAt line i == 32 then i else space line (i + 1).
+showResult r = case r of Ok text -> print text | Err why -> print "error: {why}".
+create me fs name text = case FS.readLatest me fs name of
+    Ok old -> print "already exists"
+  | Err why -> if FS.missing why then (case FS.append me fs name text of Ok ack -> print "created {name}" | Err msg -> print "error: {msg}") else print "error: {why}".
+command me fs line =
+  a = space line 0;
+  op = substr line 0 a;
+  n = strlen line;
+  b = space line (a + 1);
+  slot = if line == "status 1" or line == "stop 1" then 1 else if line == "status 2" or line == "stop 2" then 2 else 0;
+  if op == "status" and (slot > 0 or line == "status") then (case spectreJob slot 0 of
+        259 -> print "running; yields {spectreTicks slot}"
+      | 257 -> print "invalid exit status"
+      | 260 -> print "stopped"
+      | 261 -> print "no app"
+      | code -> print "exit {code}")
+  else if op == "stop" and (slot > 0 or line == "stop") then (if spectreJob slot 1 == 1 then print "stopped" else print "no running app")
+  else if line == "ls" then showResult (FS.rpc me fs 14 "" "")
+  else if op == "run" and b == n and a + 1 < n then (case FS.readLatest me fs (substr line (a + 1) (n - a - 1)) of
+      Err why -> print "run: {why}"
+    | Ok image -> status = spectreRun image; if status > 0 then print "started job {status}" else if status == 0 then print "run: busy" else print "run: invalid app")
+  else if op == "cat" and b == n and a + 1 < n then showResult (FS.readLatest me fs (substr line (a + 1) (n - a - 1)))
+  else if op == "create" and b > a + 1 and b < n then create me fs (substr line (a + 1) (b - a - 1)) (substr line (b + 1) (n - b - 1))
+  else print "usage: create NAME TEXT | ls | cat NAME | run NAME | status [1|2] | stop [1|2]".
+turn me fs state = _ = command me fs (spectrePrompt Unit); (True,state).
+main =
+  me = myself 0;
+  fs = spawn (QL.actorWith (QL.direct (device "blk")));
+  Sys.loop Unit (turn me fs).

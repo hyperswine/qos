@@ -1,0 +1,4 @@
+profile builtin.
+swing : unsafe Int -> Int -> Int .
+swing left right = swing right left.
+main = swing 0 1.

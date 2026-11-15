@@ -1,0 +1,6 @@
+#: expect qloghashrv32: HOLDS
+unsafe program.
+Q = use "programs/mods/qlog".
+main =
+  if Q.hashStr "hello from Spectre" == 853982337 and Q.hashByte 1000000006 255 == 224 and Q.hashByte 32258064 0 == 999999984
+  then print "qloghashrv32: HOLDS" else error "QLog hash changed".

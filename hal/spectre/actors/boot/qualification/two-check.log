@@ -1,0 +1,25 @@
+ 
+['create', 'apps/spin.sxa'] already exists
+cat apps/spin.sxa 53584132600100004b25e787970200009382820223a0a20023a2b200170300006700c30b970200009382020183
+['create', 'apps/pendulum.sxa'] already exists
+cat apps/pendulum.sxa 535841327c010000da210258970200009382820223a0a20023a2b200170300006700c30b970200009382020183
+['create', 'apps/hello2.sxa'] created apps/hello2.sxa
+cat apps/hello2.sxa 5358413260010000c7173a0f970200009382820223a0a20023a2b200170300006700c30b970200009382020183
+run apps/spin.sxa started job 1
+run apps/pendulum.sxa started job 2
+status 1 running; yields 306
+status 2 running; yields 106
+run apps/hello2.sxa run: busy
+cat notes/spectre.txt hello from Spectre
+status 1 running; yields 672
+status 2 running; yields 472
+stop 1 stopped
+status 1 stopped
+status 2 running; yields 737
+run apps/hello2.sxa started job 1
+status 1 exit 42
+status 2 running; yields 1484
+stop 2 stopped
+status 2 stopped
+cat notes/spectre.txt hello from Spectre
+PASS

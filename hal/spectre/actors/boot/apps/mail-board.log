@@ -1,0 +1,20 @@
+ 
+['create', 'apps/pong.sxa'] created apps/pong.sxa
+cat apps/pong.sxa 5358413368010000bc784c41970200009382020323a0a20023a2b20023a4c20023a6d200170300006700430e97
+['create', 'apps/ping.sxa'] created apps/ping.sxa
+cat apps/ping.sxa 535841335c0100009788f93f970200009382020323a0a20023a2b20023a4c20023a6d200170300006700430e97
+run apps/pong.sxa started job 1
+status 1 running; yields 0
+cat notes/spectre.txt hello from Spectre
+run apps/ping.sxa started job 2
+status 1 exit 37
+status 2 exit 37
+cat notes/spectre.txt hello from Spectre
+run apps/pong.sxa started job 1
+status 1 running; yields 0
+cat notes/spectre.txt hello from Spectre
+run apps/ping.sxa started job 2
+status 1 exit 37
+status 2 exit 37
+cat notes/spectre.txt hello from Spectre
+PASS

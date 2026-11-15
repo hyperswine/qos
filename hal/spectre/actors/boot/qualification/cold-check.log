@@ -1,0 +1,21 @@
+armed
+disconnected
+reconnected
+b'Spectre SD boot OK\nqos> '
+ls
+notes/prompt-366a9169.txt
+apps/ping.sxa
+apps/pong.sxa
+apps/pendulum.sxa
+apps/spin.sxa
+apps/hello.sxa
+notes/prompt-4f0db519.txt
+notes/prompt-df19f9e6.txt
+notes/spectre.txt
+qos> 
+cat notes/prompt-366a9169.txt
+written at the Spectre prompt 366a9169
+qos> 
+cat notes/spectre.txt
+hello from Spectre
+qos> 

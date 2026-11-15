@@ -1,0 +1,13 @@
+unsafe program.
+FS = use "std/fs".
+QL = use "programs/mods/qlog".
+main =
+  me = myself 0;
+  fs = spawn (QL.actorWith (QL.direct (device "blk")));
+  name = "notes/spectre.txt";
+  result = FS.readLatest me fs name;
+  case result of
+    Ok text -> print "READ {text}"
+  | Err why -> case FS.append me fs name "hello from Spectre" of
+      Ok head -> print "SAVED {head}"
+    | Err err -> print "ERROR {err}".
