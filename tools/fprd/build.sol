@@ -14,7 +14,7 @@ build output fprisc =
   target = "{B.query ["realpath",dir]}/{B.query ["basename",output]}";
   objects = "{target}.objects";
   _ = B.command ["mkdir","-p",objects];
-  ghc = ["ghc","-O1","-threaded","-v0","-outputdir",objects,"-o",target,source];
+  ghc = ["ghc","-O1","-threaded","-rtsopts","-v0","-outputdir",objects,"-o",target,source];
   # a cabal plan whose store is gone (another container) fails: fall back
   borrowed = fprisc != "" and B.exists "-f" "{fprisc}/dist-newstyle/cache/plan.json"
     and Proc.streamNow (ProcessSpec (List.append ["cabal","exec","-v0","--"] ghc) fprisc [] "" 0) == Ok 0;
