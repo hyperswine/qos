@@ -16,11 +16,13 @@ jobs:
       run:
         shell: sh
     steps:
-      - uses: actions/checkout@v4
+      # git first: without it in the container, actions/checkout downloads an
+      # archive with no .git, and the policy check reads the tracked files from git
       - name: Native build dependencies
         run: |
           apt-get update
           apt-get install -y --no-install-recommends git ca-certificates make gcc pkg-config ghc cabal-install libghc-megaparsec-dev libghc-network-dev libghc-utf8-string-dev libgit2-dev libarchive-dev libcurl4-openssl-dev libegl-dev libgl-dev jq
+      - uses: actions/checkout@v4
       - name: Read compiler pin
         id: pin
         run: echo "revision=$(jq -r .revision fprisc.lock.json)" >> "$GITHUB_OUTPUT"
