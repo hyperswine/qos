@@ -25,7 +25,16 @@ local argv =
   ProcessResult code out err = need (Proc.runNow (ProcessSpec argv "" [] "" 600000));
   if code == 0 then Str.trim out else error "{argv}: {err}".
 stamp u = local ["date","-u","+%Y%m%dT%H%M%SZ"].
-write path text = writePath path text.
+# written now, not at commit: the drivers keep running processes afterwards
+write path text =
+  bytes = need (Utf8.encode text);
+  scratch = tempDir "pi-driver-write";
+  w = need (Stream.openWrite "{scratch}/bytes" (Bytes.len bytes + 1));
+  (result,w2) = Stream.writeChunk bytes w;
+  _ = need (Stream.closeWrite w2);
+  _ = need result;
+  _ = need (Fs.copyPublishNow "{scratch}/bytes" path 65536 True);
+  Unit.
 field key value = need (J.get key value).
 number key value = need (J.num (field key value)).
 flag key value = need (J.bool (field key value)).
