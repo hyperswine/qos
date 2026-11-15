@@ -337,7 +337,7 @@ static V h_sys_attach_image(V idv, V abiv, V shav, V relshav, V numsv, V secsv) 
 FPR_FN(fpr_g_Sys_x2eattachImage, h_sys_attach_image, 6);
 
 /* Sys.compile <profile> <source> -> Ok reply | Err reason: the host-side
- * fpr compiler server (tools/fprd.py), reached through the HAL table's
+ * fpr compiler server (qos-fprd, tools/fprd/QosFprd.hs), reached through the HAL table's
  * worker-backed compile_* entries (ABI v21, portable/compile.c).  The
  * calling actor PARKS while the host's worker does the exchange: a compile
  * takes seconds and must hold no hart (whatever shares the hart -- the
@@ -370,7 +370,7 @@ static V h_sys_compile(V profv, V srcv) {
   const char *b;
   int64_t r = qos_hal->compile_reply(job, &b);
   V out;
-  if (r == -2) out = fpr_mkresult(1, "no compiler server (start tools/fprd.py)");
+  if (r == -2) out = fpr_mkresult(1, "no compiler server (start qos-fprd daemon)");
   else if (r == -3) out = fpr_mkresult(1, "the compiler server stopped answering");
   else if (r < 3 || !b) out = fpr_mkresult(1, "compiler channel error");
   else if (b[0] == 'o' && b[1] == 'k' && b[2] == '\n') out = fpr_mkresultn(0, b + 3, (uw)r - 3);

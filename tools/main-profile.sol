@@ -44,6 +44,17 @@ profileBuild argv =
   if CLI.flag "run" parsed then
     _ = K.check "cross-built profiles cannot run on this host" (arch == "" or arch == (if K.command ["uname","-m"] == "riscv64" then "rv64" else "a64"));
     _ = execute "{root}/qos" env ["make","-s","portable-gl"];
-    execute out (("FPR_DISK",disk)::env) ["{root}/qos/qosp-gl","--yes","{out}/main.qa"]
+    compiler = if CLI.flag "no-compiler" parsed then [] else [startCompiler root fpr out env runner];
+    _ = execute out (("FPR_DISK",disk)::env) ["{root}/qos/qosp-gl","--yes","{out}/main.qa"];
+    _ = List.map (fn job -> Proc.cancel job) compiler;
+    Unit
   else Unit.
+# The Editor builds through the compiler daemon (tools/fprd/QosFprd.hs) on the
+# socket qosp's Sys.compile uses; built here once, stopped when qosp exits.
+startCompiler root fpr out env runner =
+  daemon = "{out}/qos-fprd";
+  _ = (if K.isFile daemon then Unit else execute root env [runner,"{root}/tools/fprd/build.sol",daemon,fpr]);
+  sock = setting "FPRD_SOCK" "/tmp/fprd.sock";
+  spec = ProcessSpec [daemon,"daemon","--socket",sock,"--work","{out}/fprd"] root (("SOL",runner)::env) "" 0;
+  K.need (Proc.start (PipelineSpec [spec] (PipeBytes (Bytes.empty Unit)) PipeDiscard PipeOutputInherit 0 PipeFail)).
 > profileBuild (args Unit).

@@ -260,7 +260,7 @@ typedef struct {
   void (*hart_clear)(uint64_t hart);
   void (*hart_timer_arm)(uint64_t hart, uint64_t ticks);
   void (*hart_timer_park)(uint64_t hart);
-  /* v21: the compiler bridge (portable/compile.c + tools/fprd.py),
+  /* v21: the compiler bridge (portable/compile.c + qos-fprd, tools/fprd/QosFprd.hs),
    * worker-backed like the disk's v15 entries: submit copies the request
    * ("<profile>\n<source>") and queues it for one host thread; the caller
    * parks between done polls, so a compile holds no hart.  reply gives the

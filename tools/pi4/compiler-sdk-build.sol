@@ -8,21 +8,22 @@ strings text = List.map (fn value -> unwrap (J.text value)) (unwrap (J.parse tex
 revision value = case value of
     J.JArr [J.JStr commit,dirty] -> (commit,J.render dirty)
   | _ -> error "invalid SDK revision result".
-build qos fpr compiler sol kind qr fr work output scratch limit python py stdlib extensions arch glibc bootstrap =
-  _ = if python == "" and py == "" and stdlib == "" and extensions == "" then Unit else error "Python SDK runtime was retired; use the Sol-only SDK";
+build qos fpr compiler sol kind qr fr work output scratch limit daemon py stdlib extensions arch glibc bootstrap =
+  _ = if py == "" and stdlib == "" and extensions == "" then Unit else error "Python SDK runtime was retired; use the Sol-only SDK";
+  served = if daemon == "" then "" else "native";
   sdk = "{work}/sdk";
   tools = "{qos}/tools/pi4";
-  roots = strings (query (List.concat [bootstrap,["{tools}/compiler-sdk-tools.sol",sdk,compiler,sol,python]]));
+  roots = strings (query (List.concat [bootstrap,["{tools}/compiler-sdk-tools.sol",sdk,compiler,sol,daemon]]));
   child name argv = List.append ["{sdk}/bin/sol","{tools}/compiler-sdk-{name}.sol"] argv;
   provenance = unwrap (J.parse (query (child "revisions" [qos,qr,fpr,fr])) |>? J.items);
   case provenance of
     [q,f] ->
       (qRev,qDirty) = revision q;
       (fRev,fDirty) = revision f;
-      _ = invoke (child "inputs" [qos,fpr,sdk,kind,"{work}/probe.toml",py]);
+      _ = invoke (child "inputs" [qos,fpr,sdk,kind,"{work}/probe.toml",served]);
 
-      invoke (child "package" (List.append [tools,sdk,compiler,arch,py,kind,glibc,qRev,fRev,qDirty,fDirty,stdlib,extensions,output,scratch,limit] roots))
+      invoke (child "package" (List.append [tools,sdk,compiler,arch,served,kind,glibc,qRev,fRev,qDirty,fDirty,stdlib,extensions,output,scratch,limit] roots))
   | _ -> error "expected revisions for both SDK source trees".
-> case args Unit of qos :: fpr :: compiler :: sol :: kind :: qr :: fr :: work :: output :: scratch :: limit :: python :: py :: stdlib :: extensions :: arch :: glibc :: bootstrap ->
-    build qos fpr compiler sol kind qr fr work output scratch limit python py stdlib extensions arch glibc bootstrap
+> case args Unit of qos :: fpr :: compiler :: sol :: kind :: qr :: fr :: work :: output :: scratch :: limit :: daemon :: py :: stdlib :: extensions :: arch :: glibc :: bootstrap ->
+    build qos fpr compiler sol kind qr fr work output scratch limit daemon py stdlib extensions arch glibc bootstrap
   | _ -> error "expected compiler SDK build parameters".

@@ -1,5 +1,5 @@
 /* compile.c -- qosp's UNIX-DOMAIN-SOCKET bridge to the host-side fpr
- * compiler server (tools/fprd.py).
+ * compiler server (qos-fprd, tools/fprd/QosFprd.hs).
  *
  * The app never sees a socket: it calls Sys.compile (std/compile.fpr),
  * the app-side shim submits the request through the HAL table's
@@ -50,7 +50,7 @@
 #include <sys/un.h>
 #include <unistd.h>
 
-/* fprd.py answers within its own deadlines: a publication is a commit
+/* qos-fprd answers within its own deadlines: a publication is a commit
  * (120 s) then a plugin build (300 s), its longest; a server that has
  * said nothing for longer than that is not going to (-3).  (A test build
  * shortens it: qos/tests-host/compile-check.sh.) */

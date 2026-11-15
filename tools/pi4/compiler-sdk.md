@@ -14,14 +14,32 @@ ghc -O0 -threaded -rtsopts -with-rtsopts=-V0.001 -i. -main-is PiEditorCompiler \
   -o /out/fpr-editor /work/qos/tools/pi4/EditorCompiler.hs
 ```
 
-The packaging container needs a 0.13.1-compatible Sol runner and Info-ZIP
-`zip` to create the Python standard-library archive.
+Build the compiler daemon, `qos-fprd` (`tools/fprd/QosFprd.hs`, the native
+replacement for the retired `tools/fprd.py` and Python runner), in the same
+container. It needs only GHC's boot packages and `network`
+(`libghc-network-dev`):
+
+```sh
+cd /work/qos
+sol tools/fprd/build.sol /out/qos-fprd
+```
+
+The builder is `debian:trixie` (glibc 2.41, the Pi's) with FP-RISC CI's package
+list (`git ca-certificates make gcc libc6-dev pkg-config ghc cabal-install
+libghc-megaparsec-dev libghc-network-dev libghc-utf8-string-dev libgit2-dev
+libarchive-dev libcurl4-openssl-dev libegl-dev libgl-dev zip jq binutils file`)
+plus `clang lld llvm`, and for the Main bundle `libgles-dev libasound2-dev
+libdrm-dev libgbm-dev`. The former `qos-pi-builder:20261104` image (Ubuntu
+24.04, GHC 9.4.7, libgit2 1.7) can no longer build the compiler, which needs
+`unix >= 2.8` and `libgit2 >= 1.9`. The packaging runs a Sol runner matching
+the pinned compiler (a `sol` link to its `fpr`).
 
 Package and exercise the SDK with the following commands.
 
 ```sh
 sol tools/pi4/compiler-sdk.sol --qos /work/qos --fprisc /work/fprisc \
-  --compiler /out/fpr-editor --compiler-kind editor --output /out/compiler-sdk.tar.gz \
+  --compiler /out/fpr-editor --compiler-kind editor --daemon /out/qos-fprd \
+  --output /out/compiler-sdk.tar.gz \
   --qos-revision "$QOS_REVISION" --fprisc-revision "$FPRISC_REVISION"
 mkdir /tmp/compiler-sdk-check
 gzip -dc /out/compiler-sdk.tar.gz > /tmp/compiler-sdk.tar
@@ -31,12 +49,15 @@ rm /tmp/compiler-sdk.tar
 ```
 
 Set the revision variables to the exact source-export revisions recorded by
-the appliance build. The packager requires make, GCC, binutils, Python and the compiler's dynamic
-libraries to be installed in the build container. It strips ELF objects,
-packages Python's standard library in a zip, follows native library
-dependencies, and refuses an archive larger than 40 MiB. The manifest records
-source revisions, dirty state, input and packaged compiler digests, bundled-source digest, Python
-version and build glibc. It records the Editor entrypoint's source digest too.
+the appliance build. The packager requires make, GCC, binutils and the compiler's dynamic
+libraries to be installed in the build container. It strips ELF objects (each
+into a copy renamed over the original, since one of them is the Sol runner
+doing the packaging), follows native library dependencies, and refuses an
+archive larger than 40 MiB. The manifest records source revisions, dirty
+state, input and packaged compiler digests, bundled-source digest,
+`compiler_daemon` with the daemon's binary and source digests, and build glibc.
+Without `--daemon` the SDK records `compiler_daemon: false` and serves only
+the daemonless `run.sol` plugin build. It records the Editor entrypoint's source digest too.
 Source exports without `.git` require explicit
 `--qos-revision` and `--fprisc-revision` arguments; their dirty state is unknown.
 Pinned source blobs and version metadata are included for older module pins.
@@ -55,6 +76,11 @@ overridden `PLUG_A64_LINK`. Native GCC assembles the generated `.s` files and
 links them with GNU ld. There is no C frontend, C header tree, LLVM, or Clang in
 the SDK. This supports the Editor's front-end checks and relocatable QOS
 plugins; it is not a general C or FP-RISC hosted executable build environment.
+
+`bin/qos-fprd` sets its children's environment from the SDK layout (compiler,
+sources, `make`, `gcc` and `sol` under the SDK root; builds, caches and
+temporaries under `--work`; `GHCRTS=-M512m -K64m`; the GNU plugin link), writes
+`$QOSP_READY_FILE` once listening, and exits 0 only on SIGTERM or SIGINT.
 
 The selftest talks to a real daemon over its Unix socket. It checks valid
 source, builds a QAR2 plugin through compiler/assembler/linker/packaging, and

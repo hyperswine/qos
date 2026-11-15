@@ -6,7 +6,7 @@ copyTool from dest =
 resolve name =
   ProcessResult code out err = unwrap (Proc.runNow (ProcessSpec ["which",name] "" [] "" 0));
   if code == 0 then Str.trim out else error "missing SDK build tool {name}: {err}".
-stage sdk compiler sol python =
+stage sdk compiler sol daemon =
   bin = "{sdk}/bin";
   _ = command ["mkdir","-p",bin,"{sdk}/lib","{sdk}/qos","{sdk}/fprisc"];
   roots = List.map (fn name -> copyTool (resolve name) "{bin}/{name}") ["make","gcc","as","ld"];
@@ -18,9 +18,7 @@ stage sdk compiler sol python =
   solRoots = (if sol == "" then
       _ = command ["ln","-s","../fprisc/fpr","{bin}/sol"]; []
     else [copyTool sol "{bin}/sol"]);
-  py = if python == "" then [] else
-    _ = command ["mkdir","-p","{sdk}/python/lib"];
-    [copyTool python "{bin}/python3"];
-  print (J.render (J.JArr (List.map J.JStr (List.concat [roots,[collectPath,fpr],solRoots,py])))).
-> case args Unit of [sdk,compiler,sol,python] -> stage sdk compiler sol python
-  | _ -> error "expected SDK COMPILER SOL_OR_EMPTY PYTHON".
+  served = if daemon == "" then [] else [copyTool daemon "{bin}/qos-fprd"];
+  print (J.render (J.JArr (List.map J.JStr (List.concat [roots,[collectPath,fpr],solRoots,served])))).
+> case args Unit of [sdk,compiler,sol,daemon] -> stage sdk compiler sol daemon
+  | _ -> error "expected SDK COMPILER SOL_OR_EMPTY DAEMON_OR_EMPTY".

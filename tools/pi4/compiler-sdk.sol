@@ -1,7 +1,7 @@
 CLI = use "sol/lib/cli".
 J = use "sol/lib/json".
 options = List.map (fn name -> CLI.Option name "" CLI.One)
-  ["qos","fprisc","compiler","compiler-kind","sol","qos-revision","fprisc-revision","output","max-compressed-mib"].
+  ["qos","fprisc","compiler","compiler-kind","sol","daemon","qos-revision","fprisc-revision","output","max-compressed-mib"].
 query argv =
   ProcessResult status out err = unwrap (Proc.runNow (ProcessSpec argv "" [] "" 0));
   if status == 0 then Str.trim out else error "command failed: {argv}: {err}".
@@ -21,7 +21,9 @@ package parsed =
   separate = if provided != "" then query ["realpath",provided] else if kind == "editor" then query ["which","sol"] else "";
   # Preserve the sol argv[0] name when bootstrapping a multi-call compiler.
   bootstrap = if provided != "" then [provided] else if separate != "" then [separate] else [compiler,"sol"];
-  py = ["","","",""];
+  # the native compiler daemon (tools/fprd/QosFprd.hs) takes the retired Python slot
+  daemon = (if opt "daemon" "" == "" then "" else query ["realpath",opt "daemon" ""]);
+  py = [daemon,"","",""];
   glibc = query ["getconf","GNU_LIBC_VERSION"];
   limit = opt "max-compressed-mib" "40";
   _ = parseInt limit;
