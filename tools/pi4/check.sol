@@ -101,13 +101,13 @@ applications ctx harts =
     [(1,"fresh"),(2,"replayed=committed")];
   faults = List.map (fn f -> (label,env,status,limit) = f;
       faultDisk = "{persistent}/{label}-{harts}.disk";
-      _ = R.ssh host 30 "cp {R.q shutDisk} {R.q faultDisk}";
+      _ = R.ssh host 30 "if [ -e {R.q shutDisk} ]; then cp {R.q shutDisk} {R.q faultDisk}; fi";
       runCase ctx {plain | stop = 3, deadline = 12, disk = faultDisk, exit = status, env = List.append env [("QOSP_SHUTDOWN_MS",limit)],
           contains = (if status == 1 then ["qosp: shutdown failed"] else []), forbidden = ["qosp: shutdown complete"]} "qos-{label}{h}" "portableshutdown.qa" harts)
     [("flush-error",[("QOS_BLK_TEST_FAIL_FLUSH_AT","4")],1,"5000"),
      ("flush-stall",[("QOS_BLK_TEST_FLUSH_DELAY_AT","4"),("QOS_BLK_TEST_FLUSH_DELAY_US","2000000")],124,"250")];
   qsysDisk = "{persistent}/qsys-{harts}.disk";
-  _ = R.ssh host 30 "cp {R.q remote}/qsys.disk {R.q qsysDisk}";
+  _ = R.ssh host 30 "if [ -e {R.q remote}/qsys.disk ]; then cp {R.q remote}/qsys.disk {R.q qsysDisk}; fi";
   plugins = List.map (fn boot -> runCase ctx {plain | disk = qsysDisk, contains = ["qsys: boot #{boot}; 2 apps [plugmini,plughello];","ping=pong from a .qa read off qosp.disk",
       "hello=plughello: the second sub-slot; 21+21=42;","note={boot * 3}B;"]} "qos-plugins{h}-boot{boot}" "qsys.qa" harts) [1,2];
   List.concat [holds,[gfx],files,shutdown,faults,plugins].
