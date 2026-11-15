@@ -127,7 +127,7 @@ benchmarks ctx = List.concat (List.map (fn program ->
   ["fib","sha","pingpong","xpingpong","nbody","vecread"]).
 soaks ctx seconds = List.map (fn harts ->
     name = "main-soak-h{harts}"; dir = "{ctx.remote}/{name}";
-    _ = R.ssh ctx.host 30 "mkdir -p {R.q dir}; cp {R.q ctx.remote}/Main.disk {R.q dir}/disk";
+    _ = R.ssh ctx.host 30 "mkdir -p {R.q dir}; if [ -e {R.q ctx.remote}/Main.disk ]; then cp {R.q ctx.remote}/Main.disk {R.q dir}/disk; fi";
     runCase ctx {plain | stop = seconds, deadline = seconds + 12, contains = ["Main Profile ready","qosp: shutdown complete"]} name "main.qa" harts) [1,4].
 qualify parsed =
   host = CLI.valueOr "" "host" parsed;
