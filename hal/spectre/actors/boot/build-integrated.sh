@@ -25,8 +25,13 @@ cp "$boot/../atomic.c" .
 cp "$boot"/{app.fpr,hal.c,build.sh,build-media.sh,rom.c,install.c,media.S,mkmedia.py,patchrom.py,check-writable.py} boot/
 cp "$boot"/../vfs/{pack.py,unpack.S} boot/
 cp "$boot"/apps/{*.fpr,entry.S,link.ld,build-app.py,check-two.py} boot/apps/
-export FPR_HOME="$qos" FPR_PATH="$fprisc" FPR_FOREIGN="$qos/core/foreign.fpr"
-(cd boot && "$fprisc/fpr" compile --target=rv32 --prelude="$fprisc/core/prelude.fpr" app.fpr app.s)
+# FP-RISC orders module-table entries by resolved source path. Give both
+# source roots stable relative names, independent of checkout locations.
+mkdir fprisc qos
+cp -R "$fprisc/core" "$fprisc/std" fprisc/
+cp -R "$qos/core" "$qos/std" "$qos/programs" "$qos/.fpr" qos/
+export FPR_HOME="$out/qos" FPR_PATH="$out/fprisc" FPR_FOREIGN="$out/qos/core/foreign.fpr"
+(cd boot && "$fprisc/fpr" compile --target=rv32 --prelude="$FPR_PATH/core/prelude.fpr" app.fpr app.s)
 bash boot/build.sh
 (cd boot && bash build-media.sh)
 (cd boot/apps
