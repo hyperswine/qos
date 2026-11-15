@@ -71,7 +71,9 @@ runtime ctx harts =
     ("fmath",["ok log2-pow2","ok pythagorean"]),
     ("actors",["actor demo done"]),
     ("bigheap",["bigheap: 72000006000000"])];
-  a = List.map (fn p -> (n,t) = p; exactCase ctx "{n}{h}" n harts t) exact;
+  # mvuscoped's 20000 cross-actor frames take about 75 s at the powersave
+  # governor's 600 MHz (the retired driver could switch to performance)
+  a = List.map (fn p -> (n,t) = p; runCase ctx {plain | exact = True, expected = t, deadline = (if n == "mvuscoped" then 180 else 60)} "{n}{h}" n harts) exact;
   b = List.map (fn p -> (n,t) = p; containsCase ctx "{n}{h}" n harts t) contains;
   long = "PANIC [actor 0]: long:{Str.join "" (List.map (fn i -> "0123456789") (List.range 1 30))}:end ***";
   simd = Str.join "" (List.map (fn i -> n = 99 - i; "simd-int: {n} {n * (n - 1) / 2 + 7 * n}\n") (List.range 0 99));
