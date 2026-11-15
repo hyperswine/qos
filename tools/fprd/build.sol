@@ -14,7 +14,10 @@ build output fprisc =
   target = "{B.query ["realpath",dir]}/{B.query ["basename",output]}";
   objects = "{target}.objects";
   _ = B.command ["mkdir","-p",objects];
-  ghc = ["ghc","-O1","-threaded","-rtsopts","-v0","-outputdir",objects,"-o",target,source];
+  # On Linux the SDK starts bin/qos-fprd directly (no wrapper sets
+  # LD_LIBRARY_PATH): find the libraries the packager copies beside it.
+  rpath = (if B.query ["uname","-s"] == "Linux" then ["-optl-Wl,-rpath,$ORIGIN/../lib"] else []);
+  ghc = List.append ["ghc","-O1","-threaded","-rtsopts","-v0","-outputdir",objects,"-o",target] (List.append rpath [source]);
   # a cabal plan whose store is gone (another container) fails: fall back
   borrowed = fprisc != "" and B.exists "-f" "{fprisc}/dist-newstyle/cache/plan.json"
     and Proc.streamNow (ProcessSpec (List.append ["cabal","exec","-v0","--"] ghc) fprisc [] "" 0) == Ok 0;
