@@ -39,6 +39,10 @@
 -- Commands:
 --   qos-fprd daemon [--socket PATH] [--work DIR] [--watch ID=FILE]...
 --   qos-fprd selftest
+--   qos-fprd request [--socket PATH] PROFILE [FILE]
+-- `request` sends one request (FILE's bytes, or none) to a running daemon and
+-- writes the reply after its status line to stdout (exit 0 on "ok", 1 on
+-- "err"): the probe an install uses against the installed service.
 -- `daemon` writes its pid to $QOSP_READY_FILE once it is listening, exits 0
 -- on SIGTERM or SIGINT (the supervisor's acknowledged stop) and nonzero on any
 -- other ending. `selftest` starts a real daemon on a private socket and drives
@@ -756,7 +760,21 @@ parseDaemon o args = case args of
   other : _ -> Left ("unexpected argument " ++ other)
 
 usage :: String
-usage = "usage: qos-fprd daemon [--socket PATH] [--work DIR] [--watch ID=FILE]... | qos-fprd selftest"
+usage = "usage: qos-fprd daemon [--socket PATH] [--work DIR] [--watch ID=FILE]... | qos-fprd selftest | qos-fprd request [--socket PATH] PROFILE [FILE]"
+
+clientRequest :: FilePath -> [String] -> IO ()
+clientRequest sock args = case args of
+  "--socket" : p : rest -> clientRequest p rest
+  [profile] -> go profile B.empty
+  [profile, file] -> B.readFile file >>= go profile
+  _ -> hPutStrLn stderr usage >> exitWith (ExitFailure 2)
+  where
+    go profile source = do
+      reply <- request sock profile source
+      let (status, rest) = BC.break (== '\n') reply
+      B.hPut stdout (B.drop 1 rest)
+      hFlush stdout
+      if status == BC.pack "ok" then exitSuccess else exitWith (ExitFailure 1)
 
 main :: IO ()
 main = do
@@ -769,5 +787,6 @@ main = do
       Left e -> hPutStrLn stderr (e ++ "\n" ++ usage) >> exitWith (ExitFailure 2)
       Right o -> daemon (oSocket o) (oWork o) (oWatches o)
     ["selftest"] -> selftest
+    "request" : rest -> clientRequest sock rest
     ["--version"] -> putStrLn "qos-fprd (native compiler daemon, protocol of qos/portable/compile.c)"
     _ -> hPutStrLn stderr usage >> exitWith (ExitFailure 2)
