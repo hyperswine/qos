@@ -15,8 +15,10 @@ build output fprisc =
   objects = "{target}.objects";
   _ = B.command ["mkdir","-p",objects];
   ghc = ["ghc","-O1","-threaded","-v0","-outputdir",objects,"-o",target,source];
-  _ = (if fprisc != "" and B.exists "-f" "{fprisc}/dist-newstyle/cache/plan.json"
-    then B.inDirectory fprisc [] (List.append ["cabal","exec","-v0","--"] ghc) else B.command ghc);
+  # a cabal plan whose store is gone (another container) fails: fall back
+  borrowed = fprisc != "" and B.exists "-f" "{fprisc}/dist-newstyle/cache/plan.json"
+    and Proc.streamNow (ProcessSpec (List.append ["cabal","exec","-v0","--"] ghc) fprisc [] "" 0) == Ok 0;
+  _ = (if borrowed then Unit else B.command ghc);
   print "built {target}".
 > case args Unit of
     [output] -> build output (B.setting "FPRISC_ROOT" "")
