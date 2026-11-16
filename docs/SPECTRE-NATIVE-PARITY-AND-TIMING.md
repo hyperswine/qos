@@ -31,7 +31,7 @@ state assumptions alongside a bound. Keep each result attached to those inputs.
 
 Start from an integrated build and run from the QOS checkout:
 
-    python3 hal/spectre/actors/boot/timing-inputs.py /tmp/spectre-build hello
+    sol hal/spectre/actors/boot/timing-inputs.sol /tmp/spectre-build hello
 
 The tool checks the build manifest, compares the ELF payload with the packaged
 application, and inventories linked main alongside the compiler segment report.
