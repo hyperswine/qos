@@ -18,7 +18,7 @@
 #   meshes   the (name, data) meshes the scene refers to
 #   frame    the frame budget, in 10 MHz ticks (160000 = 16 ms)
 #   flags    what init receives
-#   sound    name -> variation -> Int: perform one cue (`silent` for none)
+#   sound    cue -> variation -> Int: perform one cue (`silent` for none)
 #   storage  True: tasks reach the Files service; False: every task answers
 #            Err "no storage" (a game with nothing to keep, or no disk)
 #
@@ -92,6 +92,7 @@ perform config app env es w cs = case es of
     Nil -> (w, cs)
   | G.ELog s :: more -> _ = print s; perform config app env more w cs
   | G.ESound n v :: more -> _ = config.sound n v; perform config app env more w cs
+  | G.EMusic n v :: more -> _ = sndMusic n v; perform config app env more w cs
   | G.ECapture :: more -> perform config app env more { w | snap = w.snap + 1 } cs
   | G.EQuit :: more -> ({ w | over = True }, MV.MQuit :: Nil)
   | G.ETask task toMsg :: more ->
@@ -99,7 +100,7 @@ perform config app env es w cs = case es of
         (case perform config app env es2 { w | game = m2 } cs of (w2, cs2) ->
           (if w2.over then (w2, cs2) else perform config app env more w2 cs2))).
 
-answer env task = case env of (me, fs) -> (if fs == 0 then Err "no storage" else stored me fs task).
+answer env task = case env of (me, fs) -> (if fs == 0 then Err G.noStorage else stored me fs task).
 stored me fs (G.Replay name) = FS.replay me fs name.
 stored me fs (G.ReadLatest name) = FS.readLatest me fs name.
 stored me fs (G.Append name text) = FS.append me fs name text.
