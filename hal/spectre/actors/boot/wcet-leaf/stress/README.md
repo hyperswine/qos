@@ -99,12 +99,12 @@ pins are unmodeled because this test checks controller timing.
 
 From a writable copy of this directory with SIMPLE_RISC, QOS and FPRISC set:
 
-    cp "$QOS"/hal/spectre/actors/boot/wcet-leaf/{leaf.fpr,build.py} .
-    python3 build.py "$FPRISC/fpr" "$QOS/hal/spectre/actors/boot/apps"
+    cp "$QOS"/hal/spectre/actors/boot/wcet-leaf/leaf.fpr .
+    sol "$QOS"/hal/spectre/actors/boot/wcet-leaf/build.sol "$FPRISC/fpr" "$QOS/hal/spectre/actors/boot/apps"
     riscv64-unknown-elf-objdump -d leaf.elf >linked.txt
     python3 -u board.py >board.log
-    python3 summary.py
-    bash run-rtl.sh
+    sol "$QOS"/hal/spectre/actors/boot/wcet-leaf/stress/summary.sol
+    sol "$QOS"/hal/spectre/actors/boot/wcet-leaf/stress/run-rtl.sol
 
 The board harness warm-resets to the SD bootloader, verifies the stored app by
 name, checks all 2,160 counts and requires the successful exit. The raw cycle

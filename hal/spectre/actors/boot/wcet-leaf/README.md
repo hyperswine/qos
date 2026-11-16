@@ -62,10 +62,10 @@ model covers those states. This interval excludes scheduler and UART latency.
 With the installed qualified QOS kernel and the Simple-Risc UART tools, copy
 this directory to a writable build directory and run:
 
-    python3 build.py "$FPRISC/fpr" "$QOS/hal/spectre/actors/boot/apps"
+    sol "$QOS"/hal/spectre/actors/boot/wcet-leaf/build.sol "$FPRISC/fpr" "$QOS/hal/spectre/actors/boot/apps"    # SPECTRE_IMAGE names the built spectre-image
     riscv64-unknown-elf-objdump -d leaf.elf > linked.txt
     SIMPLE_RISC="$SIMPLE_RISC" python3 -u board.py > board.log
-    python3 analyse.py
+    sol "$QOS"/hal/spectre/actors/boot/wcet-leaf/analyse.sol
 
 board.py warm-resets the CPU, verifies the SD boot marker, creates a
 content-named probe file or verifies the existing one, then runs it and checks
