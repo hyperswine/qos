@@ -1,0 +1,2 @@
+phase_cases=540 four_pending=540 refresh_during_hold=40 max_hold=44
+controller_tb.v:39: $finish called at 3031020 (1s)

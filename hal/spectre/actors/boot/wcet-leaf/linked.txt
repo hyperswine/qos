@@ -1,0 +1,99 @@
+
+leaf.elf:     file format elf32-littleriscv
+
+
+Disassembly of section .text:
+
+00000000 <_start>:
+   0:	fe010113          	addi	sp,sp,-32
+   4:	00112e23          	sw	ra,28(sp)
+   8:	00812c23          	sw	s0,24(sp)
+   c:	00912a23          	sw	s1,20(sp)
+  10:	01212823          	sw	s2,16(sp)
+  14:	01312623          	sw	s3,12(sp)
+  18:	01412423          	sw	s4,8(sp)
+  1c:	01512223          	sw	s5,4(sp)
+  20:	00050413          	mv	s0,a0
+  24:	00000493          	li	s1,0
+  28:	00000917          	auipc	s2,0x0
+  2c:	0bc90913          	addi	s2,s2,188 # e4 <_start+0xe4>
+  30:	0014f293          	andi	t0,s1,1
+  34:	00028663          	beqz	t0,40 <_start+0x40>
+  38:	00000917          	auipc	s2,0x0
+  3c:	10090913          	addi	s2,s2,256 # 138 <fpr_fn_chooseRight>
+  40:	00f00513          	li	a0,15
+  44:	00149593          	slli	a1,s1,0x1
+  48:	0015e593          	ori	a1,a1,1
+  4c:	300479f3          	csrrci	s3,mstatus,8
+  50:	b0002a73          	csrr	s4,mcycle
+  54:	b0202af3          	csrr	s5,minstret
+  58:	000900e7          	jalr	s2
+  5c:	b02022f3          	csrr	t0,minstret
+  60:	b0002373          	csrr	t1,mcycle
+  64:	0089f993          	andi	s3,s3,8
+  68:	3009a073          	csrs	mstatus,s3
+  6c:	41430a33          	sub	s4,t1,s4
+  70:	41528ab3          	sub	s5,t0,s5
+  74:	0014f293          	andi	t0,s1,1
+  78:	00028463          	beqz	t0,80 <_start+0x80>
+  7c:	04b51063          	bne	a0,a1,bc <_start+0xbc>
+  80:	00000597          	auipc	a1,0x0
+  84:	0a658593          	addi	a1,a1,166 # 126 <_start+0x126>
+  88:	000a0513          	mv	a0,s4
+  8c:	05c000ef          	jal	e8 <_start+0xe8>
+  90:	00158593          	addi	a1,a1,1
+  94:	000a8513          	mv	a0,s5
+  98:	050000ef          	jal	e8 <_start+0xe8>
+  9c:	00000517          	auipc	a0,0x0
+  a0:	07c50513          	addi	a0,a0,124 # 118 <_start+0x118>
+  a4:	000400e7          	jalr	s0
+  a8:	00148493          	addi	s1,s1,1
+  ac:	02000293          	li	t0,32
+  b0:	f654cce3          	blt	s1,t0,28 <_start+0x28>
+  b4:	05500513          	li	a0,85
+  b8:	0080006f          	j	c0 <_start+0xc0>
+  bc:	00300513          	li	a0,3
+  c0:	00412a83          	lw	s5,4(sp)
+  c4:	00812a03          	lw	s4,8(sp)
+  c8:	00c12983          	lw	s3,12(sp)
+  cc:	01012903          	lw	s2,16(sp)
+  d0:	01412483          	lw	s1,20(sp)
+  d4:	01812403          	lw	s0,24(sp)
+  d8:	01c12083          	lw	ra,28(sp)
+  dc:	02010113          	addi	sp,sp,32
+  e0:	00008067          	ret
+  e4:	00008067          	ret
+  e8:	00800393          	li	t2,8
+  ec:	01c55293          	srli	t0,a0,0x1c
+  f0:	00a00313          	li	t1,10
+  f4:	0062e463          	bltu	t0,t1,fc <_start+0xfc>
+  f8:	02728293          	addi	t0,t0,39
+  fc:	03028293          	addi	t0,t0,48
+ 100:	00558023          	sb	t0,0(a1)
+ 104:	00158593          	addi	a1,a1,1
+ 108:	00451513          	slli	a0,a0,0x4
+ 10c:	fff38393          	addi	t2,t2,-1
+ 110:	fc039ee3          	bnez	t2,ec <_start+0xec>
+ 114:	00008067          	ret
+ 118:	00002328          	.word	0x00002328
+ 11c:	00000000          	.word	0x00000000
+ 120:	00000013          	.word	0x00000013
+ 124:	30302057          	.word	0x30302057
+ 128:	30303030          	.word	0x30303030
+ 12c:	30203030          	.word	0x30203030
+ 130:	30303030          	.word	0x30303030
+ 134:	3030                	.short	0x3030
+ 136:	30                	.byte	0x30
+	...
+
+00000138 <fpr_fn_chooseRight>:
+ 138:	ff010113          	addi	sp,sp,-16
+ 13c:	00112623          	sw	ra,12(sp)
+ 140:	00812423          	sw	s0,8(sp)
+ 144:	01010413          	addi	s0,sp,16
+ 148:	00058513          	mv	a0,a1
+ 14c:	00040e13          	mv	t3,s0
+ 150:	ffc42083          	lw	ra,-4(s0)
+ 154:	ff842403          	lw	s0,-8(s0)
+ 158:	000e0113          	mv	sp,t3
+ 15c:	00008067          	ret

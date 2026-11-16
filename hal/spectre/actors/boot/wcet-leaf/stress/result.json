@@ -1,0 +1,45 @@
+{
+  "conditional_leaf_cycles": 6960,
+  "conditional_window_cycles": 9648,
+  "modes": {
+    "baseline": {
+      "trials": 540,
+      "histogram": {
+        "81": 539,
+        "163": 1
+      },
+      "distinct_start_low32_mod_540": 347
+    },
+    "conflict": {
+      "trials": 540,
+      "histogram": {
+        "133": 490,
+        "134": 6,
+        "135": 11,
+        "136": 21,
+        "137": 7,
+        "138": 5
+      },
+      "distinct_start_low32_mod_540": 350
+    },
+    "stores": {
+      "trials": 540,
+      "histogram": {
+        "81": 540
+      },
+      "distinct_start_low32_mod_540": 344
+    },
+    "both": {
+      "trials": 540,
+      "histogram": {
+        "134": 465,
+        "135": 3,
+        "136": 17,
+        "137": 30,
+        "138": 7,
+        "139": 18
+      },
+      "distinct_start_low32_mod_540": 340
+    }
+  }
+}

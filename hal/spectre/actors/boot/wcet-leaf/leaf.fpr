@@ -1,0 +1,4 @@
+profile builtin.
+chooseRight : unsafe Int -> Int -> Int .
+chooseRight left right = right.
+main = chooseRight 7 42.

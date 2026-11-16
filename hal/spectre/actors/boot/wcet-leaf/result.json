@@ -1,0 +1,23 @@
+{
+  "elf_sha256": "99553a8a8a0853abb96e40d5c2e4b4ba0fedc0bdc8b4e27060f36e92bee06d7e",
+  "package_sha256": "1c19e50e6373b00cdc06cabced33ace9a57e086f33add30eb30b255d1bac8f1b",
+  "leaf_link_offset": "138",
+  "samples": {
+    "ret_only": {
+      "paired_trials": 16,
+      "minstret_delta": 3,
+      "raw_mcycle_histogram": {
+        "104": 1,
+        "62": 15
+      }
+    },
+    "chooseRight": {
+      "paired_trials": 16,
+      "minstret_delta": 12,
+      "raw_mcycle_histogram": {
+        "128": 1,
+        "81": 15
+      }
+    }
+  }
+}

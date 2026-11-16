@@ -1,0 +1,30 @@
+{
+  "natural": {
+    "advance": 81,
+    "all_lines": 9,
+    "charged_fills": 10,
+    "counter_retry_clocks": 0,
+    "gap": 14,
+    "physical_sim": 163,
+    "pushes": 4,
+    "read_lines": 9,
+    "refills": 7,
+    "transfer_cap": 18,
+    "window": 422,
+    "windows": 1280
+  },
+  "all": {
+    "advance": 111,
+    "all_lines": 23,
+    "charged_fills": 24,
+    "counter_retry_clocks": 68,
+    "gap": 14,
+    "physical_sim": 360,
+    "pushes": 4,
+    "read_lines": 22,
+    "refills": 22,
+    "transfer_cap": 32,
+    "window": 751,
+    "windows": 25600
+  }
+}
