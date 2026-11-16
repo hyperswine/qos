@@ -92,8 +92,9 @@ predictions even on this tiny function.
 
 ## Reproduction
 
-From this directory, set FPRISC and SIMPLE_RISC to their checkouts and run
-`bash run.sh NEW_OUTPUT_DIRECTORY`. The script rebuilds and verifies the exact
+Set QOS, FPRISC and SIMPLE_RISC to their checkouts and SPECTRE_IMAGE to the built
+hal/spectre/tools/spectre-image, and run `sol run.sol NEW_OUTPUT_DIRECTORY`
+(the analysis step takes about two minutes in Sol). The script rebuilds and verifies the exact
 guest payload and pins all simulation HDL hashes. The generated per-window
 port traces are under runs/. The fresh UART transcript is physical.log.
 The negative control is `obj_dir/Vtb +limit=1 +cap=10` from the output
