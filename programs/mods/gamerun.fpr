@@ -19,10 +19,17 @@
 #   frame    the frame budget, in 10 MHz ticks (160000 = 16 ms)
 #   flags    what init receives
 #   sound    name -> variation -> Int: perform one cue (`silent` for none)
+#   storage  True: tasks reach the Files service; False: every task answers
+#            Err "no storage" (a game with nothing to keep, or no disk)
 #
 # What view answers is Game.layers world overlay: the 3D scene the renderer
 # walks and the 2D layer over it. A frame capture asked for by a transition is
 # taken of the frame that transition renders.
+#
+# A task (Game.attempt) is performed when its transition's effects are, in
+# order, and its result is delivered to update before the next event is taken.
+# The Files calls are synchronous here, so a slow disk is a slow frame; what an
+# append guarantees is the Files service's contract (std/fs).
 #
 # One tick period is honoured: every Game.tick of a model must name the same
 # number of milliseconds (the frame loop has one clock for update).
@@ -30,6 +37,7 @@ G = use "std/game".
 MV = use "std/mvu".
 Services = use "mods/services".
 EC = use "mods/epclient#e09b467f350a5396".
+FS = use "std/fs#84826bc9e8ddb4b5".
 
 silent name variation = 0.
 
@@ -40,19 +48,20 @@ run config app =
   me = myself 0;
   ep = Services.graphics hub config.name config.meshes me;
   (graphics, session) = EC.owner ep;
-  cfg = {env = (me, 0), mt = hub.mt, tick = config.frame, input = graphics, render = graphics};
+  fs = (if config.storage then FS.connect me hub.ns else 0);
+  cfg = {env = (me, fs), mt = hub.mt, tick = config.frame, input = graphics, render = graphics};
   result = MV.game me cfg (MV.App (ini config app) (upd config app) (sbs app) (vw app));
   _ = EC.close me session;
   _ = print "{config.name} over";
   result.
 
 ini config app env = case G.start app config.flags of (m, es) ->
-  (case perform config es { game = m, snap = 0, over = False } Nil of (w, cs) -> w).
+  (case perform config app env es { game = m, snap = 0, over = False } Nil of (w, cs) -> w).
 
 upd config app env ev w | w.over = (w, MV.MQuit :: Nil).
 upd config app env ev w = case input app w ev of
     Nothing -> (w, Nil)
-  | Taken i -> (case G.step app i w.game of (m2, es) -> perform config es { w | game = m2 } Nil).
+  | Taken i -> (case G.step app i w.game of (m2, es) -> perform config app env es { w | game = m2 } Nil).
 
 Taking = Type (Nothing | Taken i).
 input app w ev = case ev of
@@ -77,10 +86,20 @@ sbs app w =
 vw app w = case G.view app w.game of G.Layers world overlay -> (world, overlay, w.snap).
 
 # perform a transition's effects in order; the commands the frame loop takes
-# (it knows only quit) come back oldest first
-perform config es w cs = case es of
+# (it knows only quit) come back. A task's result is delivered where the task
+# stood, and what that delivery asks for is performed before the rest.
+perform config app env es w cs = case es of
     Nil -> (w, cs)
-  | G.ELog s :: more -> _ = print s; perform config more w cs
-  | G.ESound n v :: more -> _ = config.sound n v; perform config more w cs
-  | G.ECapture :: more -> perform config more { w | snap = w.snap + 1 } cs
-  | G.EQuit :: more -> ({ w | over = True }, MV.MQuit :: Nil).
+  | G.ELog s :: more -> _ = print s; perform config app env more w cs
+  | G.ESound n v :: more -> _ = config.sound n v; perform config app env more w cs
+  | G.ECapture :: more -> perform config app env more { w | snap = w.snap + 1 } cs
+  | G.EQuit :: more -> ({ w | over = True }, MV.MQuit :: Nil)
+  | G.ETask task toMsg :: more ->
+      (case G.apply app (toMsg (answer env task)) w.game of (m2, es2) ->
+        (case perform config app env es2 { w | game = m2 } cs of (w2, cs2) ->
+          (if w2.over then (w2, cs2) else perform config app env more w2 cs2))).
+
+answer env task = case env of (me, fs) -> (if fs == 0 then Err "no storage" else stored me fs task).
+stored me fs (G.Replay name) = FS.replay me fs name.
+stored me fs (G.ReadLatest name) = FS.readLatest me fs name.
+stored me fs (G.Append name text) = FS.append me fs name text.
