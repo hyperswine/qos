@@ -20,4 +20,4 @@ Each of the two aligned execution windows holds 4 KiB. The serial create command
 
 See [actor app ABI and board check](ACTOR-APPS.md) for the SXA2 build,
 cooperative scheduling contract and current acceptance test. The earlier
-check-app.py and board.log document the original synchronous SXA1 milestone. check-job.py and job-board.log record the subsequent single-job milestone.
+check-app.sol and board.log document the original synchronous SXA1 milestone. check-job.sol and job-board.log record the subsequent single-job milestone.

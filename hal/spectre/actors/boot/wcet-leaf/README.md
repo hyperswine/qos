@@ -64,10 +64,10 @@ this directory to a writable build directory and run:
 
     sol "$QOS"/hal/spectre/actors/boot/wcet-leaf/build.sol "$FPRISC/fpr" "$QOS/hal/spectre/actors/boot/apps"    # SPECTRE_IMAGE names the built spectre-image
     riscv64-unknown-elf-objdump -d leaf.elf > linked.txt
-    SIMPLE_RISC="$SIMPLE_RISC" python3 -u board.py > board.log
+    sol "$QOS"/hal/spectre/actors/boot/wcet-leaf/board.sol > board.log
     sol "$QOS"/hal/spectre/actors/boot/wcet-leaf/analyse.sol
 
-board.py warm-resets the CPU, verifies the SD boot marker, creates a
+board.sol warm-resets the CPU, verifies the SD boot marker, creates a
 content-named probe file or verifies the existing one, then runs it and checks
 the exit status. The archived run used FP-RISC 18fce327 (compiler SHA-256
 7d0183774b137c5645a5d296d90ce4597b70a34685e8b92095e5c4bce8ef07f2),

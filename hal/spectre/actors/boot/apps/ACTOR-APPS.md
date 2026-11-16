@@ -20,7 +20,7 @@ accepted by length and CRC as a compatibility convenience, not authentication.
 
 spin.fpr and pendulum.fpr are compiled separately by the integrated build
 (README.md). From this directory run
-`SIMPLE_RISC=/path/to/simple-risc python3 check-two.py` on a freshly booted
+`sol check-two.sol` (README.md of the boot directory) on a freshly booted
 board with the earlier hello app and notes/spectre.txt present. The harness
 installs and verifies both loop images by name, checks independent progress,
 stops one, and reuses its slot for hello while the other continues.
@@ -40,5 +40,5 @@ application that needs a stable peer across slot reuse needs a stronger API.
 Run apps/pong.sxa first. It waits, echoes the integer it receives, and returns
 that integer. Then run apps/ping.sxa. It sends 37 and returns the value of its
 blocking receive. Both slots should show exit 37. The UART harness exercises
-this twice with `python3 check-two.py --mailbox`, including a named filesystem
+this twice with `sol check-two.sol --mailbox`, including a named filesystem
 read while the responder is waiting.

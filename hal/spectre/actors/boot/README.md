@@ -26,9 +26,12 @@ test volume. The qualification checks expect notes/spectre.txt on that volume.
 With the installer verified and the shell running, export SIMPLE_RISC to
 the full board checkout and run these commands from the output's boot directory:
 
-    python3 check-writable.py warm
-    python3 -u check-writable.py cold
-    (cd apps && python3 check-two.py && python3 check-two.py --mailbox)
+    sol "$QOS"/hal/spectre/actors/boot/check-writable.sol warm
+    sol "$QOS"/hal/spectre/actors/boot/check-writable.sol cold
+    (cd apps && sol "$QOS"/hal/spectre/actors/boot/apps/check-two.sol && sol "$QOS"/hal/spectre/actors/boot/apps/check-two.sol --mailbox)
+
+The checks drive the prompt through `spectre-uart` (hal/spectre/tools/spectre-uart.c;
+SPECTRE_UART_TOOL names the built helper, SPECTRE_UART the port).
 
 After the cold checker prints armed, remove all board power for five seconds
 with the microSD inserted, then reconnect. The checker observes USB removal
