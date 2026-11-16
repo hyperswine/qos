@@ -4,8 +4,8 @@ Use the actor probe's pinned-runtime scratch build setup (../README.md).
 From that same scratch directory:
 
     mkdir -p idle
-    cp "$QOS"/hal/spectre/actors/idle/{build.sh,idle.c} idle/
-    bash idle/build.sh
+    cp "$QOS"/hal/spectre/actors/idle/idle.c idle/
+    sol "$QOS"/hal/spectre/actors/build.sol . idle
     python3 /path/to/simple-risc/boards/tangnano20k/run_program.py --freq-mhz 54 --protocol u --timeout 45 idle/idle.bin
 
 Both application actors park on deadlines (10 and 18 ms). The runtime's memory

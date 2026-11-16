@@ -15,8 +15,8 @@ Use the pinned scratch setup in ../README.md, then:
 
     export SIMPLE_RISC=/path/to/simple-risc
     mkdir -p sd
-    cp "$QOS"/hal/spectre/actors/sd/{build.sh,run.py,storage.c} sd/
-    bash sd/build.sh
+    cp "$QOS"/hal/spectre/actors/sd/{run.py,storage.c} sd/
+    sol "$QOS"/hal/spectre/actors/build.sol . sd
     python3 sd/run.py "$SIMPLE_RISC" sd/storage.bin /dev/cu.usbserial-20250303171
 
 The FPGA and card remain powered across this reset. Neither cold boot from SD

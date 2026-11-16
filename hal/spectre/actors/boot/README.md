@@ -4,7 +4,7 @@
 
 From the QOS checkout, with sibling fprisc and simple-risc checkouts, run:
 
-    hal/spectre/actors/boot/build-integrated.sh /tmp/spectre-build
+    sol hal/spectre/actors/boot/build-integrated.sol /tmp/spectre-build
 
 Choose an output directory that does not exist yet. FPRISC and SIMPLE_RISC
 may override the sibling paths. The build needs the FP-RISC host compiler
@@ -47,8 +47,9 @@ not the UART uploader. Recovery is by JTAG. The first filesystem slice remains
 at LBA 131072..131583; the installer never writes there. The prompt supports
 one command, cat NAME, resolved through FS.readLatest against a read-only HAL.
 
-This board trial reused the qualified 54 MHz routed design. patchrom.py checks
-the SHA-256 of the known original .fs, finds each of the 64 ROM bit columns
+This board trial reused the qualified 54 MHz routed design. The build checks
+the SHA-256 of the known original .fs, and `spectre-image patchrom`
+(hal/spectre/tools/spectre-image.c) finds each of the 64 ROM bit columns
 against all 512 original words using the Gowin BSRAM initialization mapping,
 and replaces those columns and their affected frame CRCs only. No logic or
 routing changes. This is specific to that exact uncompressed board build.
@@ -57,16 +58,15 @@ The old bitstream user-code metadata is not an identity for the new ROM.
 Build inputs: the actor probe's pinned RV32 runtime scratch build, QOS's
 std/fs, the wake-tested 54 MHz board, and Simple-Risc's sd.c/bootrom startup.
 For the app, follow ../vfs/README.md using boot/ instead of vfs/ and this
-directory's app.fpr, hal.c and build.sh. Pack the payload with the VFS probe's
-pack.py and unpack.S. Header and payload are installed with the one-time UART
+directory's app.fpr and hal.c (target `boot` of ../build.sol). Pack the payload with
+`spectre-image lz4` and the VFS probe's unpack.S. Header and payload are installed with the one-time UART
 installer; the header is written last after each payload sector was compared.
 Normal boots need neither this installer nor a host image. UART is a console.
 The prompt is a bring-up tool, not a multiuser shell. CRC checks accidental
 corruption; it does not authenticate executable code.
 
-Preparation (one time): copy the scratch sources into boot/, including
-pack.py and unpack.S from ../vfs/. After compiling boot/app.fpr and linking
-boot/fs.bin as above, run `(cd boot && bash build-media.sh)`. With the original
+Preparation (one time): run build-integrated.sol, which compiles boot/app.fpr,
+links boot/fs.bin and builds the media, the patched bitstream and install.bin. With the original
 UART ROM active, upload install.bin at 54 MHz through the guarded protocol.
 Require the SD readback comparison before changing FPGA configuration. Test
 patched-pre.fs in SRAM first. A serial terminal on the FPGA UART uses

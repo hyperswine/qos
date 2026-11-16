@@ -10,8 +10,8 @@ The actor plane is owned by FP-RISC and is the one QOS Native uses.
     mkdir -p src
     pin=$(python3 -c 'import sys,json;print(json.load(open(sys.argv[1]))["revision"])' "$QOS/fprisc.lock.json")
     git -C "$FPRISC" archive "$pin" runtime machine/virt machine/tangnano20k | tar -x -C src
-    cp "$QOS"/hal/spectre/actors/{build.sh,atomic.c,probe.c} .
-    bash build.sh
+    cp "$QOS"/hal/spectre/actors/{atomic.c,probe.c} .
+    sol "$QOS"/hal/spectre/actors/build.sol . probe
     python3 /path/to/simple-risc/boards/tangnano20k/run_program.py --freq-mhz 54 --protocol u --timeout 45 probe.bin
 
 The hardware clock adapter is for the 54 MHz preset. Check the ROM identity

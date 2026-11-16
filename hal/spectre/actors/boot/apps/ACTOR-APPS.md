@@ -18,8 +18,8 @@ calls or corrupted code. There is no privilege separation or fault containment.
 SXA1 has no poll callback; only the earlier known terminating hello demo is
 accepted by length and CRC as a compatibility convenience, not authentication.
 
-Compile spin.fpr and pendulum.fpr separately with build-app.py, using the
-compiler argument shown in README.md. From this directory run
+spin.fpr and pendulum.fpr are compiled separately by the integrated build
+(README.md). From this directory run
 `SIMPLE_RISC=/path/to/simple-risc python3 check-two.py` on a freshly booted
 board with the earlier hello app and notes/spectre.txt present. The harness
 installs and verifies both loop images by name, checks independent progress,
@@ -27,8 +27,8 @@ stops one, and reuses its slot for hello while the other continues.
 
 ## Integer messages between apps
 
-Build ping.fpr and pong.fpr separately with the extra build-app.py argument
-`--mailbox` to select SXA3. The first two entry registers retain the SXA2
+ping.fpr and pong.fpr are built separately as mailbox apps (SXA3:
+`spectre-image sxa ... --mailbox`, with -DSPECTRE_MAILBOX at the link). The first two entry registers retain the SXA2
 console and poll callbacks. Registers a2 and a3 supply peerSend and mailReceive.
 
 `peerSend value` sends a tagged Int to the actor currently occupying the other

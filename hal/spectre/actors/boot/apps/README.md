@@ -1,8 +1,8 @@
 # Running a separately compiled program on Spectre
 
-Build from this directory with:
+Build from the QOS root with:
 
-    python3 build-app.py hello.fpr "$FPRISC/fpr"
+    sol hal/spectre/actors/boot/build-integrated.sol /tmp/spectre-build    # builds every app fixture
 
 This invokes the FP-RISC RV32 Builtin compiler, separates generated functions
 for section garbage collection, links an entry adapter, and rejects unexpected

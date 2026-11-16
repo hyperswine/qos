@@ -3,8 +3,8 @@
 Start in the pinned scratch build from ../README.md:
 
     mkdir -p uart
-    cp "$QOS"/hal/spectre/actors/uart/{build.sh,run.py,uart.c} uart/
-    bash uart/build.sh
+    cp "$QOS"/hal/spectre/actors/uart/{run.py,uart.c} uart/
+    sol "$QOS"/hal/spectre/actors/build.sol . uart
     python3 uart/run.py "$SIMPLE_RISC" uart/uart.bin /dev/cu.usbserial-20250303171
 
 The host uses the existing Simple-Risc ROM library for guarded SDRAM upload.
