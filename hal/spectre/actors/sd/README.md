@@ -15,9 +15,9 @@ Use the pinned scratch setup in ../README.md, then:
 
     export SIMPLE_RISC=/path/to/simple-risc
     mkdir -p sd
-    cp "$QOS"/hal/spectre/actors/sd/{run.py,storage.c} sd/
+    cp "$QOS"/hal/spectre/actors/sd/storage.c sd/
     sol "$QOS"/hal/spectre/actors/build.sol . sd
-    python3 sd/run.py "$SIMPLE_RISC" sd/storage.bin /dev/cu.usbserial-20250303171
+    sol "$QOS"/hal/spectre/actors/sd/run.sol sd/storage.bin /dev/cu.usbserial-20250303171    # SPECTRE_UART_TOOL names the built spectre-uart
 
 The FPGA and card remain powered across this reset. Neither cold boot from SD
 nor sudden power-loss durability is part of this test.

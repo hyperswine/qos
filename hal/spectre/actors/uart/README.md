@@ -3,9 +3,9 @@
 Start in the pinned scratch build from ../README.md:
 
     mkdir -p uart
-    cp "$QOS"/hal/spectre/actors/uart/{run.py,uart.c} uart/
+    cp "$QOS"/hal/spectre/actors/uart/uart.c uart/
     sol "$QOS"/hal/spectre/actors/build.sol . uart
-    python3 uart/run.py "$SIMPLE_RISC" uart/uart.bin /dev/cu.usbserial-20250303171
+    sol "$QOS"/hal/spectre/actors/uart/run.sol uart/uart.bin /dev/cu.usbserial-20250303171    # SPECTRE_UART_TOOL names the built spectre-uart
 
 The host uses the existing Simple-Risc ROM library for guarded SDRAM upload.
 It waits for each READY marker, delays 80 ms to let the receiver block, and

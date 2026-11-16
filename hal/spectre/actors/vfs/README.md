@@ -20,10 +20,10 @@ Starting from the parent actor probe's scratch setup (../README.md):
 
     export QOS=/path/to/qos FPRISC=/path/to/fprisc SIMPLE_RISC=/path/to/simple-risc
     mkdir -p vfs
-    cp "$QOS"/hal/spectre/actors/vfs/{app.fpr,hal.c,run.py} vfs/
+    cp "$QOS"/hal/spectre/actors/vfs/{app.fpr,hal.c} vfs/
     (cd vfs && FPR_HOME="$QOS" FPR_PATH="$FPRISC" FPR_FOREIGN="$QOS/core/foreign.fpr" "$FPRISC/fpr" compile --target=rv32 --prelude="$FPRISC/core/prelude.fpr" app.fpr app.s)
     sol "$QOS"/hal/spectre/actors/build.sol . vfs
-    python3 vfs/run.py "$SIMPLE_RISC" vfs/fs.bin /dev/cu.usbserial-20250303171 --initialize-test-slice
+    sol "$QOS"/hal/spectre/actors/vfs/run.sol vfs/fs.bin /dev/cu.usbserial-20250303171 --initialize-test-slice
 
 The host checks ROM identity, CRC-verifies and starts the image, and selects
 writer mode. It returns the CPU to the ROM with Ctrl-C, verifies/reloads the
