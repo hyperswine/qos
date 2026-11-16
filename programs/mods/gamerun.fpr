@@ -1,0 +1,86 @@
+# mods/gamerun.fpr -- Game.run for QOS: the runner of a std/game app.
+#
+#   Game = use "std/game".
+#   Run = use "mods/gamerun".
+#   main = Run.run { name = "dungeon", width = 960, height = 600, meshes = Nil,
+#                    frame = 160000, flags = 0, sound = Run.silent }
+#                  (Game.app init update subs view)
+#
+# The game is four pure functions over its own Model and Msg (std/game.fpr).
+# This module is everything else: it opens the graphics session, turns the
+# platform's events into the game's messages through the decoders `subs model`
+# gives, performs what update asked for (once, in order, after the model
+# changed), draws `view model`, and closes the session when the game quits.
+#
+# config
+#   name     the session's tag, and the word in the closing line
+#   width, height   the window
+#   meshes   the (name, data) meshes the scene refers to
+#   frame    the frame budget, in 10 MHz ticks (160000 = 16 ms)
+#   flags    what init receives
+#   sound    name -> variation -> Int: perform one cue (`silent` for none)
+#
+# What view answers is Game.layers world overlay: the 3D scene the renderer
+# walks and the 2D layer over it. A frame capture asked for by a transition is
+# taken of the frame that transition renders.
+#
+# One tick period is honoured: every Game.tick of a model must name the same
+# number of milliseconds (the frame loop has one clock for update).
+G = use "std/game".
+MV = use "std/mvu".
+Services = use "mods/services".
+EC = use "mods/epclient#e09b467f350a5396".
+
+silent name variation = 0.
+
+# the runner's own state around the game's model: the capture counter the
+# renderer watches, and whether init already asked to quit
+run config app =
+  hub = Services.withGraphics Services.boot config.width config.height;
+  me = myself 0;
+  ep = Services.graphics hub config.name config.meshes me;
+  (graphics, session) = EC.owner ep;
+  cfg = {env = (me, 0), mt = hub.mt, tick = config.frame, input = graphics, render = graphics};
+  result = MV.game me cfg (MV.App (ini config app) (upd config app) (sbs app) (vw app));
+  _ = EC.close me session;
+  _ = print "{config.name} over";
+  result.
+
+ini config app env = case G.start app config.flags of (m, es) ->
+  (case perform config es { game = m, snap = 0, over = False } Nil of (w, cs) -> w).
+
+upd config app env ev w | w.over = (w, MV.MQuit :: Nil).
+upd config app env ev w = case input app w ev of
+    Nothing -> (w, Nil)
+  | Taken i -> (case G.step app i w.game of (m2, es) -> perform config es { w | game = m2 } Nil).
+
+Taking = Type (Nothing | Taken i).
+input app w ev = case ev of
+    MV.EKey k -> Taken (G.Key k)
+  | MV.EWheel dy dx -> Taken (G.Scroll dy dx)
+  | MV.ETick -> Taken (G.Elapsed (clock (G.periods (G.subscriptions app w.game))))
+  | e -> Nothing.
+
+# the one tick period of a model's subscriptions, 0 for none
+clock Nil = 0.
+clock (p :: more) = agree p more.
+agree p ps = case ps of
+    Nil -> p
+  | q :: more -> (if q == p then agree p more else error "gamerun: a model's tick subscriptions must share one period").
+
+sbs app w =
+  ss = G.subscriptions app w.game;
+  period = clock (G.periods ss);
+  ticks = (if period > 0 then MV.STick period :: Nil else Nil);
+  if G.wantsKeys ss then MV.SKeys :: ticks else ticks.
+
+vw app w = case G.view app w.game of G.Layers world overlay -> (world, overlay, w.snap).
+
+# perform a transition's effects in order; the commands the frame loop takes
+# (it knows only quit) come back oldest first
+perform config es w cs = case es of
+    Nil -> (w, cs)
+  | G.ELog s :: more -> _ = print s; perform config more w cs
+  | G.ESound n v :: more -> _ = config.sound n v; perform config more w cs
+  | G.ECapture :: more -> perform config more { w | snap = w.snap + 1 } cs
+  | G.EQuit :: more -> ({ w | over = True }, MV.MQuit :: Nil).
