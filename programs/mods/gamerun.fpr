@@ -33,6 +33,7 @@
 #
 # One tick period is honoured: every Game.tick of a model must name the same
 # number of milliseconds (the frame loop has one clock for update).
+AC = use "std/actor".
 G = use "std/game".
 MV = use "std/mvu".
 Services = use "mods/services".
@@ -49,19 +50,69 @@ run config app =
   ep = Services.graphics hub config.name config.meshes me;
   (graphics, session) = EC.owner ep;
   fs = (if config.storage then FS.connect me hub.ns else 0);
-  cfg = {env = (me, fs), mt = hub.mt, tick = config.frame, input = graphics, render = graphics};
+  port = (if fs != 0 then AC.spawnWith (AC.Dynamic 64) MV.port else 0);
+  worker = (if fs != 0 then AC.spawnWith (AC.Dynamic 64) (storageWorker fs port) else 0);
+  cfg = {env = (me, worker, port), mt = hub.mt, tick = config.frame, input = graphics, render = graphics};
   result = MV.game me cfg (MV.App (ini config app) (upd config app) (sbs app) (vw app));
+  _ = (if worker != 0 then kill worker else Unit);
+  _ = (if port != 0 then kill port else Unit);
   _ = EC.close me session;
   _ = print "{config.name} over";
   result.
 
+storageWorker fs port self =
+  _ = Sys.loop (fs, port) (storageStep self);
+  Unit.
+
+storageStep self state =
+  (fs, port) = state;
+  msg = receive self;
+  req = keep msg;
+  _ = drop msg;
+  (id, task) = req;
+  res = stored self fs task;
+  _ = (case res of
+      Ok text -> AC.sendSure self port ("{id}:ok", text)
+    | Err why -> AC.sendSure self port ("{id}:err", why));
+  (True, state).
+
+portOf (me, worker, port) = port.
+
 ini config app env = case G.start app config.flags of (m, es) ->
-  (case perform config app env es { game = m, snap = 0, over = False } Nil of (w, cs) -> w).
+  (case perform config app env es { game = m, snap = 0, over = False, jobs = Nil, tasks = Nil, nextId = 1, port = portOf env } Nil of (w, cs) -> w).
 
 upd config app env ev w | w.over = (w, MV.MQuit :: Nil).
+upd config app env (MV.EMsg tag arg) w = deliverTask config app env tag arg w.
 upd config app env ev w = case input app w ev of
-    Nothing -> (w, Nil)
-  | Taken i -> (case G.step app i w.game of (m2, es) -> perform config app env es { w | game = m2 } Nil).
+    Nothing -> stepPendingJobs config app env w
+  | Taken i -> (case G.step app i w.game of (m2, es) ->
+      (case perform config app env es { w | game = m2 } Nil of (w2, cs2) ->
+        if w2.over then (w2, cs2) else stepPendingJobs config app env w2)).
+
+deliverTask config app env tag arg w =
+  colon = strIndexOf ":" tag;
+  id = parseInt (substr tag 0 colon);
+  kind = substr tag (colon + 1) (strlen tag - colon - 1);
+  res = if kind == "ok" then Ok arg else Err arg;
+  case takeTask id w.tasks Nil of
+      (Nil, tasks2) -> stepPendingJobs config app env { w | tasks = tasks2 }
+    | (toMsg :: rest, tasks2) ->
+        (case G.apply app (toMsg res) w.game of (m2, es) ->
+          (case perform config app env es { w | game = m2, tasks = tasks2 } Nil of (w2, cs2) ->
+            if w2.over then (w2, cs2) else stepPendingJobs config app env w2)).
+
+takeTask id Nil acc = (Nil, revTasks acc Nil).
+takeTask id ((tid, toMsg) :: more) acc =
+  if tid == id then ([toMsg], revTasks acc more)
+  else takeTask id more ((tid, toMsg) :: acc).
+revTasks Nil acc = acc.
+revTasks (x :: more) acc = revTasks more (x :: acc).
+
+stepPendingJobs config app env w = case w.jobs of
+    Nil -> (w, Nil)
+  | s :: more ->
+      (case G.stepJobs app w.jobs w.game of (jobs2, m2, es2) ->
+        perform config app env es2 { w | game = m2, jobs = jobs2 } Nil).
 
 Taking = Type (Nothing | Taken i).
 input app w ev = case ev of
@@ -81,13 +132,14 @@ sbs app w =
   ss = G.subscriptions app w.game;
   period = clock (G.periods ss);
   ticks = (if period > 0 then MV.STick period :: Nil else Nil);
-  if G.wantsKeys ss then MV.SKeys :: ticks else ticks.
+  base = (if G.wantsKeys ss then MV.SKeys :: ticks else ticks);
+  if w.port != 0 then MV.SPort w.port :: base else base.
 
 vw app w = case G.view app w.game of G.Layers world overlay -> (world, overlay, w.snap).
 
 # perform a transition's effects in order; the commands the frame loop takes
-# (it knows only quit) come back. A task's result is delivered where the task
-# stood, and what that delivery asks for is performed before the rest.
+# (it knows only quit) come back. Storage tasks go to the background worker
+# when storage is available, and their results arrive via MV.SPort.
 perform config app env es w cs = case es of
     Nil -> (w, cs)
   | G.ELog s :: more -> _ = print s; perform config app env more w cs
@@ -96,11 +148,20 @@ perform config app env es w cs = case es of
   | G.ECapture :: more -> perform config app env more { w | snap = w.snap + 1 } cs
   | G.EQuit :: more -> ({ w | over = True }, MV.MQuit :: Nil)
   | G.ETask task toMsg :: more ->
-      (case G.apply app (toMsg (answer env task)) w.game of (m2, es2) ->
-        (case perform config app env es2 { w | game = m2 } cs of (w2, cs2) ->
-          (if w2.over then (w2, cs2) else perform config app env more w2 cs2))).
+      (case env of (me, worker, port) ->
+        (if worker == 0 then
+          (case G.apply app (toMsg (Err G.noStorage)) w.game of (m2, es2) ->
+            (case perform config app env es2 { w | game = m2 } cs of (w2, cs2) ->
+              (if w2.over then (w2, cs2) else perform config app env more w2 cs2)))
+        else
+          id = w.nextId;
+          _ = AC.sendSure me worker (id, task);
+          perform config app env more { w | tasks = (id, toMsg) :: w.tasks, nextId = id + 1 } cs))
+  | G.ELatest key rev job onResult :: more ->
+      perform config app env more { w | jobs = G.submitJob key rev job onResult w.jobs } cs
+  | G.ECancel key :: more ->
+      perform config app env more { w | jobs = G.cancelJob key w.jobs } cs.
 
-answer env task = case env of (me, fs) -> (if fs == 0 then Err G.noStorage else stored me fs task).
 stored me fs (G.Replay name) = FS.replay me fs name.
 stored me fs (G.ReadLatest name) = FS.readLatest me fs name.
 stored me fs (G.Append name text) = FS.append me fs name text.
