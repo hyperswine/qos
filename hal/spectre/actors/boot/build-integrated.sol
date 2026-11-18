@@ -121,6 +121,8 @@ sums out names = Str.join "" (List.map (fn name -> path = "{out}/{name}"; sha = 
       tool = "{out}/spectre-image";
       _ = B.command ["/bin/sh","-c","cc -O2 $(pkg-config --cflags liblz4) \"$0\" $(pkg-config --libs liblz4) -o \"$1\"","{qos}/hal/spectre/tools/spectre-image.c",tool];
       _ = B.inDirectory "{out}/boot" env ["{fprisc}/fpr","compile","--target=rv32","--prelude={out}/fprisc/core/prelude.fpr","app.fpr","app.s"];
+      bsp = if spectreBoard == "spectre-84" then "spectre84" else "spectre54";
+      _ = B.inDirectory qos [] [B.setting "SOL" "sol","tools/board.sol","bsp/{bsp}/board.json","{out}/board-devices"];
       _ = S.target out board "boot";
       _ = media out board tool;
       _ = List.map (app "{out}/boot/apps" "{fprisc}/fpr" env tool False) ["spin","pendulum","hello"];

@@ -1,6 +1,6 @@
 #include "devtable.h"
 #include "fpr.h"
-#include "sd_spi.h"
+#include "sd.h"
 static void say(const char *s) {
   while (*s)
     hal_putc(*s++);
@@ -51,16 +51,9 @@ void hal_timer_arm(uw hart, uint64_t delta) {
                   delta / 10 * CORE_MHZ + ((delta % 10) * CORE_MHZ + 9) / 10);
 }
 
-/* The QLog volume: 64 pages from sector 131072 of the SD card, through the
- * BLOCK class (hal/classes/block.c) and its SD driver (hal/drivers/sd_spi.c). */
-static sd_spi_t disk = {.lba0 = 131072, .pages = 64};
-static void disk_setup(void) { sd_spi_setup(&disk); }
-static const devtable_entry_t tab[] = {
-    {"blk", {T_DEVICE, 0, 0}, disk_setup, NULL, .cls = FPR_DEV_BLOCK, .ops = &sd_spi_ops, .state = &disk}};
-const devtable_entry_t *hal_devtable_ext(uw *n) {
-  *n = 1;
-  return tab;
-}
+/* The device table (the QLog volume on the SD card, hal/drivers/sd_spi.c behind
+ * the BLOCK class) is generated from bsp/spectre54 or bsp/spectre84/board.json
+ * by tools/board.sol. */
 V fpr_g_blkPackPair_call3(V a, V b, V c) {
   fpr_cpanic("pair outside probe");
   return 0;

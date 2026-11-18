@@ -1,0 +1,3 @@
+{"class": "net", "setup": "net_setup",
+ "sources": ["hal/virt/net.c", "hal/net_actor_bridge.c"],
+ "about": "virtio-net and its TCP stack on QEMU virt (net is not a device class yet: no ops)"}

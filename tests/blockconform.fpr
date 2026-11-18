@@ -1,0 +1,29 @@
+#: cflags -DQOS_MEMBLK_TEST
+#: expect blockconform: blk=ok mem0=ok HOLDS
+# The BLOCK class contract (hal/classes/block.h), checked the same way on every
+# instance: the virtio disk and the RAM reference driver (hal/drivers/memblk.c,
+# added with -DQOS_MEMBLK_TEST). Uses the last pages, so seeded disks keep
+# their QLog.
+unsafe program.
+grow : unsafe Int -> String -> String .
+grow k s = if k == 0 then s else grow (k - 1) (strcat s s).
+zeroAt r i = charAt r i == 0.
+check d name =
+  n = blkPages d;
+  p = n - 4;
+  _ = blkWrite d p "abc";
+  one = blkRead d p;
+  pageOk = strlen one == 4096 and substr one 0 3 == "abc" and zeroAt one 3 and zeroAt one 4095;
+  payload = substr (grow 13 "x") 0 5000;
+  written = blkWriteRecord d p "H1" payload;
+  three = blkReadRange d p 3;
+  recordOk = written == 5002 and strlen three == 12288 and substr three 0 2 == "H1" and zeroAt three 2
+    and substr three 4096 5000 == payload and zeroAt three 9096 and zeroAt three 12287;
+  _ = blkWrite d (p + 1) "y";
+  short = blkRead d (p + 1);
+  staleOk = substr short 0 1 == "y" and zeroAt short 1 and zeroAt short 4095;
+  f = blkFlush d;
+  flushOk = f == 0 or f == 1;
+  if n >= 8 and pageOk and recordOk and staleOk and flushOk then "{name}=ok"
+  else "{name}=FAIL pages={n} page={pageOk} record={recordOk} stale={staleOk} flush={f}".
+main = "blockconform: {check (device "blk") "blk"} {check (device "mem0") "mem0"} HOLDS".

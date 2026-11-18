@@ -1,0 +1,5 @@
+{"board": "spectre54",
+ "about": "Spectre-54: the Tang Nano 20K with Simple-Risc's btbdef-54 bitstream (RV32IMC core at 54 MHz, 8 MiB), the original SD boot demonstrator",
+ "devices": [
+   {"name": "blk", "driver": "sd_spi", "params": {"lba0": 131072, "pages": 64}}
+ ]}

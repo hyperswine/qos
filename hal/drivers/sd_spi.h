@@ -13,7 +13,7 @@
 #ifndef QOS_SD_SPI_H
 #define QOS_SD_SPI_H
 #include "sd.h"
-#include "block.h"
+#include "../classes/block.h"
 
 typedef struct {
   uint32_t lba0;      /* first sector of the volume */

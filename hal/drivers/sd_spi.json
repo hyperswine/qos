@@ -1,0 +1,4 @@
+{"class": "block", "ops": "sd_spi_ops", "state": "sd_spi_t", "header": "hal/drivers/sd_spi.h",
+ "state_setup": "sd_spi_setup", "params": ["lba0", "pages", "format", "read_only"],
+ "sources": ["hal/drivers/sd_spi.c"], "needs": ["simple-risc boards/tangnano20k/c/sd.c"],
+ "about": "an SD card on Simple-Risc's SPI port; the volume is pages 4 KiB pages from sector lba0"}

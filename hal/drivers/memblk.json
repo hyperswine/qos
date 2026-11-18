@@ -1,0 +1,4 @@
+{"class": "block", "ops": "memblk_ops", "state": "memblk_t", "header": "hal/drivers/memblk.h",
+ "params": ["pages"], "storage": {"field": "bytes", "count": "pages", "unit": 4096},
+ "sources": ["hal/drivers/memblk.c"],
+ "about": "a RAM disk: the BLOCK class's reference driver"}

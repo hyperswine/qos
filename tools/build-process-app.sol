@@ -7,7 +7,7 @@ output argv = ProcessResult status out err = unwrap (Proc.runNow (ProcessSpec ar
   if status == 0 then Str.trim out else error "{argv}: {err}".
 runtime fpr = virt = "{fpr}/machine/virt"; rt = "{fpr}/runtime";
   List.append ["build/virt-clint.s","{virt}/rawunit.c","build/qos-plic.s","build/qos-virtio.s","build/qos-blockpolicy.s","build/qos-netpolicy.s",
-    "hal/virt/plic.c","hal/virt/net.c","hal/net_actor_bridge.c","hal/virt/blk.c","hal/classes/block.c","hal/virt/pins.c","hal/virt/devices.c","hal/core/lifecycle.c",
+    "hal/virt/plic.c","hal/virt/pins.c","hal/core/lifecycle.c","build/board-virt/devtable.c",
     "qos/native/proc_entry.c","{virt}/ctx.S","{virt}/ctx_fab.c","{rt}/runtime.c","{rt}/i32.c","{virt}/hal.c","{virt}/memshim.c"]
     (List.map (fn name -> "{rt}/{name}.c") ["actors","buddy","mod","bits","vec","sstr"]).
 link extra env fpr layout assembly units base elf =
@@ -15,7 +15,8 @@ link extra env fpr layout assembly units base elf =
     "-ffreestanding","-nostdlib","-nostartfiles","-O2","-Wl,--defsym=PROC_IMAGE_BASE={base}","-Wl,--emit-relocs","-Wl,--no-relax",
     "-Wl,--no-warn-rwx-segments","-Wl,--defsym=_heap_start=_proc_image_end","-Wl,--defsym=_heap_end=_proc_image_end",
     "-Wl,--defsym=_proc_arena_end=_proc_image_end","-T","{fpr}/machine/virt/link-app.ld","-I{fpr}/runtime","-I{fpr}/machine/virt"];
-  command env (List.concat [flags,extra,runtime fpr,[assembly],units,["-o",elf]]).
+  board = List.filter (fn l -> l != "") (Str.lines (readPath "build/board-virt/sources.txt"));
+  command env (List.concat [flags,extra,runtime fpr,board,[assembly],units,["-lgcc","-o",elf]]).
 solCommand = (case unwrap (Env.get "SOL") of EnvText path -> path | EnvMissing -> "sol").
 buildClint env fpr =
   virt = "{fpr}/machine/virt"; driver = "{virt}/build-clint.sol";
@@ -33,6 +34,8 @@ build app manifest archive extra =
   _ = command env ["mkdir","-p","build"];
   _ = command (("LC_ALL","C.UTF-8") :: env) ["{fpr}/fpr","--target=rv64","--prelude={fpr}/core/prelude.fpr",app,assembly];
   _ = buildClint env fpr;
+  # the board's device table and the class and driver sources (tools/board.sol)
+  _ = command env [solCommand,"tools/board.sol","bsp/virt/board.json","build/board-virt"];
   _ = List.map (HAL.compile env "{fpr}/fpr" "hal" "build") ["plic","virtio","blockpolicy","netpolicy"];
   units = Str.lines (readPath "{assembly}.units");
   _ = link extra env fpr layout assembly units "0" "{prefix}.elf";

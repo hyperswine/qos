@@ -1,0 +1,5 @@
+{"board": "spectre84",
+ "about": "Spectre-84: the Tang Nano 20K with Simple-Risc's fprisc-84 bitstream (RV32IM, 84 MHz, 8 MiB)",
+ "devices": [
+   {"name": "blk", "driver": "sd_spi", "params": {"lba0": 131072, "pages": 64}}
+ ]}

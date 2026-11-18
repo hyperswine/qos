@@ -1,0 +1,3 @@
+{"class": "block", "ops": "virtio_blk_ops", "setup": "blk_setup",
+ "sources": ["hal/virt/blk.c"],
+ "about": "virtio-blk on QEMU virt's virtio-mmio slots (probes all 8; the instance base is unused)"}
