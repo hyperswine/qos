@@ -53,6 +53,15 @@ conRead : Device -> String .
 conArm : Device -> Int -> Int -> Int .
 conSize : Device -> Int .
 
+# ---- input, clock, host files, audio  (hal/classes/devices.c; contracts in hal/classes/*.h)
+inRead : Device -> String .
+clkNow : Device -> String .
+hfRead : Device -> String -> Result String String .
+hfList : Device -> String -> Result String String .
+hfWrite : Device -> String -> String -> Result String String .
+hfAppend : Device -> String -> String -> Result String String .
+audTone : Device -> Int -> Int -> Int .
+
 # ---- the pin bus  (hal/virt/pins.c; docs/PINS.md)
 Pin.mode : a -> Int -> Unit .
 Pin.read : a -> Int .

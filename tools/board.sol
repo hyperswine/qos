@@ -24,8 +24,13 @@ listOf key j = case J.get key j of Ok (J.JArr xs) -> List.map (fn x -> need (J.t
 classInfo c = case c of
     "block" -> ("FPR_DEV_BLOCK","hal/classes/block.h","qos_block_ops",["hal/classes/block.c"])
   | "console" -> ("FPR_DEV_CONSOLE","hal/classes/console.h","qos_console_ops",["hal/classes/console.c"])
+  | "input" -> ("FPR_DEV_INPUT","hal/classes/input.h","qos_input_ops",["hal/classes/devices.c"])
+  | "clock" -> ("FPR_DEV_CLOCK","hal/classes/clock.h","qos_clock_ops",["hal/classes/devices.c"])
+  | "hostfs" -> ("FPR_DEV_HOSTFS","hal/classes/hostfs.h","qos_hostfs_ops",["hal/classes/devices.c"])
+  | "audio" -> ("FPR_DEV_AUDIO","hal/classes/audio.h","qos_audio_ops",["hal/classes/devices.c"])
   | "net" -> ("FPR_DEV_NET","","",[])
-  | other -> error "unknown device class {other} (block, console, net)".
+  | "transport" -> ("FPR_DEV_TRANSPORT","","",[])
+  | other -> error "unknown device class {other} (block, console, input, clock, hostfs, audio, net, transport)".
 value v = case v of
     J.JNum n -> "{n}"
   | J.JStr s -> s

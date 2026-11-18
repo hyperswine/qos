@@ -28,7 +28,7 @@ blockClass u = q = B.setting "QOS" "";
 # SPECTRE_CONSOLE=qlink: the boot image's console runs over qlink (hal/link),
 # for tools/qhost; raw (the default) keeps the plain UART prompt
 consoleSources u = q = B.setting "QOS" "";
-  if B.setting "SPECTRE_CONSOLE" "raw" == "qlink" then ["-DSPECTRE_QLINK","-I{q}/hal/link","{q}/hal/link/qlink.c","{q}/hal/link/qlink_sruart.c"] else [].
+  if B.setting "SPECTRE_CONSOLE" "raw" == "qlink" then ["-DSPECTRE_QLINK","-I{q}/hal/link","{q}/hal/link/qlink_sruart.c"] else [].
 # the boot image's device table and its class and driver sources, generated
 # into ROOT/board-devices by tools/board.sol from the board manifest
 boardDevices root = List.append ["{root}/board-devices/devtable.c"]

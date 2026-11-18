@@ -1,6 +1,7 @@
 /* qlink_test.c -- the qlink session over a simulated wire that drops and
- * corrupts bytes: every reliable message arrives once, in order, both ways,
- * and no frame ever carries a raw 0x03.
+ * corrupts bytes, and a receiver that refuses frames it has no room for:
+ * every reliable message arrives once, in order, both ways, and no frame
+ * ever carries a raw 0x03.
  *   cc -O2 -I../../hal/link qlink_test.c ../../hal/link/qlink.c -o qlink_test && ./qlink_test */
 #include "qlink.h"
 #include <stdio.h>
@@ -15,7 +16,7 @@ struct side {
   size_t raw03;
 };
 static uint32_t clock_ms;
-static unsigned loss_ppm, corrupt_ppm;
+static unsigned loss_ppm, corrupt_ppm, refuse_ppm; /* refuse: the receiver has no room */
 static uint32_t rng = 1;
 static uint32_t rnd(void) { rng = rng * 1103515245u + 12345u; return rng >> 8; }
 static uint32_t now(void *ctx) { (void)ctx; return clock_ms; }
@@ -29,12 +30,14 @@ static void wr(void *ctx, const uint8_t *b, size_t n) {
     s->wire[s->wlen++] = v;
   }
 }
-static void deliver(void *ctx, uint8_t ch, const uint8_t *p, size_t n) {
+static int deliver(void *ctx, uint8_t ch, const uint8_t *p, size_t n) {
   side_t *s = ctx;
-  if (ch != QLINK_CH_CONSOLE || n != 4) { s->bad++; return; }
+  if (rnd() % 1000000 < refuse_ppm) return -1;
+  if (ch != QLINK_CH_CONSOLE || n != 4) { s->bad++; return 0; }
   uint32_t v = (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
   if (v != s->expect_next) s->bad++;
   s->expect_next = v + 1; s->got++;
+  return 0;
 }
 static void deliver_wire(side_t *from) {
   /* the peer reads what `from` wrote, in pieces */
@@ -42,10 +45,10 @@ static void deliver_wire(side_t *from) {
   qlink_input(&from->peer->q, from->wire, k);
   memmove(from->wire, from->wire + k, from->wlen - k); from->wlen -= k;
 }
-static int run(unsigned loss, unsigned corrupt, uint32_t count, uint8_t wa, uint8_t wb) {
+static int run(unsigned loss, unsigned corrupt, unsigned refuse, uint32_t count, uint8_t wa, uint8_t wb) {
   static side_t a, b;
   memset(&a, 0, sizeof a); memset(&b, 0, sizeof b);
-  a.peer = &b; b.peer = &a; loss_ppm = loss; corrupt_ppm = corrupt; clock_ms = 0;
+  a.peer = &b; b.peer = &a; loss_ppm = loss; corrupt_ppm = corrupt; refuse_ppm = refuse; clock_ms = 0;
   qlink_config_t ca = {wr, now, deliver, 0, &a, wa, 255, 50}, cb = {wr, now, deliver, 0, &b, wb, 14, 50};
   qlink_init(&a.q, &ca); qlink_init(&b.q, &cb);
   uint32_t sa = 0, sb = 0;
@@ -59,18 +62,20 @@ static int run(unsigned loss, unsigned corrupt, uint32_t count, uint8_t wa, uint
     clock_ms++;
   }
   int ok = a.got == count && b.got == count && !a.bad && !b.bad;
-  printf("loss %5u ppm corrupt %5u ppm windows %u/%u: a got %u b got %u, bad %d/%d, resent %u/%u, crc errors %u/%u, raw 0x03 on wire %zu/%zu, %u ms: %s\n",
-         loss, corrupt, wa, wb, b.got, a.got, a.bad, b.bad, a.q.stats.resent, b.q.stats.resent,
-         a.q.stats.crc_errors, b.q.stats.crc_errors, a.raw03, b.raw03, clock_ms, ok && !a.raw03 && !b.raw03 ? "PASS" : "FAIL");
+  printf("loss %5u ppm corrupt %5u ppm refuse %6u ppm windows %u/%u: a got %u b got %u, bad %d/%d, resent %u/%u, crc errors %u/%u, refused %u/%u, raw 0x03 on wire %zu/%zu, %u ms: %s\n",
+         loss, corrupt, refuse, wa, wb, b.got, a.got, a.bad, b.bad, a.q.stats.resent, b.q.stats.resent,
+         a.q.stats.crc_errors, b.q.stats.crc_errors, a.q.stats.refused, b.q.stats.refused, a.raw03, b.raw03, clock_ms, ok && !a.raw03 && !b.raw03 ? "PASS" : "FAIL");
   return ok && !a.raw03 && !b.raw03;
 }
 int main(void) {
   int ok = 1;
-  ok &= run(0, 0, 20000, 4, 1);
-  ok &= run(2000, 0, 5000, 4, 1);
-  ok &= run(0, 2000, 5000, 4, 1);
-  ok &= run(5000, 5000, 3000, 4, 1);
-  ok &= run(20000, 10000, 1000, 2, 1);
+  ok &= run(0, 0, 0, 20000, 4, 1);
+  ok &= run(2000, 0, 0, 5000, 4, 1);
+  ok &= run(0, 2000, 0, 5000, 4, 1);
+  ok &= run(5000, 5000, 0, 3000, 4, 1);
+  ok &= run(20000, 10000, 0, 1000, 2, 1);
+  ok &= run(0, 0, 300000, 3000, 4, 1);     /* a receiver out of room 30% of the time */
+  ok &= run(5000, 5000, 100000, 1000, 4, 1);
   puts(ok ? "qlink: PASS" : "qlink: FAIL");
   return ok ? 0 : 1;
 }

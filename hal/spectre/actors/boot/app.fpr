@@ -13,6 +13,16 @@ soakLine k = "S{k} {chr 3}{chr 126}{chr 125} 0123456789abcdefghijklmnopqrstuvwxy
 soakRun : unsafe Int -> Int -> Int .
 soakRun n k = if k >= n then n else _ = print (soakLine k); soakRun n (k + 1).
 soakCmd count = _ = soakRun count 0; print "soak done".
+# `keys N`: key events from the input device until N have arrived
+keyEvents : unsafe String -> Int -> Int .
+keyEvents evs i = if i + 4 > strlen evs then 0 else
+  _ = print "key code {charAt evs (i + 1) + 256 * charAt evs (i + 2)} value {charAt evs (i + 3)}";
+  1 + keyEvents evs (i + 4).
+keysLoop : unsafe Int -> Int -> Int .
+keysLoop want got = if got >= want then got else
+  evs = inRead (device "in0");
+  if strlen evs == 0 then _ = Sys.sleepUs 2000; keysLoop want got else keysLoop want (got + keyEvents evs 0).
+keysFor want = _ = keysLoop want 0; print "keys done".
 showResult r = case r of Ok text -> print text | Err why -> print "error: {why}".
 create me fs name text = case FS.readLatest me fs name of
     Ok old -> print "already exists"
@@ -37,7 +47,13 @@ command me fs line =
   else if op == "soak" and b == n and a + 1 < n then soakCmd (parseInt (substr line (a + 1) (n - a - 1)))
   else if op == "cat" and b == n and a + 1 < n then showResult (FS.readLatest me fs (substr line (a + 1) (n - a - 1)))
   else if op == "create" and b > a + 1 and b < n then create me fs (substr line (a + 1) (b - a - 1)) (substr line (b + 1) (n - b - 1))
-  else print "usage: create NAME TEXT | ls | cat NAME | run NAME | status [1|2] | stop [1|2] | soak N".
+  else if line == "date" then (case clkNow (device "clk0") of "" -> print "date: the host has not sent the time" | ms -> print "epoch ms {ms}")
+  else if op == "hcat" and b == n and a + 1 < n then showResult (hfRead (device "hf0") (substr line (a + 1) (n - a - 1)))
+  else if op == "hls" then showResult (hfList (device "hf0") (if a + 1 < n then substr line (a + 1) (n - a - 1) else "."))
+  else if op == "hput" and b > a + 1 and b < n then (case hfWrite (device "hf0") (substr line (a + 1) (b - a - 1)) (substr line (b + 1) (n - b - 1)) of Ok u -> print "written" | Err why -> print "error: {why}")
+  else if op == "beep" then (if audTone (device "aud0") 880 200 == 0 then print "beep sent" else print "beep: no listener")
+  else if op == "keys" and b == n and a + 1 < n then keysFor (parseInt (substr line (a + 1) (n - a - 1)))
+  else print "usage: create NAME TEXT | ls | cat NAME | run NAME | status [1|2] | stop [1|2] | soak N | date | hcat P | hls [P] | hput P TEXT | beep | keys N".
 turn me fs state = _ = command me fs (spectrePrompt Unit); (True,state).
 main =
   me = myself 0;

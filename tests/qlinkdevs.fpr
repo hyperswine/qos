@@ -1,0 +1,36 @@
+# The qlink device classes on QEMU (board virt-qlink): a host clock, host
+# files, a tone and key events, all through tools/qhost on UART0. Not a
+# native-fixtures kernel: it needs qhost on the other end
+# (tools/qlink-qemu-check.sol runs it).
+unsafe program.
+waitClock : unsafe Int -> String .
+waitClock tries = case clkNow (device "clk0") of
+    "" -> if tries == 0 then "" else _ = Sys.sleepUs 20000; waitClock (tries - 1)
+  | ms -> ms.
+waitKeys : unsafe Int -> String -> String .
+waitKeys tries acc = if strlen acc >= 8 or tries == 0 then acc else
+  _ = Sys.sleepUs 20000;
+  waitKeys (tries - 1) (strcat acc (inRead (device "in0"))).
+okText r = case r of Ok t -> t | Err why -> "ERR {why}".
+# report on the console instance (qlink's console channel)
+sayAll : unsafe String -> Int .
+sayAll t = if strlen t == 0 then 0 else
+  took = conWrite (device "con0") t;
+  if took == 0 then _ = Sys.sleepUs 1000; sayAll t else sayAll (substr t took (strlen t - took)).
+say t = sayAll "{t}\n".
+main =
+  clock = waitClock 1500;
+  _ = say "qlinkdevs: clock {clock}";
+  greeting = okText (hfRead (device "hf0") "greeting.txt");
+  _ = say "qlinkdevs: read {greeting}";
+  wrote = okText (hfWrite (device "hf0") "from-qemu.txt" "written by QEMU over qlink");
+  refused = case hfRead (device "hf0") "../outside" of Ok t -> False | Err why -> True;
+  tone = audTone (device "aud0") 440 100;
+  _ = say "qlinkdevs: tone {tone}; press two keys";
+  keys = waitKeys 1500 "";
+  code = if strlen keys >= 4 then charAt keys 1 + 256 * charAt keys 2 else 0 - 1;
+  good = strlen clock >= 13 and greeting == "hello from the host\n" and wrote == "" and refused and tone == 0 and strlen keys == 8 and charAt keys 3 == 1 and charAt keys 7 == 0;
+  verdict = "qlinkdevs: key {code}; {if good then "HOLDS" else "FAILED"}";
+  _ = say verdict;
+  _ = Sys.sleepUs 500000;
+  verdict.

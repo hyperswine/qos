@@ -1,0 +1,2 @@
+{"class": "transport", "sources": ["hal/link/qlink_uart16550.c"],
+ "about": "qlink over a 16550 UART (QEMU virt): names the backend so a board links it; no instance of its own"}

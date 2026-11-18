@@ -1,0 +1,12 @@
+{"board": "virt-qlink",
+ "about": "QEMU virt, rv64, with UART0 carrying qlink: con0 and the input, clock, host-file and audio devices ride it, and tools/qhost is the host (QEMU -serial unix:PATH,server; qhost attach unix:PATH)",
+ "devices": [
+   {"name": "ql0", "driver": "qlink_uart16550", "base": "0x10000000"},
+   {"name": "con0", "driver": "qlink_con", "irq": 10, "params": {"port": "&qlink_board_port", "init": "qlink_uart16550_init"}},
+   {"name": "in0", "driver": "qlink_input", "params": {"port": "&qlink_board_port", "init": "qlink_uart16550_init"}},
+   {"name": "clk0", "driver": "qlink_clock", "params": {"port": "&qlink_board_port", "init": "qlink_uart16550_init"}},
+   {"name": "hf0", "driver": "qlink_hostfs", "params": {"port": "&qlink_board_port", "init": "qlink_uart16550_init"}},
+   {"name": "aud0", "driver": "qlink_audio", "params": {"port": "&qlink_board_port", "init": "qlink_uart16550_init"}},
+   {"name": "net", "driver": "virtio_net", "base": "0x10001000"},
+   {"name": "blk", "driver": "virtio_blk", "base": "0x10001000"}
+ ]}

@@ -99,11 +99,11 @@ static void frame_done(qlink_t *q) {
   q->peer_heard = 1;
   acked(q, ack);
   if (ch & QLINK_ACK_ONLY) return;
-  if (ch & QLINK_UNRELIABLE) { q->cfg.deliver(q->cfg.ctx, (uint8_t)(ch & 0x3f), q->frame + 4, n); return; }
+  if (ch & QLINK_UNRELIABLE) { (void)q->cfg.deliver(q->cfg.ctx, (uint8_t)(ch & 0x3f), q->frame + 4, n); return; }
   if (seq != q->expect_seq) { q->stats.dup_frames++; q->ack_owed = 1; return; }
+  if (q->cfg.deliver(q->cfg.ctx, (uint8_t)(ch & 0x3f), q->frame + 4, n) < 0) { q->stats.refused++; return; }
   q->expect_seq++;
   q->ack_owed = 1;
-  q->cfg.deliver(q->cfg.ctx, (uint8_t)(ch & 0x3f), q->frame + 4, n);
 }
 
 void qlink_input(qlink_t *q, const uint8_t *bytes, size_t n) {

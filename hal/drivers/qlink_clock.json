@@ -1,0 +1,3 @@
+{"class": "clock", "ops": "qlink_clock_ops", "state": "qlink_dev_t", "header": "hal/drivers/qlink_dev.h",
+ "params": ["port", "init"], "sources": ["hal/drivers/qlink_dev.c", "hal/link/qlink_port.c", "hal/link/qlink.c"],
+ "about": "the clock class over a qlink port (hal/link/qlink_port.h)"}

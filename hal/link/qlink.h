@@ -40,7 +40,10 @@ typedef struct qlink qlink_t;
 typedef struct {
   void (*write)(void *ctx, const uint8_t *bytes, size_t n); /* raw bytes to the wire */
   uint32_t (*now_ms)(void *ctx);
-  void (*deliver)(void *ctx, uint8_t ch, const uint8_t *payload, size_t n);
+  /* a frame's payload, in order. For a reliable frame, -1 refuses it (no
+   * room): it is neither acknowledged nor counted as received, so the peer
+   * resends it, which is the link's flow control. */
+  int (*deliver)(void *ctx, uint8_t ch, const uint8_t *payload, size_t n);
   void (*raw)(void *ctx, uint8_t byte);                    /* a byte outside frames, or NULL */
   void *ctx;
   uint8_t window;      /* reliable frames in flight, 1..QLINK_WINDOW_MAX */
@@ -49,7 +52,7 @@ typedef struct {
 } qlink_config_t;
 
 typedef struct {
-  uint32_t frames_in, frames_out, resent, crc_errors, dup_frames, overlong;
+  uint32_t frames_in, frames_out, resent, crc_errors, dup_frames, overlong, refused;
 } qlink_stats_t;
 
 struct qlink {

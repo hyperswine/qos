@@ -6,6 +6,8 @@
 #ifndef QOS_QLINK_SRUART_H
 #define QOS_QLINK_SRUART_H
 #include <stdint.h>
+#include "qlink_port.h"
+extern qport_t qlink_board_port; /* the board's one link; qlink_dev instances name it */
 void qcon_init(uint32_t (*now_ms)(void));
 void qcon_putc(char c);        /* buffered; sent at '\n', when full, or on flush */
 int qcon_getc(void);           /* a console byte from the host, or -1 */
