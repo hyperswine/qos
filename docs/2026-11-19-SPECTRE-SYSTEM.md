@@ -102,7 +102,11 @@ idle memory on the 128 MiB map no longer falls at all (it fell about 92 KB/s).
   allocate per turn would leak the same way.
 - **Process images on Spectre-84** (the M5 gate on the board): rv32im
   images, built with the Spectre kernel's flags, loaded from the SD QLog.
-- **Power-cycle boot**: a power cycle reloads the flash bitstream (54 MHz),
-  so the cold check needs fprisc-84 written to flash, which needs the
-  owner's go-ahead.
+- **Power-cycle boot**: with the owner's go-ahead the board's flash now holds
+  the fprisc-84 bitstream with the SD-boot ROM (`boot/patched-pre.fs` of the
+  System.qa build). After `openFPGALoader -r` (the FPGA reloads from flash)
+  the ROM booted System.qa from SD: "boot #3 on this log" (the boot count
+  kept on the SD QLog) and all four permissions "[remembered y]" (stored on
+  the card at the first boot), then the launcher. A true power cycle
+  (unplug and replug) is the remaining step of the check.
 - The SD QLog volume is the boot shell's 64 pages (256 KiB).
