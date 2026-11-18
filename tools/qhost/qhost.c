@@ -241,6 +241,13 @@ static int soak(long count, double seconds) {
   }
 }
 
+/* tell the board this session is over, so it stops sending */
+static void bye(void) {
+  if (!hello_seen) return;
+  for (int i = 0; i < 3; i++) qlink_send_unreliable(&ql, QLINK_CH_CONTROL, (const uint8_t *)"BYE", 3);
+}
+static void on_signal(int sig) { (void)sig; exit(130); }
+
 static struct termios saved_tty;
 static void restore_tty(void) { tcsetattr(0, TCSANOW, &saved_tty); }
 
@@ -307,6 +314,12 @@ int main(int argc, char **argv) {
     while (!hello_seen && now_s() < end) pump(0.01);
   }
   qlink_reset(&ql);
+  /* end the session on every exit: a board left streaming into a closed
+   * port wedged the Tang Nano's USB bridge */
+  atexit(bye);
+  signal(SIGINT, on_signal);
+  signal(SIGTERM, on_signal);
+  signal(SIGHUP, on_signal);
   if (!strcmp(mode, "attach")) return attach();
   echo_out = 1;
   for (; i < argc;) {

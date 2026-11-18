@@ -107,10 +107,26 @@ reconnected found the board resending one frame forever. Two faults:
   `qlink_sruart.c` now drains the FIFO into a 1 KB ring while waiting to
   transmit, and `qhost` sends no acknowledgements before the board answers.
 
-The lossy-wire unit test passes with the change. The board check (abandon a
-soak, reconnect three times) is not done: the Tang Nano's USB bridge stopped
-returning board-to-host bytes after the failing runs (the stock fprisc-84
-bitstream's ROM no longer answers either) and needs a USB replug.
+The lossy-wire unit test passes with the change.
+
+On the board the abandon-and-reconnect check then failed differently: after
+a host left mid-stream, the board sent nothing at all, even its boot ROM
+after an FPGA reload. The Tang Nano's USB bridge had stopped passing
+board-to-host bytes, and only a USB replug cleared it. It happened twice,
+both times right after the board kept writing into a port the host had
+closed, so the board now stops doing that:
+
+- The board has no session at boot. A session ends on the host's `BYE`, or
+  when the host has not acknowledged for 1.5 s while frames are in flight.
+  Without a session the board sends no reliable frames and drops console
+  output instead of blocking (so output before a host connects is lost).
+- `qhost` sends `BYE` on every exit, including SIGINT, SIGTERM and SIGHUP.
+
+Board results (Spectre-84, after a replug): a soak abandoned after 3 s
+leaves the board quiet (46 bytes in the next 3 s, then nothing), and three
+reconnects each run `ls`; a `qhost` killed by SIGTERM 5 s into a soak leaves
+it quiet (50 bytes) and the next connection works; a full 12,000-line soak
+then runs at 8,541 B/s with no CRC errors or resends, as before.
 
 ## Left open
 

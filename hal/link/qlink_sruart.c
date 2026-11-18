@@ -12,6 +12,18 @@ static unsigned in_head, in_tail;
 static int ready;
 static uint8_t session; /* the current host session nonce, 0 = none */
 
+/* With no host session the board sends no reliable frames and drops console
+ * output. Writing into a port nobody reads wedged the Tang Nano's USB bridge
+ * twice (board-to-host bytes stopped until a replug), so a session ends on
+ * the host's BYE, or when a host stops acknowledging for PEER_LOST_MS. */
+#define PEER_LOST_MS 1500u
+static uint32_t heard_at, frames_seen;
+static void session_end(void) {
+  qlink_reset(&link);
+  session = 0;
+  out_n = 0;
+}
+
 /* Bytes taken off the 32-byte receive FIFO but not yet parsed. A window of
  * resends is about 1 KB, 100 ms at line rate, so the FIFO is drained while
  * waiting to transmit; parsing waits for qcon_poll (qlink_input cannot run
@@ -39,15 +51,17 @@ static void deliver(void *ctx, uint8_t ch, const uint8_t *p, size_t n) {
     /* A host (re)opened the link. It repeats one HELLO nonce until it hears
      * the answer, so only a new nonce starts a new session; a repeat is
      * answered again without resetting the sequence state twice. */
-    if (n == 5 || p[5] != session) {
+    if (n == 5 || p[5] != session || !session) {
       qlink_reset(&link);
       out_n = 0;
-      session = n == 6 ? p[5] : 0;
+      session = n == 6 && p[5] ? p[5] : 1;
     }
+    heard_at = clock_ms();
     uint8_t answer[6] = {'H', 'E', 'L', 'L', 'O', session};
     qlink_send_unreliable(&link, QLINK_CH_CONTROL, answer, n);
     return;
   }
+  if (ch == QLINK_CH_CONTROL && n == 3 && p[0] == 'B' && p[1] == 'Y' && p[2] == 'E') { session_end(); return; }
   if (ch != QLINK_CH_CONSOLE) return;
   for (size_t i = 0; i < n; i++)
     if (in_head - in_tail < sizeof in) in[in_head++ % sizeof in] = p[i];
@@ -70,13 +84,16 @@ void qcon_poll(void) {
     qlink_input(&link, b, n);
     rx_pull();
   }
-  qlink_poll(&link);
+  if (link.stats.frames_in != frames_seen) { frames_seen = link.stats.frames_in; heard_at = clock_ms(); }
+  if (session && link.in_flight && clock_ms() - heard_at > PEER_LOST_MS) session_end();
+  if (session) qlink_poll(&link);
 }
 
 void qcon_flush(void) {
   if (!ready || !out_n) return;
-  while (!qlink_can_send(&link)) qcon_poll();
-  if (!out_n) return; /* a new session began while waiting and dropped it */
+  if (!session) { out_n = 0; return; } /* nobody is listening */
+  while (session && !qlink_can_send(&link)) qcon_poll();
+  if (!session || !out_n) { out_n = 0; return; } /* the session ended, or a new one began, while waiting */
   qlink_send(&link, QLINK_CH_CONSOLE, out, out_n);
   out_n = 0;
 }
@@ -96,6 +113,6 @@ int qcon_getc(void) {
 int qcon_drain(uint32_t ms) {
   qcon_flush();
   uint32_t t0 = clock_ms ? clock_ms() : 0;
-  while (ready && !qlink_idle(&link) && clock_ms() - t0 < ms) qcon_poll();
+  while (ready && session && !qlink_idle(&link) && clock_ms() - t0 < ms) qcon_poll();
   return ready && qlink_idle(&link);
 }
