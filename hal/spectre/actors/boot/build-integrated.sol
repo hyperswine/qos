@@ -1,6 +1,8 @@
 # Build the integrated Spectre kernel, SD installer, FPGA image and app fixtures.
 #
 #   sol hal/spectre/actors/boot/build-integrated.sol NEW-OUTPUT-DIRECTORY     (from the QOS root)
+#   SPECTRE_BOARD=spectre-84 sol hal/spectre/actors/boot/build-integrated.sol DIR   (the fprisc-84 image)
+# SPECTRE_RUNTIME_REV overrides the runtime revision taken from fprisc.lock.json.
 #
 # FPRISC and SIMPLE_RISC name the two other checkouts (default: beside QOS).
 # The output holds the artifacts, SHA256SUMS and build-inputs.txt. The byte
@@ -12,8 +14,18 @@ B = use "sol/lib/build".
 K = use "../../../../tools/sdk/sdk".
 J = use "sol/lib/json".
 boardPin = "8f83a6d165dae080110312cdbde40d32799a461a".
-bitstreamSha = "f01fdf0bb48c3f5842cf8f8ad0d7d24bc1a746c9959993089e26a4661e207038".
-preset = "output/tangnano20k/btbdef-54".
+# SPECTRE_BOARD picks the qualified bitstream the ROM is patched into, its CPU
+# clock and the SD boot slot: spectre-54 (btbdef-54, the original demonstrator)
+# or spectre-84 (fprisc-84, RV32IM at 84 MHz). The two slots are adjacent 2 MiB
+# windows, so a card can hold both kernels.
+spectreBoard = B.setting "SPECTRE_BOARD" "spectre-54".
+boardConf name = case name of
+    "spectre-54" -> ("output/tangnano20k/btbdef-54","f01fdf0bb48c3f5842cf8f8ad0d7d24bc1a746c9959993089e26a4661e207038","54","135168")
+  | "spectre-84" -> ("output/tangnano20k/fprisc-84","64664f41c869e9110857ddf5b5df9797c0c4c3a38f750765646ec7fcd71fc261","84","139264")
+  | _ -> error "SPECTRE_BOARD must be spectre-54 or spectre-84".
+preset = (p,_,_,_) = boardConf spectreBoard; p.
+bitstreamSha = (_,h,_,_) = boardConf spectreBoard; h.
+slot = (_,_,_,l) = boardConf spectreBoard; l.
 bare = ["-march=rv32im_zicsr_zifencei","-mabi=ilp32","-mno-relax","-msmall-data-limit=0","-Os","-ffreestanding","-nostdlib"].
 inDir dir argv = B.inDirectory dir [] argv.
 copyInto dir paths = List.map (fn p -> B.command ["/bin/cp", p, dir]) paths.
@@ -23,7 +35,7 @@ export repo rev paths dest = B.command (List.append ["/bin/sh","-c","rev=$1; des
 # ---- the boot media: ROM, packed kernel, SD slot, patched bitstream, installer ----
 media out board tool =
   boot = "{out}/boot"; b = "{board}/boards/tangnano20k";
-  _ = inDir boot (List.concat [[S.cc],bare,["-DROM_SDRAM","-T","{b}/bootrom/link.ld","{b}/bootrom/crt0.S","rom.c","-o","rom.elf"]]);
+  _ = inDir boot (List.concat [[S.cc],bare,["-DROM_SDRAM","-DSLOT_LBA={slot}u","-T","{b}/bootrom/link.ld","{b}/bootrom/crt0.S","rom.c","-o","rom.elf"]]);
   _ = inDir boot [S.objcopy,"-O","binary","rom.elf","rom.bin"];
   _ = inDir boot [tool,"lz4","fs.bin","packed.lz4"];
   _ = inDir boot (List.concat [[S.cc],bare,["-Ttext=0x80000000","unpack.S","-o","packed.elf"]]);
@@ -32,7 +44,7 @@ media out board tool =
   fs = "{board}/{preset}/impl/pnr/sdram_test.fs";
   _ = K.check "the bitstream is not the one this patch was qualified against" (K.sha256 fs == bitstreamSha);
   _ = inDir boot [tool,"patchrom",fs,"{board}/{preset}/bootrom-sdram.hex","rom.bin","patched-pre.fs"];
-  _ = inDir out (List.concat [[S.cc],bare,["-T","src/machine/tangnano20k/link.ld","src/machine/tangnano20k/crt0.S","-I{b}/c","{b}/c/sd.c","boot/install.c","boot/media.S","-o","boot/install.elf"]]);
+  _ = inDir out (List.concat [[S.cc],bare,["-DSLOT_LBA={slot}u","-T","src/machine/tangnano20k/link.ld","src/machine/tangnano20k/crt0.S","-I{b}/c","{b}/c/sd.c","boot/install.c","boot/media.S","-o","boot/install.elf"]]);
   inDir out [S.objcopy,"-O","binary","boot/install.elf","boot/install.bin"].
 
 # ---- one returning app: PC-relative text and read-only literals ----
@@ -84,8 +96,13 @@ sums out names = Str.join "" (List.map (fn name -> path = "{out}/{name}"; sha = 
       checkout = K.realpath (B.setting "SIMPLE_RISC" "{qos}/../simple-risc");
       _ = B.command ["/bin/mkdir", target];
       out = K.realpath target;
+      (_,_,clock,_) = boardConf spectreBoard;
+      _ = unwrap (Env.set "SPECTRE_MHZ" clock);
       _ = List.map (fn d -> K.mkdirs "{out}/{d}") ["src","boot/apps","board/{preset}/impl/pnr","fprisc","qos"];
-      pin = K.need (J.text (K.field "revision" (K.need (J.parse (readPath "{qos}/fprisc.lock.json")))));
+      # the runtime is fprisc.lock.json's revision unless SPECTRE_RUNTIME_REV names
+      # another (the lock predates the RV32 raw-mask fix fprisc 886696e8)
+      locked = K.need (J.text (K.field "revision" (K.need (J.parse (readPath "{qos}/fprisc.lock.json")))));
+      pin = B.setting "SPECTRE_RUNTIME_REV" locked;
       _ = export fprisc pin ["runtime","machine/virt","machine/tangnano20k"] "{out}/src";
       _ = export checkout boardPin ["boards/tangnano20k/c","boards/tangnano20k/bootrom"] "{out}/board";
       _ = B.command ["/bin/cp","{checkout}/{preset}/impl/pnr/sdram_test.fs","{out}/board/{preset}/impl/pnr/"];
@@ -112,7 +129,7 @@ sums out names = Str.join "" (List.map (fn name -> path = "{out}/{name}"; sha = 
       manifest = sums out listed;
       _ = K.writeText "{out}/SHA256SUMS" manifest;
       compilerSha = K.sha256 "{fprisc}/fpr"; preludeSha = K.sha256 "{fprisc}/core/prelude.fpr";
-      inputs = Str.join "\n" ["runtime {pin}","board {boardPin}",Str.trim (K.command ["git","-C",qos,"rev-parse","HEAD"]),Str.trim (K.command ["git","-C",fprisc,"rev-parse","HEAD"]),
+      inputs = Str.join "\n" ["board image {spectreBoard} ({preset}, slot {slot})","runtime {pin}","board {boardPin}",Str.trim (K.command ["git","-C",qos,"rev-parse","HEAD"]),Str.trim (K.command ["git","-C",fprisc,"rev-parse","HEAD"]),
         "{compilerSha}  {fprisc}/fpr","{preludeSha}  {fprisc}/core/prelude.fpr",Str.trim (K.command [S.cc,"--version"])];
       _ = K.writeText "{out}/build-inputs.txt" "{inputs}\n";
       print manifest

@@ -35,7 +35,7 @@ extern uint64_t spectre_raw_ticks(void);
 extern void spectre_raw_arm(uw,uint64_t);
 #ifdef TEST_QEMU
 #define CORE_MHZ 10
-#else
+#elif !defined(CORE_MHZ) /* the board build passes -DCORE_MHZ */
 #define CORE_MHZ 54
 #endif
 uint64_t hal_mtime(void){uint64_t n=spectre_raw_ticks();return n/CORE_MHZ*10+(n%CORE_MHZ)*10/CORE_MHZ;}

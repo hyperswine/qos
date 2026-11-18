@@ -39,6 +39,30 @@ and reconnection, listens for the SD boot marker and prompt, then verifies
 the exact file created before power loss. The app checks verify their named
 images and use apps/hello2.sxa for the freshly compiled hello fixture.
 
+## Spectre-84 (18 November 2026)
+
+`SPECTRE_BOARD=spectre-84` builds the same image for Simple-Risc's qualified
+fprisc-84 bitstream (RV32IM, CPU 84 MHz, SDRAM 48 MHz): the board C gets
+`-DCORE_MHZ=84`, the ROM and installer use the second boot slot at LBA 139264
+(the 54 MHz kernel stays at 135168, so one card holds both), and the ROM is
+patched into `output/tangnano20k/fprisc-84` (its hash is on the build's list).
+`SPECTRE_RUNTIME_REV` overrides the runtime revision from `fprisc.lock.json`;
+the lock predates FP-RISC's RV32 raw-mask fix, so name a later revision. The
+tools take the clock from `SPECTRE_MHZ` (default 54); the UART runs at
+round(MHz * 1e6 / 868) = 96774 baud at 84 MHz.
+
+    SPECTRE_BOARD=spectre-84 SPECTRE_RUNTIME_REV=<fprisc rev> \
+      sol hal/spectre/actors/boot/build-integrated.sol /tmp/spectre-84
+    SPECTRE_MHZ=84 spectre-uart PORT upload boot/install.bin 120 1 expect DONE 120
+    openFPGALoader -b tangnano20k --ftdi-serial 2025030317 boot/patched-pre.fs
+
+Board run, 18 November 2026 (FP-RISC runtime e2dce0bd, from SRAM): the
+installer wrote and compared slot 139264, the patched bitstream booted from SD
+to `qos>`, `ls` listed the existing volume, and with `SPECTRE_MHZ=84`
+`check-writable.sol warm`, `check-two.sol` and `check-two.sol --mailbox` passed.
+The cold check needs the patched bitstream in configuration flash, which still
+holds the 54 MHz image; it was not run.
+
 ## Original boot bring-up
 
 The CPU reset ROM initializes an SDHC/SDXC card over SPI and validates a

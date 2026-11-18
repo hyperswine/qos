@@ -2,14 +2,15 @@
  *
  *   spectre-uart PORT OP...
  *
- * The operations run in order on one open port (8N1, 54 MHz / 868 baud):
+ * The operations run in order on one open port (8N1, SPECTRE_MHZ / 868 baud;
+ * SPECTRE_MHZ is the CPU clock, default 54, 84 for Spectre-84):
  *
  *   send-line TEXT        TEXT and a newline, one byte every 6 ms (the prompt has no flow control)
  *   send-hex HEX          raw bytes
  *   expect TEXT SECONDS   read until what has arrived since the last expect holds TEXT
  *   expect-count TEXT N SECONDS    ... holds TEXT N times and ends with a newline
  *   delay MS
- *   upload IMAGE SECONDS RETRIES   reset to the boot ROM, check its identity (SRID1, 54 MHz,
+ *   upload IMAGE SECONDS RETRIES   reset to the boot ROM, check its identity (SRID1, SPECTRE_MHZ,
  *                         capabilities UICG, room for the image), upload with CRC and readback,
  *                         and start the image; needs the original UART ROM in the FPGA
  *   wait-gone SECONDS / wait-present SECONDS    wait for the port's device node to go or come
@@ -34,7 +35,14 @@
 #include <time.h>
 #include <unistd.h>
 
-#define BAUD 62212 /* round(54e6 / 868) */
+/* The CPU clock in MHz: SPECTRE_MHZ, default 54 (Spectre-54); 84 for Spectre-84.
+ * The UART runs at round(MHz * 1e6 / 868) baud. */
+static unsigned long spectre_mhz(void) {
+  const char *s = getenv("SPECTRE_MHZ");
+  unsigned long m = s && *s ? strtoul(s, 0, 10) : 54;
+  return m ? m : 54;
+}
+#define BAUD ((speed_t)((spectre_mhz() * 1000000ul + 434) / 868))
 
 static void die(const char *why) { fprintf(stderr, "spectre-uart: %s\n", why); exit(1); }
 static double now(void) {
@@ -196,7 +204,7 @@ static void upload(int fd, const char *path, double timeout, int retries) {
   fflush(stdout);
   const char *cpu = field(id, "cpu="), *max = field(id, "max="), *cap = field(id, "cap=");
   if (!cpu || !max || !cap) die("malformed ROM identity reply");
-  if (strtoul(cpu, 0, 16) != 54) die("CPU clock mismatch: the board does not report 54 MHz");
+  if (strtoul(cpu, 0, 16) != spectre_mhz()) die("CPU clock mismatch: the board does not report SPECTRE_MHZ (default 54)");
   unsigned long limit = strtoul(max, 0, 16);
   if (padded > limit) die("the program image exceeds the board loader's limit");
   for (const char *need = "UICG"; *need; need++) {

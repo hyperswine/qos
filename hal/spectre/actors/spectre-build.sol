@@ -8,7 +8,9 @@ cc = "riscv64-unknown-elf-gcc".
 objcopy = "riscv64-unknown-elf-objcopy".
 words text = List.filter (fn w -> w != "") (Str.split 32 (Str.trim text)).
 extra = words (B.setting "EXTRA" "").
-flags march = List.append extra ["-march={march}","-mabi=ilp32","-mno-relax","-msmall-data-limit=0","-ffixed-x27","-DFPR_NHARTS=1",
+# the CPU clock the board C converts its timebase with (Spectre-54 or Spectre-84)
+mhz = B.setting "SPECTRE_MHZ" "54".
+flags march = List.append extra ["-march={march}","-DCORE_MHZ={mhz}","-mabi=ilp32","-mno-relax","-msmall-data-limit=0","-ffixed-x27","-DFPR_NHARTS=1",
   "-ffreestanding","-fno-builtin","-Os","-ffunction-sections","-fdata-sections","-Isrc/runtime","-Isrc/machine/virt"].
 hal = ["-Dhal_mtime=spectre_raw_ticks","-Dhal_timer_arm=spectre_raw_arm","-Dhal_putc=unused_uart","-Dhal_poweroff=unused_poweroff"].
 kernel runtime = List.append ["-nostdlib","-Wl,--gc-sections","-T","src/machine/tangnano20k/link.ld","src/machine/tangnano20k/crt0.S",

@@ -1,8 +1,13 @@
-// SDHC/SDXC SPI boot; 54 MHz Spectre. Header: little-endian magic, bytes, CRC32.
+// SDHC/SDXC SPI boot for Spectre (54 or 84 MHz: the SPI divisors keep card
+// init under 400 kHz at both). Header: little-endian magic, bytes, CRC32.
+// SLOT_LBA picks the boot slot: 135168 for Spectre-54, 139264 for Spectre-84.
 typedef unsigned U;
 #define SPI ((volatile U*)0x10001000)
 #define UART ((volatile U*)0x10000000)
-#define BASE 135168u
+#ifndef SLOT_LBA
+#define SLOT_LBA 135168u
+#endif
+#define BASE SLOT_LBA
 static unsigned char x(U b){SPI[0]=b;while(SPI[1]&1);return SPI[0];}
 static void cs(U on){SPI[2]=(15<<8)|on;}
 static U cmd(U n,U arg,U crc){x(255);x(64+n);for(int i=24;i>=0;i-=8)x(arg>>i);x(crc);for(int i=0;i<16;i++){U r=x(255);if(r<128)return r;}return 255;}
