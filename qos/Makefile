@@ -173,7 +173,7 @@ native: portable/sha256.c $(BUILD)/system.s $(BUILD)/apps_data.c $(RT_VIRT) $(VI
 	$(CROSS)gcc $(CFLAGS) $(NATIVE_CFLAGS_EXTRA) -T $(FMACHINE)/virt/link.ld -I$(FRUNTIME) -I$(FMACHINE)/virt \
 	  $(RT_VIRT) $(VIRT_FPR) $(QOS_VIRT_HAL) $(BUILD)/system.s $$(cat $(BUILD)/system.s.units) $(RT_CORE) \
 	  ../loader/apps.c $(BUILD)/apps_data.c ../loader/qaimg.c ../loader/process.c portable/sha256.c $(NATIVE_TEST_SRC) \
-	  -o $(KERNEL)
+	  -lgcc -o $(KERNEL)
 
 $(DISK): $(FPR)/tools/mkdisk.sol $(FPR)/tools/qlog-seed.sol $(FPR)/tools/qlog-preserve.sol
 	"$(SOL)" $(FPR)/tools/mkdisk.sol $(DISK) 8

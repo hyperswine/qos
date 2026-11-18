@@ -7,7 +7,7 @@ output argv = ProcessResult status out err = unwrap (Proc.runNow (ProcessSpec ar
   if status == 0 then Str.trim out else error "{argv}: {err}".
 runtime fpr = virt = "{fpr}/machine/virt"; rt = "{fpr}/runtime";
   List.append ["build/virt-clint.s","{virt}/rawunit.c","build/qos-plic.s","build/qos-virtio.s","build/qos-blockpolicy.s","build/qos-netpolicy.s",
-    "hal/virt/plic.c","hal/virt/net.c","hal/net_actor_bridge.c","hal/virt/blk.c","hal/virt/pins.c","hal/virt/devices.c","hal/core/lifecycle.c",
+    "hal/virt/plic.c","hal/virt/net.c","hal/net_actor_bridge.c","hal/virt/blk.c","hal/classes/block.c","hal/virt/pins.c","hal/virt/devices.c","hal/core/lifecycle.c",
     "qos/native/proc_entry.c","{virt}/ctx.S","{virt}/ctx_fab.c","{rt}/runtime.c","{rt}/i32.c","{virt}/hal.c","{virt}/memshim.c"]
     (List.map (fn name -> "{rt}/{name}.c") ["actors","buddy","mod","bits","vec","sstr"]).
 link extra env fpr layout assembly units base elf =

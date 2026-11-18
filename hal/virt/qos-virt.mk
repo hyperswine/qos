@@ -18,4 +18,4 @@ $(QOS_VIRT_ASM): $(BUILD)/qos-%.s: $(QOS_HAL)/virt/%.fpr $(FPRC) $(QOS_HAL_TOOLS
 	"$(SOL)" "$(QOS_HAL_TOOLS)/build-virt-hal.sol" "$(FPRC)" "$(QOS_HAL)" "$(BUILD)" "$*"
 
 QOS_VIRT_HAL = $(QOS_VIRT_ASM) $(QOS_HAL)/virt/plic.c $(QOS_HAL)/virt/net.c $(QOS_HAL)/net_actor_bridge.c \
-               $(QOS_HAL)/virt/blk.c $(QOS_HAL)/virt/pins.c $(QOS_HAL)/virt/devices.c $(QOS_HAL)/core/lifecycle.c
+               $(QOS_HAL)/virt/blk.c $(QOS_HAL)/classes/block.c $(QOS_HAL)/virt/pins.c $(QOS_HAL)/virt/devices.c $(QOS_HAL)/core/lifecycle.c

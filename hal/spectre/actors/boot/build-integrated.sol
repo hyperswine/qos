@@ -98,6 +98,7 @@ sums out names = Str.join "" (List.map (fn name -> path = "{out}/{name}"; sha = 
       out = K.realpath target;
       (_,_,clock,_) = boardConf spectreBoard;
       _ = unwrap (Env.set "SPECTRE_MHZ" clock);
+      _ = unwrap (Env.set "QOS" qos);
       _ = List.map (fn d -> K.mkdirs "{out}/{d}") ["src","boot/apps","board/{preset}/impl/pnr","fprisc","qos"];
       # the runtime is fprisc.lock.json's revision unless SPECTRE_RUNTIME_REV names
       # another (the lock predates the RV32 raw-mask fix fprisc 886696e8)

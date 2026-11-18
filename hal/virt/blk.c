@@ -7,11 +7,9 @@
  * page directly; that the filesystem above chooses to only ever APPEND
  * is the filesystem's discipline, not the driver's.
  *
- * FPRISC surface (fpr_g_* discoverable symbols, same shape as net.c):
- *   blkPages d        -> Int      capacity in 4 KiB pages
- *   blkRead d p       -> String   the 4096 bytes of page p
- *   blkWrite d p s    -> Int      write s (<= 4096 bytes, zero-padded)
- *                                 to page p; returns bytes accepted
+ * It is a BLOCK class driver (hal/classes/block.h): virtio_blk_ops below,
+ * named in hal/virt/devices.c; the FP-RISC primitives (blkPages, blkRead,
+ * blkWrite, ...) are the class's, in hal/classes/block.c.
  *
  * A page read materializes as a 4096-byte String on the FPRISC heap:
  * "streaming" is the FPRISC pattern of read page -> inspect -> drop,
@@ -40,6 +38,7 @@
  */
 #include "fpr.h"
 #include "../blk_pack.h"
+#include "../classes/block.h"
 #include "blockpolicy.h"
 #if __riscv_xlen == 64
 #include "virtio.h"
@@ -662,10 +661,6 @@ static void blk_rw(u64 page, u32 bytes, u32 type) {
 }
 
 /* a request that cannot be made: refused, the caller fail-stops */
-static void blk_check(V pv) {
-  if (!blk) fpr_actor_fail("blk: no disk (boot QEMU with `make run-disk`)");
-  if ((u64)UNTAG(pv) >= blk_pages) fpr_actor_fail("blk: page out of range");
-}
 
 /* ---- device table hook + FPRISC surface -------------------------------- */
 void blk_setup(void) {
@@ -675,76 +670,54 @@ void blk_setup(void) {
   if (!blk_probe()) bputs("[blk] no virtio-blk device found\n");
 }
 
-static V h_blkPages(V d) {
-  (void)d;
-  return TAG(blk ? (sw)(blk_pages) : 0);
+/* ---- the BLOCK class ops (hal/classes/block.h) --------------------------
+ * hal/classes/block.c checks every argument and page range before calling
+ * these; they move pages and keep the DMA and failure discipline above. */
+static uint64_t vb_pages(void *st) {
+  (void)st;
+  return blk ? blk_pages : 0;
 }
 
 #ifdef QOS_REPLAY_BLK_PROFILE
 void qos_replay_blk_cost(uw page, uint64_t lock, uint64_t transfer, uint64_t copy);
 #endif
 
-static V h_blkRead(V d, V pv) {
-  (void)d;
-  if (!ISINT(pv)) fpr_cpanic("blkRead: page must be an Int");
-  blk_check(pv);
-  str_t *result = (str_t *)fpr_alloc(sizeof(str_t) + PAGE_SZ);
-  result->tid = T_STR; result->var = 0; result->len = PAGE_SZ;
+static void vb_read(void *st, uint64_t page, uint32_t count, uint8_t *dst) {
+  (void)st;
 #ifdef QOS_REPLAY_BLK_PROFILE
   uint64_t start = hal_mtime();
 #endif
+  /* DMA always targets driver storage. On timeout or caller death the
+   * existing orphan/reset protocol retains this entire range buffer. */
   blk_lock();
 #ifdef QOS_REPLAY_BLK_PROFILE
   uint64_t acquired = hal_mtime();
 #endif
-  blk_rw((u64)UNTAG(pv), PAGE_SZ, 0);
+  blk_rw(page, count * PAGE_SZ, 0);
 #ifdef QOS_REPLAY_BLK_PROFILE
   uint64_t transferred = hal_mtime();
 #endif
-  __builtin_memcpy(result->bytes, bdata, PAGE_SZ);
+  __builtin_memcpy(dst, bdata, (uw)count * PAGE_SZ);
 #ifdef QOS_REPLAY_BLK_PROFILE
   uint64_t copied = hal_mtime();
 #endif
   blk_unlock();
 #ifdef QOS_REPLAY_BLK_PROFILE
-  qos_replay_blk_cost((uw)UNTAG(pv), acquired - start, transferred - acquired, copied - transferred);
+  if (count == 1) qos_replay_blk_cost((uw)page, acquired - start, transferred - acquired, copied - transferred);
 #endif
-  return (V)result;
 }
 
-static V h_blkReadRange(V d, V pv, V nv) {
-  (void)d;
-  if (!ISINT(pv) || !ISINT(nv) || UNTAG(pv) < 0 || UNTAG(nv) < 1 || UNTAG(nv) > BLK_RANGE_MAX)
-    fpr_actor_fail("blk: invalid page range");
-  uw page = (uw)UNTAG(pv), count = (uw)UNTAG(nv);
-  if (!blk || blk_pages < count || page > blk_pages - count) fpr_actor_fail("blk: page out of range");
-  str_t *s = (str_t *)fpr_alloc(sizeof(str_t) + count * PAGE_SZ);
-  s->tid = T_STR; s->var = 0; s->len = count * PAGE_SZ;
-  /* DMA always targets driver storage. On timeout or caller death the
-   * existing orphan/reset protocol retains this entire range buffer. */
-  blk_lock();
-  blk_rw(page, (u32)s->len, 0);
-  __builtin_memcpy(s->bytes, bdata, s->len);
-  blk_unlock();
-  return (V)s;
-}
-FPR_FN(fpr_g_blkReadRange, h_blkReadRange, 3);
 /* The transfer may cover a partial final page; pad only the unused suffix. */
-static void stage_bytes(u8 *dst, const str_t *src, uw capacity) {
-  __builtin_memcpy(dst, src->bytes, src->len);
-  if (src->len < capacity) __builtin_memset(dst + src->len, 0, capacity - src->len);
+static void stage_first_page(const u8 *src, uw len) {
+  __builtin_memcpy(bdata, src, len);
+  if (len < first_page_dirty) __builtin_memset(bdata + len, 0, first_page_dirty - len);
+  first_page_dirty = len;
 }
 
-static void stage_first_page(const str_t *src) {
-  stage_bytes(bdata, src, first_page_dirty);
-  first_page_dirty = src->len;
-}
-
-static void stage_payload(const str_t *src, uw capacity) {
+static void stage_payload(const u8 *src, uw len, uw capacity) {
   if (!capacity) return;
   u8 *dst = bdata + PAGE_SZ;
-  uw len = src->len;
-  __builtin_memcpy(dst, src->bytes, len);
+  __builtin_memcpy(dst, src, len);
   if (len < capacity) {
     if (payload_zero_start >= payload_zero_end || capacity <= payload_zero_start ||
         len >= payload_zero_end) {
@@ -761,56 +734,30 @@ static void stage_payload(const str_t *src, uw capacity) {
   payload_zero_start = len;
 }
 
-static V h_blkWriteRecord(V d, V pv, V hv, V sv) {
-  if (!ISINT(pv) || UNTAG(pv) < 0 || ISINT(hv) || TID(hv) != T_STR ||
-      ISINT(sv) || TID(sv) != T_STR) fpr_actor_fail("blk: invalid record write");
-  str_t *header = (str_t *)hv, *payload = (str_t *)sv;
-  if (header->len > PAGE_SZ || payload->len > (BLK_RANGE_MAX - 1) * PAGE_SZ) fpr_actor_fail("blk: record too large");
-  uw page = (uw)UNTAG(pv), pages = 1 + (payload->len + PAGE_SZ - 1) / PAGE_SZ;
-  (void)d;
-  if (!blk || blk_pages < pages || page > blk_pages - pages) fpr_actor_fail("blk: page out of range");
+static void vb_write_record(void *st, uint64_t page, const uint8_t *hdr, uint32_t hlen,
+                            const uint8_t *payload, uint32_t plen) {
+  (void)st;
+  uw pages = 1 + (plen + PAGE_SZ - 1) / PAGE_SZ;
   blk_lock();
-  stage_first_page(header);
-  stage_payload(payload, (pages - 1) * PAGE_SZ);
-  blk_rw(page, pages * PAGE_SZ, 1);
+  stage_first_page(hdr, hlen);
+  stage_payload(payload, plen, (pages - 1) * PAGE_SZ);
+  blk_rw(page, (u32)(pages * PAGE_SZ), 1);
   blk_unlock();
-  return TAG((sw)(header->len + payload->len));
-}
-FPR_FN(fpr_g_blkWriteRecord, h_blkWriteRecord, 4);
-static V h_blkWrite(V d, V pv, V sv) {
-  (void)d;
-  if (!ISINT(pv)) fpr_cpanic("blkWrite: page must be an Int");
-  if (ISINT(sv) || TID(sv) != T_STR) fpr_cpanic("blkWrite: payload must be a String");
-  str_t *s = (str_t *)sv;
-  if (s->len > PAGE_SZ) fpr_cpanic("blkWrite: payload exceeds one page");
-  blk_check(pv);
-  blk_lock();
-  stage_first_page(s);
-  blk_rw((u64)UNTAG(pv), PAGE_SZ, 1);
-  blk_unlock();
-  return TAG((sw)s->len);
 }
 
-FPR_FN(fpr_g_blkPages, h_blkPages, 1);
-FPR_FN(fpr_g_blkRead, h_blkRead, 2);
-FPR_FN(fpr_g_blkWrite, h_blkWrite, 3);
-static V h_blkFlush(V d) {
-  (void)d;
-  if (!blk) return TAG(1);
+static int vb_flush(void *st) {
+  (void)st;
   blk_lock();
-  if (!blk_can_flush) { blk_unlock(); return TAG(1); }
+  if (!blk_can_flush) { blk_unlock(); return 1; }
   blk_rw(0, 0, BLK_T_FLUSH);
   blk_unlock();
-  return TAG(0);
+  return 0;
 }
-FPR_FN(fpr_g_blkFlush, h_blkFlush, 1);
 
-static V h_blkWaitInbox(V me, V until) {
-  sw us = UNTAG(until);
-  if (us < 0 || (uint64_t)us > UINT64_MAX / 10) return TAG(0);
-  return TAG(fpr_wait_any_until_c(me, (uint64_t)us * 10));
-}
-FPR_FN(fpr_g_blkWaitInbox, h_blkWaitInbox, 2);
+const qos_block_ops virtio_blk_ops = {
+  .version = QOS_BLOCK_OPS_VERSION, .range_max = BLK_RANGE_MAX,
+  .pages = vb_pages, .read = vb_read, .write_record = vb_write_record, .flush = vb_flush,
+};
 
 /* Native-only policy mechanism. (version, deadline microseconds, reset probes,
  * waiter factor). Negative configure codes: invalid -1, busy -2, stale -3,

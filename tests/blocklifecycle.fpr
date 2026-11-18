@@ -1,3 +1,5 @@
+#: cflags -DQOS_BLK_TEST
+#: expect HOLDS
 # Queued cancellation, active cancellation, global queue bound and drain.
 unsafe program.
 B = use "../std/blockio#8b4ffa1467ca03a5".

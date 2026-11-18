@@ -19,6 +19,12 @@ kernel runtime = List.append ["-nostdlib","-Wl,--gc-sections","-T","src/machine/
 base = ["runtime","actors","buddy","i32","sstr","vec"].
 withMod = List.append base ["mod"].
 sd board = ["-I{board}/boards/tangnano20k/c","{board}/boards/tangnano20k/c/sd.c"].
+# the BLOCK class and its SD driver, from the QOS checkout QOS names
+# (hal/classes/block.c, hal/drivers/sd_spi.c): vfs and boot name their volume
+# in the device table and leave the primitives to the class
+blockClass u = q = B.setting "QOS" "";
+  if q == "" then error "set QOS to the QOS checkout (the vfs and boot images link hal/classes and hal/drivers)"
+  else ["-I{q}/hal/classes","-I{q}/hal/drivers","{q}/hal/classes/block.c","{q}/hal/drivers/sd_spi.c"].
 # the compilation units an FP-RISC compile listed beside its app.s, as paths from the root
 units root dir = List.map (fn line -> if Str.startsWith "./" line then "{dir}/{Str.slice line 2 (Str.len line)}" else line)
   (List.filter (fn line -> line != "") (List.map Str.trim (Str.lines (readPath "{root}/{dir}/app.s.units")))).
@@ -33,6 +39,6 @@ target root board name =
   else if name == "idle" then link root "rv32im_zicsr" base ["-Wl,--wrap=hal_wfi","idle/idle.c"] "idle/idle"
   else if name == "uart" then link root "rv32im_zicsr" base ["-Wl,--wrap=hal_wfi","uart/uart.c"] "uart/uart"
   else if name == "sd" then link root "rv32im_zicsr" base (List.append (sd board) ["sd/storage.c"]) "sd/storage"
-  else if name == "vfs" then link root "rv32im_zicsr" withMod (List.concat [sd board,["vfs/hal.c","vfs/app.s"],units root "vfs"]) "vfs/fs"
-  else if name == "boot" then link root "rv32im_zicsr_zifencei" withMod (List.concat [sd board,["boot/hal.c","boot/app.s"],units root "boot"]) "boot/fs"
+  else if name == "vfs" then link root "rv32im_zicsr" withMod (List.concat [sd board,blockClass Unit,["vfs/hal.c","vfs/app.s"],units root "vfs"]) "vfs/fs"
+  else if name == "boot" then link root "rv32im_zicsr_zifencei" withMod (List.concat [sd board,blockClass Unit,["boot/hal.c","boot/app.s"],units root "boot"]) "boot/fs"
   else error "expected probe, idle, uart, sd, vfs or boot".

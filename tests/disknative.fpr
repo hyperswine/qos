@@ -1,3 +1,4 @@
+#: expect native disk: True True
 # Concurrent page transfers must serialize the shared DMA buffer.
 rounds : unsafe Int -> Int -> String -> Bool .
 rounds n page text = if n == 0 then True else

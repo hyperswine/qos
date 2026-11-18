@@ -1,3 +1,5 @@
+#: cflags -DQOS_BLK_TEST -DBLK_DEADLINE_TICKS=3000000ULL
+#: expect blockservice: invalid=True stale=True unchanged=True auth=True range=True size=True busy=True reserved=True timeout=True timed=True alive=True responsive=True callerDeath=True offline=True refused=True fast=True liveOffline=True offlineConfig=True after=before HOLDS
 B = use "../std/blockio#8b4ffa1467ca03a5".
 Native = use "../std/block#615ea5947fe13b00".
 S = use "std/string".

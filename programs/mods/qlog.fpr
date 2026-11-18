@@ -108,7 +108,7 @@ pageCount source = case source of
   | Routed service -> countReply (B.call (myself 0) service B.Capacity)
   | Bounded service until -> countReply (B.callUntil until (myself 0) service B.Capacity).
 pageFlush source = case source of
-    Direct dev -> flushDirect (blkFlush 0)
+    Direct dev -> flushDirect (blkFlush dev)
   | Routed service -> flushReply (B.call (myself 0) service B.Flush)
   | Bounded service until -> flushReply (B.callUntil until (myself 0) service B.Flush).
 # One device read (the superblock page) per read request, answered or not
