@@ -229,6 +229,51 @@ FPR_FN(fpr_g_Pin_x2etget, h_pin_trace, 1);
 FPR_FN(fpr_g_Pin_x2etlen, h_pin_trace, 1);
 FPR_FN(fpr_g_Pin_x2etclear, h_pin_trace, 1);
 
+/* ---- the console class: the 16550 driver over the table's MMIO -------
+ * Portable has no device table entries with ops; its console instance is
+ * the emulated 16550 the table already serves, driven by the same driver
+ * QEMU virt uses (hal/drivers/uart16550.c). */
+#include "drivers/uart16550.c"
+static uint8_t con_rd(uintptr_t a) { return (uint8_t)qos_hal->mmio_read(a, 1); }
+static void con_wr(uintptr_t a, uint8_t v) { qos_hal->mmio_write(a, v, 1); }
+static uart16550_t *con_of(V d) {
+  static uart16550_t con;
+  fpr_confined_refuse("the console device");
+  if (ISINT(d) || !d || TID(d) != T_DEVICE) fpr_cpanic("con: not a Device");
+  con.base = (uintptr_t)((fpr_dev_t *)d)->base;
+  con.rd = con_rd;
+  con.wr = con_wr;
+  return &con;
+}
+static V h_conOpen(V d) { uart16550_ops.open(con_of(d)); return TAG(0); }
+static V h_conWrite(V d, V sv) {
+  uart16550_t *u = con_of(d);
+  if (ISINT(sv) || !sv || TID(sv) != T_STR) fpr_cpanic("conWrite: bytes must be a String");
+  str_t *s = (str_t *)sv;
+  return TAG((sw)uart16550_ops.write(u, (const uint8_t *)s->bytes, (uint32_t)s->len));
+}
+static V h_conRead(V d) {
+  uart16550_t *u = con_of(d);
+  uint8_t buf[512];
+  uint32_t n = uart16550_ops.read(u, buf, sizeof buf);
+  str_t *s = (str_t *)fpr_alloc(sizeof(str_t) + n);
+  s->tid = T_STR; s->var = 0; s->len = n;
+  for (uint32_t i = 0; i < n; i++) s->bytes[i] = (char)buf[i];
+  return (V)s;
+}
+static V h_conArm(V d, V rx, V tx) {
+  uart16550_t *u = con_of(d);
+  if (!ISINT(rx) || !ISINT(tx)) fpr_cpanic("conArm: rx and tx must be Ints");
+  uart16550_ops.arm(u, UNTAG(rx) != 0, UNTAG(tx) != 0);
+  return TAG(0);
+}
+static V h_conSize(V d) { (void)con_of(d); return TAG(0); }
+FPR_FN(fpr_g_conOpen, h_conOpen, 1);
+FPR_FN(fpr_g_conWrite, h_conWrite, 2);
+FPR_FN(fpr_g_conRead, h_conRead, 1);
+FPR_FN(fpr_g_conArm, h_conArm, 3);
+FPR_FN(fpr_g_conSize, h_conSize, 1);
+
 /* ---- device discovery through the table ----------------------------- */
 static fpr_dev_t devcells[8];
 static char devnames[8][16];

@@ -1,27 +1,32 @@
 # ============================================================================
-# uart.fpr -- UART.qa: the UART main actor.  ONE actor owns the 16550;
-# everything else in the system talks to it in messages, and the
-# DEVICE talks to it in interrupts.
+# uart.fpr -- UART.qa: the console main actor.  ONE actor owns a console
+# instance (hal/classes/console.h: a 16550 on QEMU virt and Portable, the
+# qlink console channel on Spectre boards); everything else in the system
+# talks to it in messages, and the DEVICE talks to it in interrupts.  The
+# registers are the driver's (hal/drivers/uart16550.c): this actor asks the
+# class to take bytes (conWrite), hand over bytes (conRead) and say when to
+# interrupt (conArm).
 #
 #   * TX is "DMA-shaped": a client's write ENQUEUES bytes into the
 #     actor's outgoing buffer and returns immediately; the actor
 #     drains the buffer into the THR FIFO on transmit interrupts
-#     (IER.THRE), not by spinning on LSR.  flush is the completion
+#     (conArm tx), not by spinning.  flush is the completion
 #     round trip.
 #   * RX interrupts (IER.RDA) interrupt THIS ACTOR ONLY: the irq
 #     arrives as a plain Int message (Sys.irqBind, actors.c), the
-#     actor reads RBR until LSR.DR clears, appends to its rx buffer,
+#     actor takes what the device holds (conRead), appends to its rx buffer,
 #     re-arms the source (Sys.irqAck), and hands data DOWNSTREAM as
 #     ordinary messages -- a subscriber gets (URx bytes) pushes, a
 #     poller gets them from UGet.
 #   * On QOS Portable there is no PLIC: irqBind/irqAck are weak
-#     no-ops, LSR.THRE is always ready (the host tty never fills),
+#     no-ops, the emulated 16550 always has room (the host tty never fills),
 #     so TX drains synchronously at the kick and RX drains at every
 #     message -- the SAME protocol, a synchronous backend.
 #
 # The message surface (RPC envelope: send svc (me, <msg>)):
 #   UOpen              -> UOk        claim the device (one owner at a time)
-#   UParams div        -> UOk        divisor latch (DLAB dance)
+#   UParams div        -> UErr       line settings belong to the console
+#                                    driver and the board manifest
 #   UBuf cap           -> UOk        outgoing-buffer byte budget
 #   UArm               -> UOk        enable interrupts, bind irq, go live
 #   UWrite s           -> UOkI n     enqueue n=strlen s (0 = budget full)
@@ -46,20 +51,11 @@ UMsg = Type (UOpen | UParams d | UBuf n | UArm | UWrite s | UFlush
 URep = Type (UOk | UOkI n | UOkS s | UErr e).
 URx  = Type (URx s).
 
-# 16550 registers (byte offsets off the injected device)
-#   0 RBR/THR/DLL   1 IER/DLM   2 IIR/FCR   3 LCR   5 LSR
-# LSR bits: 0 DR (rx data ready)  5 THRE (tx holding empty)
-
-uartIrq = 10.   # QEMU virt: UART0 is PLIC source 10 (the default `actor`)
-
-# ---- device helpers --------------------------------------------------------
-
-lsrDR v = BITTEST v 0.
-lsrTHRE v = BITTEST v 5.
+uartIrq = 10.   # QEMU virt: UART0 (con0) is PLIC source 10 (the default `actor`)
 
 # ---- the actor state machine ----------------------------------------------
 # St dev owner cap txq txn rxs sub flushers
-#   dev      the uart Device (0 before UOpen probes it)
+#   dev      the console Device
 #   owner    0 = unclaimed; else the client actor
 #   cap      outgoing-buffer budget (bytes)
 #   txq      pending outgoing bytes, oldest first (String)
@@ -71,9 +67,10 @@ St = Type (St dev owner cap txq rxs sub fl armed irq).
 
 # the DEVICE and its interrupt are injected: one actor per UART, spawned by
 # whoever enumerates the board (System.qa claims /services/uart/<n> for
-# each).  `actor` is the first UART of the virt board and the Portable host.
+# each).  `actor` is con0, the first console of the virt board and the
+# Portable host.
 actor : unsafe Int -> a .
-actor me = actorOn "uart" uartIrq me.
+actor me = actorOn "con0" uartIrq me.
 actorOn : unsafe String -> Int -> Int -> a .
 actorOn nm irq me = loop me (St (device nm) 0 4096 "" "" 0 0 0 irq).
 
@@ -135,31 +132,16 @@ doOpen me st from =
 doOpen2 : unsafe Int -> St -> Int -> a .
 doOpen2 me st from =
   St dev owner cap txq rxs sub fl armed irq = st;
-  # 8N1, interrupts off until UArm.  NO FCR write: setting the FIFO
-  # enable RESETS the rx fifo, and on the System tier open() runs at
-  # boot while the user's first keystrokes may already be buffered --
-  # the lost-y bug ate one permission answer and shifted the rest.
-  # QEMU's fifo is on regardless; a real 16550 bring-up would enable
-  # it in a context that owns the device from reset.
-  _ = write (reg8 dev 3) 3;
-  _ = write (reg8 dev 1) 0;
+  # line settings and interrupts off until UArm (the driver must not
+  # drop bytes already received: see hal/drivers/uart16550.c on FCR)
+  _ = conOpen dev;
   reply me from UOk (St dev from cap txq rxs sub fl 0 irq).
 
-# divisor latch: DLAB on, DLL/DLM, DLAB off (8N1 restored)
+# the console class has no line settings: a 16550's divisor, a qlink
+# channel's rate are the driver's and the board manifest's.  Refused, not
+# ignored, so a caller that needs a rate finds out.
 doParams : unsafe Int -> St -> Int -> Int -> a .
-doParams me st from d =
-  St dev owner cap txq rxs sub fl armed irq = st;
-  case owner == from of
-    False -> reply me from (UErr "not the owner") st
-  | True -> doParams2 me st from d.
-doParams2 : unsafe Int -> St -> Int -> Int -> a .
-doParams2 me st from d =
-  St dev owner cap txq rxs sub fl armed irq = st;
-  _ = write (reg8 dev 3) 131;
-  _ = write (reg8 dev 0) (band d 255);
-  _ = write (reg8 dev 1) (BITSHIFTR d 8);
-  _ = write (reg8 dev 3) 3;
-  reply me from UOk st.
+doParams me st from d = reply me from (UErr "uart: line settings belong to the console driver") st.
 
 # go live: bind the PLIC source to THIS actor, enable RDA (rx); THRE
 # joins whenever tx bytes are pending (see irqSet)
@@ -177,17 +159,17 @@ doArm2 me st from =
   _ = irqSet st2;
   reply me from UOk st2.
 
-# IER follows the state: RDA always (armed), THRE while tx pends
+# the interrupt follows the state: received data always (armed), room to
+# transmit while tx pends
 irqSet : unsafe St -> Unit .
 irqSet st =
   St dev owner cap txq rxs sub fl armed irq = st;
   case armed == 1 of
     False -> Unit
-  | True -> write (reg8 dev 1) (rdaBits (strlen txq)).
-rdaBits pend = case pend > 0 of True -> 3 | False -> 1.
+  | True -> _ = conArm dev 1 (if strlen txq > 0 then 1 else 0); Unit.
 
-# enqueue-and-kick: the DMA-shaped write.  The kick moves bytes only
-# while THRE says the FIFO has room; the rest drains on interrupts.
+# enqueue-and-kick: the DMA-shaped write.  The kick moves what the
+# device takes now; the rest drains on interrupts.
 doWrite : unsafe Int -> St -> Int -> String -> a .
 doWrite me st from s =
   St dev owner cap txq rxs sub fl armed irq = st;
@@ -203,24 +185,21 @@ doWrite2 me st from s =
   _ = irqSet st2;
   reply me from (UOkI (strlen s)) st2.
 
-# move pending bytes into THR while the FIFO reports room.  The drain
-# walks an INDEX over txq and slices the unsent remainder ONCE at the
-# end -- the old shape substr'd the whole queue per byte (quadratic:
-# fine at 4KB, the wrong shape for a real ring).
+# hand the device what it takes now and keep the unsent remainder,
+# sliced once
 txDrain : unsafe St -> St .
 txDrain st =
   St dev owner cap txq rxs sub fl armed irq = st;
-  case strlen txq == 0 of
+  n = strlen txq;
+  case n == 0 of
     True -> st
-  | False -> txDrainGo st 0 (strlen txq).
-txDrainGo : unsafe St -> Int -> Int -> St .
-txDrainGo st i n =
+  | False -> txLeft st (conWrite dev txq) n.
+txLeft : unsafe St -> Int -> Int -> St .
+txLeft st took n =
   St dev owner cap txq rxs sub fl armed irq = st;
-  case i >= n of
+  case took >= n of
     True -> St dev owner cap "" rxs sub fl armed irq
-  | False -> case lsrTHRE (read (reg8 dev 5)) of
-      False -> St dev owner cap (substr txq i (n - i)) rxs sub fl armed irq
-    | True -> write (reg8 dev 0) (charAt txq i) >> txDrainGo st (i + 1) n.
+  | False -> St dev owner cap (substr txq took (n - took)) rxs sub fl armed irq.
 
 doFlush : unsafe Int -> St -> Int -> a .
 doFlush me st from =
@@ -239,8 +218,8 @@ doFlush2 me st from =
       True -> loop me (St dev owner cap txq rxs sub from armed irq)
                      # ^ parked: answered from the irq path when empty
     | False -> doFlush2 me st2 from.
-                     # ^ unarmed (no THRE irq will come): spin the
-                     #   drain -- LSR progress bounds it
+                     # ^ unarmed (no tx interrupt will come): spin
+                     #   the drain -- the device's progress bounds it
 
 doClose : unsafe Int -> St -> Int -> a .
 doClose me st from =
@@ -250,7 +229,7 @@ doClose me st from =
 irqOff : unsafe St -> Unit .
 irqOff st =
   St dev owner cap txq rxs sub fl armed irq = st;
-  case armed == 1 of True -> write (reg8 dev 1) 0 | False -> Unit.
+  case armed == 1 of True -> _ = conArm dev 0 0; Unit | False -> Unit.
 
 # ---- the interrupt path ----------------------------------------------------
 # One Int message per claimed-and-masked source: service the device
@@ -275,16 +254,17 @@ irqPush me st =
     True -> send sub (URx rxs) >> loop me (St dev owner cap txq "" sub fl armed irq)
   | False -> loop me st.
 
+# take everything the device holds (conRead hands over at most 512
+# bytes a call, so loop until it comes back empty)
 rxDrain : unsafe St -> St .
 rxDrain st =
   St dev owner cap txq rxs sub fl armed irq = st;
   case owner == 0 of
     True -> st
-  | False -> case lsrDR (read (reg8 dev 5)) of
-      False -> st
-    | True -> rxDrain1 st.
-rxDrain1 : unsafe St -> St .
-rxDrain1 st =
+  | False -> rxMore st (conRead dev).
+rxMore : unsafe St -> String -> St .
+rxMore st got =
   St dev owner cap txq rxs sub fl armed irq = st;
-  b = read (reg8 dev 0);
-  rxDrain (St dev owner cap txq (strcat rxs (chr b)) sub fl armed irq).
+  case strlen got == 0 of
+    True -> st
+  | False -> rxDrain (St dev owner cap txq (strcat rxs got) sub fl armed irq).

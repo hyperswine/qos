@@ -3,7 +3,7 @@
 # (programs/mods/uart.fpr).  Two LINEAR PHASE TYPES make the protocol
 # a compile-time property:
 #
-#   UartCfg    open -> params/buffer     the un-armed device: you can
+#   UartCfg    open -> buffer            the un-armed device: you can
 #                                        configure it, you cannot write
 #   Uart       arm -> write/flush/get/   the live device: DMA-shaped
 #              sub, close                writes, completion flushes,
@@ -20,8 +20,7 @@
 #
 #   svc = spawn UM.actor;              # or System.qa's /services/uart
 #   h  = U.open svc;                   # UartCfg
-#   h2 = U.params h 1;                 # divisor
-#   h3 = U.buffer h2 8192;             # outgoing budget
+#   h3 = U.buffer h 8192;              # outgoing budget
 #   u  = U.arm h3;                     # UartCfg -> Uart: interrupts on
 #   (n, u2) = U.write u "payload";     # DMA enqueue, returns at once
 #   u3 = U.flush u2;                   # completion round trip
@@ -29,7 +28,7 @@
 #   _ = U.close u4;                    # release: handle is CONSUMED
 #
 # Every call is a full round trip through the UART.qa main actor --
-# buffer setup, params, DMA kick, flush completion, rx take -- and the
+# buffer setup, DMA kick, flush completion, rx take -- and the
 # DEVICE's interrupts (tx-empty, rx-ready) interrupt that actor only.
 # ============================================================================
 
@@ -37,7 +36,6 @@ UM = use "../programs/mods/uart".
 AC = use "std/actor#2de24bf2bdd5cb87".
 
 UOpen = UM.UOpen.
-UParams = UM.UParams.
 UBuf = UM.UBuf.
 UArm = UM.UArm.
 UWrite = UM.UWrite.
@@ -82,12 +80,6 @@ okCall what svc msg =
 open : Int -> UartCfg .
 open svc =
   _ = okCall "open" svc UOpen;
-  UartCfg svc.
-
-params : UartCfg -> Int -> UartCfg .
-params h d =
-  svc = cfgSvc h;
-  _ = okCall "params" svc (UParams d);
   UartCfg svc.
 
 buffer : UartCfg -> Int -> UartCfg .

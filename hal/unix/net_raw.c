@@ -306,6 +306,7 @@ void qos_blkraw_setup(void); /* blk_raw.h -- linked wherever this table is */
 
 static rawdev_t rawdevs[] = {
     {"uart", QOS_UART_BASE, 0},
+    {"con0", QOS_UART_BASE, 0}, /* the console instance (hal/classes/console.h) */
     {"clint", QOS_CLINT_BASE, 0},
     {"net", 0, qos_netraw_setup},
     {"blk", 0, qos_blkraw_setup},

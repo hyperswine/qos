@@ -1,0 +1,8 @@
+{
+  "class": "console",
+  "ops": "uart16550_ops",
+  "state": "uart16550_t",
+  "header": "hal/drivers/uart16550.h",
+  "params": ["base"],
+  "sources": ["hal/drivers/uart16550.c"]
+}

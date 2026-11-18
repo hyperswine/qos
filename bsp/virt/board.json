@@ -1,6 +1,7 @@
 {"board": "virt",
  "about": "QEMU virt, rv64: QOS Native's development machine",
  "devices": [
+   {"name": "con0", "driver": "uart16550", "base": "0x10000000", "irq": 10, "params": {"base": "0x10000000"}},
    {"name": "net", "driver": "virtio_net", "base": "0x10001000"},
    {"name": "blk", "driver": "virtio_blk", "base": "0x10001000"},
    {"name": "mem0", "driver": "memblk", "params": {"pages": 16}, "when": "QOS_MEMBLK_TEST"}

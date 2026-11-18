@@ -49,6 +49,9 @@ platformSources root fprisc =
      ("loader/qaimg.c", "{root}/loader/qaimg.c"),
      ("hal/blk_pack.h", "{root}/hal/blk_pack.h"),
      ("hal/net_actor_bridge.c", "{root}/hal/net_actor_bridge.c"),
+     ("hal/drivers/uart16550.c", "{root}/hal/drivers/uart16550.c"),
+     ("hal/drivers/uart16550.h", "{root}/hal/drivers/uart16550.h"),
+     ("hal/classes/console.h", "{root}/hal/classes/console.h"),
      ("machine/unix/ctx_a64.S", "{fprisc}/machine/unix/ctx_a64.S")]
   + List.map (fn n -> ("runtime/{n}", "{fprisc}/runtime/{n}"))
       ["runtime.c", "i32.c", "actors.c", "bits.c", "vec.c", "sstr.c", "mod.c", "buddy.c", "fpr.h", "i32.h", "vec_layout.h"]

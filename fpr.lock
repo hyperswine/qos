@@ -86,7 +86,7 @@ ep v4.0 d65056c9d7dc9c18 programs/mods/svc.fpr
 std/storage v2.0 d3bc6af554583437 programs/mods/svc.fpr
 ep v4.0 d65056c9d7dc9c18 programs/mods/sysep.fpr
 svc v6.0 b4e4e109ca696787 programs/mods/sysep.fpr
-uart v3.0 cdee34460c2ad81a programs/mods/sysep.fpr
+uart v4.0 a0bf2c966fc966b2 programs/mods/sysep.fpr
 timer v2.0 38fa906125d48580 programs/mods/sysep.fpr
 epservice v4.0 436f606333c44f26 programs/mods/sysep.fpr
 std/actor v4.0 2de24bf2bdd5cb87 programs/mods/sysep.fpr

@@ -45,6 +45,14 @@ netRead : Int -> a .
 netWrite : Int -> a -> Unit .
 netClose : Int -> Unit .
 
+# ---- the console class  (hal/classes/console.c natively; qos/appside/hal.c portably)
+# d is a console instance (`device "con0"`); hal/classes/console.h is the contract
+conOpen : Device -> Int .
+conWrite : Device -> String -> Int .
+conRead : Device -> String .
+conArm : Device -> Int -> Int -> Int .
+conSize : Device -> Int .
+
 # ---- the pin bus  (hal/virt/pins.c; docs/PINS.md)
 Pin.mode : a -> Int -> Unit .
 Pin.read : a -> Int .

@@ -1,0 +1,270 @@
+# ============================================================================
+# uart.fpr -- UART.qa: the console main actor.  ONE actor owns a console
+# instance (hal/classes/console.h: a 16550 on QEMU virt and Portable, the
+# qlink console channel on Spectre boards); everything else in the system
+# talks to it in messages, and the DEVICE talks to it in interrupts.  The
+# registers are the driver's (hal/drivers/uart16550.c): this actor asks the
+# class to take bytes (conWrite), hand over bytes (conRead) and say when to
+# interrupt (conArm).
+#
+#   * TX is "DMA-shaped": a client's write ENQUEUES bytes into the
+#     actor's outgoing buffer and returns immediately; the actor
+#     drains the buffer into the THR FIFO on transmit interrupts
+#     (conArm tx), not by spinning.  flush is the completion
+#     round trip.
+#   * RX interrupts (IER.RDA) interrupt THIS ACTOR ONLY: the irq
+#     arrives as a plain Int message (Sys.irqBind, actors.c), the
+#     actor takes what the device holds (conRead), appends to its rx buffer,
+#     re-arms the source (Sys.irqAck), and hands data DOWNSTREAM as
+#     ordinary messages -- a subscriber gets (URx bytes) pushes, a
+#     poller gets them from UGet.
+#   * On QOS Portable there is no PLIC: irqBind/irqAck are weak
+#     no-ops, the emulated 16550 always has room (the host tty never fills),
+#     so TX drains synchronously at the kick and RX drains at every
+#     message -- the SAME protocol, a synchronous backend.
+#
+# The message surface (RPC envelope: send svc (me, <msg>)):
+#   UOpen              -> UOk        claim the device (one owner at a time)
+#   UParams div        -> UErr       line settings belong to the console
+#                                    driver and the board manifest
+#   UBuf cap           -> UOk        outgoing-buffer byte budget
+#   UArm               -> UOk        enable interrupts, bind irq, go live
+#   UWrite s           -> UOkI n     enqueue n=strlen s (0 = budget full)
+#   UFlush             -> UOk        answered when the tx buffer is EMPTY
+#   UGet               -> UOkS s     take the rx buffer (may be "")
+#   USub a             -> UOk        push future rx chunks to a as (URx s)
+#   UClose             -> UOk        release the device, unsubscribe
+#   UShare             -> UOk        owner opts into SHARED writes: any
+#                                    capability-routed caller may
+#                                    UWrite/UFlush/UGet (System.qa's
+#                                    /services/uart tier; config stays
+#                                    owner-only)
+# and the DEVICE's own arm: a bare Int (the irq number).
+#
+# Protocol safety lives in std/uart.fpr's LINEAR PHASE-TYPED handle;
+# this actor still answers UErr honestly if spoken to out of order
+# (a raw-message caller is not type-checked).
+# ============================================================================
+
+UMsg = Type (UOpen | UParams d | UBuf n | UArm | UWrite s | UFlush
+             | UGet | USub a | UClose | UShare).
+URep = Type (UOk | UOkI n | UOkS s | UErr e).
+URx  = Type (URx s).
+
+uartIrq = 10.   # QEMU virt: UART0 (con0) is PLIC source 10 (the default `actor`)
+
+# ---- the actor state machine ----------------------------------------------
+# St dev owner cap txq txn rxs sub flushers
+#   dev      the console Device
+#   owner    0 = unclaimed; else the client actor
+#   cap      outgoing-buffer budget (bytes)
+#   txq      pending outgoing bytes, oldest first (String)
+#   rxs      received bytes not yet taken (String)
+#   sub      0 = no subscriber; else the downstream actor
+#   fl       0 = nobody waiting on flush; else the flusher's actor
+
+St = Type (St dev owner cap txq rxs sub fl armed irq).
+
+# the DEVICE and its interrupt are injected: one actor per UART, spawned by
+# whoever enumerates the board (System.qa claims /services/uart/<n> for
+# each).  `actor` is con0, the first console of the virt board and the
+# Portable host.
+actor : unsafe Int -> a .
+actor me = actorOn "con0" uartIrq me.
+actorOn : unsafe String -> Int -> Int -> a .
+actorOn nm irq me = loop me (St (device nm) 0 4096 "" "" 0 0 0 irq).
+
+loop : unsafe Int -> St -> a .
+loop me st =
+  m = receive me;
+  case m of
+    (from, req) -> dispatch me st from req
+  | irq -> onIrq me st irq.
+
+dispatch : unsafe Int -> St -> Int -> UMsg -> a .
+dispatch me st from req =
+  St dev owner cap txq rxs sub fl armed irq = st;
+  case req of
+    UOpen -> doOpen me st from
+  | UParams d -> doParams me st from d
+  | UBuf n -> reply me from UOk (St dev owner n txq rxs sub fl armed irq)
+  | UArm -> doArm me st from
+  | UWrite s -> doWrite me st from s
+  | UFlush -> doFlush me st from
+  | UGet -> doGet me st from
+  | USub a -> reply me from UOk (St dev owner cap txq rxs a fl armed irq)
+  | UClose -> doClose me st from
+  | UShare -> doShare me st from.
+
+# take the rx buffer; the POLL drain first covers the portable tier
+# (no irqs there -- LSR.DR is only ever noticed inside a service call)
+doGet : unsafe Int -> St -> Int -> a .
+doGet me st from =
+  St dev owner cap txq rxs sub fl armed irq = st;
+  case ownerOk owner from of
+    False -> reply me from (UErr "not the owner") st
+  | True -> doGet2 me st from.
+doGet2 : unsafe Int -> St -> Int -> a .
+doGet2 me st from =
+  st2 = rxDrain st;
+  St dev owner cap txq rxs sub fl armed irq = st2;
+  reply me from (UOkS rxs) (St dev owner cap txq "" sub fl armed irq).
+
+# owner -1 = shared: any caller may move data (never reconfigure)
+ownerOk o from = case o == from of True -> True | False -> o == 0 - 1.
+
+doShare : unsafe Int -> St -> Int -> a .
+doShare me st from =
+  St dev owner cap txq rxs sub fl armed irq = st;
+  case owner == from of
+    False -> reply me from (UErr "not the owner") st
+  | True -> reply me from UOk (St dev (0 - 1) cap txq rxs sub fl armed irq).
+
+reply : unsafe Int -> Int -> URep -> St -> a .
+reply me from r st = send from r >> loop me st.
+
+doOpen : unsafe Int -> St -> Int -> a .
+doOpen me st from =
+  St dev owner cap txq rxs sub fl armed irq = st;
+  case owner == 0 of
+    False -> reply me from (UErr "uart is claimed") st
+  | True -> doOpen2 me st from.
+doOpen2 : unsafe Int -> St -> Int -> a .
+doOpen2 me st from =
+  St dev owner cap txq rxs sub fl armed irq = st;
+  # line settings and interrupts off until UArm (the driver must not
+  # drop bytes already received: see hal/drivers/uart16550.c on FCR)
+  _ = conOpen dev;
+  reply me from UOk (St dev from cap txq rxs sub fl 0 irq).
+
+# the console class has no line settings: a 16550's divisor, a qlink
+# channel's rate are the driver's and the board manifest's.  Refused, not
+# ignored, so a caller that needs a rate finds out.
+doParams : unsafe Int -> St -> Int -> Int -> a .
+doParams me st from d = reply me from (UErr "uart: line settings belong to the console driver") st.
+
+# go live: bind the PLIC source to THIS actor, enable RDA (rx); THRE
+# joins whenever tx bytes are pending (see irqSet)
+doArm : unsafe Int -> St -> Int -> a .
+doArm me st from =
+  St dev owner cap txq rxs sub fl armed irq = st;
+  case owner == from of
+    False -> reply me from (UErr "not the owner") st
+  | True -> doArm2 me st from.
+doArm2 : unsafe Int -> St -> Int -> a .
+doArm2 me st from =
+  St dev owner cap txq rxs sub fl armed irq = st;
+  _ = Sys.irqBind irq me;
+  st2 = St dev owner cap txq rxs sub fl 1 irq;
+  _ = irqSet st2;
+  reply me from UOk st2.
+
+# the interrupt follows the state: received data always (armed), room to
+# transmit while tx pends
+irqSet : unsafe St -> Unit .
+irqSet st =
+  St dev owner cap txq rxs sub fl armed irq = st;
+  case armed == 1 of
+    False -> Unit
+  | True -> _ = conArm dev 1 (if strlen txq > 0 then 1 else 0); Unit.
+
+# enqueue-and-kick: the DMA-shaped write.  The kick moves what the
+# device takes now; the rest drains on interrupts.
+doWrite : unsafe Int -> St -> Int -> String -> a .
+doWrite me st from s =
+  St dev owner cap txq rxs sub fl armed irq = st;
+  case ownerOk owner from of
+    False -> reply me from (UErr "not the owner") st
+  | True -> case strlen txq + strlen s > cap of
+      True -> reply me from (UOkI 0) st
+    | False -> doWrite2 me st from s.
+doWrite2 : unsafe Int -> St -> Int -> String -> a .
+doWrite2 me st from s =
+  St dev owner cap txq rxs sub fl armed irq = st;
+  st2 = txDrain (St dev owner cap (strcat txq s) rxs sub fl armed irq);
+  _ = irqSet st2;
+  reply me from (UOkI (strlen s)) st2.
+
+# hand the device what it takes now and keep the unsent remainder,
+# sliced once
+txDrain : unsafe St -> St .
+txDrain st =
+  St dev owner cap txq rxs sub fl armed irq = st;
+  n = strlen txq;
+  case n == 0 of
+    True -> st
+  | False -> txLeft st (conWrite dev txq) n.
+txLeft : unsafe St -> Int -> Int -> St .
+txLeft st took n =
+  St dev owner cap txq rxs sub fl armed irq = st;
+  case took >= n of
+    True -> St dev owner cap "" rxs sub fl armed irq
+  | False -> St dev owner cap (substr txq took (n - took)) rxs sub fl armed irq.
+
+doFlush : unsafe Int -> St -> Int -> a .
+doFlush me st from =
+  st0 = st;
+  St dev owner cap txq rxs sub fl armed irq = st0;
+  case ownerOk owner from of
+    False -> reply me from (UErr "not the owner") st0
+  | True -> doFlush2 me st0 from.
+doFlush2 : unsafe Int -> St -> Int -> a .
+doFlush2 me st from =
+  st2 = txDrain st;
+  St dev owner cap txq rxs sub fl armed irq = st2;
+  case strlen txq == 0 of
+    True -> reply me from UOk st2
+  | False -> case armed == 1 of
+      True -> loop me (St dev owner cap txq rxs sub from armed irq)
+                     # ^ parked: answered from the irq path when empty
+    | False -> doFlush2 me st2 from.
+                     # ^ unarmed (no tx interrupt will come): spin
+                     #   the drain -- the device's progress bounds it
+
+doClose : unsafe Int -> St -> Int -> a .
+doClose me st from =
+  St dev owner cap txq rxs sub fl armed irq = st;
+  _ = irqOff st;
+  reply me from UOk (St dev 0 cap "" "" 0 0 0 irq).
+irqOff : unsafe St -> Unit .
+irqOff st =
+  St dev owner cap txq rxs sub fl armed irq = st;
+  case armed == 1 of True -> _ = conArm dev 0 0; Unit | False -> Unit.
+
+# ---- the interrupt path ----------------------------------------------------
+# One Int message per claimed-and-masked source: service the device
+# fully (rx drain + tx refill), re-arm, deliver downstream.
+
+onIrq : unsafe Int -> St -> Int -> a .
+onIrq me st irq =
+  st2 = txDrain (rxDrain st);
+  _ = irqSet st2;
+  _ = Sys.irqAck irq;
+  St dev owner cap txq rxs sub fl armed irq = st2;
+  case and2 (fl > 0) (strlen txq == 0) of
+    True -> send fl UOk >> irqPush me (St dev owner cap txq rxs sub 0 armed irq)
+  | False -> irqPush me st2.
+and2 a b = case a of True -> b | False -> False.
+
+# push freshly received bytes to the subscriber, then keep looping
+irqPush : unsafe Int -> St -> a .
+irqPush me st =
+  St dev owner cap txq rxs sub fl armed irq = st;
+  case and2 (sub > 0) (strlen rxs > 0) of
+    True -> send sub (URx rxs) >> loop me (St dev owner cap txq "" sub fl armed irq)
+  | False -> loop me st.
+
+# take everything the device holds (conRead hands over at most 512
+# bytes a call, so loop until it comes back empty)
+rxDrain : unsafe St -> St .
+rxDrain st =
+  St dev owner cap txq rxs sub fl armed irq = st;
+  case owner == 0 of
+    True -> st
+  | False -> rxMore st (conRead dev).
+rxMore : unsafe St -> String -> St .
+rxMore st got =
+  St dev owner cap txq rxs sub fl armed irq = st;
+  case strlen got == 0 of
+    True -> st
+  | False -> rxDrain (St dev owner cap txq (strcat rxs got) sub fl armed irq).

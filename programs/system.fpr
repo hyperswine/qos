@@ -1143,9 +1143,10 @@ main =
 # -- the display endpoint included -- may enqueue tx.  The one 16550 is
 # console + keyboard, and this actor is its only driver: nothing else in
 # System.qa touches a register.
-# the board's UARTs: (device name, PLIC source) each; the virt machine
-# has one.  Adding a second is one entry here, and /services/uart/1.
-board = ("uart", 10) :: Nil.
+# the board's consoles: (console instance, PLIC source) each, the names the
+# board manifest gives them (bsp/BOARD/board.json); the virt machine has
+# one, con0.  Adding a second is one entry here, and /services/uart/1.
+board = ("con0", 10) :: Nil.
 spawnUarts : unsafe Int -> List (String, Int) -> List Int .
 spawnUarts me bd = case bd of
     Nil -> Nil
