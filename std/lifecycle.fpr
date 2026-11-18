@@ -5,7 +5,7 @@
 # explicitly reports unsupported durability; an absent disk is drained only.
 
 AC = use "std/actor#2de24bf2bdd5cb87".
-Net = use "std/net#9450dfa41b157181".
+Net = use "std/net#0e7c699bca3ce421".
 FS = use "std/fs".
 IO = use "std/blockio".
 

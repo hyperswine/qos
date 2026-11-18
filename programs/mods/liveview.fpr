@@ -1,4 +1,4 @@
-N = use "std/net#9450dfa41b157181".
+N = use "std/net#0e7c699bca3ce421".
 # ============================================================================
 # liveview.fpr -- LV.server: the BROWSER driver for std.MVU's App.
 #

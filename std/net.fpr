@@ -88,9 +88,13 @@ again : unsafe Int -> Int -> Int -> (String, (Int, Bool)) -> Int -> Unit .
 again admin mode arena state me = (mac, (cursor, open)) = state; loop admin mode arena mac cursor open me.
 
 loop : unsafe Int -> Int -> Int -> String -> Int -> Bool -> Int -> Unit .
+# With frames to pump (frame mode and an open connection) the loop polls
+# every millisecond; otherwise it blocks in receive: polling with nothing to
+# pump spent about 2 MB/s of allocation and a hart's idle time for nothing.
 loop admin mode arena mac cursor open me =
-  _ = if mode == 1 and open then pump arena mac 32 else Unit;
-  next = case receiveNow me of
+  polling = mode == 1 and open;
+  _ = if polling then pump arena mac 32 else Unit;
+  next = case (if polling then receiveNow me else Ok (receive me)) of
       Err why -> _ = Sys.sleepUs 1000; (cursor, open)
     | Ok borrowed -> (from, id, q) = keep borrowed; _ = drop borrowed;
                      (rr, live, answer) = handle admin mode arena mac cursor open from q;

@@ -9,7 +9,8 @@
  * board answers "HELLO" + nonce, and repeats of the same nonce do not reset
  * twice. A session ends on the host's "BYE", or when the host stops
  * acknowledging for QPORT_PEER_LOST_MS while frames are in flight. Without a
- * session the port sends no reliable frames and drops console output: a
+ * session the port sends no reliable frames and keeps console output in a
+ * bounded backlog, replayed when the next session opens: a
  * host that closes and reopens the Tang Nano's UART while the FPGA
  * transmits wedges its BL616 bridge (simple-risc boards/tangnano20k/README.md,
  * "Known issue"), so the board must be quiet whenever a host may reopen.
@@ -55,6 +56,10 @@ typedef struct qport_serial {
 #define QPORT_CON_IN 512u
 #define QPORT_CON_OUT 200u
 #define QPORT_IN_RING 1024u
+/* console output written while no host is attached: the latest bytes are
+ * kept and replayed when a session opens, after a line that says how many
+ * earlier bytes were dropped (nobody could have read them) */
+#define QPORT_BACKLOG 4096u
 
 typedef struct qport {
   qport_serial io;
@@ -69,6 +74,9 @@ typedef struct qport {
   uint32_t con_in_head, con_in_tail;
   uint8_t con_out[QPORT_CON_OUT];
   uint32_t con_out_n;
+  uint8_t backlog[QPORT_BACKLOG];
+  uint32_t backlog_head, backlog_n, backlog_dropped; /* ring; replayed from head - n */
+  int replay;                                       /* a session opened: send the backlog */
   /* input events */
   uint8_t in[QPORT_IN_RING];
   uint32_t in_head, in_tail;
@@ -95,7 +103,7 @@ int qport_session(const qport_t *p);
 int qport_send(qport_t *p, uint8_t ch, const uint8_t *msg, uint32_t n);
 
 /* console: write takes what fits without waiting (all of it with no session:
- * dropped); flush sends the line buffer, waiting for window room. */
+ * into the backlog); flush sends the line buffer, waiting for window room. */
 uint32_t qport_con_write(qport_t *p, const uint8_t *b, uint32_t n);
 void qport_con_flush(qport_t *p);
 uint32_t qport_con_read(qport_t *p, uint8_t *dst, uint32_t max);

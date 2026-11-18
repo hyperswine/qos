@@ -11,11 +11,13 @@ static uint32_t (*clock_ms)(void);
 static int sr_rx(void *ctx) { (void)ctx; return (UART[1] & 2) ? (int)(UART[2] & 255) : -1; }
 static int sr_tx_ready(void *ctx) { (void)ctx; return (int)(UART[1] & 1); }
 static void sr_tx(void *ctx, uint8_t b) { (void)ctx; UART[0] = b; }
+/* CTRL (+0xc) bit 0: interrupt (PLIC source 10) while received bytes wait */
+static void sr_arm(void *ctx, int rx) { (void)ctx; UART[3] = rx ? 1u : 0u; }
 static uint32_t sr_now(void *ctx) { (void)ctx; return clock_ms(); }
 
 void qcon_init(uint32_t (*now_ms)(void)) {
   clock_ms = now_ms;
-  qport_serial io = {sr_rx, sr_tx_ready, sr_tx, 0, sr_now, 0};
+  qport_serial io = {sr_rx, sr_tx_ready, sr_tx, sr_arm, sr_now, 0};
   qport_init(&qlink_board_port, &io);
 }
 

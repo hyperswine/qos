@@ -3,6 +3,9 @@
 #   sol hal/spectre/actors/boot/build-integrated.sol NEW-OUTPUT-DIRECTORY     (from the QOS root)
 #   SPECTRE_BOARD=spectre-84 sol hal/spectre/actors/boot/build-integrated.sol DIR   (the fprisc-84 image)
 # SPECTRE_RUNTIME_REV overrides the runtime revision taken from fprisc.lock.json.
+# SPECTRE_IMAGE=system makes System.qa (programs/system.fpr, HARTS=1, console
+# con0 on qlink; needs SPECTRE_CONSOLE=qlink) the image the SD slot boots
+# instead of the boot shell (boot/app.fpr, the default `boot`).
 #
 # FPRISC and SIMPLE_RISC name the two other checkouts (default: beside QOS).
 # The output holds the artifacts, SHA256SUMS and build-inputs.txt. The byte
@@ -86,6 +89,15 @@ app apps fpr env tool mailbox name =
   _ = inDir apps [S.objcopy,"-O","binary","{name}.elf","{name}.bin"];
   inDir apps (List.append [tool,"sxa","{name}.bin","{name}.sxa"] (if mailbox then ["--mailbox"] else [])).
 
+# System.qa as the SD image: compiled for qos-native RV32, linked by
+# spectre-build's `system` target, and copied over boot/fs.bin for `media`
+systemImage qos fprisc out board env =
+  _ = K.mkdirs "{out}/system";
+  _ = B.command ["/bin/cp","{qos}/hal/spectre/actors/system/hal.c","{out}/system/"];
+  _ = B.inDirectory "{out}/system" env ["{fprisc}/fpr","compile","--system=qos-native","--target=rv32","--prelude={out}/fprisc/core/prelude.fpr","{out}/qos/programs/system.fpr","app.s"];
+  _ = B.command ["make","-s","-C","{qos}/qos","BUILD={out}/sysbuild","{out}/sysbuild/apps_data.c"];
+  _ = S.target out board "system";
+  B.command ["/bin/cp","{out}/system/fs.bin","{out}/boot/fs.bin"].
 sums out names = Str.join "" (List.map (fn name -> path = "{out}/{name}"; sha = K.sha256 path; "{sha}  {name}\n") names).
 > case args Unit of
     [target] ->
@@ -124,6 +136,7 @@ sums out names = Str.join "" (List.map (fn name -> path = "{out}/{name}"; sha = 
       bsp = if spectreBoard == "spectre-84" then "spectre84" else "spectre54";
       _ = B.inDirectory qos [] [B.setting "SOL" "sol","tools/board.sol","bsp/{bsp}/board.json","{out}/board-devices"];
       _ = S.target out board "boot";
+      _ = (if B.setting "SPECTRE_IMAGE" "boot" == "system" then systemImage qos fprisc out board env else Unit);
       _ = media out board tool;
       _ = List.map (app "{out}/boot/apps" "{fprisc}/fpr" env tool False) ["spin","pendulum","hello"];
       _ = List.map (app "{out}/boot/apps" "{fprisc}/fpr" env tool True) ["ping","pong"];

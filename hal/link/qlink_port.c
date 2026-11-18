@@ -23,9 +23,40 @@ static void wire(void *ctx, const uint8_t *b, size_t n) {
 }
 static uint32_t link_now(void *ctx) { return now(ctx); }
 
+static void backlog_put(qport_t *p, const uint8_t *b, uint32_t n) {
+  for (uint32_t i = 0; i < n; i++) {
+    p->backlog[p->backlog_head++ % QPORT_BACKLOG] = b[i];
+    if (p->backlog_n < QPORT_BACKLOG) p->backlog_n++;
+    else p->backlog_dropped++;
+  }
+}
+/* send the backlog as the window allows: a dropped-bytes note first */
+static void replay_some(qport_t *p) {
+  while (p->replay && qlink_can_send(&p->link)) {
+    uint8_t chunk[QLINK_PAYLOAD_MAX];
+    uint32_t k = 0;
+    if (p->backlog_dropped) {
+      static const char note[] = "[qlink: ";
+      for (const char *c = note; *c; c++) chunk[k++] = (uint8_t)*c;
+      char digits[12]; uint32_t d = 0, v = p->backlog_dropped;
+      do { digits[d++] = (char)('0' + v % 10); v /= 10; } while (v);
+      while (d) chunk[k++] = (uint8_t)digits[--d];
+      static const char tail[] = " earlier bytes of output dropped]\n";
+      for (const char *c = tail; *c; c++) chunk[k++] = (uint8_t)*c;
+      p->backlog_dropped = 0;
+    } else {
+      uint32_t start = p->backlog_head - p->backlog_n;
+      while (k < QLINK_PAYLOAD_MAX && p->backlog_n) { chunk[k++] = p->backlog[start++ % QPORT_BACKLOG]; p->backlog_n--; }
+    }
+    if (k) qlink_send(&p->link, QLINK_CH_CONSOLE, chunk, k);
+    if (!p->backlog_n && !p->backlog_dropped) p->replay = 0;
+  }
+}
+
 static void session_end(qport_t *p) {
   qlink_reset(&p->link);
   p->session = 0;
+  backlog_put(p, p->con_out, p->con_out_n); /* not yet sent: the next host sees it */
   p->con_out_n = 0;
   if (p->file_state == 1) p->file_state = 0; /* qport_file sees no session */
 }
@@ -73,6 +104,7 @@ static int deliver(void *ctx, uint8_t ch, const uint8_t *b, size_t n) {
         session_end(p);
         p->session = n == 6 && b[5] ? b[5] : 1;
         p->file_hdr_n = 0;
+        p->replay = p->backlog_n || p->backlog_dropped;
       }
       p->heard_at = now(p);
       uint8_t answer[6] = {'H', 'E', 'L', 'L', 'O', p->session};
@@ -125,10 +157,11 @@ void qport_poll(qport_t *p) {
   if (p->session && p->link.in_flight && now(p) - p->heard_at > QPORT_PEER_LOST_MS) session_end(p);
   if (!p->session) return;
   qlink_poll(&p->link);
+  replay_some(p);
   /* console bytes waiting in the line buffer go out as soon as the window
    * allows: an interrupt-driven writer (UART.qa) may have nothing more to
-   * write, so no later write would carry them */
-  if (p->con_out_n && qlink_can_send(&p->link)) {
+   * write, so no later write would carry them. The backlog goes first. */
+  if (!p->replay && p->con_out_n && qlink_can_send(&p->link)) {
     qlink_send(&p->link, QLINK_CH_CONSOLE, p->con_out, p->con_out_n);
     p->con_out_n = 0;
   }
@@ -149,9 +182,9 @@ int qport_send(qport_t *p, uint8_t ch, const uint8_t *msg, uint32_t n) {
 
 void qport_con_flush(qport_t *p) {
   if (!p->con_out_n) return;
-  if (!p->session) { p->con_out_n = 0; return; }
+  if (!p->session) { backlog_put(p, p->con_out, p->con_out_n); p->con_out_n = 0; return; }
   uint8_t s = p->session;
-  while (p->session == s && !qlink_can_send(&p->link)) qport_poll(p);
+  while (p->session == s && (p->replay || !qlink_can_send(&p->link))) qport_poll(p);
   if (p->session != s || !p->con_out_n) { p->con_out_n = 0; return; }
   qlink_send(&p->link, QLINK_CH_CONSOLE, p->con_out, p->con_out_n);
   p->con_out_n = 0;
@@ -159,16 +192,16 @@ void qport_con_flush(qport_t *p) {
 
 uint32_t qport_con_write(qport_t *p, const uint8_t *b, uint32_t n) {
   qport_poll(p);
-  if (!p->session) return n; /* nobody is listening: dropped, as a port with no host does */
+  if (!p->session) { backlog_put(p, b, n); return n; } /* nobody is listening: kept for the next host */
   uint32_t took = 0;
   while (took < n) {
     if (p->con_out_n == QPORT_CON_OUT) {
-      if (!qlink_can_send(&p->link)) break; /* the window is full: the caller retries */
+      if (p->replay || !qlink_can_send(&p->link)) break; /* the window is full: the caller retries */
       qport_con_flush(p);
     }
     p->con_out[p->con_out_n++] = b[took++];
   }
-  if (p->con_out_n && qlink_can_send(&p->link)) qport_con_flush(p);
+  if (p->con_out_n && !p->replay && qlink_can_send(&p->link)) qport_con_flush(p);
   return took;
 }
 

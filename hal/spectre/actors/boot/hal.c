@@ -84,10 +84,6 @@ void hal_timer_arm(uw hart, uint64_t delta) {
 /* The device table (the QLog volume on the SD card, hal/drivers/sd_spi.c behind
  * the BLOCK class) is generated from bsp/spectre54 or bsp/spectre84/board.json
  * by tools/board.sol. */
-V fpr_g_blkPackPair_call3(V a, V b, V c) {
-  fpr_cpanic("pair outside probe");
-  return 0;
-}
 enum { RUNNING=-3, STOPPED=-4, EMPTY=-5 };
 typedef struct {
  uint8_t image[4096] __attribute__((aligned(16)));

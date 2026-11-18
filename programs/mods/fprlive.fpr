@@ -1,4 +1,4 @@
-N = use "std/net#9450dfa41b157181".
+N = use "std/net#0e7c699bca3ce421".
 # ============================================================================
 # fprlive.fpr -- FPRLive: LiveView over a real websocket, for FP-RISC apps
 # on the socket tier (qosp / virt).  The browser driver for a

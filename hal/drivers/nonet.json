@@ -1,0 +1,2 @@
+{"class": "net", "setup": "nonet_setup", "sources": ["hal/drivers/nonet.c", "hal/net_actor_bridge.c"],
+ "about": "no network interface: every net primitive fails the caller with net: NIC absent, as virtio-net does without a NIC"}

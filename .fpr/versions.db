@@ -145,3 +145,5 @@ files v5.0 8303a8f9f02909ff
 qlog v26.0 e1cb103459f4bc1d
 fs v10.0 eb554fc5f32fe8fc
 timer v3.0 f11a31ca977152b0
+uart v5.0 3eedf3bc88217cb1
+net v5.0 0e7c699bca3ce421

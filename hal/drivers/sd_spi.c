@@ -55,3 +55,23 @@ const qos_block_ops sd_spi_ops = {
   .version = QOS_BLOCK_OPS_VERSION, .range_max = 8,
   .pages = sd_pages, .read = sd_read_pages, .write_record = sd_write_record, .flush = sd_flush,
 };
+
+/* blkPackPair (QLog's two-record batch), the same primitive every block
+ * board links (hal/blk_pack.h). */
+#include "../blk_pack.h"
+
+/* The native block-policy knobs (std/block.fpr: deadline, reset probes,
+ * waiter factor) belong to virtio's recovery machinery. An SD card over SPI
+ * has none: it reports version 0 with no budget, and refuses any budget as
+ * invalid (-1) rather than pretending to apply it. */
+static V sd_budget_get(V u) {
+  (void)u;
+  hdr_t *t = (hdr_t *)fpr_alloc(8 + 4 * sizeof(V));
+  t->tid = T_TUP4; t->var = 0;
+  V *fields = (V *)((char *)t + 8);
+  for (int i = 0; i < 4; i++) fields[i] = TAG(0);
+  return (V)t;
+}
+static V sd_budget_set(V request) { (void)request; return TAG(-1); }
+FPR_FN(fpr_g_blkBudgetGet, sd_budget_get, 1);
+FPR_FN(fpr_g_blkBudgetSet, sd_budget_set, 1);

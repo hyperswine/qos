@@ -69,19 +69,26 @@ St = Type (St dev owner cap txq rxs sub fl armed irq).
 # whoever enumerates the board (System.qa claims /services/uart/<n> for
 # each).  `actor` is con0, the first console of the virt board and the
 # Portable host.
-actor : unsafe Int -> a .
+# One turn of Sys.loop per message: the runtime rewinds the turn's arena,
+# so what a turn allocates (replies, the next state's record) is reclaimed.
+# A hand-written receive recursion kept every turn's garbage: an idle
+# System.qa lost about 100 KB/s here while the keyboard polled UGet
+# (docs/2026-11-19-SPECTRE-SYSTEM.md).
+actor : unsafe Int -> Unit .
 actor me = actorOn "con0" uartIrq me.
-actorOn : unsafe String -> Int -> Int -> a .
-actorOn nm irq me = loop me (St (device nm) 0 4096 "" "" 0 0 0 irq).
+actorOn : unsafe String -> Int -> Int -> Unit .
+actorOn nm irq me = _ = Sys.loop (St (device nm) 0 4096 "" "" 0 0 0 irq) (turn me); Unit.
 
-loop : unsafe Int -> St -> a .
-loop me st =
+turn : unsafe Int -> St -> (Bool, St) .
+turn me st =
   m = receive me;
   case m of
     (from, req) -> dispatch me st from req
-  | irq -> onIrq me st irq.
+  | fired -> onIrq me st.
+    # ^ anything else is the bound source firing (a bare Int); the source
+    #   to acknowledge is the one this actor bound, kept in the state
 
-dispatch : unsafe Int -> St -> Int -> UMsg -> a .
+dispatch : unsafe Int -> St -> Int -> UMsg -> (Bool, St) .
 dispatch me st from req =
   St dev owner cap txq rxs sub fl armed irq = st;
   case req of
@@ -98,13 +105,13 @@ dispatch me st from req =
 
 # take the rx buffer; the POLL drain first covers the portable tier
 # (no irqs there -- LSR.DR is only ever noticed inside a service call)
-doGet : unsafe Int -> St -> Int -> a .
+doGet : unsafe Int -> St -> Int -> (Bool, St) .
 doGet me st from =
   St dev owner cap txq rxs sub fl armed irq = st;
   case ownerOk owner from of
     False -> reply me from (UErr "not the owner") st
   | True -> doGet2 me st from.
-doGet2 : unsafe Int -> St -> Int -> a .
+doGet2 : unsafe Int -> St -> Int -> (Bool, St) .
 doGet2 me st from =
   st2 = rxDrain st;
   St dev owner cap txq rxs sub fl armed irq = st2;
@@ -113,23 +120,23 @@ doGet2 me st from =
 # owner -1 = shared: any caller may move data (never reconfigure)
 ownerOk o from = case o == from of True -> True | False -> o == 0 - 1.
 
-doShare : unsafe Int -> St -> Int -> a .
+doShare : unsafe Int -> St -> Int -> (Bool, St) .
 doShare me st from =
   St dev owner cap txq rxs sub fl armed irq = st;
   case owner == from of
     False -> reply me from (UErr "not the owner") st
   | True -> reply me from UOk (St dev (0 - 1) cap txq rxs sub fl armed irq).
 
-reply : unsafe Int -> Int -> URep -> St -> a .
-reply me from r st = send from r >> loop me st.
+reply : unsafe Int -> Int -> URep -> St -> (Bool, St) .
+reply me from r st = _ = send from r; (True, st).
 
-doOpen : unsafe Int -> St -> Int -> a .
+doOpen : unsafe Int -> St -> Int -> (Bool, St) .
 doOpen me st from =
   St dev owner cap txq rxs sub fl armed irq = st;
   case owner == 0 of
     False -> reply me from (UErr "uart is claimed") st
   | True -> doOpen2 me st from.
-doOpen2 : unsafe Int -> St -> Int -> a .
+doOpen2 : unsafe Int -> St -> Int -> (Bool, St) .
 doOpen2 me st from =
   St dev owner cap txq rxs sub fl armed irq = st;
   # line settings and interrupts off until UArm (the driver must not
@@ -140,18 +147,18 @@ doOpen2 me st from =
 # the console class has no line settings: a 16550's divisor, a qlink
 # channel's rate are the driver's and the board manifest's.  Refused, not
 # ignored, so a caller that needs a rate finds out.
-doParams : unsafe Int -> St -> Int -> Int -> a .
+doParams : unsafe Int -> St -> Int -> Int -> (Bool, St) .
 doParams me st from d = reply me from (UErr "uart: line settings belong to the console driver") st.
 
 # go live: bind the PLIC source to THIS actor, enable RDA (rx); THRE
 # joins whenever tx bytes are pending (see irqSet)
-doArm : unsafe Int -> St -> Int -> a .
+doArm : unsafe Int -> St -> Int -> (Bool, St) .
 doArm me st from =
   St dev owner cap txq rxs sub fl armed irq = st;
   case owner == from of
     False -> reply me from (UErr "not the owner") st
   | True -> doArm2 me st from.
-doArm2 : unsafe Int -> St -> Int -> a .
+doArm2 : unsafe Int -> St -> Int -> (Bool, St) .
 doArm2 me st from =
   St dev owner cap txq rxs sub fl armed irq = st;
   _ = Sys.irqBind irq me;
@@ -170,7 +177,7 @@ irqSet st =
 
 # enqueue-and-kick: the DMA-shaped write.  The kick moves what the
 # device takes now; the rest drains on interrupts.
-doWrite : unsafe Int -> St -> Int -> String -> a .
+doWrite : unsafe Int -> St -> Int -> String -> (Bool, St) .
 doWrite me st from s =
   St dev owner cap txq rxs sub fl armed irq = st;
   case ownerOk owner from of
@@ -178,7 +185,7 @@ doWrite me st from s =
   | True -> case strlen txq + strlen s > cap of
       True -> reply me from (UOkI 0) st
     | False -> doWrite2 me st from s.
-doWrite2 : unsafe Int -> St -> Int -> String -> a .
+doWrite2 : unsafe Int -> St -> Int -> String -> (Bool, St) .
 doWrite2 me st from s =
   St dev owner cap txq rxs sub fl armed irq = st;
   st2 = txDrain (St dev owner cap (strcat txq s) rxs sub fl armed irq);
@@ -201,27 +208,27 @@ txLeft st took n =
     True -> St dev owner cap "" rxs sub fl armed irq
   | False -> St dev owner cap (substr txq took (n - took)) rxs sub fl armed irq.
 
-doFlush : unsafe Int -> St -> Int -> a .
+doFlush : unsafe Int -> St -> Int -> (Bool, St) .
 doFlush me st from =
   st0 = st;
   St dev owner cap txq rxs sub fl armed irq = st0;
   case ownerOk owner from of
     False -> reply me from (UErr "not the owner") st0
   | True -> doFlush2 me st0 from.
-doFlush2 : unsafe Int -> St -> Int -> a .
+doFlush2 : unsafe Int -> St -> Int -> (Bool, St) .
 doFlush2 me st from =
   st2 = txDrain st;
   St dev owner cap txq rxs sub fl armed irq = st2;
   case strlen txq == 0 of
     True -> reply me from UOk st2
   | False -> case armed == 1 of
-      True -> loop me (St dev owner cap txq rxs sub from armed irq)
+      True -> (True, (St dev owner cap txq rxs sub from armed irq))
                      # ^ parked: answered from the irq path when empty
     | False -> doFlush2 me st2 from.
                      # ^ unarmed (no tx interrupt will come): spin
                      #   the drain -- the device's progress bounds it
 
-doClose : unsafe Int -> St -> Int -> a .
+doClose : unsafe Int -> St -> Int -> (Bool, St) .
 doClose me st from =
   St dev owner cap txq rxs sub fl armed irq = st;
   _ = irqOff st;
@@ -235,11 +242,12 @@ irqOff st =
 # One Int message per claimed-and-masked source: service the device
 # fully (rx drain + tx refill), re-arm, deliver downstream.
 
-onIrq : unsafe Int -> St -> Int -> a .
-onIrq me st irq =
+onIrq : unsafe Int -> St -> (Bool, St) .
+onIrq me st =
   st2 = txDrain (rxDrain st);
   _ = irqSet st2;
-  _ = Sys.irqAck irq;
+  St d0 o0 c0 t0 r0 s0 f0 a0 bound = st2;
+  _ = Sys.irqAck bound;
   St dev owner cap txq rxs sub fl armed irq = st2;
   case and2 (fl > 0) (strlen txq == 0) of
     True -> send fl UOk >> irqPush me (St dev owner cap txq rxs sub 0 armed irq)
@@ -247,12 +255,12 @@ onIrq me st irq =
 and2 a b = case a of True -> b | False -> False.
 
 # push freshly received bytes to the subscriber, then keep looping
-irqPush : unsafe Int -> St -> a .
+irqPush : unsafe Int -> St -> (Bool, St) .
 irqPush me st =
   St dev owner cap txq rxs sub fl armed irq = st;
   case and2 (sub > 0) (strlen rxs > 0) of
-    True -> send sub (URx rxs) >> loop me (St dev owner cap txq "" sub fl armed irq)
-  | False -> loop me st.
+    True -> send sub (URx rxs) >> (True, (St dev owner cap txq "" sub fl armed irq))
+  | False -> (True, st).
 
 # take everything the device holds (conRead hands over at most 512
 # bytes a call, so loop until it comes back empty)

@@ -76,7 +76,3 @@ const devtable_entry_t *hal_devtable_ext(uw *n) {
   *n = 1;
   return tab;
 }
-V fpr_g_blkPackPair_call3(V a, V b, V c) {
-  fpr_cpanic("pair outside probe");
-  return 0;
-}

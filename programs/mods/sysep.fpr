@@ -34,7 +34,7 @@
 
 EP = use "ep#d65056c9d7dc9c18".
 SV = use "svc#b4e4e109ca696787".
-UM = use "uart#a0bf2c966fc966b2".
+UM = use "uart#3eedf3bc88217cb1".
 TM = use "timer#f11a31ca977152b0".
 Endpoint = use "epservice#436f606333c44f26".
 AC = use "std/actor#2de24bf2bdd5cb87".
@@ -209,32 +209,40 @@ pinSet url x =
 # none); rxq: bytes received and not yet taken, oldest first.  Bytes
 # arrive as URx pushes from the service (the receive interrupt, on
 # native).  With a read held and the queue empty the actor also polls the
-# service (UGet, the Portable tier) once a millisecond, taking requests as
-# they come (receiveNow); with nothing held it parks in receive.
+# service (UGet, the Portable tier, which has no receive interrupt) every
+# 20 ms, taking requests as they come (receiveNow); with nothing held it
+# parks in receive.  (It polled every millisecond: 1,000 UART.qa turns a
+# second on an idle prompt, a real cost on an 84 MHz single hart.)
 # The pushes arrive through a SUBSCRIBER actor of the keyboard's own, not
 # straight from UART.qa: the service's replies to UGet and its URx pushes
 # would otherwise share one sender, and a push queued before a reply would
 # be read as the reply (receiveFromRes takes the next message FROM the
 # service).  By sender they never mix.
-keyboard : unsafe Int -> Int -> a .
+keyboard : unsafe Int -> Int -> Unit .
 keyboard usvc me =
   _ = case usvc == 0 of
       True -> UM.UOk
     | False -> uartRpc me usvc (UM.USub (spawnD (kbdSub me)));
-  kLoop usvc me Nil 1 (0, 0, 0) "".
+  _ = Sys.loop (Nil, 1, (0, 0, 0), "") (kTurn usvc me); Unit.
+# Pushes reach the keyboard shaped like a request from sender 0 (no actor
+# has id 0 as a client here), so the keyboard's turn reads one message type.
 kbdSub : unsafe Int -> Int -> a .
 kbdSub kbd me =
   m = receive me;
-  _ = send kbd m;
+  _ = case m of UM.URx s -> send kbd (0, 0, EP.Write 0 (EP.IStr (strcat s "")));
   kbdSub kbd me.
-kLoop : unsafe Int -> Int -> List (Int, String, Int) -> Int -> (Int, Int, Int) -> String -> a .
-kLoop usvc me hs next pend rxq =
+# One turn of Sys.loop per request, push or poll: the runtime rewinds the
+# turn's arena. As a hand-written recursion every poll's small allocations
+# stayed (about 23 KB/s while the launcher polled the keyboard).
+kTurn : unsafe Int -> Int -> (List (Int, String, Int), Int, (Int, Int, Int), String) -> (Bool, (List (Int, String, Int), Int, (Int, Int, Int), String)) .
+kTurn usvc me s =
+  (hs, next, pend, rxq) = s;
   (pf, pi, ph) = pend;
   case ph == 0 of
     True -> kTake usvc me hs next pend rxq (receive me)
   | False -> kServe usvc me hs next pend rxq.
 # a held read: answer from the queue, else poll the service, else wait
-kServe : unsafe Int -> Int -> List (Int, String, Int) -> Int -> (Int, Int, Int) -> String -> a .
+kServe : unsafe Int -> Int -> List (Int, String, Int) -> Int -> (Int, Int, Int) -> String -> (Bool, (List (Int, String, Int), Int, (Int, Int, Int), String)) .
 kServe usvc me hs next pend rxq =
   (pf, pi, ph) = pend;
   q2 = case strlen rxq == 0 of
@@ -242,61 +250,61 @@ kServe usvc me hs next pend rxq =
     | False -> rxq;
   case strlen q2 == 0 of
     True -> kIdle usvc me hs next pend q2 (receiveNow me)
-  | False -> AC.reply (pf, pi) (Ok (IInt (charAt q2 0))) >> kLoop usvc me hs next (0, 0, 0) (substr q2 1 (strlen q2 - 1)).
+  | False -> AC.reply (pf, pi) (Ok (IInt (charAt q2 0))) >> (True, (hs, next, (0, 0, 0), (substr q2 1 (strlen q2 - 1)))).
 kPollUart : Int -> Int -> String .
 kPollUart me usvc = case usvc == 0 of
     True -> ""
   | False -> (case uartRpc me usvc UM.UGet of
       UM.UOkS s -> strcat s ""
     | o -> "").
-kIdle : unsafe Int -> Int -> List (Int, String, Int) -> Int -> (Int, Int, Int) -> String -> _ -> a .
+kIdle : unsafe Int -> Int -> List (Int, String, Int) -> Int -> (Int, Int, Int) -> String -> _ -> (Bool, (List (Int, String, Int), Int, (Int, Int, Int), String)) .
 kIdle usvc me hs next pend rxq r = case r of
     Ok m -> kTake usvc me hs next pend rxq m
-  | Err e -> Sys.sleepUs 1000 >> kLoop usvc me hs next pend rxq.
+  | Err e -> Sys.sleepUs 20000 >> (True, (hs, next, pend, rxq)).
 # a message: a request envelope, or the service's push
-kTake : unsafe Int -> Int -> List (Int, String, Int) -> Int -> (Int, Int, Int) -> String -> _ -> a .
+kTake : unsafe Int -> Int -> List (Int, String, Int) -> Int -> (Int, Int, Int) -> String -> _ -> (Bool, (List (Int, String, Int), Int, (Int, Int, Int), String)) .
 kTake usvc me hs next pend rxq m = case m of
-    (from, id, q) -> kMsg usvc me hs next pend rxq (from, id) from q
-  | push -> kPush usvc me hs next pend rxq push.
-kPush : unsafe Int -> Int -> List (Int, String, Int) -> Int -> (Int, Int, Int) -> String -> UM.URx -> a .
-kPush usvc me hs next pend rxq push = case push of
-    UM.URx s -> kLoop usvc me hs next pend (strcat rxq s).
-kMsg : unsafe Int -> Int -> List (Int, String, Int) -> Int -> (Int, Int, Int) -> String -> (Int, Int) -> Int -> EP.Ep -> a .
+    (from, id, q) -> if from == 0 then kPush usvc me hs next pend rxq q else kMsg usvc me hs next pend rxq (from, id) from q.
+kPush : unsafe Int -> Int -> List (Int, String, Int) -> Int -> (Int, Int, Int) -> String -> EP.Ep -> (Bool, (List (Int, String, Int), Int, (Int, Int, Int), String)) .
+kPush usvc me hs next pend rxq q = case q of
+    Write h v -> (case v of IStr s -> (True, (hs, next, pend, (strcat rxq s))) | other -> (True, (hs, next, pend, rxq)))
+  | other -> (True, (hs, next, pend, rxq)).
+kMsg : unsafe Int -> Int -> List (Int, String, Int) -> Int -> (Int, Int, Int) -> String -> (Int, Int) -> Int -> EP.Ep -> (Bool, (List (Int, String, Int), Int, (Int, Int, Int), String)) .
 kMsg usvc me hs next pend rxq ret from q = case q of
-    EP.Timed until command -> AC.reply ret (Err "keyboard: timed reads require polling") >> kLoop usvc me hs next pend rxq
-  | Open url mode -> AC.reply ret (Opened next) >> kLoop usvc me ((next, strcat url "", from) :: hs) (next + 1) pend rxq
+    EP.Timed until command -> AC.reply ret (Err "keyboard: timed reads require polling") >> (True, (hs, next, pend, rxq))
+  | Open url mode -> AC.reply ret (Opened next) >> (True, (((next, strcat url "", from) :: hs), (next + 1), pend, rxq))
   | Read h n -> kRead usvc me hs next pend rxq ret h (EP.hFind hs h)
-  | Write h v -> AC.reply ret (Err "/services/keyboard is read-only") >> kLoop usvc me hs next pend rxq
+  | Write h v -> AC.reply ret (Err "/services/keyboard is read-only") >> (True, (hs, next, pend, rxq))
   | Close h -> kClose usvc me hs next pend rxq ret h.
-kRead : unsafe Int -> Int -> List (Int, String, Int) -> Int -> (Int, Int, Int) -> String -> (Int, Int) -> Int -> (String, Int) -> a .
+kRead : unsafe Int -> Int -> List (Int, String, Int) -> Int -> (Int, Int, Int) -> String -> (Int, Int) -> Int -> (String, Int) -> (Bool, (List (Int, String, Int), Int, (Int, Int, Int), String)) .
 kRead usvc me hs next pend rxq ret h b =
   (url, client) = b;
   case strlen url == 0 of
-    True -> AC.reply ret (Err "no such handle") >> kLoop usvc me hs next pend rxq
+    True -> AC.reply ret (Err "no such handle") >> (True, (hs, next, pend, rxq))
   | False -> (case EP.strEq (EP.segAfter url 19) "poll" of
       True -> kPoll usvc me hs next pend rxq ret
     | False -> kHold usvc me hs next pend rxq ret h).
 # the nonblocking read: a queued byte, a freshly polled one, or 0
-kPoll : unsafe Int -> Int -> List (Int, String, Int) -> Int -> (Int, Int, Int) -> String -> (Int, Int) -> a .
+kPoll : unsafe Int -> Int -> List (Int, String, Int) -> Int -> (Int, Int, Int) -> String -> (Int, Int) -> (Bool, (List (Int, String, Int), Int, (Int, Int, Int), String)) .
 kPoll usvc me hs next pend rxq ret =
   q2 = case strlen rxq == 0 of
       True -> kPollUart me usvc
     | False -> rxq;
   case strlen q2 == 0 of
-    True -> AC.reply ret (Ok (IInt 0)) >> kLoop usvc me hs next pend ""
-  | False -> AC.reply ret (Ok (IInt (charAt q2 0))) >> kLoop usvc me hs next pend (substr q2 1 (strlen q2 - 1)).
-kHold : unsafe Int -> Int -> List (Int, String, Int) -> Int -> (Int, Int, Int) -> String -> (Int, Int) -> Int -> a .
+    True -> AC.reply ret (Ok (IInt 0)) >> (True, (hs, next, pend, ""))
+  | False -> AC.reply ret (Ok (IInt (charAt q2 0))) >> (True, (hs, next, pend, (substr q2 1 (strlen q2 - 1)))).
+kHold : unsafe Int -> Int -> List (Int, String, Int) -> Int -> (Int, Int, Int) -> String -> (Int, Int) -> Int -> (Bool, (List (Int, String, Int), Int, (Int, Int, Int), String)) .
 kHold usvc me hs next pend rxq ret h =
   (pf, pi, ph) = pend;
   (rf, ri) = ret;
   case ph != 0 of
-    True -> AC.reply ret (Err "busy: a read is already held") >> kLoop usvc me hs next pend rxq
-  | False -> kLoop usvc me hs next (rf, ri, h) rxq.
-kClose : unsafe Int -> Int -> List (Int, String, Int) -> Int -> (Int, Int, Int) -> String -> (Int, Int) -> Int -> a .
+    True -> AC.reply ret (Err "busy: a read is already held") >> (True, (hs, next, pend, rxq))
+  | False -> (True, (hs, next, (rf, ri, h), rxq)).
+kClose : unsafe Int -> Int -> List (Int, String, Int) -> Int -> (Int, Int, Int) -> String -> (Int, Int) -> Int -> (Bool, (List (Int, String, Int), Int, (Int, Int, Int), String)) .
 kClose usvc me hs next pend rxq ret h =
   (pf, pi, ph) = pend;
   _ = case ph == h of
       True -> AC.reply (pf, pi) (Err "closed")
     | False -> Ok Unit;
   _ = AC.reply ret (Ok 0);
-  kLoop usvc me (EP.hRemove hs h) next (case ph == h of True -> (0, 0, 0) | False -> pend) rxq.
+  (True, ((EP.hRemove hs h), next, (case ph == h of True -> (0, 0, 0) | False -> pend), rxq)).

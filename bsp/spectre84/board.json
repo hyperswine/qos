@@ -2,6 +2,7 @@
  "about": "Spectre-84: the Tang Nano 20K with Simple-Risc's fprisc-84 bitstream (RV32IM, 84 MHz, 8 MiB)",
  "devices": [
    {"name": "blk", "driver": "sd_spi", "params": {"lba0": 131072, "pages": 64}},
+   {"name": "net", "driver": "nonet"},
    {"name": "con0", "driver": "qlink_con", "params": {"port": "&qlink_board_port", "init": "0"}, "when": "SPECTRE_QLINK"},
    {"name": "in0", "driver": "qlink_input", "params": {"port": "&qlink_board_port", "init": "0"}, "when": "SPECTRE_QLINK"},
    {"name": "clk0", "driver": "qlink_clock", "params": {"port": "&qlink_board_port", "init": "0"}, "when": "SPECTRE_QLINK"},

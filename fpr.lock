@@ -41,7 +41,7 @@ std/storage v2.0 d3bc6af554583437 programs/mods/filepolicy.fpr
 leaseslots v4.0 0eba65251ebb9450 programs/mods/files.fpr
 ep v4.0 d65056c9d7dc9c18 programs/mods/files.fpr
 std/actor v4.0 2de24bf2bdd5cb87 programs/mods/files.fpr
-std/net v4.0 9450dfa41b157181 programs/mods/fprlive.fpr
+std/net v5.0 0e7c699bca3ce421 programs/mods/fprlive.fpr
 std/actor v4.0 2de24bf2bdd5cb87 programs/mods/fprlive.fpr
 ep v4.0 d65056c9d7dc9c18 programs/mods/graphics.fpr
 epclient v3.0 decd41e2d3f54b1b programs/mods/graphics.fpr
@@ -52,7 +52,7 @@ std/fs v10.0 eb554fc5f32fe8fc programs/mods/guishell.fpr
 std/actor v4.0 2de24bf2bdd5cb87 programs/mods/guishell.fpr
 ep v4.0 d65056c9d7dc9c18 programs/mods/leaseslots.fpr
 std/actor v4.0 2de24bf2bdd5cb87 programs/mods/leaseslots.fpr
-std/net v4.0 9450dfa41b157181 programs/mods/liveview.fpr
+std/net v5.0 0e7c699bca3ce421 programs/mods/liveview.fpr
 std/actor v4.0 2de24bf2bdd5cb87 programs/mods/logsapp.fpr
 ep v4.0 d65056c9d7dc9c18 programs/mods/panejobs.fpr
 std/actor v4.0 2de24bf2bdd5cb87 programs/mods/panejobs.fpr
@@ -86,7 +86,7 @@ ep v4.0 d65056c9d7dc9c18 programs/mods/svc.fpr
 std/storage v2.0 d3bc6af554583437 programs/mods/svc.fpr
 ep v4.0 d65056c9d7dc9c18 programs/mods/sysep.fpr
 svc v6.0 b4e4e109ca696787 programs/mods/sysep.fpr
-uart v4.0 a0bf2c966fc966b2 programs/mods/sysep.fpr
+uart v5.0 3eedf3bc88217cb1 programs/mods/sysep.fpr
 timer v3.0 f11a31ca977152b0 programs/mods/sysep.fpr
 epservice v4.0 436f606333c44f26 programs/mods/sysep.fpr
 std/actor v4.0 2de24bf2bdd5cb87 programs/mods/sysep.fpr
@@ -97,7 +97,7 @@ mods/svc v6.0 b4e4e109ca696787 programs/system.fpr
 mods/ep v4.0 d65056c9d7dc9c18 programs/system.fpr
 mods/epclient v3.0 decd41e2d3f54b1b programs/system.fpr
 std/actor v4.0 2de24bf2bdd5cb87 programs/system.fpr
-std/net v4.0 9450dfa41b157181 programs/system.fpr
+std/net v5.0 0e7c699bca3ce421 programs/system.fpr
 std/block v7.0 ac4ea92ddd273d16 programs/system.fpr
 mods/epservice v4.0 436f606333c44f26 programs/system.fpr
 mods/blockep v6.0 e39ef0a30e25ff08 programs/system.fpr
@@ -118,7 +118,7 @@ std/blockio v7.0 12684c106eacea7e std/fs.fpr
 std/storage v2.0 d3bc6af554583437 std/fs.fpr
 ../programs/mods/epdeadline v2.0 96e69ecbbd8c7fce std/fs.fpr
 std/actor v4.0 2de24bf2bdd5cb87 std/lifecycle.fpr
-std/net v4.0 9450dfa41b157181 std/lifecycle.fpr
+std/net v5.0 0e7c699bca3ce421 std/lifecycle.fpr
 std/blockio v7.0 12684c106eacea7e std/lifecycle.fpr
 ../programs/mods/qlog v26.0 e1cb103459f4bc1d std/livereload.fpr
 fs v10.0 eb554fc5f32fe8fc std/loader.fpr
@@ -235,7 +235,7 @@ std/fs v10.0 eb554fc5f32fe8fc tests/mainreliability.fpr
 std/actor v4.0 2de24bf2bdd5cb87 tests/mainreliability.fpr
 std/actor v4.0 2de24bf2bdd5cb87 tests/memoryproc.fpr
 std/fs v10.0 eb554fc5f32fe8fc tests/moduleinterfaces.fpr
-../std/net v4.0 9450dfa41b157181 tests/native-netowner.fpr
+../std/net v5.0 0e7c699bca3ce421 tests/native-netowner.fpr
 std/fs v10.0 eb554fc5f32fe8fc tests/native-netowner.fpr
 std/fs v10.0 eb554fc5f32fe8fc tests/nativeimage.fpr
 std/fs v10.0 eb554fc5f32fe8fc tests/nativeinbox.fpr
@@ -247,13 +247,13 @@ std/fs v10.0 eb554fc5f32fe8fc tests/nativerefusal.fpr
 ../programs/mods/svc v6.0 b4e4e109ca696787 tests/nativerefusal.fpr
 ../programs/mods/epservice v4.0 436f606333c44f26 tests/nativesave.fpr
 ../programs/mods/ep v4.0 d65056c9d7dc9c18 tests/nativesave.fpr
-../std/net v4.0 9450dfa41b157181 tests/netactor.fpr
+../std/net v5.0 0e7c699bca3ce421 tests/netactor.fpr
 std/actor v4.0 2de24bf2bdd5cb87 tests/netactor.fpr
-../std/net v4.0 9450dfa41b157181 tests/netactorprocess.fpr
-../std/net v4.0 9450dfa41b157181 tests/netactorstall.fpr
-../std/net v4.0 9450dfa41b157181 tests/netactorstart.fpr
+../std/net v5.0 0e7c699bca3ce421 tests/netactorprocess.fpr
+../std/net v5.0 0e7c699bca3ce421 tests/netactorstall.fpr
+../std/net v5.0 0e7c699bca3ce421 tests/netactorstart.fpr
 std/actor v4.0 2de24bf2bdd5cb87 tests/netactorstart.fpr
-../std/net v4.0 9450dfa41b157181 tests/nettransport.fpr
+../std/net v5.0 0e7c699bca3ce421 tests/nettransport.fpr
 ../programs/mods/ep v4.0 d65056c9d7dc9c18 tests/panemvu.fpr
 std/actor v4.0 2de24bf2bdd5cb87 tests/panemvu.fpr
 std/fs v10.0 eb554fc5f32fe8fc tests/pathnotes.fpr

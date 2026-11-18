@@ -33,11 +33,24 @@ consoleSources u = q = B.setting "QOS" "";
 # into ROOT/board-devices by tools/board.sol from the board manifest
 boardDevices root = List.append ["{root}/board-devices/devtable.c"]
   (List.filter (fn l -> l != "") (Str.lines (readPath "{root}/board-devices/sources.txt"))).
+# System.qa's own C: the loader and process images, the placeholder app
+# registry (generated into ROOT/sysbuild by qos/Makefile), the lifecycle, and
+# the RV32 PLIC and pin drivers shared with QEMU virt32
+qosKernel root = q = B.setting "QOS" "";
+  ["{q}/loader/apps.c","{root}/sysbuild/apps_data.c","{q}/loader/qaimg.c","{q}/loader/process.c",
+   "{q}/qos/portable/sha256.c","{q}/hal/core/lifecycle.c","{q}/hal/virt/plic.c","{q}/hal/virt/pins.c"].
 # the compilation units an FP-RISC compile listed beside its app.s, as paths from the root
 units root dir = List.map (fn line -> if Str.startsWith "./" line then "{dir}/{Str.slice line 2 (Str.len line)}" else line)
   (List.filter (fn line -> line != "") (List.map Str.trim (Str.lines (readPath "{root}/{dir}/app.s.units")))).
-link root march runtime rest stem =
-  f = flags march;
+# System.qa on an 8 MiB board: the runtime's memory sizes for big machines
+# (64 KiB buddy blocks, 128 KiB first stacks, slabs to 256 KiB) leave about
+# 96 blocks of a 6 MiB heap and run out at boot. Small blocks, first stacks
+# that grow on demand, and slab sizes that leave room for the buddy header
+# (a 64 KiB slab plus its header took a 128 KiB block):
+smallMemory = ["-DFPR_BUDDY_MIN=4096","-DFPR_STACK_SZ=16376","-DFPR_SLAB_SZ=32760","-DFPR_SLAB_MIN=4088","-DFPR_MSG_SLAB_SZ=16376"].
+link root march runtime rest stem = linkWith [] root march runtime rest stem.
+linkWith more root march runtime rest stem =
+  f = List.append (flags march) more;
   _ = B.inDirectory root [] (List.concat [[cc],f,hal,["-c","src/machine/virt/hal.c","-o","hal.o"]]);
   _ = B.inDirectory root [] (List.concat [[cc],f,kernel runtime,rest,["atomic.c","-lgcc","-o","{stem}.elf"]]);
   B.inDirectory root [] [objcopy,"-O","binary","{stem}.elf","{stem}.bin"].
@@ -49,4 +62,6 @@ target root board name =
   else if name == "sd" then link root "rv32im_zicsr" base (List.append (sd board) ["sd/storage.c"]) "sd/storage"
   else if name == "vfs" then link root "rv32im_zicsr" withMod (List.concat [sd board,blockClass Unit,["vfs/hal.c","vfs/app.s"],units root "vfs"]) "vfs/fs"
   else if name == "boot" then link root "rv32im_zicsr_zifencei" withMod (List.concat [sd board,boardDevices root,consoleSources Unit,["boot/hal.c","boot/app.s"],units root "boot"]) "boot/fs"
-  else error "expected probe, idle, uart, sd, vfs or boot".
+  else if name == "system" then (if B.setting "SPECTRE_CONSOLE" "raw" != "qlink" then error "the System.qa image needs SPECTRE_CONSOLE=qlink (its console is con0 on qlink)" else
+    linkWith smallMemory root "rv32im_zicsr_zifencei" (List.append withMod ["bits"]) (List.concat [sd board,boardDevices root,consoleSources Unit,qosKernel root,["system/hal.c","system/app.s"],units root "system"]) "system/fs")
+  else error "expected probe, idle, uart, sd, vfs, boot or system".

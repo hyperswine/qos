@@ -72,7 +72,7 @@ IInt = EP.IInt.
 IStr = EP.IStr.
 IFn  = EP.IFn.
 IErr = EP.IErr.
-Net = use "std/net#9450dfa41b157181".
+Net = use "std/net#0e7c699bca3ce421".
 Lifecycle = use "std/lifecycle".
 FS = use "std/fs".
 Block = use "std/block".
@@ -935,15 +935,17 @@ lStep caps ids st v =
   lKey caps ids sel page fo2 (Sys.arena (fn u -> lPoll caps sec)) v2.
 # Every poll allocates a little (the route's substring, the boxed reply);
 # the wait runs in an arena of its own inside the step's, so a long idle
-# second keeps only the key code.  It parks 1 ms between empty polls --
+# second keeps only the key code.  It parks 20 ms between empty polls --
 # it used to spin, and a faster compiler exhausted the heap of an idle
-# launcher within seconds (2026-10-01).
+# launcher within seconds (2026-10-01); at 1 ms the replies' message slabs
+# were not released fast enough for an 8 MiB board
+# (docs/2026-11-19-SPECTRE-SYSTEM.md).
 lPoll : unsafe Caps -> Int -> Int .
 lPoll caps sec =
   k = svcPollKey caps;
   case k == 0 of
     True -> (case secsOf (svcClock caps) == sec of
-        True -> Sys.sleepUs 1000 >> lPoll caps sec
+        True -> Sys.sleepUs 20000 >> lPoll caps sec
       | False -> 0)
   | False -> k.
 lKey : unsafe Caps -> List String -> Int -> Int -> Int -> Int -> (Vector Int) -> (Bool, (Int, Int, Int), (Vector Int)) .
