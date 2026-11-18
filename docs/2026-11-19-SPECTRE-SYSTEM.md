@@ -107,6 +107,9 @@ idle memory on the 128 MiB map no longer falls at all (it fell about 92 KB/s).
   System.qa build). After `openFPGALoader -r` (the FPGA reloads from flash)
   the ROM booted System.qa from SD: "boot #3 on this log" (the boot count
   kept on the SD QLog) and all four permissions "[remembered y]" (stored on
-  the card at the first boot), then the launcher. A true power cycle
-  (unplug and replug) is the remaining step of the check.
+  the card at the first boot), then the launcher. After an unplug and
+  replug (a true power cycle) the board booted System.qa unaided: qhost
+  attached about two minutes later to a running launcher whose clock read
+  02:00 (the console backlog had dropped the boot lines, "4699 earlier bytes
+  of output dropped", so the boot count was not seen).
 - The SD QLog volume is the boot shell's 64 pages (256 KiB).
