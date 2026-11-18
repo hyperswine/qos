@@ -18,6 +18,12 @@ taken in steps that work with today's code. That proposal's services and
 `bsp/<board>/board.toml` are where this ends up. The device classes below are the
 contracts those services would implement.
 
+The long-term form, in the language, is FP-RISC's
+[devices as Sigs](../../fprisc/docs/2026-11-18-DEVICE-SIGS.md): a class is a Sig,
+a driver a Struct, a board a record of instances, permissions a required row, and
+the C ABI derived from the Sig. Steps 1 to 3 below can be done in C first and move
+onto it.
+
 ## How a driver is plugged in today
 
 Three layers sit under a program
