@@ -10,7 +10,7 @@ ST = use "../programs/mods/scrolltext".
 L = use "../programs/mods/shelllayout".
 AW = use "../programs/mods/appwire".
 S2 = use "../programs/mods/scene2d".
-AC = use "std/actor#201a0e9bf98a5154".
+AC = use "std/actor#2de24bf2bdd5cb87".
 check True = Unit.
 check False = error "guishell: invariant failed".
 logRows i | i >= 30 = Unit.

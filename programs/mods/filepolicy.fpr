@@ -1,6 +1,6 @@
 # Live file-service policy. Wire text is confined to this module; service
 # decisions use Policy/Update, and validation happens before any mutation.
-Wire = use "std/storage#a8f7ee14e1efae76".
+Wire = use "std/storage#d3bc6af554583437".
 Text = use "policytext".
 Policy = Type (Policy Int Int Int Int).
 Update = Type (Update Int Policy).

@@ -2,16 +2,16 @@
 # attach to Graphics.qa and access Files.qa through their namespace.
 # Clock capability remains the legacy MVU mtime handle for now.
 unsafe module.
-Endpoint = use "epservice#e8bce05a1ddf73db".
-EP = use "ep#c66ad65e68dd97f5".
-EC = use "epclient#e09b467f350a5396".
-AC = use "std/actor#201a0e9bf98a5154".
+Endpoint = use "epservice#436f606333c44f26".
+EP = use "ep#d65056c9d7dc9c18".
+EC = use "epclient#decd41e2d3f54b1b".
+AC = use "std/actor#2de24bf2bdd5cb87".
 Lifecycle = use "std/lifecycle".
-BlockEP = use "blockep#bd295a609815dadd".
+BlockEP = use "blockep#e39ef0a30e25ff08".
 Files = use "files".
 GX = use "graphics".
 GL = use "glsvc".
-Wire = use "std/storage#a8f7ee14e1efae76".
+Wire = use "std/storage#d3bc6af554583437".
 
 claim me ns url owner = case EP.register me ns url owner of
     Ok _ -> Unit

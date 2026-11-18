@@ -75,11 +75,11 @@
 # Exact prior lease owner, byte-identical to the reviewed source candidate.
 ../.fpr/store/878fb2196060eb47.fpr
 # Current Svc snapshot, byte-identical to the trusted source above.
-../.fpr/store/75479fb6d5f34670.fpr
+../.fpr/store/b4e4e109ca696787.fpr
 
 # Exact current actor library (v3.0, pinned throughout), byte-identical to
 # fprisc std/actor.fpr at dcf9fbc (2026-10-13), an allow-listed std module.
-../.fpr/store/201a0e9bf98a5154.fpr
+../.fpr/store/2de24bf2bdd5cb87.fpr
 
 # The loop an app the Editor runs lives in (docs/2026-10-17-PROGRAMS.md):
 # the persistent host loop and its effect interpreter (perform).

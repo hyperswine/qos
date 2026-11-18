@@ -3,13 +3,13 @@
 unsafe program.
 QS = use "../programs/mods/qsys".
 FP = use "../programs/mods/filepolicy".
-EP = use "../programs/mods/ep#c66ad65e68dd97f5".
-Endpoint = use "../programs/mods/epservice#e8bce05a1ddf73db".
-AC = use "std/actor#201a0e9bf98a5154".
+EP = use "../programs/mods/ep#d65056c9d7dc9c18".
+Endpoint = use "../programs/mods/epservice#436f606333c44f26".
+AC = use "std/actor#2de24bf2bdd5cb87".
 AJ = use "../programs/mods/appjobs".
 ES = use "../programs/mods/endpointstate".
 AW = use "../programs/mods/appwire".
-SVC = use "../programs/mods/svc#75479fb6d5f34670".
+SVC = use "../programs/mods/svc#b4e4e109ca696787".
 check tag True = Unit.
 check tag False = error "filepolicy: {tag}".
 get tag (Ok value) = value.
@@ -74,18 +74,18 @@ main =
   _ = check "rejected edits leave state" (snap me ep == before);
   # Expired updates cannot mutate, even if valid and carrying current revision.
   (owner, h) = ep;
-  expired = AC.callWithin 200 me owner (EP.Timed (AC.nowUs Unit - 1) (EP.Write h (EP.IStr (FP.encode 1 FP.defaults))));
+  expired = AC.callWithin 200 me owner (EP.Timed (AC.nowMs Unit - 1) (EP.Write h (EP.IStr (FP.encode 1 FP.defaults))));
   _ = check "expired update refused" (case expired of Ok (Err why) -> True | other -> False);
   _ = check "expiry leaves revision" (snap me ep == before);
   # Deadline admission is enforced again by the owner, not only its adapter.
   private = spawn (privateManager st ns me);
-  denied = AC.callWithin 200 me private (EP.Timed (AC.nowUs Unit - 1) (EP.Write me (EP.IStr (FP.encode 0 p))));
+  denied = AC.callWithin 200 me private (EP.Timed (AC.nowMs Unit - 1) (EP.Write me (EP.IStr (FP.encode 0 p))));
   _ = check "owner rejects expired update" (case denied of Ok (Err why) -> True | other -> False);
   unchanged = EP.flat (AC.callWithin 200 me private (EP.Read me 0));
   _ = check "owner revision unchanged" (strIndexOf "revision=0 " (text (get "owner snapshot" unchanged)) == 0);
   _ = kill private;
   (aActor, ah) = a;
-  wrongValue = EP.flat (AC.callWithin 200 me aActor (EP.Timed (AC.nowUs Unit + 200000) (EP.Write ah (EP.IInt 1))));
+  wrongValue = EP.flat (AC.callWithin 200 me aActor (EP.Timed (AC.nowMs Unit + 200) (EP.Write ah (EP.IInt 1))));
   _ = check "integer file writes still refused" (rejected wrongValue);
   _ = check "existing lease preserved" (text (get "read" (EP.read me a 0)) == "body");
   _ = get "increase and restrict new paths" (update me ep 1 (FP.Policy 3 8 200 50));
@@ -116,10 +116,10 @@ main =
   _ = ES.ended done;
   slow1 = spawn stalled; slow2 = spawn stalled;
   entries = [("/slow1", slow1), ("/slow2", slow2)];
-  started = AC.nowUs Unit;
+  started = AC.nowMs Unit;
   kept = QS.filesReclaimWith p (QS.filesDeadline p) me entries;
-  elapsed = AC.nowUs Unit - started;
-  _ = check "configured shared reclamation budget" (elapsed >= 150000 and elapsed < 1000000 and kept == entries);
+  elapsed = AC.nowMs Unit - started;
+  _ = check "configured shared reclamation budget" (elapsed >= 150 and elapsed < 1000 and kept == entries);
   _ = kill slow1; _ = kill slow2;
   _ = get "close first" (EP.close me a);
   _ = get "close policy" (EP.close me ep);

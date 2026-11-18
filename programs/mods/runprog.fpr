@@ -41,7 +41,7 @@
 unsafe module.
 Plug = use "plug".
 PG = use "std/hosted".
-AC = use "std/actor#201a0e9bf98a5154".
+AC = use "std/actor#2de24bf2bdd5cb87".
 
 Sys.pidOf : Int -> Int .
 Sys.alive : Int -> Bool .

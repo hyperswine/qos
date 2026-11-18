@@ -1,6 +1,6 @@
 # Typed interpretation of the existing storage ABI. Never renumber these tags:
 # separately compiled clients still send Svc.Rpc and Svc.TimedRpc.
-Wire = use "std/storage#a8f7ee14e1efae76".
+Wire = use "std/storage#d3bc6af554583437".
 StorageOp = Type (ReadLatest String | Append String String | Replay String | Delete String | Stats String | Compact | Quiesce | AppendBulk String | Verify | Replace String String | Generation String | Snapshot String | ReplaceAt String Int String).
 TargetKind = Type (FilesOwner | Qlog | FilesAdapter).
 WireVersion = Type (LegacyV1 | DeadlineV2).

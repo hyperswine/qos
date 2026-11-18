@@ -6,7 +6,7 @@
 #: expect fsbench: HOLDS
 unsafe program.
 Services = use "../programs/mods/services".
-EP = use "../programs/mods/ep#c66ad65e68dd97f5".
+EP = use "../programs/mods/ep#d65056c9d7dc9c18".
 FS = use "../std/fs".
 
 ok (Ok _) = True.

@@ -4,8 +4,8 @@
 # follows draining and, when Files exists, its final requested flush. Native
 # explicitly reports unsupported durability; an absent disk is drained only.
 
-AC = use "std/actor#201a0e9bf98a5154".
-Net = use "std/net#464ca3ee0d89bc64".
+AC = use "std/actor#2de24bf2bdd5cb87".
+Net = use "std/net#9450dfa41b157181".
 FS = use "std/fs".
 IO = use "std/blockio".
 

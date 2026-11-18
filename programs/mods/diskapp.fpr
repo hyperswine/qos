@@ -6,7 +6,7 @@ AV = use "appview".
 L = use "shelllayout".
 ST = use "scrolltext".
 AK = use "appkit".
-AC = use "std/actor#201a0e9bf98a5154".
+AC = use "std/actor#2de24bf2bdd5cb87".
 
 init = ({rows = Nil, token = 1, busy = True, ticks = 0, phase = AW.Loading, w = 960, h = 530, focused = True, down = False, capture = 0 - 1, wheel = 0, scroll = 0, dragY = 0, dragScroll = 0, dragged = False}, [AW.Fetch 1 AW.Disk]).
 fetch m = if m.busy then (m, Nil) else

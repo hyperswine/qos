@@ -7,9 +7,9 @@ E = use "../programs/mods/editbuf".
 AW = use "../programs/mods/appwire".
 AJ = use "../programs/mods/appjobs".
 Lease = use "../programs/mods/endpointstate".
-EP = use "../programs/mods/ep#c66ad65e68dd97f5".
-Endpoint = use "../programs/mods/epservice#e8bce05a1ddf73db".
-AC = use "std/actor#201a0e9bf98a5154".
+EP = use "../programs/mods/ep#d65056c9d7dc9c18".
+Endpoint = use "../programs/mods/epservice#436f606333c44f26".
+AC = use "std/actor#2de24bf2bdd5cb87".
 Text = use "../programs/mods/policytext".
 check what True = Unit.
 check what False = error "editorstate: {what}".
@@ -28,17 +28,17 @@ ready until me ns sid =
   case EP.readOnce me ns (EC.url sid) of
     Ok (EP.IStr s) -> if strIndexOf "job token=" s < 0 then s else again until me ns sid
   | other -> again until me ns sid.
-again until me ns sid = if AC.nowUs Unit >= until then error "Editor did not become ready" else
+again until me ns sid = if AC.nowMs Unit >= until then error "Editor did not become ready" else
   _ = Sys.sleepUs 1000; ready until me ns sid.
 removed until me ns sid =
   paths = get "namespace list" (EP.flat (AC.callWithin 250 me ns (EP.NsList (EC.url sid))));
-  if paths == "" then Unit else if AC.nowUs Unit >= until then error "Editor endpoints leaked" else
+  if paths == "" then Unit else if AC.nowMs Unit >= until then error "Editor endpoints leaked" else
   _ = Sys.sleepUs 1000; removed until me ns sid.
 ended until actor = if not (Sys.alive actor) then Unit else
-  if AC.nowUs Unit >= until then error "Editor did not end" else _ = Sys.sleepUs 1000; ended until actor.
+  if AC.nowMs Unit >= until then error "Editor did not end" else _ = Sys.sleepUs 1000; ended until actor.
 unprivileged parent me =
   (initial, _) = ED.init;
-  answer = ED.controlled (AC.nowUs Unit + 1000000) me 0 ES.CancelPrompt 0 initial;
+  answer = ED.controlled (AC.nowMs Unit + 1000) me 0 ES.CancelPrompt 0 initial;
   _ = send parent (rejected answer); Unit.
 main =
   _ = check "query spaces preserved" (ES.parse "revision=12 find a  b" == Ok (12, ES.ShowFind "a  b"));
@@ -96,15 +96,15 @@ main =
   (listingDone, _) = ED.arrived picker.token (Ok (AW.Lines ["/home/a"] "")) picker;
   _ = check "typed job routes completion" (listingDone.listed and listingDone.files == ["/home/a"] and not (ED.pendingKind ES.ListDocuments listingDone.pending));
   me = myself 0;
-  _ = check "stale and expired transitions rejected" (rejected (ED.controlled (AC.nowUs Unit + 1000000) me 0 ES.CancelPrompt 1 typed2) and rejected (ED.controlled (AC.nowUs Unit - 1) me 1 ES.CancelPrompt 1 typed2));
-  _ = check "exhausted revision rejected" (rejected (ED.controlled (AC.nowUs Unit + 1000000) me (intMax Unit) ES.CancelPrompt (intMax Unit) typed2));
+  _ = check "stale and expired transitions rejected" (rejected (ED.controlled (AC.nowMs Unit + 1000) me 0 ES.CancelPrompt 1 typed2) and rejected (ED.controlled (AC.nowMs Unit - 1) me 1 ES.CancelPrompt 1 typed2));
+  _ = check "exhausted revision rejected" (rejected (ED.controlled (AC.nowMs Unit + 1000) me (intMax Unit) ES.CancelPrompt (intMax Unit) typed2));
   child = Sys.spawnApp (unprivileged me);
   _ = check "application cannot control Editor" (get "child" (receiveFromRes me child));
   ns = spawn Endpoint.namespace;
   app = spawn ED.run;
   boot = AC.callWithin 500 me app (AW.magic, AW, (81, (800, 480), (ns, 0, 0, "")));
   _ = check "real Editor bootstrap" (case boot of Ok (magic, schema, sid) -> magic == AW.magic and sid == 81 | other -> False);
-  start = ready (AC.nowUs Unit + 1000000) me ns 81;
+  start = ready (AC.nowMs Unit + 1000) me ns 81;
   _ = check "live initial state" (strIndexOf "prompt=editing" start >= 0);
   schema = text (get "schema" (EP.readOnce me ns (EC.schemaUrl 81)));
   _ = check "discoverable schema" (strIndexOf "jobs=open-document" schema >= 0 and strIndexOf "controlMs=250" schema >= 0);
@@ -131,18 +131,18 @@ main =
   _ = check "ordinary edit visible" (strIndexOf "editKind=typing\ndirty=True" observed >= 0);
   closed = AC.callWithin 1500 me app (AW.Close 81);
   _ = check "real Editor close" (case closed of Ok (AW.Closed 81 result) -> True | other -> False);
-  _ = removed (AC.nowUs Unit + 1000000) me ns 81;
+  _ = removed (AC.nowMs Unit + 1000) me ns 81;
   _ = check "closed actor ended" (not (Sys.alive app));
   orphan = spawn ED.run;
   _ = AC.callWithin 500 me orphan (AW.magic, AW, (82, (800, 480), (ns, 0, 0, "")));
-  _ = ready (AC.nowUs Unit + 1000000) me ns 82;
+  _ = ready (AC.nowMs Unit + 1000) me ns 82;
   _ = kill orphan;
-  _ = removed (AC.nowUs Unit + 1000000) me ns 82;
+  _ = removed (AC.nowMs Unit + 1000) me ns 82;
   # Fail the second registration: withdraw the first, preserve another owner.
   _ = get "reserve schema" (EP.register me ns (EC.schemaUrl 83) me);
   collision = spawn ED.run;
   _ = AC.callWithin 500 me collision (AW.magic, AW, (83, (800, 480), (ns, 0, 0, "")));
-  _ = ended (AC.nowUs Unit + 1000000) collision;
+  _ = ended (AC.nowMs Unit + 1000) collision;
   paths = get "collision listing" (EP.flat (AC.callWithin 250 me ns (EP.NsList (EC.url 83))));
   _ = check "partial registration withdrawn, other owner preserved" (strIndexOf (EC.schemaUrl 83) paths >= 0 and strIndexOf "{EC.url 83}\n" paths < 0);
   _ = kill ns;

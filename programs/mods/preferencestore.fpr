@@ -3,13 +3,13 @@
 unsafe module.
 E = use "editorpreferences".
 T = use "terminalpreferences".
-EP = use "ep#c66ad65e68dd97f5".
+EP = use "ep#d65056c9d7dc9c18".
 ED = use "epdeadline".
-Endpoint = use "leaseslots#efa81888e7fe1099".
-AC = use "std/actor#201a0e9bf98a5154".
+Endpoint = use "leaseslots#0eba65251ebb9450".
+AC = use "std/actor#2de24bf2bdd5cb87".
 Storage = use "std/storageclient".
 SP = use "std/storageprotocol".
-Wire = use "std/storage#a8f7ee14e1efae76".
+Wire = use "std/storage#d3bc6af554583437".
 PC = use "preferencecontrol".
 Snapshot = Type (Editor E.Snapshot | Terminal T.Snapshot).
 url app = "/services/preferences/{app}".
@@ -79,7 +79,7 @@ current until me ns storage app = if storage == 0 then defaults app else
   | Ok (EP.IStr text) -> parse app text
   | Ok other -> Err "invalid preference store response".
 save deadline me ns storage app text recovery = if storage == 0 then Ok Unit else
-  bound = AC.nowUs Unit + PC.controlMs * 1000;
+  bound = AC.nowMs Unit + PC.controlMs;
   until = if deadline < bound then deadline else bound;
   case ED.writeOnceUntil until me ns (url app) (EP.IStr "{text}\n{recovery}") of
     Err why -> Err why

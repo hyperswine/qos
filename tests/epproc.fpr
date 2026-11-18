@@ -18,8 +18,8 @@
 
 unsafe program.
 
-EP = use "../programs/mods/ep#c66ad65e68dd97f5".
-EC = use "../programs/mods/epclient#e09b467f350a5396".
+EP = use "../programs/mods/ep#d65056c9d7dc9c18".
+EC = use "../programs/mods/epclient#decd41e2d3f54b1b".
 
 Sys.ns : Int -> Int .
 Sys.caps : Int -> String .

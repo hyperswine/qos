@@ -1,7 +1,7 @@
 #: expect HOLDS
 # Successful I/O must not allocate an immortal worker/relay identity per page.
 unsafe program.
-B = use "../std/blockio#8b4ffa1467ca03a5".
+B = use "../std/blockio#12684c106eacea7e".
 freeKiB u = case Sys.memInfo 0 of _ :: f :: _ -> f | _ -> 0.
 check yes why = if yes then Unit else error "blockmemory: {why}".
 readPage me svc = case B.call me svc (B.Read 3) of

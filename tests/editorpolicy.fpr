@@ -7,9 +7,9 @@ ED = use "../programs/mods/editapp".
 AW = use "../programs/mods/appwire".
 PG = use "std/hosted".
 Process = use "../programs/mods/runprog".
-EP = use "../programs/mods/ep#c66ad65e68dd97f5".
-Endpoint = use "../programs/mods/epservice#e8bce05a1ddf73db".
-AC = use "std/actor#201a0e9bf98a5154".
+EP = use "../programs/mods/ep#d65056c9d7dc9c18".
+Endpoint = use "../programs/mods/epservice#436f606333c44f26".
+AC = use "std/actor#2de24bf2bdd5cb87".
 check what True = Unit.
 check what False = error "editorpolicy: {what}".
 get what (Ok x) = x.
@@ -29,7 +29,7 @@ setRun me ns rev p = get "run update" (EP.writeOnce me ns RP.url (EP.IStr (RP.en
 setAccess me ns rev p = get "access update" (EP.writeOnce me ns FA.url (EP.IStr (FA.encode rev p))).
 # A confined process must not be able to alter the system-owned policy.
 unprivileged owner parent me =
-  result = AC.callWithin 200 me owner (XP.PutRun (AC.nowUs Unit + 200000) me 0 (RP.FixedBytes 1048576));
+  result = AC.callWithin 200 me owner (XP.PutRun (AC.nowMs Unit + 200) me 0 (RP.FixedBytes 1048576));
   send parent result.
 main =
   _ = check "default run codec" (RP.parse (RP.encode 0 RP.defaults) == Ok (RP.Snapshot 0 RP.defaults));
@@ -70,7 +70,7 @@ main =
   _ = check "running admission immutable" (admission == RP.Admitted 1 33554432);
   _ = check "next run uses current policy" (RP.admit (get "next snapshot" (XP.currentRun me ns)) 100 == Ok (RP.Admitted 2 16777216));
   _ = check "stale run update" (rejected (EP.writeOnce me ns RP.url (EP.IStr (RP.encode 1 RP.defaults))));
-  expired = AC.callWithin 200 me owner (XP.PutRun (AC.nowUs Unit - 1) me 2 RP.defaults);
+  expired = AC.callWithin 200 me owner (XP.PutRun (AC.nowMs Unit - 1) me 2 RP.defaults);
   _ = check "expired unchanged" (case expired of Ok (Err why) -> XP.currentRun me ns == Ok (RP.Snapshot 2 (RP.FixedBytes 16777216)) | other -> False);
   program = spawn (stand me);
   (initial, _) = ED.init;

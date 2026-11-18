@@ -2,11 +2,11 @@
 # One budget covers admission, queued time, recovery and all page operations.
 # A timed-out mutation is never replayed: its commit outcome may be unknown.
 
-AC = use "std/actor#201a0e9bf98a5154".
+AC = use "std/actor#2de24bf2bdd5cb87".
 
 defaultMs = 10000.
 
-now u = AC.nowUs u.
+now u = AC.nowMs u.
 deadline ms = AC.deadlineAfter ms.
 expired until = now Unit >= until.
 missing why = why == "no such file".

@@ -2,9 +2,9 @@
 # endpoints. A parked watcher removes the endpoints if the owning app dies.
 unsafe module.
 
-EP = use "ep#c66ad65e68dd97f5".
-Endpoint = use "leaseslots#efa81888e7fe1099".
-AC = use "std/actor#201a0e9bf98a5154".
+EP = use "ep#d65056c9d7dc9c18".
+Endpoint = use "leaseslots#0eba65251ebb9450".
+AC = use "std/actor#2de24bf2bdd5cb87".
 Request = Type (Inspect Int | Change Int Int String).
 controlMs = 250.
 url app session = "/apps/{app}/{session}/preferences".
@@ -23,12 +23,12 @@ register until me ns path owner = EP.flat (AC.callUntil until me ns (EP.NsReg pa
 # Registration replies and forwarded opens both come FROM the namespace.
 # A separate registrar keeps its correlated replies off the endpoint mailbox.
 claim owner ns path me =
-  until = AC.nowUs Unit + controlMs * 1000;
+  until = AC.nowMs Unit + controlMs;
   result = case register until me ns path owner of Err why -> Err why
     | Ok u -> register until me ns (schemaUrl path) owner;
   _ = send owner result; Unit.
 withdraw me ns path =
-  until = AC.nowUs Unit + controlMs * 1000;
+  until = AC.nowMs Unit + controlMs;
   # Queue withdrawals before exit. No synchronous reply wait on this mixed
   # namespace channel: pending opens may precede the acknowledgements.
   _ = report (AC.sendSureUntil until me ns (me, Sys.nextId Unit, EP.NsUnreg path));
@@ -55,7 +55,7 @@ step owner watcher path schema me state =
     (from, id, command) ->
       stopping = case command of EP.Close h -> h == stopHandle and from == watcher | other -> False;
       if stopping then (False, state) else
-        live = Endpoint.sweep handles cursor (AC.nowUs Unit);
+        live = Endpoint.sweep handles cursor (AC.nowMs Unit);
         (after, serial) = Endpoint.dispatch (read owner path schema) (write owner path) me live next (from, id) from command;
         (True, (after, serial, (cursor + 1) % 64))
   | stale -> (True, state);
@@ -78,6 +78,6 @@ check until client expected current =
   if Sys.pidOf client != 0 then Err "preferences are system-only"
   else if expected != current then Err "stale preference revision; current revision={current}"
   else if current == intMax Unit then Err "preference revision exhausted"
-  else if AC.nowUs Unit >= until then Err "preference update expired" else Ok Unit.
+  else if AC.nowMs Unit >= until then Err "preference update expired" else Ok Unit.
 
 owned borrowed = value = keep borrowed; _ = drop borrowed; value.

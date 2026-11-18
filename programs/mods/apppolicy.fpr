@@ -1,8 +1,8 @@
 # One live owner for app I/O and recovery policy. Jobs take immutable
 # snapshots; updates cannot reset endpoint ownership or recovery counters.
-AC = use "std/actor#201a0e9bf98a5154".
-EP = use "ep#c66ad65e68dd97f5".
-Endpoint = use "leaseslots#efa81888e7fe1099".
+AC = use "std/actor#2de24bf2bdd5cb87".
+EP = use "ep#d65056c9d7dc9c18".
+Endpoint = use "leaseslots#0eba65251ebb9450".
 Text = use "policytext".
 IoPolicy = Type (IoPolicy Int Int Int Int).
 RecoveryPolicy = Type (RecoveryPolicy Int Int Int Int Int).
@@ -73,7 +73,7 @@ step me snapshot =
   (from, id, request) = message;
   ret = (from, id);
   case request of
-    Get until -> _ = AC.reply ret (if AC.nowUs Unit >= until then Err "app policy: deadline exceeded" else Ok snapshot); (True, snapshot)
+    Get until -> _ = AC.reply ret (if AC.nowMs Unit >= until then Err "app policy: deadline exceeded" else Ok snapshot); (True, snapshot)
   | Put until client expected next ->
       result = update until client expected next snapshot;
       case result of
@@ -88,7 +88,7 @@ update until client expected next snapshot =
     Err why -> Err "app policy: {why}"
   | Ok p -> (case AC.deadlineAfter (ownerMs p) of
       Err why -> Err "app policy: derived deadline would overflow"
-    | Ok deadline -> if AC.nowUs Unit >= until then Err "app policy: deadline exceeded before update"
+    | Ok deadline -> if AC.nowMs Unit >= until then Err "app policy: deadline exceeded before update"
         else Ok (Snapshot (rev + 1) p)).
 readPolicy owner until me client path =
   if path == schemaUrl then Ok (EP.IStr schema)

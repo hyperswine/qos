@@ -3,10 +3,10 @@
 unsafe module.
 RP = use "runpolicy".
 FA = use "fileaccesspolicy".
-AC = use "std/actor#201a0e9bf98a5154".
-EP = use "ep#c66ad65e68dd97f5".
+AC = use "std/actor#2de24bf2bdd5cb87".
+EP = use "ep#d65056c9d7dc9c18".
 ED = use "epdeadline".
-Endpoint = use "leaseslots#efa81888e7fe1099".
+Endpoint = use "leaseslots#0eba65251ebb9450".
 Request = Type (GetRun Int | PutRun Int Int Int RP.RunPolicy | GetAccess Int | PutAccess Int Int Int FA.FileAccessPolicy).
 controlMs = 250.
 start me ns =
@@ -21,8 +21,8 @@ step me state =
   (from, id, request) = receive me;
   ret = (from, id);
   case request of
-    GetRun until -> _ = AC.reply ret (if AC.nowUs Unit >= until then Err "policy read expired" else Ok state.run); (True, state)
-  | GetAccess until -> _ = AC.reply ret (if AC.nowUs Unit >= until then Err "policy read expired" else Ok state.access); (True, state)
+    GetRun until -> _ = AC.reply ret (if AC.nowMs Unit >= until then Err "policy read expired" else Ok state.run); (True, state)
+  | GetAccess until -> _ = AC.reply ret (if AC.nowMs Unit >= until then Err "policy read expired" else Ok state.access); (True, state)
   | PutRun until client expected p -> (case updateRun until client expected p state.run of
       Err why -> _ = AC.reply ret (Err why); (True, state)
     | Ok next -> _ = AC.reply ret (Ok next); (True, {state | run = next}))
@@ -36,11 +36,11 @@ checkUpdate client expected revision =
 updateRun until client expected p snapshot = case checkUpdate client expected (RP.revision snapshot) of
     Err why -> Err why
   | Ok u -> case RP.validate p of Err why -> Err why
-    | Ok valid -> if AC.nowUs Unit >= until then Err "policy update expired" else Ok (RP.Snapshot (expected + 1) valid).
+    | Ok valid -> if AC.nowMs Unit >= until then Err "policy update expired" else Ok (RP.Snapshot (expected + 1) valid).
 updateAccess until client expected p snapshot = case checkUpdate client expected (FA.revision snapshot) of
     Err why -> Err why
   | Ok u -> case FA.validate p of Err why -> Err why
-    | Ok valid -> if AC.nowUs Unit >= until then Err "policy update expired" else Ok (FA.Snapshot (expected + 1) valid).
+    | Ok valid -> if AC.nowMs Unit >= until then Err "policy update expired" else Ok (FA.Snapshot (expected + 1) valid).
 readPolicy owner until me client path =
   if path == RP.url then answer RP.render (AC.callUntil until me owner (GetRun until))
   else if path == RP.schemaUrl then answer runSchema (AC.callUntil until me owner (GetRun until))

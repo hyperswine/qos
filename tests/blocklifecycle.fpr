@@ -2,8 +2,8 @@
 #: expect HOLDS
 # Queued cancellation, active cancellation, global queue bound and drain.
 unsafe program.
-B = use "../std/blockio#8b4ffa1467ca03a5".
-Native = use "../std/block#615ea5947fe13b00".
+B = use "../std/blockio#12684c106eacea7e".
+Native = use "../std/block#ac4ea92ddd273d16".
 blkTestStall : Unit -> Int .
 blkTestBusy : Unit -> Int .
 err why (Err text) = why == text.

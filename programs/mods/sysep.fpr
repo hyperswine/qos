@@ -32,12 +32,12 @@
 # url and its client, and each request is one function.
 # ============================================================================
 
-EP = use "ep#c66ad65e68dd97f5".
-SV = use "svc#75479fb6d5f34670".
+EP = use "ep#d65056c9d7dc9c18".
+SV = use "svc#b4e4e109ca696787".
 UM = use "uart#cdee34460c2ad81a".
 TM = use "timer#38fa906125d48580".
-Endpoint = use "epservice#e8bce05a1ddf73db".
-AC = use "std/actor#201a0e9bf98a5154".
+Endpoint = use "epservice#436f606333c44f26".
+AC = use "std/actor#2de24bf2bdd5cb87".
 
 IStr = EP.IStr. IInt = EP.IInt. IUnit = EP.IUnit. IFn = EP.IFn. IErr = EP.IErr.
 Open = EP.Open. Read = EP.Read. Write = EP.Write. Close = EP.Close.

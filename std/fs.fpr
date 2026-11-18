@@ -22,12 +22,12 @@
 # ============================================================================
 
 QL = use "../programs/mods/qlog".
-SVC = use "../programs/mods/svc#75479fb6d5f34670".
-AC = use "std/actor#201a0e9bf98a5154".
+SVC = use "../programs/mods/svc#b4e4e109ca696787".
+AC = use "std/actor#2de24bf2bdd5cb87".
 B = use "std/blockio".
-EP = use "../programs/mods/ep#c66ad65e68dd97f5".
-Wire = use "std/storage#a8f7ee14e1efae76".
-ED = use "../programs/mods/epdeadline#08a8ecf9d7c57d85".
+EP = use "../programs/mods/ep#d65056c9d7dc9c18".
+Wire = use "std/storage#d3bc6af554583437".
+ED = use "../programs/mods/epdeadline#96e69ecbbd8c7fce".
 
 # spawn the service on a device the caller opened; the returned actor
 # handle IS the filesystem from here on
@@ -256,7 +256,7 @@ fileReply (Err why) = Err why.
 
 requestFields message = case message of
     SVC.TimedRpc caller id until tag key payload -> ((caller, id, True), (until, (tag, key, payload)))
-  | SVC.Rpc caller tag key payload -> ((caller, 0, False), (Wire.now Unit + Wire.defaultMs * 1000, (tag, key, payload))).
+  | SVC.Rpc caller tag key payload -> ((caller, 0, False), (Wire.now Unit + Wire.defaultMs, (tag, key, payload))).
 
 viaNamespaceUntil until me ns 1 key _ = fileReply (ED.readOnceUntil until me ns "/services/files/{key}/latest").
 viaNamespaceUntil until me ns 2 key bytes = fileReply (ED.writeOnceUntil until me ns "/services/files/{key}/append" (EP.IStr bytes)).

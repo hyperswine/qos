@@ -5,9 +5,9 @@ CP = use "apppolicy".
 AW = use "appwire".
 AJ = use "appjobs".
 L = use "shelllayout".
-AC = use "std/actor#201a0e9bf98a5154".
+AC = use "std/actor#2de24bf2bdd5cb87".
 Inbox = Type (Message (Int, Int) AW.Request | JobResult Int (Result AW.Snapshot String) | Idle | Gone).
-start me = case bootstrap (AC.nowUs Unit + CP.bootstrapReceiveMs * 1000) me of
+start me = case bootstrap (AC.nowMs Unit + CP.bootstrapReceiveMs) me of
     Err why -> Err why
   | Ok request -> begin me request.
 begin me request =
@@ -53,7 +53,7 @@ finish me ctx = case CP.current me ctx.policies of
     Err why -> _ = kill ctx.worker; Err "worker forced stop; {why}"
   | Ok snapshot -> finishWithin (CP.workerStopMs (CP.recovery (CP.policy snapshot))) (intMax Unit) me ctx.
 finishWithin stopMs until me ctx =
-  deadline = case AC.deadlineAfter stopMs of Ok d -> if d < until then d else until | Err why -> AC.nowUs Unit;
+  deadline = case AC.deadlineAfter stopMs of Ok d -> if d < until then d else until | Err why -> AC.nowMs Unit;
   result = case AC.callUntil deadline me ctx.worker AW.Stop of
       Err why -> Err "worker forced stop: {why}"
     | Ok (AW.Stopped result) -> result
@@ -78,7 +78,7 @@ selfResult me = case receiveFromNow me me of
       (case owned of (id, AW.Completed token result) -> JobResult token result | other -> Idle)
   | other -> Idle.
 
-bootstrap deadline me = if AC.nowUs Unit >= deadline then Err "startup deadline exceeded" else
+bootstrap deadline me = if AC.nowMs Unit >= deadline then Err "startup deadline exceeded" else
   case receiveNow me of
     Ok borrowed -> owned = keep borrowed; _ = drop borrowed; Ok owned
   | Err why -> _ = AC.napUntil deadline; bootstrap deadline me.

@@ -94,12 +94,13 @@ static V h_blkFlush(V d) {
   return TAG((sw)ops->flush(st));
 }
 
-/* Park the calling actor until a message arrives or `until` (microseconds
- * of the 10 MHz timebase) passes: the completion wait block clients use. */
+/* Park the calling actor until a message arrives or `until` passes: the
+ * completion wait block clients use. `until` is a std/actor deadline,
+ * absolute milliseconds since boot (Sys.uptimeMs); the timebase is 10 MHz. */
 static V h_blkWaitInbox(V me, V until) {
-  sw us = UNTAG(until);
-  if (us < 0 || (uint64_t)us > UINT64_MAX / 10) return TAG(0);
-  return TAG(fpr_wait_any_until_c(me, (uint64_t)us * 10));
+  sw ms = UNTAG(until);
+  if (ms < 0 || (uint64_t)ms > UINT64_MAX / 10000) return TAG(0);
+  return TAG(fpr_wait_any_until_c(me, (uint64_t)ms * 10000));
 }
 
 FPR_FN(fpr_g_blkPages, h_blkPages, 1);

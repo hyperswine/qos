@@ -5,7 +5,7 @@ M = use "manifest".
 E = use "std/encoding".
 Storage = use "std/storageclient".
 SP = use "std/storageprotocol".
-Wire = use "std/storage#a8f7ee14e1efae76".
+Wire = use "std/storage#d3bc6af554583437".
 AW = use "appwire".
 address appId key = case M.validId appId of
     Err why -> Err "app store: no valid session identity ({why})"

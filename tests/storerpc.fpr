@@ -1,5 +1,5 @@
 # Mixed traffic stays queued; storage send refusal and death are results.
-S = use "../programs/mods/svc#75479fb6d5f34670".
+S = use "../programs/mods/svc#b4e4e109ca696787".
 Rpc = S.Rpc.
 store me = (ret, _) = S.requestFields (receive me); S.reply ret (Ok "storage reply").
 event target me = send target (Err "unrelated event").

@@ -1,8 +1,8 @@
 # Deadline-aware endpoint owner. Six binary decisions select one of 64 slots.
 # A fresh handle carries its generation in its high bits.
 unsafe module.
-EP = use "ep#c66ad65e68dd97f5".
-AC = use "std/actor#201a0e9bf98a5154".
+EP = use "ep#d65056c9d7dc9c18".
+AC = use "std/actor#2de24bf2bdd5cb87".
 Sys.alive : Int -> Bool .
 Slots = Type (Empty | Branch Slots Slots | Occupied Int String Int Int).
 
@@ -87,25 +87,25 @@ sweepCursor root node cursor base size = case node of
       if cursor < base + half then sweepCursor root left cursor base half
       else sweepCursor root right cursor (base + half) half
   | Occupied handle url client until ->
-      live = if AC.nowUs Unit >= until or not (Sys.alive client) then clear root cursor 32 else root;
+      live = if AC.nowMs Unit >= until or not (Sys.alive client) then clear root cursor 32 else root;
       (live, (cursor + 1) % 64).
 dispatch rd wr me slots next ret client command = case command of
     EP.Open url mode ->
-      now = AC.nowUs Unit;
+      now = AC.nowMs Unit;
       h = if strlen url > 2048 then 0 else freeHandle slots next now 64;
       (case h == 0 of
         True -> _ = AC.reply ret (EP.Refused "endpoint: handle budget exhausted"); (slots, next)
       | False ->
-          after = put slots (h % 64) 32 (Occupied h (strcat url "") client (now + 60000000));
+          after = put slots (h % 64) 32 (Occupied h (strcat url "") client (now + 60000));
           _ = AC.reply ret (EP.Opened h);
           (after, nextHandle h))
   | EP.Timed until q ->
-      now = AC.nowUs Unit;
+      now = AC.nowMs Unit;
       if now >= until then
       _ = AC.reply ret (Err "endpoint: deadline exceeded before execution"); (slots, next)
       else operateAt rd wr me slots next ret client now until q
   | other ->
-      now = AC.nowUs Unit;
+      now = AC.nowMs Unit;
       operateAt rd wr me slots next ret client now (now + 10000000) other.
 operateAt rd wr me slots next ret client now until command = case command of
     EP.Close h -> _ = AC.reply ret (Ok 0); (close slots h client, next)

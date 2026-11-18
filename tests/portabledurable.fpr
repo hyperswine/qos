@@ -3,8 +3,8 @@
 unsafe program.
 QL = use "../programs/mods/qlog".
 B = use "std/blockio".
-SVC = use "svc#75479fb6d5f34670".
-Wire = use "std/storage#a8f7ee14e1efae76".
+SVC = use "svc#b4e4e109ca696787".
+Wire = use "std/storage#d3bc6af554583437".
 action = 0.
 outcome r = case r of Ok s -> "Ok {s}" | Err why -> "Err {why}".
 inspect src h =

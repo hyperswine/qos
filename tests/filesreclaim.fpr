@@ -2,8 +2,8 @@
 #: expect filesreclaim: HOLDS
 unsafe program.
 QS = use "../programs/mods/qsys".
-EP = use "../programs/mods/ep#c66ad65e68dd97f5".
-AC = use "std/actor#201a0e9bf98a5154".
+EP = use "../programs/mods/ep#d65056c9d7dc9c18".
+AC = use "std/actor#2de24bf2bdd5cb87".
 check tag True = Unit.
 check tag False = error "filesreclaim: {tag}".
 stalled me = _ = Sys.sleepUs 10000000; Unit.
@@ -22,11 +22,11 @@ main =
   a = spawn stalled;
   b = spawn stalled;
   entries = [("/a", a), ("/b", b)];
-  start = AC.nowUs Unit;
+  start = AC.nowMs Unit;
   kept = QS.filesReclaim me entries;
-  elapsed = AC.nowUs Unit - start;
-  _ = print "filesreclaim: stalled pair {elapsed} us";
-  _ = check "one shared wait budget" (elapsed >= 1500000 and elapsed < 3000000);
+  elapsed = AC.nowMs Unit - start;
+  _ = print "filesreclaim: stalled pair {elapsed} ms";
+  _ = check "one shared wait budget" (elapsed >= 1500 and elapsed < 3000);
   _ = check "timeouts retain owners" (kept == entries and Sys.alive a and Sys.alive b);
   _ = kill a; _ = kill b;
 

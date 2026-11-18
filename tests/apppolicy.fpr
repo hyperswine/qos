@@ -5,9 +5,9 @@ AP = use "../programs/mods/appclient".
 AJ = use "../programs/mods/appjobs".
 AS = use "../programs/mods/appsession".
 AW = use "../programs/mods/appwire".
-EP = use "../programs/mods/ep#c66ad65e68dd97f5".
-Endpoint = use "../programs/mods/epservice#e8bce05a1ddf73db".
-AC = use "std/actor#201a0e9bf98a5154".
+EP = use "../programs/mods/ep#d65056c9d7dc9c18".
+Endpoint = use "../programs/mods/epservice#436f606333c44f26".
+AC = use "std/actor#2de24bf2bdd5cb87".
 S2 = use "../programs/mods/scene2d".
 check tag True = Unit.
 check tag False = error "apppolicy: {tag}".
@@ -97,7 +97,7 @@ main =
   _ = send worker (me, id, AW.Read 1 (AW.ReadPath "/slow"));
   _ = receiveFromRes me ep;
   _ = set me ns 1 short;
-  original = AC.awaitReplyUntil (AC.nowUs Unit + 1500000) me worker id;
+  original = AC.awaitReplyUntil (AC.nowMs Unit + 1500) me worker id;
   _ = check "in-flight read keeps old deadline" (case original of Ok (AW.Completed token (Ok (AW.Text value))) -> value == "body" | other -> False);
   used = AC.callWithin 200 me worker AW.InspectPolicy;
   _ = check "worker exposes admitted revision" (used == Ok (CP.Snapshot 1 long));
@@ -108,7 +108,7 @@ main =
   _ = check "cleanup retained own longer budget" (case clean of Ok s -> s.held == (0, 0) and s.uncertain == "" | other -> False);
   _ = check "stale rejected" (rejected (EP.writeOnce me ns CP.url (EP.IStr (CP.encode 1 CP.defaults))));
   _ = check "stale preserved values" (CP.current me policies == Ok (CP.Snapshot 2 short));
-  expired = AC.callWithin 200 me policies (CP.Put (AC.nowUs Unit - 1) me 2 CP.defaults);
+  expired = AC.callWithin 200 me policies (CP.Put (AC.nowMs Unit - 1) me 2 CP.defaults);
   _ = check "expired refused" (case expired of Ok (Err why) -> True | other -> False);
   _ = check "expired leaves revision" (CP.current me policies == Ok (CP.Snapshot 2 short));
   _ = check "delete uses live budget" (rejected (fetch me worker (AW.DeletePath "/slow")));

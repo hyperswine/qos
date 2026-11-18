@@ -2,7 +2,7 @@
 unsafe program.
 Q = use "../programs/mods/qlog".
 B = use "std/blockio".
-AC = use "std/actor#201a0e9bf98a5154".
+AC = use "std/actor#2de24bf2bdd5cb87".
 Str = use "std/string".
 worker last me =
   (a, id, cmd) = receive me;

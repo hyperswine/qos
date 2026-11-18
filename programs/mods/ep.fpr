@@ -41,7 +41,7 @@
 # (docs/2026-10-02-QOS-AUDIT.md), and the contract says so.
 # ============================================================================
 
-AC = use "std/actor#201a0e9bf98a5154".
+AC = use "std/actor#2de24bf2bdd5cb87".
 
 Sys.pidOf : Int -> Int .
 
@@ -271,7 +271,7 @@ lsLoop ns me hs next =
   lsMsg ns me hs next (from, id) q.
 lsMsg : unsafe Int -> Int -> List (Int, String) -> Int -> (Int, Int) -> Ep -> a .
 lsMsg ns me hs next ret q = case q of
-    Timed until command -> if AC.nowUs Unit >= until then AC.reply ret (Err "endpoint: deadline exceeded before execution") >> lsLoop ns me hs next else lsMsg ns me hs next ret command
+    Timed until command -> if AC.nowMs Unit >= until then AC.reply ret (Err "endpoint: deadline exceeded before execution") >> lsLoop ns me hs next else lsMsg ns me hs next ret command
   | Open url mode -> lsOpen ns me hs next ret url
   | Read h n -> AC.reply ret (lsRead ns me (hUrl hs h)) >> lsLoop ns me hs next
   | Write h v -> AC.reply ret (Err "a listing is read-only") >> lsLoop ns me hs next
@@ -398,7 +398,7 @@ sLoop rd wr me hs next =
   sMsg rd wr me hs next (from, id) from q.
 sMsg : unsafe _ -> _ -> Int -> List (Int, String, Int) -> Int -> (Int, Int) -> Int -> Ep -> a .
 sMsg rd wr me hs next ret from q = case q of
-    Timed until command -> if AC.nowUs Unit >= until then AC.reply ret (Err "endpoint: deadline exceeded before execution") >> sLoop rd wr me hs next else sMsg rd wr me hs next ret from command
+    Timed until command -> if AC.nowMs Unit >= until then AC.reply ret (Err "endpoint: deadline exceeded before execution") >> sLoop rd wr me hs next else sMsg rd wr me hs next ret from command
   | Open url mode -> AC.reply ret (Opened next) >> sLoop rd wr me ((next, strcat url "", from) :: hs) (next + 1)
   | Read h n -> AC.reply ret (sRead rd me (hFind hs h)) >> sLoop rd wr me hs next
   | Write h v -> AC.reply ret (sWrite wr me (hFind hs h) v) >> sLoop rd wr me hs next

@@ -47,19 +47,19 @@ Storage = use "std/storageclient".
 SP = use "std/storageprotocol".
 Lifecycle = use "std/lifecycle".
 AK  = use "appkit".
-BlockEP = use "blockep#bd295a609815dadd".
-SVC = use "svc#75479fb6d5f34670".
-EP  = use "ep#c66ad65e68dd97f5".
+BlockEP = use "blockep#e39ef0a30e25ff08".
+SVC = use "svc#b4e4e109ca696787".
+EP  = use "ep#d65056c9d7dc9c18".
 Core = use "coreutil".
 QAR = use "qar".
 Plug = use "plug".
 AppsEP = use "appsep".
-Endpoint = use "epservice#e8bce05a1ddf73db".
-Slots = use "leaseslots#efa81888e7fe1099".
-AC = use "std/actor#201a0e9bf98a5154".
+Endpoint = use "epservice#436f606333c44f26".
+Slots = use "leaseslots#0eba65251ebb9450".
+AC = use "std/actor#2de24bf2bdd5cb87".
 GX = use "graphics".
 GL = use "glsvc".
-Wire = use "std/storage#a8f7ee14e1efae76".
+Wire = use "std/storage#d3bc6af554583437".
 FP = use "filepolicy".
 Preferences = use "preferencestore".
 
@@ -291,7 +291,7 @@ fileRetireAsk mgr st path me body next hs ret sender until =
   fileRetireWith (FP.marginMs FP.defaults) mgr st path me body next hs ret sender until.
 fileRetireWith margin mgr st path me body next hs ret sender until =
   idle = case hs of Nil -> True | h :: rest -> False;
-  if mgr > 0 and sender == mgr and idle and margin > 0 and margin <= intMax Unit / 1000 and until - AC.nowUs Unit > margin * 1000
+  if mgr > 0 and sender == mgr and idle and margin > 0 and until - AC.nowMs Unit > margin
   then AC.reply ret (Ok 1) >> Unit
   else AC.reply ret (Ok 0) >> fileServe mgr st path me body next hs.
 # Load on the first operation that needs the previous bytes. Retry after a failed replay.
@@ -339,7 +339,7 @@ fileTruncate mgr st path me body next hs ret sender = case storage me st (SP.Del
   | Err why -> AC.reply ret (Refused "replace {path}: {why}") >> fileServe mgr st path me body next hs.
 fileTimed : unsafe Int -> Int -> Int -> String -> Int -> Result String String -> Int -> List (Int, Int, Int) -> (Int, Int) -> Int -> EP.Ep -> Unit .
 fileTimed mgr until st path me body next hs ret sender q =
-  if AC.nowUs Unit >= until then AC.reply ret (Err "endpoint: deadline exceeded before execution") >> fileServe mgr st path me body next hs else
+  if AC.nowMs Unit >= until then AC.reply ret (Err "endpoint: deadline exceeded before execution") >> fileServe mgr st path me body next hs else
   case q of
       Write h (IInt margin) -> if h == 0 - 1 then fileRetireWith margin mgr st path me body next hs ret sender until
         else fileMsg mgr st path me body next hs ret sender (Write h (IInt margin))
@@ -436,7 +436,7 @@ filesCommit until ctx me act ret next =
   FilesCtx st ns policy revision admin = ctx;
   case AC.deadlineAfter (FP.reclaimMs next) of
     Err why -> AC.reply ret (Err "file policy: reclaim deadline would overflow") >> filesServe ctx me act
-  | Ok deadline -> if AC.nowUs Unit >= until then AC.reply ret (Err "file policy: deadline exceeded before update") >> filesServe ctx me act
+  | Ok deadline -> if AC.nowMs Unit >= until then AC.reply ret (Err "file policy: deadline exceeded before update") >> filesServe ctx me act
       else _ = AC.reply ret (Ok (IStr (FP.snapshot (revision + 1) next (filesLive act))));
         filesServe (FilesCtx st ns next (revision + 1) admin) me act.
 filesEntries Nil = Nil.
@@ -478,7 +478,7 @@ filesMsg : unsafe Int -> FilesCtx -> Int -> List (String, Int) -> (Int, Int) -> 
 filesMsg deadline ctx me act ret from q =
   FilesCtx st ns policy revision admin = ctx;
   case q of
-    EP.Timed until command -> if AC.nowUs Unit >= until then AC.reply ret (Err "endpoint: deadline exceeded before execution") >> filesServe ctx me act else filesMsg (if until < deadline then until else deadline) ctx me act ret from command
+    EP.Timed until command -> if AC.nowMs Unit >= until then AC.reply ret (Err "endpoint: deadline exceeded before execution") >> filesServe ctx me act else filesMsg (if until < deadline then until else deadline) ctx me act ret from command
   | Open url mode -> filesOpen ctx me act ret from url mode
   | Read h n -> if from == admin and admin > 0 then AC.reply ret (Ok (IStr (FP.snapshot revision policy (filesLive act)))) >> filesServe ctx me act
       else AC.reply ret (Err "a file namespace: open a path under it") >> filesServe ctx me act
@@ -503,7 +503,7 @@ filesUrlOf act a = case act of
 # no).  True: it has ended (or had already).  A late or missing answer is
 # "no": the actor is kept, and asked again when it is next idle.
 # A clock near exhaustion cannot start another pass. Never wrap a deadline.
-filesDeadline policy = case AC.deadlineAfter (FP.reclaimMs policy) of Ok until -> until | Err why -> AC.nowUs Unit.
+filesDeadline policy = case AC.deadlineAfter (FP.reclaimMs policy) of Ok until -> until | Err why -> AC.nowMs Unit.
 filesRetireAsk : unsafe Int -> Int -> Bool .
 filesRetireAsk me a = filesRetireWith FP.defaults (filesDeadline FP.defaults) me a.
 filesRetireAskUntil : unsafe Int -> Int -> Int -> Bool .
@@ -521,7 +521,7 @@ filesReclaim : unsafe Int -> List (String, Int) -> List (String, Int) .
 filesReclaim me act = filesReclaimWith FP.defaults (filesDeadline FP.defaults) me act.
 filesReclaimUntil : unsafe Int -> Int -> List (String, Int) -> List (String, Int) .
 filesReclaimUntil until me act = filesReclaimWith FP.defaults until me act.
-filesReclaimWith policy until me act = if AC.nowUs Unit >= until then act else case act of
+filesReclaimWith policy until me act = if AC.nowMs Unit >= until then act else case act of
     Nil -> Nil
   | (p, a) :: rest ->
       if a <= 0 then (p, a) :: filesReclaimWith policy until me rest

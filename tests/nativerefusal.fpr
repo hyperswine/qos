@@ -1,8 +1,8 @@
 unsafe program.
 # Test kernel: execute actual relocatable process images against a full,
 # dead and killed-during-request storage actor. Then serve a real request.
-FS = use "std/fs#19932fc6492e8a87".
-S = use "../programs/mods/svc#75479fb6d5f34670".
+FS = use "std/fs#e2eac59ab17e6dd5".
+S = use "../programs/mods/svc#b4e4e109ca696787".
 NI = use "nativeimage".
 Sys.bindStore : Int -> S.Rpc -> Unit .
 Sys.bindApp : String -> Unit .

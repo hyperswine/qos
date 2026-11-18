@@ -5,8 +5,8 @@ unsafe program.
 # process under one, and a 64-byte id gets its own whole store url (it
 # used to be cut at 100/120 bytes, so long ids sharing a prefix shared a
 # store).  tools/app-id-check.py builds and boots it.
-FS = use "std/fs#19932fc6492e8a87".
-S = use "../programs/mods/svc#75479fb6d5f34670".
+FS = use "std/fs#e2eac59ab17e6dd5".
+S = use "../programs/mods/svc#b4e4e109ca696787".
 M = use "../programs/mods/manifest".
 NI = use "nativeimage".
 Sys.bindStore : Int -> S.Rpc -> Unit .

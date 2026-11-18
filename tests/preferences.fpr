@@ -10,9 +10,9 @@ PC = use "../programs/mods/preferencecontrol".
 AW = use "../programs/mods/appwire".
 AJ = use "../programs/mods/appjobs".
 Lease = use "../programs/mods/endpointstate".
-EP = use "../programs/mods/ep#c66ad65e68dd97f5".
-Endpoint = use "../programs/mods/epservice#e8bce05a1ddf73db".
-AC = use "std/actor#201a0e9bf98a5154".
+EP = use "../programs/mods/ep#d65056c9d7dc9c18".
+Endpoint = use "../programs/mods/epservice#436f606333c44f26".
+AC = use "std/actor#2de24bf2bdd5cb87".
 buffer m = E.toText m.buf.
 output m = m.out.
 check what yes = if yes then Unit else error "preferences: {what}".
@@ -26,13 +26,13 @@ readPrefs me ns path = text (get (EP.readOnce me ns path)).
 ready until me ns path = case EP.readOnce me ns path of
     Ok (EP.IStr s) -> if strIndexOf "recoveryBusy=True" s < 0 then s else again until me ns path
   | other -> again until me ns path.
-again until me ns path = if AC.nowUs Unit >= until then error "preference startup timeout" else
+again until me ns path = if AC.nowMs Unit >= until then error "preference startup timeout" else
   _ = Sys.sleepUs 1000; ready until me ns path.
 removed until me ns path =
   names = get (EP.flat (AC.callWithin 250 me ns (EP.NsList path)));
-  if names == "" then Unit else if AC.nowUs Unit >= until then error "preference endpoints leaked" else
+  if names == "" then Unit else if AC.nowMs Unit >= until then error "preference endpoints leaked" else
     _ = Sys.sleepUs 1000; removed until me ns path.
-ended until actor = if not (Sys.alive actor) then Unit else if AC.nowUs Unit >= until then error "failed app remained alive" else
+ended until actor = if not (Sys.alive actor) then Unit else if AC.nowMs Unit >= until then error "failed app remained alive" else
   _ = Sys.sleepUs 1000; ended until actor.
 boot me app sid ns = check "app bootstrap" (case AC.callWithin 500 me app (AW.magic, AW, (sid, (800, 480), (ns, 0, 0, ""))) of Ok (magic, schema, id) -> id == sid | other -> False).
 unprivileged parent ns path me =
@@ -94,15 +94,15 @@ main =
   _ = check "new output bound" (output (TM.say ["four", "five"] short) == ["four", "five"]);
   (commanded, _) = TM.submit "echo" {short | running = False, queue = Nil, stages = Nil};
   _ = check "new history cap" (commanded.hist == ["echo"]);
-  _ = check "stale and expired preference revisions" (failed (ED.configurePreferences (AC.nowUs Unit + 1000000) me (P.encode 1 P.defaults) clean) and failed (TM.configurePreferences (AC.nowUs Unit - 1) me (T.encode 0 T.defaults) terminal));
-  _ = check "revision exhaustion" (failed (TM.configurePreferences (AC.nowUs Unit + 1000000) me (T.encode (intMax Unit) T.defaults) {terminal | preferenceRevision = intMax Unit}));
+  _ = check "stale and expired preference revisions" (failed (ED.configurePreferences (AC.nowMs Unit + 1000) me (P.encode 1 P.defaults) clean) and failed (TM.configurePreferences (AC.nowMs Unit - 1) me (T.encode 0 T.defaults) terminal));
+  _ = check "revision exhaustion" (failed (TM.configurePreferences (AC.nowMs Unit + 1000) me (T.encode (intMax Unit) T.defaults) {terminal | preferenceRevision = intMax Unit}));
   ns = spawn Endpoint.namespace;
   editor = spawn ED.run;
   term = spawn TM.run;
   _ = boot me editor 91 ns; _ = boot me term 92 ns;
   ep = PC.url "editor" 91; tpUrl = PC.url "terminal" 92;
-  first = ready (AC.nowUs Unit + 1000000) me ns ep;
-  _ = ready (AC.nowUs Unit + 1000000) me ns tpUrl;
+  first = ready (AC.nowMs Unit + 1000) me ns ep;
+  _ = ready (AC.nowMs Unit + 1000) me ns tpUrl;
   _ = check "defaults visible" (strIndexOf (P.encode 0 P.defaults) first == 0);
   _ = check "schemas discoverable" (strIndexOf "type=EditorPreferences" (readPrefs me ns (PC.schemaUrl ep)) >= 0 and strIndexOf "type=TerminalPreferences" (readPrefs me ns (PC.schemaUrl tpUrl)) >= 0);
   _ = check "schema read-only" (failed (EP.writeOnce me ns (PC.schemaUrl ep) (EP.IStr "x")));
@@ -130,17 +130,17 @@ main =
   _ = check "preference endpoint retention" (arcLive 0 <= roots + 8 and memoryUsed Unit < memory + 2048);
   _ = AC.callWithin 1500 me editor (AW.Close 91);
   _ = AC.callWithin 1500 me term (AW.Close 92);
-  _ = removed (AC.nowUs Unit + 1000000) me ns ep;
-  _ = removed (AC.nowUs Unit + 1000000) me ns tpUrl;
+  _ = removed (AC.nowMs Unit + 1000) me ns ep;
+  _ = removed (AC.nowMs Unit + 1000) me ns tpUrl;
   orphan = spawn TM.run; _ = boot me orphan 93 ns;
-  _ = ready (AC.nowUs Unit + 1000000) me ns (PC.url "terminal" 93);
+  _ = ready (AC.nowMs Unit + 1000) me ns (PC.url "terminal" 93);
   _ = kill orphan;
-  _ = removed (AC.nowUs Unit + 1000000) me ns (PC.url "terminal" 93);
+  _ = removed (AC.nowMs Unit + 1000) me ns (PC.url "terminal" 93);
   # A failed second registration must remove only this adapter's first path.
   reserved = PC.url "terminal" 94;
   _ = get (EP.register me ns (PC.schemaUrl reserved) me);
   collision = spawn TM.run; _ = boot me collision 94 ns;
-  _ = ended (AC.nowUs Unit + 1000000) collision;
+  _ = ended (AC.nowMs Unit + 1000) collision;
   names = get (EP.flat (AC.callWithin 250 me ns (EP.NsList reserved)));
   _ = check "partial registration cleanup" (strIndexOf (PC.schemaUrl reserved) names >= 0 and strIndexOf "{reserved}\n" names < 0);
   _ = kill ns;

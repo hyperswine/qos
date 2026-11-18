@@ -1,6 +1,6 @@
 # Endpoint owners. Clients and services must share the same ep wire version.
-EP = use "ep#c66ad65e68dd97f5".
-AC = use "std/actor#201a0e9bf98a5154".
+EP = use "ep#d65056c9d7dc9c18".
+AC = use "std/actor#2de24bf2bdd5cb87".
 Open = EP.Open. Read = EP.Read. Write = EP.Write. Close = EP.Close.
 Opened = EP.Opened. Refused = EP.Refused.
 NsReg = EP.NsReg. NsUnreg = EP.NsUnreg. NsOpen = EP.NsOpen.
@@ -80,7 +80,7 @@ lsReceive ns me hs next tidy =
   lsMsg ns me hs next tidy (from, id) q.
 lsMsg : unsafe Int -> Int -> List (Int, String) -> Int -> AC.Tidy -> (Int, Int) -> EP.Ep -> a .
 lsMsg ns me hs next tidy ret q = case q of
-    EP.Timed until command -> if AC.nowUs Unit >= until then AC.reply ret (Err "endpoint: deadline exceeded before execution") >> lsLoop ns me hs next tidy else lsMsg ns me hs next tidy ret command
+    EP.Timed until command -> if AC.nowMs Unit >= until then AC.reply ret (Err "endpoint: deadline exceeded before execution") >> lsLoop ns me hs next tidy else lsMsg ns me hs next tidy ret command
   | Open url mode -> lsOpen ns me hs next tidy ret url
   | Read h n -> AC.reply ret (lsRead ns me (EP.hUrl hs h)) >> lsLoop ns me hs next tidy
   | Write h v -> AC.reply ret (Err "a listing is read-only") >> lsLoop ns me hs next tidy
@@ -113,7 +113,7 @@ sReceive rd wr me hs next tidy =
   sMsg rd wr me hs next tidy (from, id) from q.
 sMsg : unsafe _ -> _ -> Int -> List (Int, String, Int) -> Int -> AC.Tidy -> (Int, Int) -> Int -> EP.Ep -> a .
 sMsg rd wr me hs next tidy ret from q = case q of
-    EP.Timed until command -> if AC.nowUs Unit >= until then AC.reply ret (Err "endpoint: deadline exceeded before execution") >> sLoop rd wr me hs next tidy else sMsg rd wr me hs next tidy ret from command
+    EP.Timed until command -> if AC.nowMs Unit >= until then AC.reply ret (Err "endpoint: deadline exceeded before execution") >> sLoop rd wr me hs next tidy else sMsg rd wr me hs next tidy ret from command
   | Open url mode -> AC.reply ret (Opened next) >> sLoop rd wr me ((next, strcat url "", from) :: hs) (next + 1) tidy
   | Read h n -> AC.reply ret (EP.sRead rd me (EP.hFind hs h)) >> sLoop rd wr me hs next tidy
   | Write h v -> AC.reply ret (EP.sWrite wr me (EP.hFind hs h) v) >> sLoop rd wr me hs next tidy
@@ -129,7 +129,7 @@ simpleUntil rd wr me = _ = Sys.loop (Nil, 1) (untilStep rd wr me); Unit.
 untilStep rd wr me state =
   (handles, next) = state;
   m = receive me;
-  live = liveLeases (AC.nowUs Unit) handles;
+  live = liveLeases (AC.nowMs Unit) handles;
   # A timed-out downstream call may reply after this owner resumes serving.
   # Correlated replies are pairs; endpoint requests are triples.
   fresh = case m of
@@ -141,12 +141,12 @@ untilDispatch rd wr me handles next ret from command = case command of
     EP.Open url mode -> if leaseCount handles >= 64 or strlen url > 2048 then
       _ = AC.reply ret (EP.Refused "endpoint: handle budget exhausted"); (handles, next)
       else _ = AC.reply ret (EP.Opened next);
-        (Lease next (strcat url "") from (AC.nowUs Unit + 60000000) :: handles, next + 1)
+        (Lease next (strcat url "") from (AC.nowMs Unit + 60000) :: handles, next + 1)
   | EP.Close h -> _ = AC.reply ret (Ok 0); (removeLease handles h from, next)
-  | EP.Timed until q -> if AC.nowUs Unit >= until then
+  | EP.Timed until q -> if AC.nowMs Unit >= until then
       _ = AC.reply ret (Err "endpoint: deadline exceeded before execution"); (handles, next)
       else untilOperation rd wr until me handles next ret from q
-  | other -> untilOperation rd wr (AC.nowUs Unit + 10000000) me handles next ret from other.
+  | other -> untilOperation rd wr (AC.nowMs Unit + 10000) me handles next ret from other.
 untilOperation rd wr until me handles next ret from command = case command of
     EP.Read h n -> (url, client) = findLease handles h;
       _ = AC.reply ret (if client != from or url == "" then Err "no such handle" else rd until me client url);

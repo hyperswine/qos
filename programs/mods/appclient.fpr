@@ -3,7 +3,7 @@
 unsafe module.
 CP = use "apppolicy".
 AW = use "appwire".
-AC = use "std/actor#201a0e9bf98a5154".
+AC = use "std/actor#2de24bf2bdd5cb87".
 S2 = use "scene2d".
 Manifest = use "manifest".
 Cmd = Type (Open Int | OpenNamed String Int | Deliver AW.Event | Resize Int Int | Home | Stop | Inspect | PolicyNow | Using CP.Snapshot Cmd).

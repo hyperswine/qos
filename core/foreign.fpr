@@ -33,6 +33,7 @@ sndMusic : String -> Int -> Int .
 blkPages : a -> Int .
 blkPackPair : String -> String -> String -> String .
 blkWriteRecord : Device -> Int -> String -> String -> Int .
+# blkWaitInbox me until: park until a message or the std/actor deadline (ms since boot)
 blkWaitInbox : Int -> Int -> Int .
 blkReadRange : Device -> Int -> Int -> String .
 blkRead : a -> Int -> b .

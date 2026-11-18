@@ -1,5 +1,5 @@
 unsafe program.
-A = use "std/actor#201a0e9bf98a5154".
+A = use "std/actor#2de24bf2bdd5cb87".
 Pair = {x : Int, y : Int}.
 add acc p = acc + p.x + p.y.
 worker boss self =

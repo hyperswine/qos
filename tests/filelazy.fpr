@@ -1,8 +1,8 @@
 unsafe program.
 Q = use "../programs/mods/qsys".
-EP = use "../programs/mods/ep#c66ad65e68dd97f5".
-Endpoint = use "../programs/mods/epservice#e8bce05a1ddf73db".
-S = use "../programs/mods/svc#75479fb6d5f34670".
+EP = use "../programs/mods/ep#d65056c9d7dc9c18".
+Endpoint = use "../programs/mods/epservice#436f606333c44f26".
+S = use "../programs/mods/svc#b4e4e109ca696787".
 FS = use "../std/fs".
 ok (Ok v) = v.
 ok (Err why) = error why.

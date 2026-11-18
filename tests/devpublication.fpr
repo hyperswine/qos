@@ -1,6 +1,6 @@
 #: expect development publication: old=20 new=30 state=kept owned=stopped PASS
 unsafe program.
-FS = use "std/fs#19932fc6492e8a87".
+FS = use "std/fs#e2eac59ab17e6dd5".
 P = use "std/qpublication".
 D = use "std/devreload".
 CP = use "std/compile".
@@ -8,7 +8,7 @@ LR = use "std/mvureload".
 Plug = use "../programs/mods/plug".
 MV = use "std/mvu".
 S = use "std/string".
-SVC = use "../programs/mods/svc#75479fb6d5f34670".
+SVC = use "../programs/mods/svc#b4e4e109ca696787".
 Sys.alive : Int -> Bool .
 ok r = case r of Ok x -> x | Err why -> error why.
 source = "mathOp v = v * 2.\n".

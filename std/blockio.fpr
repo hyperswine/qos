@@ -2,8 +2,8 @@
 # has a separate global bound of 64. Administrator identity is cooperative
 # inside a trusted image; process authorization belongs to the namespace.
 
-AC = use "std/actor#201a0e9bf98a5154".
-Wire = use "std/storage#a8f7ee14e1efae76".
+AC = use "std/actor#2de24bf2bdd5cb87".
+Wire = use "std/storage#d3bc6af554583437".
 
 Sys.alive : Int -> Bool .
 
@@ -32,7 +32,7 @@ serveWithOn hart admin dev query update = Wire.spawnOn hart 64 8388608 (actor (C
 submit : Int -> Int -> Request -> Result Int String .
 submit me service q = case AC.deadlineAfter 10000 of Err why -> Err why | Ok until -> submitUntil until me service q.
 
-submitUntil until me service q = if AC.nowUs Unit >= until then Err "block: deadline exceeded before admission" else
+submitUntil until me service q = if AC.nowMs Unit >= until then Err "block: deadline exceeded before admission" else
   id = Sys.nextId Unit; case send service (me, id, Timed until q) of Ok u -> Ok id | Err why -> Err "block service: {why}".
 
 await : Int -> Int -> Int -> Result Reply String .
@@ -78,20 +78,20 @@ handleMessage ctx ready me borrowed =
   handled = case q of
       Completed result -> finish ready from id result
     | Timed until command -> handleUntil until ctx ready me from id command
-    | legacy -> handleUntil (AC.nowUs Unit + 10000000) ctx ready me from id legacy;
+    | legacy -> handleUntil (AC.nowMs Unit + 10000) ctx ready me from id legacy;
   _ = drop borrowed;
   handled.
 
 # Return the next owner state directly so successful receives need no extra Result.
 pollActive ctx ready me until = case receiveNow me of
     Ok message -> handleMessage ctx ready me message
-  | Err why -> if AC.nowUs Unit >= until then ready else
+  | Err why -> if AC.nowMs Unit >= until then ready else
       _ = if blkWaitInbox me until == 0 then Sys.sleepUs 100 else Unit;
-      if AC.nowUs Unit >= until then ready else pollActive ctx ready me until.
+      if AC.nowMs Unit >= until then ready else pollActive ctx ready me until.
 
 handleUntil : unsafe Int -> Context -> Owner -> Int -> Int -> Int -> Request -> Owner .
 handleUntil until ctx state me from id q =
-  if AC.nowUs Unit >= until then respond state from id (Err "block: deadline exceeded before I/O") else
+  if AC.nowMs Unit >= until then respond state from id (Err "block: deadline exceeded before I/O") else
   case q of
       Read p -> admitUntil until ctx state me from id q
     | ReadRange p count -> admitUntil until ctx state me from id q
@@ -118,7 +118,7 @@ again pair me = (ctx, state) = pair; loop ctx state me.
 
 advance : unsafe Context -> Owner -> Int -> Owner .
 advance ctx (Owner (Idle worker relay remaining) (Queue front back) count mode) me = case front of
-    Pending from id until q :: rest -> if AC.nowUs Unit >= until then
+    Pending from id until q :: rest -> if AC.nowMs Unit >= until then
       _ = AC.reply (from, id) (Err "block: deadline exceeded before I/O");
       advance ctx (Owner (Idle worker relay remaining) (Queue rest back) (count - 1) mode) me
     else Owner (start ctx worker relay remaining me from id until q) (Queue rest back) (count - 1) mode
@@ -126,7 +126,7 @@ advance ctx (Owner (Idle worker relay remaining) (Queue front back) count mode) 
       Nil -> drained me worker relay remaining mode
     | _ -> advance ctx (Owner (Idle worker relay remaining) (Queue (reversePending back Nil) Nil) count mode) me).
 advance ctx (Owner (Running from id worker relay cancelled until remaining) queue count mode) me =
-  if AC.nowUs Unit < until then Owner (Running from id worker relay cancelled until remaining) queue count mode else
+  if AC.nowMs Unit < until then Owner (Running from id worker relay cancelled until remaining) queue count mode else
     _ = kill worker;
     _ = kill relay;
     _ = AC.reply (from, id) (Err "block: deadline exceeded (outcome unknown)");
@@ -224,7 +224,7 @@ handle ctx state me from id q = case q of
 # After Drain, only the administrator may submit a final barrier. No page
 # operation can be admitted behind it; Closed remains the admission mode.
 flushRequest : unsafe Context -> Owner -> Int -> Int -> Int -> Owner .
-flushRequest ctx state me from id = flushRequestUntil (AC.nowUs Unit + 10000000) ctx state me from id.
+flushRequest ctx state me from id = flushRequestUntil (AC.nowMs Unit + 10000) ctx state me from id.
 
 flushRequestUntil : unsafe Int -> Context -> Owner -> Int -> Int -> Int -> Owner .
 flushRequestUntil until ctx state me from id = case state of Owner active queue count mode ->
@@ -235,7 +235,7 @@ flushRequestUntil until ctx state me from id = case state of Owner active queue 
   | other -> admitUntil until ctx state me from id Flush.
 
 closedFlush : unsafe Context -> Owner -> Int -> Int -> Int -> Owner .
-closedFlush ctx state me from id = closedFlushUntil (AC.nowUs Unit + 10000000) ctx state me from id.
+closedFlush ctx state me from id = closedFlushUntil (AC.nowMs Unit + 10000) ctx state me from id.
 
 closedFlushUntil : unsafe Int -> Context -> Owner -> Int -> Int -> Int -> Owner .
 closedFlushUntil until ctx (Owner (Idle worker relay remaining) queue count Closed) me from id = Owner (start ctx worker relay remaining me from id until Flush) queue count Closed.
@@ -249,7 +249,7 @@ modeId (Closing from id) = 1.
 modeId Closed = 2.
 
 admit : unsafe Context -> Owner -> Int -> Int -> Int -> Request -> Owner .
-admit ctx state me from id q = admitUntil (AC.nowUs Unit + 10000000) ctx state me from id q.
+admit ctx state me from id q = admitUntil (AC.nowMs Unit + 10000) ctx state me from id q.
 
 admitUntil : unsafe Int -> Context -> Owner -> Int -> Int -> Int -> Request -> Owner .
 admitUntil until ctx state me from id q = case state of Owner active queue count mode ->

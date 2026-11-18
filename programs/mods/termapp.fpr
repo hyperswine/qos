@@ -27,7 +27,7 @@ AV = use "appview".
 L = use "shelllayout".
 ST = use "scrolltext".
 AK = use "appkit".
-AC = use "std/actor#201a0e9bf98a5154".
+AC = use "std/actor#2de24bf2bdd5cb87".
 
 promptRows = 1.
 
@@ -277,7 +277,7 @@ splitGo sep s st i n acc =
 run me = case AS.start me of
     Err why -> Unit
   | Ok ctx ->
-      case PS.current (AC.nowUs Unit + PC.controlMs * 1000) me ctx.ns ctx.storage "terminal" of
+      case PS.current (AC.nowMs Unit + PC.controlMs) me ctx.ns ctx.storage "terminal" of
         Err why -> _ = AS.abandon me ctx; _ = Sys.logAt 2 why; Unit
       | Ok snapshot -> runLoaded me ctx snapshot.
 runLoaded me ctx snapshot =
@@ -324,7 +324,7 @@ applyPreferences p m = case Prefs.validate p of Err why -> Err why
 configurePreferences until client text m = case Prefs.parse text of Err why -> Err why
   | Ok (Prefs.Snapshot expected p) -> case PC.check until client expected m.preferenceRevision of Err why -> Err why
     | Ok u -> case applyPreferences p m of Err why -> Err why
-      | Ok fresh -> if AC.nowUs Unit >= until then Err "preference update expired" else Ok {fresh | preferenceRevision = expected + 1}.
+      | Ok fresh -> if AC.nowMs Unit >= until then Err "preference update expired" else Ok {fresh | preferenceRevision = expected + 1}.
 preferencesStep me ctx m = if m.preferenceAdapter == 0 then _ = Sys.sleepUs 1000; (True, (ctx, m)) else
   case receiveFromNow me m.preferenceAdapter of
     Err why -> _ = Sys.sleepUs 1000; (True, (ctx, m))
@@ -332,7 +332,7 @@ preferencesStep me ctx m = if m.preferenceAdapter == 0 then _ = Sys.sleepUs 1000
       (from, id, request) = PC.owned borrowed;
       case request of
         PC.Inspect until ->
-          _ = AC.reply (from, id) (if AC.nowUs Unit >= until then Err "preference read expired" else Ok (preferenceText m));
+          _ = AC.reply (from, id) (if AC.nowMs Unit >= until then Err "preference read expired" else Ok (preferenceText m));
           (True, (ctx, m))
       | PC.Change until client text -> case configurePreferences until client text m of
           Err why -> _ = AC.reply (from, id) (Err why); (True, (ctx, m))

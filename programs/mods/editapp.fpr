@@ -46,7 +46,7 @@ PC = use "preferencecontrol".
 PS = use "preferencestore".
 Fm = use "fontm".
 S2 = use "scene2d".
-AC = use "std/actor#201a0e9bf98a5154".
+AC = use "std/actor#2de24bf2bdd5cb87".
 RP = use "runprog".
 RunPolicy = use "runpolicy".
 FA = use "fileaccesspolicy".
@@ -779,7 +779,7 @@ controlled until client expected action revision m =
   if Sys.pidOf client != 0 then Err "Editor control is system-only"
   else if expected != revision then Err "stale Editor revision; current revision={revision}"
   else if revision == intMax Unit then Err "Editor revision exhausted"
-  else if AC.nowUs Unit >= until then Err "Editor command expired"
+  else if AC.nowMs Unit >= until then Err "Editor command expired"
   else Ok (transition action m).
 controlStep me ctx model adapter = if adapter == 0 then
     _ = Sys.sleepUs 1000; (True, (ctx, model, adapter))
@@ -791,7 +791,7 @@ controlStep me ctx model adapter = if adapter == 0 then
       (from, id, request) = owned;
       case request of
         Control.Inspect until ->
-          _ = AC.reply (from, id) (if AC.nowUs Unit >= until then Err "Editor inspection expired" else Ok (inspect ctx.revision model));
+          _ = AC.reply (from, id) (if AC.nowMs Unit >= until then Err "Editor inspection expired" else Ok (inspect ctx.revision model));
           (True, (ctx, model, adapter))
       | Control.Change until client expected action ->
           (case controlled until client expected action ctx.revision model of
@@ -806,7 +806,7 @@ controlStep me ctx model adapter = if adapter == 0 then
 run me = case AS.start me of
     Err why -> Unit
   | Ok ctx ->
-      case PS.current (AC.nowUs Unit + PC.controlMs * 1000) me ctx.ns ctx.storage "editor" of
+      case PS.current (AC.nowMs Unit + PC.controlMs) me ctx.ns ctx.storage "editor" of
         Err why -> _ = AS.abandon me ctx; _ = Sys.logAt 2 why; Unit
       | Ok snapshot -> runLoaded me ctx snapshot.
 runLoaded me ctx snapshot =
@@ -868,7 +868,7 @@ applyPreferences p m = case Prefs.validate p of Err why -> Err why
 configurePreferences until client text m = case Prefs.parse text of Err why -> Err why
   | Ok (Prefs.Snapshot expected p) -> case PC.check until client expected m.preferenceRevision of Err why -> Err why
     | Ok u -> case applyPreferences p m of Err why -> Err why
-      | Ok fresh -> if AC.nowUs Unit >= until then Err "preference update expired" else Ok {fresh | preferenceRevision = expected + 1}.
+      | Ok fresh -> if AC.nowMs Unit >= until then Err "preference update expired" else Ok {fresh | preferenceRevision = expected + 1}.
 preferencesStep me ctx m adapter = if m.preferenceAdapter == 0 then controlStep me ctx m adapter else
   case receiveFromNow me m.preferenceAdapter of
     Err why -> controlStep me ctx m adapter
@@ -876,7 +876,7 @@ preferencesStep me ctx m adapter = if m.preferenceAdapter == 0 then controlStep 
       (from, id, request) = keep borrowed; _ = drop borrowed;
       case request of
         PC.Inspect until ->
-          _ = AC.reply (from, id) (if AC.nowUs Unit >= until then Err "preference read expired" else Ok (preferenceText m));
+          _ = AC.reply (from, id) (if AC.nowMs Unit >= until then Err "preference read expired" else Ok (preferenceText m));
           (True, (ctx, m, adapter))
       | PC.Change until client text -> case configurePreferences until client text m of
           Err why -> _ = AC.reply (from, id) (Err why); (True, (ctx, m, adapter))

@@ -23,8 +23,8 @@
 # protocol, which System.qa's trampoline speaks from C.
 # ============================================================================
 
-EP = use "ep#c66ad65e68dd97f5".
-Wire = use "std/storage#a8f7ee14e1efae76".
+EP = use "ep#d65056c9d7dc9c18".
+Wire = use "std/storage#d3bc6af554583437".
 
 IoV = EP.IoV.
 IUnit = EP.IUnit. IInt = EP.IInt. IStr = EP.IStr. IFn = EP.IFn. IErr = EP.IErr.

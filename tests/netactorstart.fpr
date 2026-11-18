@@ -1,7 +1,7 @@
 # Competing callers initialize one installed actor; losing candidates stay inert.
 unsafe program.
-N = use "../std/net#464ca3ee0d89bc64".
-AC = use "std/actor#201a0e9bf98a5154".
+N = use "../std/net#9450dfa41b157181".
+AC = use "std/actor#2de24bf2bdd5cb87".
 netOwner : Unit -> Int .
 client boss me =
   _ = receive me;

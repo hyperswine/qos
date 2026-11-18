@@ -8,9 +8,9 @@
 #: plugins tests/sysed1.fpr
 #: expect loaderfail: refused=rolled back live=[] bound=no replay=0 HOLDS
 
-FS = use "std/fs#19932fc6492e8a87".
+FS = use "std/fs#e2eac59ab17e6dd5".
 LD = use "std/loader".
-SVC = use "../programs/mods/svc#75479fb6d5f34670".
+SVC = use "../programs/mods/svc#b4e4e109ca696787".
 Rpc = SVC.Rpc.
 
 # forwards every request to `fs`, except an append to sys/live

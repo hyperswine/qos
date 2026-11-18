@@ -3,8 +3,8 @@ unsafe program.
 # the real disk-backed storage actor; its replays pass the old 256 KiB
 # reply buffer, which the kernel trampoline used to truncate silently.
 # tools/kv-large-check.py builds and boots it.
-FS = use "std/fs#19932fc6492e8a87".
-S = use "../programs/mods/svc#75479fb6d5f34670".
+FS = use "std/fs#e2eac59ab17e6dd5".
+S = use "../programs/mods/svc#b4e4e109ca696787".
 NI = use "nativeimage".
 Sys.bindStore : Int -> S.Rpc -> Unit .
 Sys.bindApp : String -> Unit .

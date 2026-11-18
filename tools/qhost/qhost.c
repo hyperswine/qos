@@ -150,9 +150,11 @@ static void seen_add(const uint8_t *p, size_t n) {
   seen[seen_n] = 0;
 }
 static int hello_seen;
+static uint8_t nonce; /* this session's HELLO nonce, never 0 */
 static void deliver(void *ctx, uint8_t ch, const uint8_t *p, size_t n) {
   (void)ctx;
-  if (ch == QLINK_CH_CONTROL && n == 5 && !memcmp(p, "HELLO", 5)) { hello_seen = 1; return; }
+  if (ch == QLINK_CH_CONTROL && n == 6 && !memcmp(p, "HELLO", 5)) { if (p[5] == nonce) hello_seen = 1; return; }
+  if (!hello_seen) return; /* the board's previous session, before it answered */
   if (ch != QLINK_CH_CONSOLE) return;
   if (echo_out) { fwrite(p, 1, n, stdout); fflush(stdout); }
   seen_add(p, n);
@@ -174,6 +176,9 @@ static void pump(double seconds) {
     uint8_t buf[4096];
     ssize_t k = read(fd, buf, sizeof buf);
     if (k > 0) qlink_input(&ql, buf, (size_t)k);
+    /* Before the board answers HELLO its frames belong to an old session:
+     * acknowledging them only adds bytes to its receive FIFO. */
+    if (!hello_seen) ql.ack_owed = 0;
     else if (k == 0) die(1, "the port closed");
   }
   qlink_poll(&ql);
@@ -260,6 +265,9 @@ static int attach(void) {
         uint8_t buf[4096];
         ssize_t k = read(fd, buf, sizeof buf);
         if (k > 0) qlink_input(&ql, buf, (size_t)k);
+    /* Before the board answers HELLO its frames belong to an old session:
+     * acknowledging them only adds bytes to its receive FIFO. */
+    if (!hello_seen) ql.ack_owed = 0;
         else if (k == 0) return 1;
       }
       if (FD_ISSET(0, &r)) {
@@ -289,9 +297,12 @@ int main(int argc, char **argv) {
   qlink_config_t cfg = {wire, ms, deliver, raw, 0, 1, 14, 300};
   qlink_init(&ql, &cfg);
   /* open a session: the board resets its sequence state and answers HELLO */
+  /* every retry repeats the same nonce, so the board resets once */
+  nonce = (uint8_t)(1 + (getpid() ^ (unsigned)(now_s() * 1000)) % 255);
+  uint8_t hello[6] = {'H', 'E', 'L', 'L', 'O', nonce};
   for (int tries = 0; !hello_seen; tries++) {
     if (tries == 10) die(1, "no qlink HELLO from the board (is it running a qlink console?)");
-    qlink_send_unreliable(&ql, QLINK_CH_CONTROL, (const uint8_t *)"HELLO", 5);
+    qlink_send_unreliable(&ql, QLINK_CH_CONTROL, hello, sizeof hello);
     double end = now_s() + 0.3;
     while (!hello_seen && now_s() < end) pump(0.01);
   }

@@ -19,9 +19,9 @@
 # cooperative trust as ep.fpr's namespace (docs/2026-10-02-QOS-AUDIT.md).
 # ============================================================================
 
-EP = use "ep#c66ad65e68dd97f5".
-AC = use "std/actor#201a0e9bf98a5154".
-ED = use "epdeadline#08a8ecf9d7c57d85".
+EP = use "ep#d65056c9d7dc9c18".
+AC = use "std/actor#2de24bf2bdd5cb87".
+ED = use "epdeadline#96e69ecbbd8c7fce".
 
 IoV = EP.IoV.
 NsOpen = EP.NsOpen.

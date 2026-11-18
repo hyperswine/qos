@@ -78,15 +78,15 @@ unsafe module.
 # ============================================================================
 
 # ---- format helpers over the shared pure core -------------------------------
-SVC = use "svc#75479fb6d5f34670".
+SVC = use "svc#b4e4e109ca696787".
 Core = use "./coreutil".
 Rpc = SVC.Rpc.
-Wire = use "std/storage#a8f7ee14e1efae76".
+Wire = use "std/storage#d3bc6af554583437".
 
 # Page-source choice is explicit. Raw access is for standalone tools/tests;
 # all storage actors and native bootstrap use a routed block service.
 B = use "std/blockio".
-AC = use "std/actor#201a0e9bf98a5154".
+AC = use "std/actor#2de24bf2bdd5cb87".
 PageSource = Type (Direct Device | Routed Int | Bounded Int Int).
 baseSource source = case source of Bounded service until -> Routed service | other -> other.
 withDeadline source until = case source of

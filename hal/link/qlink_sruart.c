@@ -10,21 +10,42 @@ static unsigned out_n;
 static uint8_t in[512];
 static unsigned in_head, in_tail;
 static int ready;
+static uint8_t session; /* the current host session nonce, 0 = none */
 
+/* Bytes taken off the 32-byte receive FIFO but not yet parsed. A window of
+ * resends is about 1 KB, 100 ms at line rate, so the FIFO is drained while
+ * waiting to transmit; parsing waits for qcon_poll (qlink_input cannot run
+ * inside a send). */
+static uint8_t rx[1024];
+static unsigned rx_head, rx_tail;
+static void rx_pull(void) {
+  while (UART[1] & 2) {
+    uint8_t b = (uint8_t)UART[2];
+    if (rx_head - rx_tail < sizeof rx) rx[rx_head++ % sizeof rx] = b;
+  }
+}
 static void wire(void *ctx, const uint8_t *b, size_t n) {
   (void)ctx;
   for (size_t i = 0; i < n; i++) {
-    while (!(UART[1] & 1)) {}
+    while (!(UART[1] & 1)) rx_pull();
     UART[0] = b[i];
+    rx_pull();
   }
 }
 static uint32_t now(void *ctx) { (void)ctx; return clock_ms(); }
 static void deliver(void *ctx, uint8_t ch, const uint8_t *p, size_t n) {
   (void)ctx;
-  if (ch == QLINK_CH_CONTROL && n == 5 && p[0] == 'H' && p[1] == 'E' && p[2] == 'L' && p[3] == 'L' && p[4] == 'O') {
-    qlink_reset(&link); /* a host (re)opened the link: a new session */
-    out_n = 0;
-    qlink_send_unreliable(&link, QLINK_CH_CONTROL, (const uint8_t *)"HELLO", 5);
+  if (ch == QLINK_CH_CONTROL && (n == 5 || n == 6) && p[0] == 'H' && p[1] == 'E' && p[2] == 'L' && p[3] == 'L' && p[4] == 'O') {
+    /* A host (re)opened the link. It repeats one HELLO nonce until it hears
+     * the answer, so only a new nonce starts a new session; a repeat is
+     * answered again without resetting the sequence state twice. */
+    if (n == 5 || p[5] != session) {
+      qlink_reset(&link);
+      out_n = 0;
+      session = n == 6 ? p[5] : 0;
+    }
+    uint8_t answer[6] = {'H', 'E', 'L', 'L', 'O', session};
+    qlink_send_unreliable(&link, QLINK_CH_CONTROL, answer, n);
     return;
   }
   if (ch != QLINK_CH_CONSOLE) return;
@@ -41,16 +62,21 @@ void qcon_init(uint32_t (*now_ms)(void)) {
 
 void qcon_poll(void) {
   if (!ready) return;
-  uint8_t b[32];
-  size_t n = 0;
-  while ((UART[1] & 2) && n < sizeof b) b[n++] = (uint8_t)UART[2];
-  if (n) qlink_input(&link, b, n);
+  rx_pull();
+  while (rx_tail != rx_head) {
+    uint8_t b[64];
+    size_t n = 0;
+    while (rx_tail != rx_head && n < sizeof b) b[n++] = rx[rx_tail++ % sizeof rx];
+    qlink_input(&link, b, n);
+    rx_pull();
+  }
   qlink_poll(&link);
 }
 
 void qcon_flush(void) {
   if (!ready || !out_n) return;
   while (!qlink_can_send(&link)) qcon_poll();
+  if (!out_n) return; /* a new session began while waiting and dropped it */
   qlink_send(&link, QLINK_CH_CONSOLE, out, out_n);
   out_n = 0;
 }
