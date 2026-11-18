@@ -1,6 +1,11 @@
 #include "devtable.h"
 #include "fpr.h"
 #include "sd.h"
+#ifdef SPECTRE_QLINK
+/* The console over qlink (hal/link): the host program tools/qhost frames
+ * keys and shows output; built with -DSPECTRE_QLINK (SPECTRE_CONSOLE=qlink). */
+#include "qlink_sruart.h"
+#endif
 static void say(const char *s) {
   while (*s)
     hal_putc(*s++);
@@ -8,13 +13,23 @@ static void say(const char *s) {
 extern uint64_t spectre_raw_ticks(void);
 static uint64_t boot_ticks;
 
+#ifdef SPECTRE_QLINK
+static uint32_t uptime_ms(void);
+#endif
 void fpr_builtin_main(void) {
 
   boot_ticks = spectre_raw_ticks();
+#ifdef SPECTRE_QLINK
+  qcon_init(uptime_ms);
+#endif
   fpr_rt_init();
   fpr_hart_main(0);
 }
 void hal_putc(char c) {
+#ifdef SPECTRE_QLINK
+  qcon_putc(c);
+  return;
+#endif
 #ifdef TEST_QEMU
   volatile unsigned char *q = (void *)0x10000000;
   while (!(q[5] & 32))
@@ -30,6 +45,9 @@ void hal_putc(char c) {
 void hal_poweroff(int code) {
   (void)code;
   say("END\nDONE");
+#ifdef SPECTRE_QLINK
+  qcon_drain(2000);
+#endif
   for (;;)
     ;
 }
@@ -42,6 +60,18 @@ extern void spectre_raw_arm(uw, uint64_t);
 #elif !defined(CORE_MHZ) /* the board build passes -DCORE_MHZ */
 #define CORE_MHZ 54
 #endif
+#ifdef SPECTRE_QLINK
+static uint32_t uptime_ms(void) { return (uint32_t)((spectre_raw_ticks() - boot_ticks) / (CORE_MHZ * 1000u)); }
+#endif
+/* a console byte, or -1: the raw UART, or the host's console frames */
+static int con_getc(void) {
+#ifdef SPECTRE_QLINK
+  return qcon_getc();
+#else
+  volatile unsigned *u = (void *)0x10000000;
+  return (u[1] & 2) ? (int)(u[2] & 255) : -1;
+#endif
+}
 uint64_t hal_mtime(void) {
   uint64_t n = spectre_raw_ticks() - boot_ticks;
   return n / CORE_MHZ * 10 + (n % CORE_MHZ) * 10 / CORE_MHZ;
@@ -69,9 +99,13 @@ static app_job jobs[2]={{.status=EMPTY},{.status=EMPTY}};
 static unsigned latest;
 static V prompt(V ignored){
  static int skip_lf;
- char line[1024]; volatile unsigned *u=(void*)0x10000000;
+ char line[1024];
  for(;;){unsigned n=0,bad=0;say("qos> ");
- for(;;){while(!(u[1]&2)){if(jobs[0].status==RUNNING || jobs[1].status==RUNNING)fpr_fuel_exhausted();}unsigned c=u[2]&255;
+ for(;;){int got;while((got=con_getc())<0){
+#ifdef SPECTRE_QLINK
+  qcon_flush();
+#endif
+  if(jobs[0].status==RUNNING || jobs[1].status==RUNNING)fpr_fuel_exhausted();}unsigned c=(unsigned)got;
  if(skip_lf){skip_lf=0;if(c==10)continue;}
  if(c==10||c==13){skip_lf=c==13;hal_putc(10);break;}
  if(c==8||c==127){if(n){n--;say("\b \b");}continue;}

@@ -132,7 +132,8 @@ sums out names = Str.join "" (List.map (fn name -> path = "{out}/{name}"; sha = 
       manifest = sums out listed;
       _ = K.writeText "{out}/SHA256SUMS" manifest;
       compilerSha = K.sha256 "{fprisc}/fpr"; preludeSha = K.sha256 "{fprisc}/core/prelude.fpr";
-      inputs = Str.join "\n" ["board image {spectreBoard} ({preset}, slot {slot})","runtime {pin}","board {boardPin}",Str.trim (K.command ["git","-C",qos,"rev-parse","HEAD"]),Str.trim (K.command ["git","-C",fprisc,"rev-parse","HEAD"]),
+      consoleMode = B.setting "SPECTRE_CONSOLE" "raw";
+      inputs = Str.join "\n" ["board image {spectreBoard} ({preset}, slot {slot}), console {consoleMode}","runtime {pin}","board {boardPin}",Str.trim (K.command ["git","-C",qos,"rev-parse","HEAD"]),Str.trim (K.command ["git","-C",fprisc,"rev-parse","HEAD"]),
         "{compilerSha}  {fprisc}/fpr","{preludeSha}  {fprisc}/core/prelude.fpr",Str.trim (K.command [S.cc,"--version"])];
       _ = K.writeText "{out}/build-inputs.txt" "{inputs}\n";
       print manifest

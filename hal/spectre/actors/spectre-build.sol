@@ -25,6 +25,10 @@ sd board = ["-I{board}/boards/tangnano20k/c","{board}/boards/tangnano20k/c/sd.c"
 blockClass u = q = B.setting "QOS" "";
   if q == "" then error "set QOS to the QOS checkout (the vfs and boot images link hal/classes and hal/drivers)"
   else ["-I{q}/hal/classes","-I{q}/hal/drivers","{q}/hal/classes/block.c","{q}/hal/drivers/sd_spi.c"].
+# SPECTRE_CONSOLE=qlink: the boot image's console runs over qlink (hal/link),
+# for tools/qhost; raw (the default) keeps the plain UART prompt
+consoleSources u = q = B.setting "QOS" "";
+  if B.setting "SPECTRE_CONSOLE" "raw" == "qlink" then ["-DSPECTRE_QLINK","-I{q}/hal/link","{q}/hal/link/qlink.c","{q}/hal/link/qlink_sruart.c"] else [].
 # the boot image's device table and its class and driver sources, generated
 # into ROOT/board-devices by tools/board.sol from the board manifest
 boardDevices root = List.append ["{root}/board-devices/devtable.c"]
@@ -44,5 +48,5 @@ target root board name =
   else if name == "uart" then link root "rv32im_zicsr" base ["-Wl,--wrap=hal_wfi","uart/uart.c"] "uart/uart"
   else if name == "sd" then link root "rv32im_zicsr" base (List.append (sd board) ["sd/storage.c"]) "sd/storage"
   else if name == "vfs" then link root "rv32im_zicsr" withMod (List.concat [sd board,blockClass Unit,["vfs/hal.c","vfs/app.s"],units root "vfs"]) "vfs/fs"
-  else if name == "boot" then link root "rv32im_zicsr_zifencei" withMod (List.concat [sd board,boardDevices root,["boot/hal.c","boot/app.s"],units root "boot"]) "boot/fs"
+  else if name == "boot" then link root "rv32im_zicsr_zifencei" withMod (List.concat [sd board,boardDevices root,consoleSources Unit,["boot/hal.c","boot/app.s"],units root "boot"]) "boot/fs"
   else error "expected probe, idle, uart, sd, vfs or boot".

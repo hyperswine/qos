@@ -7,6 +7,12 @@ spectreTicks : unsafe Int -> Int .
 spectrePrompt : unsafe Unit -> String .
 space : unsafe String -> Int -> Int .
 space line i = if i >= strlen line then i else if charAt line i == 32 then i else space line (i + 1).
+# `soak N`: N numbered lines carrying 03, 7E and 7D (the bytes qlink escapes),
+# for the console link's soak test (tools/qhost soak).
+soakLine k = "S{k} {chr 3}{chr 126}{chr 125} 0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789".
+soakRun : unsafe Int -> Int -> Int .
+soakRun n k = if k >= n then n else _ = print (soakLine k); soakRun n (k + 1).
+soakCmd count = _ = soakRun count 0; print "soak done".
 showResult r = case r of Ok text -> print text | Err why -> print "error: {why}".
 create me fs name text = case FS.readLatest me fs name of
     Ok old -> print "already exists"
@@ -28,9 +34,10 @@ command me fs line =
   else if op == "run" and b == n and a + 1 < n then (case FS.readLatest me fs (substr line (a + 1) (n - a - 1)) of
       Err why -> print "run: {why}"
     | Ok image -> status = spectreRun image; if status > 0 then print "started job {status}" else if status == 0 then print "run: busy" else print "run: invalid app")
+  else if op == "soak" and b == n and a + 1 < n then soakCmd (parseInt (substr line (a + 1) (n - a - 1)))
   else if op == "cat" and b == n and a + 1 < n then showResult (FS.readLatest me fs (substr line (a + 1) (n - a - 1)))
   else if op == "create" and b > a + 1 and b < n then create me fs (substr line (a + 1) (b - a - 1)) (substr line (b + 1) (n - b - 1))
-  else print "usage: create NAME TEXT | ls | cat NAME | run NAME | status [1|2] | stop [1|2]".
+  else print "usage: create NAME TEXT | ls | cat NAME | run NAME | status [1|2] | stop [1|2] | soak N".
 turn me fs state = _ = command me fs (spectrePrompt Unit); (True,state).
 main =
   me = myself 0;
