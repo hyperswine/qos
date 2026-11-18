@@ -3,6 +3,9 @@
 Date: 2026-10-11. Kind: design proposal, for review before code changes.
 Nothing here is built yet.
 
+Follow-up (2026-11-18): [device classes](2026-11-18-DEVICE-CLASSES.md) takes the
+device side of this proposal in steps that work with today's code.
+
 ## Goal
 
 QOS Native should be a real bare-metal system that depends on nothing but
