@@ -13,9 +13,11 @@ static int ready;
 static uint8_t session; /* the current host session nonce, 0 = none */
 
 /* With no host session the board sends no reliable frames and drops console
- * output. Writing into a port nobody reads wedged the Tang Nano's USB bridge
- * twice (board-to-host bytes stopped until a replug), so a session ends on
- * the host's BYE, or when a host stops acknowledging for PEER_LOST_MS. */
+ * output. A host that closes and reopens the Tang Nano's UART while the FPGA
+ * transmits wedges its BL616 bridge until a replug (simple-risc
+ * boards/tangnano20k/README.md, "Known issue"), so a board must be quiet
+ * whenever a host may reopen: a session ends on the host's BYE, or when a
+ * host stops acknowledging for PEER_LOST_MS. */
 #define PEER_LOST_MS 1500u
 static uint32_t heard_at, frames_seen;
 static void session_end(void) {

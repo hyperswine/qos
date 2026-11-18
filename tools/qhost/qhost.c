@@ -241,10 +241,24 @@ static int soak(long count, double seconds) {
   }
 }
 
-/* tell the board this session is over, so it stops sending */
+/* Tell the board this session is over and wait until it stops sending
+ * before the port closes: closing and reopening the Tang Nano's UART while
+ * the FPGA transmits wedges its BL616 bridge until a replug (simple-risc
+ * boards/tangnano20k/README.md, "Known issue"). */
 static void bye(void) {
   if (!hello_seen) return;
   for (int i = 0; i < 3; i++) qlink_send_unreliable(&ql, QLINK_CH_CONTROL, (const uint8_t *)"BYE", 3);
+  double end = now_s() + 2.0, quiet_since = now_s();
+  while (now_s() < end && now_s() - quiet_since < 0.15) {
+    fd_set r;
+    FD_ZERO(&r);
+    FD_SET(fd, &r);
+    struct timeval tv = {0, 20000};
+    if (select(fd + 1, &r, 0, 0, &tv) > 0) {
+      uint8_t buf[512];
+      if (read(fd, buf, sizeof buf) > 0) quiet_since = now_s();
+    }
+  }
 }
 static void on_signal(int sig) { (void)sig; exit(130); }
 

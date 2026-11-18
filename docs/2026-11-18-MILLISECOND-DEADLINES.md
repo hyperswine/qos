@@ -111,22 +111,35 @@ The lossy-wire unit test passes with the change.
 
 On the board the abandon-and-reconnect check then failed differently: after
 a host left mid-stream, the board sent nothing at all, even its boot ROM
-after an FPGA reload. The Tang Nano's USB bridge had stopped passing
-board-to-host bytes, and only a USB replug cleared it. It happened twice,
-both times right after the board kept writing into a port the host had
-closed, so the board now stops doing that:
+after an FPGA reload, until a USB replug. This is the documented BL616
+wedge (simple-risc `boards/tangnano20k/README.md`, "Known issue: the
+USB-UART bridge stops working"): closing and reopening the UART while the
+FPGA is transmitting kills the bridge, and its prescribed fix is to stop
+the stream from the same session and wait for silence before closing. A
+board that resends into a departed host's port makes every reconnect such
+a reopen. So the board stops sending when no host is there, and the host
+stops it before closing:
 
 - The board has no session at boot. A session ends on the host's `BYE`, or
   when the host has not acknowledged for 1.5 s while frames are in flight.
   Without a session the board sends no reliable frames and drops console
   output instead of blocking (so output before a host connects is lost).
-- `qhost` sends `BYE` on every exit, including SIGINT, SIGTERM and SIGHUP.
+- `qhost` sends `BYE` on every exit, including SIGINT, SIGTERM and SIGHUP,
+  and waits until the line has been quiet for 150 ms (at most 2 s) before
+  the port closes. A host killed with SIGKILL cannot; the board still goes
+  quiet after 1.5 s, so a reopen must wait that long.
 
 Board results (Spectre-84, after a replug): a soak abandoned after 3 s
 leaves the board quiet (46 bytes in the next 3 s, then nothing), and three
 reconnects each run `ls`; a `qhost` killed by SIGTERM 5 s into a soak leaves
 it quiet (50 bytes) and the next connection works; a full 12,000-line soak
 then runs at 8,541 B/s with no CRC errors or resends, as before.
+
+With the 150 ms quiet wait, four rounds of abandon-then-reconnect each
+leave the board silent (0 bytes in the next second) and reconnect cleanly.
+Once, before those rounds, the board answered every `HELLO` with two bytes
+(`00 fc`, like a frame read at the wrong rate) until the bitstream was
+reloaded; the bridge itself was working. Not reproduced and not explained.
 
 ## Left open
 
