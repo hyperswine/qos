@@ -10,12 +10,14 @@
 #      child ends -- and then goes;
 #   3. when every process has ended, no image is left and the memory is back.
 #
-#   tools/nativeimage-check.sh builds this kernel and the two images.
+#   sol tools/native-image-check.sol [rv64|rv32] builds this kernel and the
+#   two images (tests/slowproc.fpr, tests/lingerproc.fpr) and runs them.
 #
 # Expected: "nativeimage: concurrent=both-intact linger=held-then-freed
 # images=0 memory=returned HOLDS"
 
-FS = use "std/fs#e2eac59ab17e6dd5".
+unsafe program.
+FS = use "std/fs#eb554fc5f32fe8fc".
 QAR = use "../programs/mods/qar".
 QaImg = use "../programs/mods/qaimg".
 
@@ -56,7 +58,7 @@ main =
       Err e -> "nativeimage: no apps/CkLinger.qa on the disk ({e})"
     | Ok linger -> run me slow linger).
 
-intact s = strCmp s "slowproc: intact 4500001500000" == 0.
+intact s = strCmp s "slowproc: intact 36" == 0.
 # the result of ONE process: its root actor's own reply (receiveFromRes), so
 # two processes finishing in either order are told apart, and a root that
 # dies without answering is "failed: dead actor"

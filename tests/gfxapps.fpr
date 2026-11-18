@@ -10,7 +10,7 @@ TR = use "../programs/terra2".
 DG = use "../programs/dungeon".
 MV = use "std/mvu".
 AC = use "std/actor#2de24bf2bdd5cb87".
-FS = use "std/fs#e2eac59ab17e6dd5".
+FS = use "std/fs#eb554fc5f32fe8fc".
 
 Note = Type (Ready String Int | Viewed String | Ended String | Pressed String Int).
 and2 a b = case a of True -> b | False -> False.

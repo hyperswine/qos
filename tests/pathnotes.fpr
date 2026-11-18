@@ -43,7 +43,7 @@
 #   pathnotes: OK notes=Third note|Fourth one n=4 cap=2
 #   ui=live ver=caps.v2 log=refused notesedbad
 
-FS = use "std/fs#e2eac59ab17e6dd5".
+FS = use "std/fs#eb554fc5f32fe8fc".
 LD = use "std/loader".
 MV = use "std/mvu".
 L = use "std/lens".

@@ -822,9 +822,8 @@ showInt n = case n < 0 of True -> strcat "-" (showNat (0 - n)) | False -> showNa
 showNat : unsafe Int -> String .
 showNat n = case n < 10 of True -> chr (48 + n) | False -> strcat (showNat (n / 10)) (chr (48 + n - (n / 10) * 10)).
 
-# clock reg is CLINT mtime (64-bit lo word is enough for a demo clock);
-# QEMU virt mtime is 10 MHz -> seconds = ticks / 10000000
-secsOf ticks = ticks / 10000000.
+# /services/clock answers milliseconds since boot
+secsOf ms = ms / 1000.
 clockStr : unsafe Caps -> String .
 clockStr caps =
   s = secsOf (svcClock caps);

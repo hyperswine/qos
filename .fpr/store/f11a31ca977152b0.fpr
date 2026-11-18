@@ -1,0 +1,130 @@
+# ============================================================================
+# timer.fpr -- Timer.qa: the time service.  ONE actor owns the CLINT
+# driver and the timer interrupt; everything else asks it in messages.
+#
+#   * The actor binds itself to the machine's timer bridge at startup
+#     (Sys.timerBind, actors.c).  On native QOS that bridge is REAL:
+#     Timer.qa arms one CLINT deadline at a time (Sys.timerArm, a
+#     delta in ticks), the IRQ HART -- the last live hart, an
+#     auxiliary hart, never hart 0 -- pops out of wfi on MTIP and
+#     delivers a bare Int message when the deadline is due.  ALL
+#     interrupt and CLINT driver work stays inside this one actor.
+#   * On QOS Portable Sys.timerBind answers 0 (no hardware timer):
+#     the SAME actor instead spawns a sleeper child per request
+#     (Sys.sleepUs then a bare-Int poke) -- the same protocol, a
+#     hosted backend.
+#   * A client does `std.timer.after svc ms` -- one SEND, no reply
+#     round trip.  When the deadline passes, Timer.qa sends TFire to
+#     the CALLER's mailbox: a blocked receiver moves from the backlog
+#     into the ready zone under the scheduler's ordinary admission
+#     bounds (RQ_CAP batches, aging) and runs soon after.  sleep is
+#     the blocking wrapper (after + receive the fire).
+#
+# The message surface (RPC envelope: send svc (me, <msg>)):
+#   TAfter ms          -> (nothing now; TFire to the SENDER later)
+#   TPing              -> TOkI nat   liveness probe; nat = 1 iff the
+#                                    hardware bridge is live
+# and the BRIDGE's arm: a bare Int (a due CLINT deadline, or a sleeper
+# child's poke).
+#
+# State: the pending set as a deadline-sorted list of (deadline, who),
+# in milliseconds since boot (Sys.uptimeMs, the clock /services/clock
+# answers): a 31-bit RV32 Int holds it for 12.4 days, where the old
+# low-word CLINT ticks wrapped after 107 s.  The hardware arm converts
+# at most ARM_MAX_MS to ticks and a hosted sleeper sleeps at most
+# SLEEP_MAX_MS; a longer wait is re-armed for the remainder when it
+# fires early, the same path an undershooting host sleep takes.
+# ============================================================================
+
+TMsg = Type (TAfter ms | TPing).
+TRep = Type (TOkI n | TFire).
+
+ticksPerMs = 10000.   # CLINT runs at 10 MHz on virt and qosp alike
+armMaxMs = 100000.     # 1e9 ticks: inside a 31-bit Int
+sleepMaxMs = 1000000.  # 1e9 microseconds: inside a 31-bit Int
+nowMs u = Sys.uptimeMs u.
+# the largest deadline an Int holds; a later one waits there (12.4 days on RV32)
+intMax u = 1073741823.
+armTicks left = (if left < 0 then 0 else if left > armMaxMs then armMaxMs else left) * ticksPerMs.
+
+actor : unsafe Int -> a .
+actor me =
+  cl = device "clint";
+  clk = reg32 cl 49144;
+  nat = Sys.timerBind me;
+  loop me clk nat Nil.
+
+loop : unsafe Int -> Int -> Int -> List (Int, Int) -> a .
+loop me clk nat pend =
+  m = receive me;
+  case m of
+    (from, req) -> dispatch me clk nat pend from req
+  | k -> fireDue me clk nat pend.
+    # ^ bare Int: the bridge's CLINT fire or a sleeper's poke --
+    #   matched by fallthrough (the uart actor's irq shape)
+
+dispatch : unsafe Int -> Int -> Int -> List (Int, Int) -> Int -> TMsg -> a .
+dispatch me clk nat pend from req =
+  case req of
+    TAfter ms -> doAfter me clk nat pend from ms
+  | TPing -> send from (TOkI nat) >> loop me clk nat pend.
+
+doAfter : unsafe Int -> Int -> Int -> List (Int, Int) -> Int -> Int -> a .
+doAfter me clk nat pend from ms =
+  now = nowMs Unit;
+  dl = if ms <= 0 then now else if ms > intMax Unit - now then intMax Unit else now + ms;
+  pend2 = insert dl from pend;
+  _ = case nat == 1 of
+        True -> armNearest clk pend2
+      | False -> sleepChild me ms;
+  fireDue me clk nat pend2.
+  # ^ fire immediately-due entries (ms = 0, or a deadline that passed
+  #   while we were parked) instead of waiting for the next poke
+
+# deadline-sorted insert, oldest deadline first
+insert : unsafe Int -> Int -> List (Int, Int) -> List (Int, Int) .
+insert dl who pend =
+  case pend of
+    Nil -> (dl, who) :: Nil
+  | p :: rest -> case p of (d2, w2) ->
+      case dl < d2 of
+        True -> (dl, who) :: pend
+      | False -> (d2, w2) :: insert dl who rest.
+
+# hardware mode: ONE armed deadline, always the nearest pending
+armNearest : unsafe Int -> List (Int, Int) -> Unit .
+armNearest clk pend =
+  case pend of
+    Nil -> Unit
+  | p :: rest -> case p of (dl, w) -> Sys.timerArm (armTicks (dl - nowMs Unit)).
+
+# hosted mode: a child sleeps the interval and pokes us (bare Int).
+# An early poke (host sleep undershot) just re-sleeps the remainder
+# via the rearm path below.
+sleepChild : unsafe Int -> Int -> Unit .
+sleepChild me ms =
+  c = spawn (sleeper me ms);
+  Unit.
+# unlike the loops above this one RETURNS -- `send` answers a Result, so
+# that is its type.  `a` would have promised the caller any type it liked
+# out of a value that is always a Result (fprisc/docs/2026-08-25-SAFETY.md).
+sleeper : unsafe Int -> Int -> Int -> Result Unit String .
+sleeper t ms me2 =
+  _ = Sys.sleepUs ((if ms > sleepMaxMs then sleepMaxMs else if ms < 0 then 0 else ms) * 1000);
+  send t 0.
+
+# pop everything due, notify the waiters, re-arm for the remainder
+fireDue : unsafe Int -> Int -> Int -> List (Int, Int) -> a .
+fireDue me clk nat pend =
+  case pend of
+    Nil -> loop me clk nat pend
+  | p :: rest -> case p of (dl, who) ->
+      case nowMs Unit >= dl of
+        True -> send who TFire >> fireDue me clk nat rest
+      | False -> rearm me clk nat pend dl.
+rearm : unsafe Int -> Int -> Int -> List (Int, Int) -> Int -> a .
+rearm me clk nat pend dl =
+  _ = case nat == 1 of
+        True -> Sys.timerArm (armTicks (dl - nowMs Unit))
+      | False -> sleepChild me (dl - nowMs Unit + 1);
+  loop me clk nat pend.

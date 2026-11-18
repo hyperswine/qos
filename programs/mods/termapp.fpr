@@ -188,7 +188,7 @@ sevOf ("w" :: _) = 1.
 sevOf ("e" :: _) = 2.
 sevOf ("h" :: _) = 3.
 sevOf other = 0.
-uptime u = t = Sys.mtime Unit / 10000000; "up {t / 3600}h {AK.pad2 (t / 60 % 60)}m {AK.pad2 (t % 60)}s".
+uptime u = t = Sys.uptimeMs Unit / 1000; "up {t / 3600}h {AK.pad2 (t / 60 % 60)}m {AK.pad2 (t % 60)}s".
 actors u = n = Sys.actLive 0; "{n} actors live" :: actorRows 0 n.
 actorRows : (i : Int | measure (n - i)) -> (n : Int) -> List String .
 actorRows i n = if i >= n then Nil else actorRow (Sys.actInfo i) :: actorRows (i + 1) n.

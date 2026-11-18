@@ -1,6 +1,6 @@
 # Stable Files owner: interrupted mutations are never replayed, recovery
 # rescans committed state; unconfirmed device reset latches storage offline.
-FS = use "../std/fs#e2eac59ab17e6dd5".
+FS = use "../std/fs#eb554fc5f32fe8fc".
 B = use "../std/blockio#12684c106eacea7e".
 Native = use "../std/block#ac4ea92ddd273d16".
 blkTestStallNth : Int -> Int .

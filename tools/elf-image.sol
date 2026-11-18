@@ -1,5 +1,5 @@
-# Flatten ELF64 PT_LOAD segments. File gaps are zero-filled; trailing BSS
-# contributes to the memory extent only.
+# Flatten ELF64 or ELF32 PT_LOAD segments. File gaps are zero-filled;
+# trailing BSS contributes to the memory extent only.
 E = use "elf-symbols".
 max a b = if a > b then a else b.
 min a b = if a < b then a else b.
@@ -22,15 +22,20 @@ payload elf cursor segments = case segments of
     zeros (addr - cursor) :: unwrap (Bytes.slice offset size elf) :: payload elf (addr + size) rest.
 flatten : unsafe Bytes -> Image .
 flatten elf =
-  magic = Bytes.toList (unwrap (Bytes.slice 0 5 elf));
+  magic = Bytes.toList (unwrap (Bytes.slice 0 4 elf));
+  wide = (case unwrap (Bytes.at 4 elf) of 2 -> True | 1 -> False | _ -> error "invalid ELF class");
   little = (case unwrap (Bytes.at 5 elf) of 1 -> True | 2 -> False | _ -> error "invalid ELF encoding");
-  n = E.number elf little; entry = n 24 8; headers = n 32 8; stride = n 54 2; count = n 56 2;
-  _ = (if or (magic != [127,69,76,70,2]) (stride < 56) then error "invalid ELF64 program headers" else Unit);
+  n = E.number elf little;
+  # (entry, phoff, phentsize, phnum) and, per program header, (offset, vaddr, filesz, memsz, flags)
+  (entry, headers, stride, count) = (if wide then (n 24 8, n 32 8, n 54 2, n 56 2) else (n 24 4, n 28 4, n 42 2, n 44 2));
+  _ = (if or (magic != [127,69,76,70]) (stride < (if wide then 56 else 32)) then error "invalid ELF program headers" else Unit);
   offsets = List.map (fn i -> headers + i * stride) (E.indices count);
-  loads = List.filter (fn p -> and (n p 4 == 1) (n (p + 40) 8 != 0)) offsets;
-  segments = List.map (fn p -> size = n (p + 32) 8; mem = n (p + 40) 8;
+  memOf = (fn p -> if wide then n (p + 40) 8 else n (p + 20) 4);
+  loads = List.filter (fn p -> and (n p 4 == 1) (memOf p != 0)) offsets;
+  segments = List.map (fn p -> size = (if wide then n (p + 32) 8 else n (p + 16) 4); mem = memOf p;
     if size > mem then error "ELF file segment exceeds memory size"
-    else Segment (n (p + 16) 8) (n (p + 8) 8) size mem (n (p + 4) 4)) loads;
+    else if wide then Segment (n (p + 16) 8) (n (p + 8) 8) size mem (n (p + 4) 4)
+    else Segment (n (p + 8) 4) (n (p + 4) 4) size mem (n (p + 24) 4)) loads;
   sorted = List.fold (fn acc seg -> insert seg acc) [] segments;
   case sorted of
     [] -> error "ELF has no loadable segments"

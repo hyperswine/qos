@@ -1,0 +1,5 @@
+name = "CkFail"
+id = "CkFail"
+entry = "n/a"
+loadMode = "process"
+version = "1"

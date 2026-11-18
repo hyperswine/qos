@@ -1,10 +1,11 @@
 # lingerproc.fpr -- a process whose main returns while a child actor it
 # spawned is still running the image's code (tests/nativeimage.fpr): the image
 # stays until that child has ended too.
+# the running sum is kept modulo a prime so it fits a 31-bit RV32 Int too
 sumTo : unsafe Int -> Int -> Int .
 sumTo n acc = case n == 0 of
     True -> acc
-  | False -> sumTo (n - 1) (acc + n).
+  | False -> sumTo (n - 1) ((acc + n) % 1000003).
 worker : unsafe Int -> Unit .
 worker self = _ = sumTo 20000000 0; Unit.
 main =

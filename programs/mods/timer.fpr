@@ -28,16 +28,24 @@
 # child's poke).
 #
 # State: the pending set as a deadline-sorted list of (deadline, who),
-# in LOW-WORD mtime ticks (10 MHz: 10000 ticks per ms) -- the same
-# 32-bit clock every /services/clock reader sees.  The hardware arm
-# re-derives its delta from the clock at arm time, so the C side keeps
-# full-width absolute time internally.
+# in milliseconds since boot (Sys.uptimeMs, the clock /services/clock
+# answers): a 31-bit RV32 Int holds it for 12.4 days, where the old
+# low-word CLINT ticks wrapped after 107 s.  The hardware arm converts
+# at most ARM_MAX_MS to ticks and a hosted sleeper sleeps at most
+# SLEEP_MAX_MS; a longer wait is re-armed for the remainder when it
+# fires early, the same path an undershooting host sleep takes.
 # ============================================================================
 
 TMsg = Type (TAfter ms | TPing).
 TRep = Type (TOkI n | TFire).
 
 ticksPerMs = 10000.   # CLINT runs at 10 MHz on virt and qosp alike
+armMaxMs = 100000.     # 1e9 ticks: inside a 31-bit Int
+sleepMaxMs = 1000000.  # 1e9 microseconds: inside a 31-bit Int
+nowMs u = Sys.uptimeMs u.
+# the largest deadline an Int holds; a later one waits there (12.4 days on RV32)
+intMax u = 1073741823.
+armTicks left = (if left < 0 then 0 else if left > armMaxMs then armMaxMs else left) * ticksPerMs.
 
 actor : unsafe Int -> a .
 actor me =
@@ -63,7 +71,8 @@ dispatch me clk nat pend from req =
 
 doAfter : unsafe Int -> Int -> Int -> List (Int, Int) -> Int -> Int -> a .
 doAfter me clk nat pend from ms =
-  dl = read clk + ms * ticksPerMs;
+  now = nowMs Unit;
+  dl = if ms <= 0 then now else if ms > intMax Unit - now then intMax Unit else now + ms;
   pend2 = insert dl from pend;
   _ = case nat == 1 of
         True -> armNearest clk pend2
@@ -87,7 +96,7 @@ armNearest : unsafe Int -> List (Int, Int) -> Unit .
 armNearest clk pend =
   case pend of
     Nil -> Unit
-  | p :: rest -> case p of (dl, w) -> Sys.timerArm (dl - read clk).
+  | p :: rest -> case p of (dl, w) -> Sys.timerArm (armTicks (dl - nowMs Unit)).
 
 # hosted mode: a child sleeps the interval and pokes us (bare Int).
 # An early poke (host sleep undershot) just re-sleeps the remainder
@@ -101,7 +110,7 @@ sleepChild me ms =
 # out of a value that is always a Result (fprisc/docs/2026-08-25-SAFETY.md).
 sleeper : unsafe Int -> Int -> Int -> Result Unit String .
 sleeper t ms me2 =
-  _ = Sys.sleepUs (ms * 1000);
+  _ = Sys.sleepUs ((if ms > sleepMaxMs then sleepMaxMs else if ms < 0 then 0 else ms) * 1000);
   send t 0.
 
 # pop everything due, notify the waiters, re-arm for the remainder
@@ -110,12 +119,12 @@ fireDue me clk nat pend =
   case pend of
     Nil -> loop me clk nat pend
   | p :: rest -> case p of (dl, who) ->
-      case read clk >= dl of
+      case nowMs Unit >= dl of
         True -> send who TFire >> fireDue me clk nat rest
       | False -> rearm me clk nat pend dl.
 rearm : unsafe Int -> Int -> Int -> List (Int, Int) -> Int -> a .
 rearm me clk nat pend dl =
   _ = case nat == 1 of
-        True -> Sys.timerArm (dl - read clk)
-      | False -> sleepChild me ((dl - read clk) / ticksPerMs + 1);
+        True -> Sys.timerArm (armTicks (dl - nowMs Unit))
+      | False -> sleepChild me (dl - nowMs Unit + 1);
   loop me clk nat pend.

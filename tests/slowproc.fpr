@@ -1,8 +1,9 @@
 # slowproc.fpr -- a process that runs while a second one is placed beside it
 # (tests/nativeimage.fpr): some work, then a result that shows its code and
 # data survived.
+# the running sum is kept modulo a prime so it fits a 31-bit RV32 Int too
 sumTo : unsafe Int -> Int -> Int .
 sumTo n acc = case n == 0 of
     True -> acc
-  | False -> sumTo (n - 1) (acc + n).
+  | False -> sumTo (n - 1) ((acc + n) % 1000003).
 main = "slowproc: intact {sumTo 3000000 0}".

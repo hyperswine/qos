@@ -51,7 +51,7 @@ executeWith : unsafe CP.IoPolicy -> Int -> Int -> Int -> AW.Job -> ES.State -> (
 executeWith io me ns storage (AW.StoreRead key) state = (Err "app store requires a bound session identity", state).
 executeWith io me ns storage (AW.StoreWrite key text) state = (Err "app store requires a bound session identity", state).
 executeWith io me ns storage (AW.StoreRemove key) state = (Err "app store requires a bound session identity", state).
-executeWith io me ns storage AW.Clock state = (Ok (AW.Time (Sys.mtime Unit / 10000000)), state).
+executeWith io me ns storage AW.Clock state = (Ok (AW.Time (Sys.uptimeMs Unit / 1000)), state).
 executeWith io me ns storage (AW.Logs sev) state =
   (Ok (AW.Lines (Sys.logSnap sev) "{Sys.logSeq sev} TOTAL"), state).
 executeWith io me ns storage AW.ListRoot state =

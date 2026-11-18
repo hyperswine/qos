@@ -5,8 +5,9 @@ M = use "qa-moved".
 Imports = use "qa-imports".
 utf8 text = unwrap (Utf8.encode text).
 digest bytes = Hex.encode (Sha256.bytes bytes).
+wide elf = unwrap (Bytes.at 4 elf) == 2.
 machine elf = case E.number elf (unwrap (Bytes.at 5 elf) == 1) 18 2 of
-    62 -> "x86_64" | 183 -> "aarch64" | 243 -> "riscv64" | other -> error "unsupported ELF machine {other}".
+    62 -> "x86_64" | 183 -> "aarch64" | 243 -> (if wide elf then "riscv64" else "riscv32") | other -> error "unsupported ELF machine {other}".
 fields : unsafe List String -> List String .
 fields lines = case lines of
     [] -> []
@@ -61,7 +62,7 @@ pack man input moved dest delta plugin abi =
   offsets = R.offsets elf base (Bytes.len image);
   _ = (if moved == "" then Unit else
     I.Image otherBase otherEntry otherExec otherRw otherImage otherMem = I.flatten (E.readFile moved);
-    M.check image otherImage offsets delta);
+    M.check image otherImage offsets delta (if wide elf then 8 else 4));
   reloc = Bytes.concat (List.map offsetBytes offsets);
   imports = (if plugin then utf8 (Imports.section elf base) else Bytes.empty Unit);
   load = loadHeader base entry execsz rw image mem + abi + "relsha {digest (Bytes.concat [reloc,imports])}\n";

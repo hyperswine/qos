@@ -1,0 +1,7 @@
+{"board": "virt32",
+ "about": "QEMU virt, rv32 (qemu-system-riscv32): the RV32 stand-in for Spectre boards, built with XLEN=32",
+ "devices": [
+   {"name": "con0", "driver": "uart16550", "base": "0x10000000", "irq": 10, "params": {"base": "0x10000000"}},
+   {"name": "net", "driver": "virtio_net", "base": "0x10001000"},
+   {"name": "blk", "driver": "virtio_blk", "base": "0x10001000"}
+ ]}

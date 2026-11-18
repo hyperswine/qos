@@ -1,7 +1,7 @@
 # Seeded by tools/qlog-memory-check.py. Use the real stable Files owner,
 # including its pinned Qlog interpreter, on a separate disk.
 unsafe program.
-FS = use "../std/fs#e2eac59ab17e6dd5".
+FS = use "../std/fs#eb554fc5f32fe8fc".
 B = use "../std/blockio#12684c106eacea7e".
 freeKiB u = case Sys.memInfo 0 of _ :: f :: _ -> f | _ -> 0.
 must r = case r of Ok v -> v | Err why -> error "qlogmemory: {why}".

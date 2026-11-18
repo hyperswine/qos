@@ -3,7 +3,7 @@
 unsafe program.
 Shell = use "../programs/mods/guishell".
 QS = use "../programs/mods/qsys".
-FS = use "std/fs#e2eac59ab17e6dd5".
+FS = use "std/fs#eb554fc5f32fe8fc".
 AC = use "std/actor#2de24bf2bdd5cb87".
 MV = use "std/mvu".
 Plug = use "../programs/mods/plug".

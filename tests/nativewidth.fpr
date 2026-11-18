@@ -1,0 +1,19 @@
+unsafe program.
+# Test kernel: a process image built for the other word size (an rv64 image
+# on an rv32 kernel, or the reverse) is refused before any of its layout is
+# read: its native ABI identity carries the width (loader/process.c).
+#   sol tools/native-image-check.sol [rv64|rv32]
+FS = use "std/fs#eb554fc5f32fe8fc".
+NI = use "nativeimage".
+Sys.images : Int -> Int .
+want = "native runtime ABI mismatch: rebuild the process with sol tools/build-process-app.sol".
+main =
+  me = myself 0;
+  fs = FS.serve (device "blk");
+  case FS.readLatest me fs "apps/CkWide.qa" of
+    Err e -> "nativewidth: no apps/CkWide.qa on the disk ({e})"
+  | Ok qa ->
+      images0 = Sys.images 0;
+      (ok, msg, root) = NI.place qa;
+      if ok != 2 and strCmp msg want == 0 and Sys.images 0 == images0 then "nativewidth: refused HOLDS"
+      else "nativewidth: ok={ok} msg={msg} FAILED".

@@ -167,8 +167,12 @@ hashByte acc byte =
   raw = (acc - q * split) * 31 + byte - q * (hprime - split * 31);
   if raw < 0 then raw + hprime else if raw >= hprime then raw - hprime else raw.
 hGo s i n acc = case i >= n of True -> acc | False -> hGo s (i + 1) n (hashByte acc (charAt s i)).
-# interior merkle node over two child hashes
-hCombine a b = hFix (imod ((imod (a * 1000003) hprime) + b + 17) hprime).
+# interior merkle node over two child hashes, (a * 1000003 + b + 17) mod p
+# without forming a value past p (p < 2^30): RV32's tagged Int is 31 bits
+addMod a b = if a >= hprime - b then a - (hprime - b) else a + b.
+mulMod : unsafe Int -> Int -> Int -> Int .
+mulMod a k r = if k == 0 then r else mulMod (addMod a a) (k / 2) (if k % 2 == 1 then addMod r a else r).
+hCombine a b = hFix (addMod (addMod (mulMod a 1000003 0) b) 17).
 
 # ---- headers ---------------------------------------------------------------
 lf = chr 10.

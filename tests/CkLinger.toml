@@ -1,0 +1,5 @@
+name = "CkLinger"
+id = "CkLinger"
+entry = "n/a"
+loadMode = "process"
+version = "1"

@@ -13,8 +13,14 @@
 # fallback and is empty on rv64).
 SOL ?= sol
 QOS_HAL_TOOLS := $(QOS_HAL)/../tools
+# rv32 (XLEN=32) has no raw-unit lowering: plic.c, virtio32.c and net.c's C
+# transport stand in, and these units are not built.
+ifeq ($(XLEN),32)
+QOS_VIRT_ASM :=
+else
 QOS_VIRT_ASM := $(addprefix $(BUILD)/qos-,plic.s virtio.s blockpolicy.s netpolicy.s)
-$(QOS_VIRT_ASM): $(BUILD)/qos-%.s: $(QOS_HAL)/virt/%.fpr $(FPRC) $(QOS_HAL_TOOLS)/build-virt-hal.sol $(QOS_HAL_TOOLS)/virt-hal.sol
+endif
+$(addprefix $(BUILD)/qos-,plic.s virtio.s blockpolicy.s netpolicy.s): $(BUILD)/qos-%.s: $(QOS_HAL)/virt/%.fpr $(FPRC) $(QOS_HAL_TOOLS)/build-virt-hal.sol $(QOS_HAL_TOOLS)/virt-hal.sol
 	@mkdir -p "$(BUILD)"
 	"$(SOL)" "$(QOS_HAL_TOOLS)/build-virt-hal.sol" "$(FPRC)" "$(QOS_HAL)" "$(BUILD)" "$*"
 
@@ -27,5 +33,5 @@ $(QOS_BOARD_DIR)/board.mk $(QOS_BOARD_DIR)/devtable.c: $(QOS_HAL)/../bsp/$(QOS_B
 	cd "$(QOS_HAL)/.." && "$(SOL)" tools/board.sol bsp/$(QOS_BOARD)/board.json "$(abspath $(QOS_BOARD_DIR))"
 -include $(QOS_BOARD_DIR)/board.mk
 
-QOS_VIRT_HAL = $(QOS_VIRT_ASM) $(QOS_HAL)/virt/plic.c $(QOS_HAL)/virt/pins.c $(QOS_HAL)/core/lifecycle.c \
+QOS_VIRT_HAL = $(QOS_VIRT_ASM) $(QOS_HAL)/virt/plic.c $(QOS_HAL)/virt/virtio32.c $(QOS_HAL)/virt/pins.c $(QOS_HAL)/core/lifecycle.c \
                $(QOS_BOARD_SOURCES) $(QOS_BOARD_DIR)/devtable.c

@@ -1,0 +1,5 @@
+name = "CkSlow"
+id = "CkSlow"
+entry = "n/a"
+loadMode = "process"
+version = "1"

@@ -1,12 +1,12 @@
 # Prebuilt acceptance driver for the installed durable counter.
 # Run twice against one disk: the second process must load the first's state.
 unsafe program.
-QL = use "../programs/mods/qlog#75482a12ec46d57d".
+QL = use "../programs/mods/qlog#e1cb103459f4bc1d".
 Plug = use "../programs/mods/plug".
 AP = use "../programs/mods/appclient".
 AW = use "../programs/mods/appwire".
 S = use "../programs/mods/scene2d".
-FS = use "std/fs#e2eac59ab17e6dd5".
+FS = use "std/fs#eb554fc5f32fe8fc".
 B = use "std/blockio#12684c106eacea7e".
 Str = use "std/string".
 AC = use "std/actor#2de24bf2bdd5cb87".

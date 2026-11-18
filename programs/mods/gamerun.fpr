@@ -38,7 +38,7 @@ G = use "std/game".
 MV = use "std/mvu".
 Services = use "mods/services".
 EC = use "mods/epclient#decd41e2d3f54b1b".
-FS = use "std/fs#032f415a28970b29".
+FS = use "std/fs#179a9d1b6e6db75c".
 
 silent name variation = 0.
 

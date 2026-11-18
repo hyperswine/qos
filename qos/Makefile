@@ -137,7 +137,17 @@ RT_CORE = $(FRUNTIME)/runtime.c $(ACTORS_SRC) $(FRUNTIME)/bits.c \
           $(FRUNTIME)/vec.c $(FRUNTIME)/sstr.c $(FRUNTIME)/mod.c $(FRUNTIME)/buddy.c
 RT_VIRT = $(FMACHINE)/virt/crt0.S $(FMACHINE)/virt/ctx.S $(FMACHINE)/virt/ctx_fab.c \
           $(FMACHINE)/virt/hal.c $(FMACHINE)/virt/memshim.c
+# XLEN=32: an RV32 kernel for qemu-system-riscv32 (bsp/virt32). rv32imac has
+# a libgcc multilib in the toolchain; rv32ima would link the rv64 one.
+XLEN ?= 64
+ifeq ($(XLEN),32)
+ARCHFLAGS = -march=rv32imac_zicsr_zifencei -mabi=ilp32 -mcmodel=medany -ffixed-x27
+FPRC_TARGET = --target=rv32
+QEMU = qemu-system-riscv32
+else
 ARCHFLAGS = -march=rv64imafdc_zicsr -mabi=lp64 -mcmodel=medany -ffixed-x27
+FPRC_TARGET =
+endif
 CFLAGS = $(FPR_LAYOUT_CFLAGS) $(ARCHFLAGS) -DFPR_NHARTS=$(HARTS) \
          -ffreestanding -nostdlib -nostartfiles -O2 -Wall -Wextra \
          -fno-builtin -fno-stack-protector
@@ -156,13 +166,16 @@ $(BUILD)/apps_data.c: $(patsubst %,$(BUILD)/qa0/%.qa,$(QAPPS)) ../tools/qa-regis
 SYSTEM ?= $(FPR)/programs/system.fpr
 $(BUILD)/system.s: $(FPRC) $(SYSTEM) $(FPRISC_ROOT)/core/prelude.fpr FORCE
 	@mkdir -p $(BUILD)
-	LC_ALL=C.UTF-8 "$(FPRC)" --system=qos-native --prelude=$(FPRISC_ROOT)/core/prelude.fpr \
+	LC_ALL=C.UTF-8 "$(FPRC)" --system=qos-native $(FPRC_TARGET) --prelude=$(FPRISC_ROOT)/core/prelude.fpr \
 	  $(SYSTEM) $@
 
 # the MACHINE LAYER is the compiler tree's (its CLINT unit is FP-RISC: virt.mk);
 # the DEVICES are this tree's (../hal/virt, qos-virt.mk).  One copy of each.
 VIRT_MACHINE := $(FMACHINE)
 include $(FMACHINE)/virt/virt.mk
+ifeq ($(XLEN),32)
+VIRT_FPR = $(FMACHINE)/virt/rawunit.c # the CLINT is hal.c's C on rv32 (raw units lower to rv64 only)
+endif
 QOS_HAL := $(abspath $(HAL))
 include $(HAL)/virt/qos-virt.mk
 

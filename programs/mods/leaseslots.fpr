@@ -106,7 +106,7 @@ dispatch rd wr me slots next ret client command = case command of
       else operateAt rd wr me slots next ret client now until q
   | other ->
       now = AC.nowMs Unit;
-      operateAt rd wr me slots next ret client now (now + 10000000) other.
+      operateAt rd wr me slots next ret client now (now + 10000) other.
 operateAt rd wr me slots next ret client now until command = case command of
     EP.Close h -> _ = AC.reply ret (Ok 0); (close slots h client, next)
   | EP.Read h n -> url = access slots h client now;

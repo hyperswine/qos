@@ -43,7 +43,8 @@ fpr_elf_load_t fpr_qaimg_place(const fpr_qaimg_t *q, const unsigned char *img, u
 }
 
 /* move a RELOCATABLE image (linked at 0) to where it was placed: each RELOC
- * entry is the little-endian u32 offset of an address word in the image's
+ * entry is the little-endian u32 offset of an address word (the machine's
+ * word: 8 bytes on rv64 and the 64-bit hosts, 4 on rv32) in the image's
  * file bytes, which gets the placement address added
  * (docs/2026-10-01-PROCESS-IMAGES.md).  The build verified the list
  * (tools/mkqa.py --check-moved); this checks only that every word lies
@@ -55,11 +56,11 @@ const char *fpr_qaimg_relocate(unsigned char *dst, uw img_len,
   uw delta = (uw)dst;
   for (uw i = 0; i < rel_len; i += 4) {
     uw off = (uw)rel[i] | (uw)rel[i + 1] << 8 | (uw)rel[i + 2] << 16 | (uw)rel[i + 3] << 24;
-    if (off + 8 > img_len || off + 8 < off) return "a RELOC entry outside the image";
+    if (off + sizeof(uw) > img_len || off + sizeof(uw) < off) return "a RELOC entry outside the image";
     uw w = 0;
-    for (int k = 7; k >= 0; k--) w = w << 8 | dst[off + (uw)k];
+    for (int k = (int)sizeof(uw) - 1; k >= 0; k--) w = w << 8 | dst[off + (uw)k];
     w += delta;
-    for (int k = 0; k < 8; k++) { dst[off + (uw)k] = (unsigned char)w; w >>= 8; }
+    for (uw k = 0; k < sizeof(uw); k++) { dst[off + k] = (unsigned char)w; w >>= 8; }
   }
   return 0;
 }

@@ -9,7 +9,7 @@
 #
 #   /services/display, /services/display/line   write IStr -> UART.qa
 #   /services/keyboard, /services/keyboard/poll  read -> IInt key (held / 0)
-#   /services/clock                              read -> IInt mtime
+#   /services/clock                              read -> IInt ms since boot
 #   /services/modules/<hash>/<fn>                read -> IFn (a miss is Err)
 #   /services/storage/kv/<app id>                read replay / write append
 #   /services/uart                               read rx / write tx (IInt n)
@@ -35,7 +35,7 @@
 EP = use "ep#d65056c9d7dc9c18".
 SV = use "svc#b4e4e109ca696787".
 UM = use "uart#a0bf2c966fc966b2".
-TM = use "timer#38fa906125d48580".
+TM = use "timer#f11a31ca977152b0".
 Endpoint = use "epservice#436f606333c44f26".
 AC = use "std/actor#2de24bf2bdd5cb87".
 
@@ -113,7 +113,9 @@ dispPut usvc me url s = case usvc == 0 of
       Ok IUnit.
 
 # ---- the clock ---------------------------------------------------------------
-clockR clk me client url = Ok (IInt (read clk)).
+# milliseconds since boot (Sys.uptimeMs): raw CLINT ticks wrapped a 31-bit
+# RV32 Int after 107 s
+clockR clk me client url = Ok (IInt (Sys.uptimeMs Unit)).
 
 # ---- modules: "/services/modules/<hash>/<fn>", a miss is data ------------------
 modR : unsafe Int -> Int -> String -> Result EP.IoV String .

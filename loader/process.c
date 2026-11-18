@@ -349,6 +349,13 @@ static int digest_is(V wantv, const unsigned char *a, uw an, const unsigned char
   return 1;
 }
 
+/* The native runtime ABI names struct layouts and the boot block, which
+ * differ by word size, so the identity an image declares carries its width:
+ * rv64 images declare FPR_NATIVE_ABI, rv32 images FPR_NATIVE_ABI plus
+ * 500000000 (tools/native-abi.sol). A wrong-width image is refused here,
+ * before any of its layout is read. */
+#define QOS_NATIVE_ABI_ID ((uw)FPR_NATIVE_ABI + (sizeof(uw) == 4 ? 500000000u : 0u))
+
 /* Shared by launcher preflight and placement itself. No image backing,
  * publication or execution can happen until this gate succeeds. Hashes are
  * integrity claims supplied from LOAD, not signatures or authorization. */
@@ -358,7 +365,7 @@ static const char *check_image(V qastr, V extv, V numsv, V shav, V relshav, uw e
     return "native image extents must cover IMAGE, RELOC and IMPORT";
   if (!fpr_list_ints(numsv, nums, 8))
     return "native runtime ABI missing: rebuild the process with sol tools/build-process-app.sol";
-  if (nums[5] != FPR_NATIVE_ABI)
+  if (nums[5] != QOS_NATIVE_ABI_ID)
     return "native runtime ABI mismatch: rebuild the process with sol tools/build-process-app.sol";
   /* the two plane contracts (fpr.h): declared apart from the layout version,
    * so either table can move without the other; -1 = not declared */
