@@ -39,3 +39,24 @@ Guarded upload (including CRC readback) succeeded; UART:
     ping/pong; elapsed deadline; peer advanced
     spectre actors OK
     DONE
+
+## Arty S7-50
+
+The probe also runs on Simple-Risc's Arty S7-50 DDR3 image
+(`boards/artys7/pipeline`, preset `arty-s7-81`: CPU 81 MHz, memory 80 MHz).
+The clock adapter takes the CPU clock as `CORE_MHZ` (default 54), and the
+Arty's serial bridge needs the settle delay after the port opens:
+
+    EXTRA=-DCORE_MHZ=81 sol "$QOS"/hal/spectre/actors/build.sol . probe
+    openFPGALoader -b arty_s7_50 <simple-risc>/output/artys7/pipeline-81/top.bit
+    SIMPLE_RISC_PORT_SETTLE=1 python3 /path/to/simple-risc/boards/tangnano20k/run_program.py \
+      --port /dev/cu.usbserial-<serial>1 --freq-mhz 81 --protocol u --timeout 45 probe.bin
+
+Physical run, 2026-11-18, twice with the board reprogrammed between runs: pin 566870c3 (pin
+22ed0c71 does not compile for RV32: `cell_raw`/`RAW_FIELD` undeclared), ROM
+id fa73fbf18a09e2fc, image 93928 bytes, SHA-256
+f5d29c7ebbe1136c450fb4ddbffdcaa4898623fcb3ef3d80243125659b194cf9. The UART
+transcript matched the Tang Nano's above line for line. The bitstream was
+loaded into SRAM only. The other Spectre targets are not ported: the Arty has
+no SD slot, and the boot image and `spectre-uart` are specific to the Tang
+Nano (Gowin bitstream patching, 62212 baud).
