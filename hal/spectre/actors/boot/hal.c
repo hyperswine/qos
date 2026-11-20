@@ -1,5 +1,6 @@
 #include "devtable.h"
 #include "fpr.h"
+#include "servo.h"
 #include "sd.h"
 #ifdef SPECTRE_QLINK
 /* The console over qlink (hal/link): the host program tools/qhost frames

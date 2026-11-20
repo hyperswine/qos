@@ -93,7 +93,7 @@ app apps fpr env tool mailbox name =
 # spectre-build's `system` target, and copied over boot/fs.bin for `media`
 systemImage qos fprisc out board env =
   _ = K.mkdirs "{out}/system";
-  _ = B.command ["/bin/cp","{qos}/hal/spectre/actors/system/hal.c","{out}/system/"];
+  _ = B.command ["/bin/cp","{qos}/hal/spectre/actors/system/hal.c","{qos}/hal/spectre/actors/servo.h","{out}/system/"];
   _ = B.inDirectory "{out}/system" env ["{fprisc}/fpr","compile","--system=qos-native","--target=rv32","--prelude={out}/fprisc/core/prelude.fpr","{out}/qos/programs/system.fpr","app.s"];
   _ = B.command ["make","-s","-C","{qos}/qos","BUILD={out}/sysbuild","{out}/sysbuild/apps_data.c"];
   _ = S.target out board "system";
@@ -122,6 +122,7 @@ sums out names = Str.join "" (List.map (fn name -> path = "{out}/{name}"; sha = 
       _ = B.command ["/bin/cp","{checkout}/{preset}/bootrom-sdram.hex","{out}/board/{preset}/"];
       board = "{out}/board";
       _ = B.command ["/bin/cp","{boot}/../atomic.c",out];
+      _ = copyInto "{out}/boot" ["{boot}/../servo.h"];
       _ = copyInto "{out}/boot" (List.map (fn n -> "{boot}/{n}") ["app.fpr","hal.c","rom.c","install.c","media.S"]);
       _ = B.command ["/bin/cp","{boot}/../vfs/unpack.S","{out}/boot/"];
       _ = B.command ["/bin/sh","-c","cp \"$0\"/apps/*.fpr \"$0\"/apps/entry.S \"$0\"/apps/link.ld \"$1\"/boot/apps/",boot,out];

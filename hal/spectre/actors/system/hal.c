@@ -9,6 +9,7 @@
  * NIC), and con0, in0, clk0, hf0, aud0 on qlink. Simple-Risc's CLINT counts
  * CPU cycles; the runtime's timebase is 10 MHz, converted here. */
 #include "fpr.h"
+#include "servo.h"
 #include "qlink_sruart.h"
 
 extern uint64_t spectre_raw_ticks(void);
