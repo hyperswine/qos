@@ -2,42 +2,65 @@
 
 Revised 23 November 2026 for the parts on the bench: a BC550 NPN, a 1 kΩ
 base resistor and a 1N5819 flyback diode. The first layout came from the
-Infera planner, which modelled Q1 as a two-terminal base-collector proxy and
-put the emitter two strips away from the collector. A TO-92's three legs sit
-in three adjacent holes, so a straight BC550 put its emitter in the pin 76
-strip and the motor had no return to ground. In this layout the three legs
-go into three adjacent strips in their real order.
+Infera planner, which then modelled Q1 as a two-terminal base-collector proxy
+and put the emitter two strips away from the collector. A TO-92's three legs
+sit in three adjacent holes, so a straight BC550 put its emitter in the pin 76
+strip and the motor had no return to ground.
 
-Each column is one connected five-hole strip on the a–e side. On a larger
-board, use any five adjacent strips on one side of the center gap.
+The planner ([motor76.nprolog](motor76.nprolog)) now knows three-leg TO-92
+parts, axial parts whose legs are 1 to 4 columns apart with empty holes
+under the body, and single-hole wires for off-board connections. The plan
+below is its output, verbatim ([planner.txt](planner.txt)). Each column is
+one connected five-hole strip, and row a is drawn at the bottom, nearest
+you. On a larger board, use any five adjacent strips on one side of the
+center gap.
 
 ```text
-                     Breadboard strips on the a–e side
-             8              9              10             11             12
- a       R1 leg 1 ───────────────────── R1 leg 2           ·              ·
- b           ·          Q1 C (left)    Q1 B (middle)   Q1 E (right)       ·
- c       FPGA pin 76     Motor −           ·           MB-V2 GND       Motor +
- d           ·          D1 anode ───────────────────────────────── D1 cathode (stripe)
- e           ·               ·             ·          Tang Nano GND    MB-V2 +
+=== Breadboard, a–e side (row a nearest you) ===
+     7    8    9   10   11   12   13
+ e   ·    ·    ·    ·    ·    ·    ·
+ d   ·    ·   GND   ·    ·    ·    ·
+ c   ·    ·   GND   ·   M-   V+    ·
+ b   ·   P76  Q1E  Q1B  Q1C  M+    ·
+ a   ·   R1────────R1   D1A──D1K   ·
+     7    8    9   10   11   12   13
+
+=== Parts ===
+  R1   1 kΩ    leg a8,  leg a10,  lying over the holes between
+  D1   1N5819  anode a11,  cathode (striped end) a12,  stood on end
+  Q1   BC550   Q1C b11,  Q1B b10,  Q1E b9   flat face toward row e (away from you)
+  P76  b8      wire to FPGA pin 76
+  M-   c11     wire to motor −
+  M+   b12     wire to motor +
+  V+   c12     wire to MB-V2 3.3 V (or 5 V if the motor is rated for it)
+  GND  c9      wire to MB-V2 GND
+  GND  d9      wire to Tang Nano GND
+
+=== Strips (each column is one connected strip) ===
+  8   PIN76      R1  a8    P76 b8
+  9   GND        Q1E b9    GND c9    GND d9
+  10  BASE       R1  a10   Q1B b10
+  11  SWITCHED   D1A a11   Q1C b11   M-  c11
+  12  MOTOR_VCC  D1K a12   M+  b12   V+  c12
 ```
 
-- **Q1, BC550:** flat face toward row e, legs down. From left to right the
-  legs are collector, base and emitter, in b9, b10 and b11. They go in
-  straight, with no bent leads.
-- **R1, 1 kΩ:** a8 to a10, lying over strip 9 without touching it. Pin 76
-  to the base. Enough for a BC550: gain 200 to 800 needs well under 1 mA of
-  base current for 100 mA.
-- **D1, 1N5819:** d9 to d12, stripe (cathode) at d12 on motor +. It lies
-  over d10 and d11, which stay empty.
-- **Strip 11 is ground:** emitter, MB-V2 GND and Tang Nano GND. The shared
-  ground is required.
+- **Q1, BC550:** flat face toward row e, away from you. From your side you
+  see its round back, and the legs from left to right are emitter, base
+  and collector, in b9, b10 and b11. They go in straight.
+- **Strip 9 is ground:** the emitter, MB-V2 GND and Tang Nano GND. The
+  shared ground is required.
+- **R1, 1 kΩ:** lies over a9 without touching it, which stays empty. Enough
+  for a BC550: gain 200 to 800 needs well under 1 mA of base current for
+  100 mA.
+- **D1, 1N5819:** stands on end. The striped (cathode) end goes in a12,
+  the motor + strip.
 - **Strip 12 is the motor supply.** Use the MB-V2 3.3 V output, or 5 V if the
   motor is rated for it. The base drive stays 3.3 V either way. Keep the
   MB-V2 positive output off the FPGA's power pins.
 
 Before powering anything, check that a meter on diode test reads about
-0.6–0.7 V from base to emitter (b10 to b11) and from base to collector
-(b10 to b9). Collector to emitter should be open in both directions.
+0.6–0.7 V from base to emitter (b10 to b9) and from base to collector
+(b10 to b11). Collector to emitter should be open in both directions.
 
 **Limits:**
 
@@ -56,17 +79,15 @@ Before powering anything, check that a meter on diode test reads about
 
 **Bench checks** while `examples/tangnano20k_motor.fpr` runs:
 
-1. Pin 76 (c8) to ground alternates between about 3.3 V and 0 V each
+1. Pin 76 (b8) to ground alternates between about 3.3 V and 0 V each
    second.
-2. While it is on, the base (b10) reads about 0.7 V and the collector (b9)
+2. While it is on, the base (b10) reads about 0.7 V and the collector (b11)
    is near 0 V.
-3. Shorting c9 to strip 11 by hand spins the motor. If it does not, the
+3. Shorting c11 to strip 9 by hand spins the motor. If it does not, the
    motor or its supply is the problem.
 
-- [Complete netlist](netlist.csv)
-- [Infera source](motor76.nprolog) and [planner output](planner.txt), for
-  the first layout only. The planner has no three-terminal footprint, and
-  this layout does not come from it.
+- [Netlist](netlist.csv), the planner's CSV output
+- [Planner](motor76.nprolog) and its [output](planner.txt)
 
 ## Firmware-timed test
 
@@ -94,7 +115,7 @@ finishes low. Record physical observations alongside the UART transcript.
 The UART side of this run passed on 23 November. The motor did not spin
 with the first layout. This revised layout has not been tried yet.
 
-The first placement used NeoProlog's
-[Infera breadboard planner example](https://github.com/hyperswine/NeoProlog/blob/main/examples/breadboard.nprolog),
-adapted in [motor76.nprolog](motor76.nprolog). The [netlist](netlist.csv)
-now records the revised hand placement above.
+The planner started from NeoProlog's
+[Infera breadboard planner example](https://github.com/hyperswine/NeoProlog/blob/main/examples/breadboard.nprolog).
+[motor76.nprolog](motor76.nprolog) replaces its two-pin, adjacent-column
+model with the footprints above and draws row a at the bottom.

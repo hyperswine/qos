@@ -1,41 +1,26 @@
-Infera v2 — clauses: color red. queries: color X? declarations: color : semidet (atom: =>).
-Commands: :load <file>   :reload (:r)   :sig [pred]   :preds   :trace <query>   :quit (:q)   Ctrl+D
-Loaded 255 clause(s) from "motor76.nprolog".
-> emit (report_flex motor76)
-=== Circuit motor76 (flexible) ===
-  Sources (not placed): MBV2 (DC 3.3) between MOTOR_VCC and GND
-=== Placement (score 6) ===
-  RBASE   (R,     1k)   pin_a -> a8     pin_b -> a9
-  D1      (D, 1N5819)   pin_a -> a10    pin_b -> a11
-  Q1_BC   (D, placement proxy only B-to-C)   pin_a -> b9     pin_b -> b10
+=== Breadboard, a–e side (row a nearest you) ===
+     7    8    9   10   11   12   13
+ e   ·    ·    ·    ·    ·    ·    ·
+ d   ·    ·   GND   ·    ·    ·    ·
+ c   ·    ·   GND   ·   M-   V+    ·
+ b   ·   P76  Q1E  Q1B  Q1C  M+    ·
+ a   ·   R1────────R1   D1A──D1K   ·
+     7    8    9   10   11   12   13
 
-=== Nets ===
-  PIN76   a8
-  MOTOR_VCCa11
-  BASE    a9, b9
-  SWITCHEDa10, b10
+=== Parts ===
+  R1   1 kΩ    leg a8,  leg a10,  lying over the holes between
+  D1   1N5819  anode a11,  cathode (striped end) a12,  stood on end
+  Q1   BC550   Q1C b11,  Q1B b10,  Q1E b9   flat face toward row e (away from you)
+  P76  b8      wire to FPGA pin 76
+  M-   c11     wire to motor −
+  M+   b12     wire to motor +
+  V+   c12     wire to MB-V2 3.3 V (or 5 V if the motor is rated for it)
+  GND  c9      wire to MB-V2 GND
+  GND  d9      wire to Tang Nano GND
 
-=== Wires needed ===
-  none
-
-=== Breadboard (170-tie) ===
-        1    2    3    4    5    6    7    8    9   10   11   12   13   14   15   16   17
-    -------------------------------------------------------------------------------------
-  a |   .    .    .    .    .    .    . RBASEa RBASEb  D1a  D1b    .    .    .    .    .    .
-  b |   .    .    .    .    .    .    .    . Q1_BCa Q1_BCb    .    .    .    .    .    .    .
-  c |   .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
-  d |   .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
-  e |   .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
-
-    ==== centre gap ====
-
-  f |   .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
-  g |   .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
-  h |   .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
-  i |   .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
-  j |   .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
-    -------------------------------------------------------------------------------------
-        1    2    3    4    5    6    7    8    9   10   11   12   13   14   15   16   17
-
-true.
-> Bye!
+=== Strips (each column is one connected strip) ===
+  8   PIN76      R1  a8    P76 b8
+  9   GND        Q1E b9    GND c9    GND d9
+  10  BASE       R1  a10   Q1B b10
+  11  SWITCHED   D1A a11   Q1C b11   M-  c11
+  12  MOTOR_VCC  D1K a12   M+  b12   V+  c12
