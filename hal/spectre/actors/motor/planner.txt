@@ -1,0 +1,41 @@
+Infera v2 — clauses: color red. queries: color X? declarations: color : semidet (atom: =>).
+Commands: :load <file>   :reload (:r)   :sig [pred]   :preds   :trace <query>   :quit (:q)   Ctrl+D
+Loaded 255 clause(s) from "motor76.nprolog".
+> emit (report_flex motor76)
+=== Circuit motor76 (flexible) ===
+  Sources (not placed): MBV2 (DC 3.3) between MOTOR_VCC and GND
+=== Placement (score 6) ===
+  RBASE   (R,     1k)   pin_a -> a8     pin_b -> a9
+  D1      (D, 1N5819)   pin_a -> a10    pin_b -> a11
+  Q1_BC   (D, placement proxy only B-to-C)   pin_a -> b9     pin_b -> b10
+
+=== Nets ===
+  PIN76   a8
+  MOTOR_VCCa11
+  BASE    a9, b9
+  SWITCHEDa10, b10
+
+=== Wires needed ===
+  none
+
+=== Breadboard (170-tie) ===
+        1    2    3    4    5    6    7    8    9   10   11   12   13   14   15   16   17
+    -------------------------------------------------------------------------------------
+  a |   .    .    .    .    .    .    . RBASEa RBASEb  D1a  D1b    .    .    .    .    .    .
+  b |   .    .    .    .    .    .    .    . Q1_BCa Q1_BCb    .    .    .    .    .    .    .
+  c |   .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+  d |   .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+  e |   .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+
+    ==== centre gap ====
+
+  f |   .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+  g |   .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+  h |   .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+  i |   .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+  j |   .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+    -------------------------------------------------------------------------------------
+        1    2    3    4    5    6    7    8    9   10   11   12   13   14   15   16   17
+
+true.
+> Bye!
