@@ -40,3 +40,21 @@ The GPIO testbench passed. The experimental image routed, but its 84 MHz
 timing check failed at -0.551 ns on a CPU pipeline register path. It was
 not loaded and there is no physical motor result. The earlier hardware
 cutoff variant also failed timing at -0.408 ns.
+
+## Planned transistor test
+
+Use Spectre-84 pin 76 to drive the NPN low-side motor switch through the
+1 kΩ base resistor, with the 1N5819 across the motor and a shared ground.
+Load the pin 76 image (Simple-Risc `SDRAM_SERVO=1`, which passes 84 MHz;
+see [README](README.md)) into FPGA SRAM and run fprisc's
+`examples/tangnano20k_motor.fpr`: 15 pairs of one second on and one second off. Verify that the motor
+starts and stops on each pair, the 3.3 V rail stays steady, and pin 76
+finishes low. Record physical observations alongside the UART transcript.
+The UART side of this run passed on 23 November. The physical
+observations are still pending.
+
+The placement uses NeoProlog's
+[Infera breadboard planner example](https://github.com/hyperswine/NeoProlog/blob/main/examples/breadboard.nprolog).
+The [motor-specific planner input](motor76.nprolog) adapts that example.
+The [netlist](netlist.csv) adds the transistor emitter and external wiring
+to the planner's two-terminal placement.
