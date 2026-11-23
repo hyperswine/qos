@@ -56,7 +56,7 @@ run me = case AS.start me of
 step me state =
   (ctx, model) = state;
   case AS.next me ctx of
-    AS.Idle -> _ = Sys.sleepUs 1000; (True, state)
+    AS.Idle -> _ = Sys.sleepUs 16000; (True, state)
   | AS.Gone -> _ = AS.abandon me ctx; (False, state)
   | AS.JobResult token result ->
       (fresh, commands) = update (AW.Arrived token result) model;

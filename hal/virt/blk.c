@@ -614,6 +614,17 @@ static void blk_rw(u64 page, u32 bytes, u32 type) {
     blk_budget budget = {.us = __atomic_load_n(&active_deadline_us, __ATOMIC_ACQUIRE)};
     uint64_t ticks = blk_budget_ticks(budget), park_limit = blk_budget_parks(budget);
     uint64_t parks = 0;
+#ifndef QOS_POLL_TRIAL
+    /* Brief 10 us spin when CLINT clock is active catches fast virtio-blk
+     * completions without a 200 us park; then ramp 10 -> 25 -> 50 -> 100 -> 200 us. */
+    if (start) {
+      while (hal_mtime() - start < 100ULL) {
+        FENCE();
+        if (QUSED->idx != before) goto completed_io;
+      }
+    }
+    uw sleep_us = start ? 10 : 200;
+#endif
     do {
       if (blk_expired(start, start ? parks : ++parks, ticks, park_limit)) {
         /* the device may still DMA into the buffers: they stay reserved (an
@@ -632,11 +643,17 @@ static void blk_rw(u64 page, u32 bytes, u32 type) {
       ++empty;
 #endif
 #else
-      fpr_actor_sleep_us(200);
+      fpr_actor_sleep_us(sleep_us);
+      if (start && sleep_us < 200) {
+        sleep_us = sleep_us < 25 ? 25 : (sleep_us < 50 ? 50 : (sleep_us < 100 ? 100 : 200));
+      }
 #endif
       FENCE();
     } while (QUSED->idx == before);
   }
+#ifndef QOS_POLL_TRIAL
+completed_io:
+#endif
 #ifdef QOS_REPLAY_BLK_PROFILE
   if (!is_write) qos_replay_device_stamps(page, submitted, hal_mtime());
 #endif

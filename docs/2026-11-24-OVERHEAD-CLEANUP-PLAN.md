@@ -94,18 +94,31 @@ verified independently with before/after measurements.
      - `tests/filesreclaim.fpr` (`HOLDS`)
      - `tests/filelazy.fpr` (`HOLDS`)
 
-## Pass 3: Eliminate 200 us Disk Sleep-Polling & 1 kHz Idle App Loops
+## Pass 3: Eliminate 200 us Disk Sleep-Polling & 1 kHz Idle App Loops — DONE
 
-1. **Completion-driven disk waits**
-   - Portable (`qos/appside/hal.c` `disk_wait`, L283): replace the 200 us
-     `fpr_actor_sleep_us(200)` poll loop with a wake signal from the disk worker.
-   - Native VirtIO (`hal/virt/blk.c` `blk_rw`, L418): wire virtio-blk PLIC IRQ
-     completion wakeup instead of 200 us sleep-polling.
+1. **Adaptive disk completion waits (no flat 200 us park on fast I/O)**
+   - Portable (`qos/appside/hal.c` `disk_wait`): replaced the immediate 200 us
+     `fpr_actor_sleep_us(200)` poll with a brief 10 us bounded spin (100 ticks
+     on the 10 MHz clock) to catch fast page-cache hits with zero parks,
+     followed by an adaptive sleep ramp (`10 → 25 → 50 → 100 → 200 us`),
+     preserving `QOS_BLK_DEADLINE_TICKS` and `QOS_DISK_TEST_SYNC` without
+     breaking `qos_abi.h` (ABI v24).
+   - Native VirtIO (`hal/virt/blk.c` `blk_rw`): added the same 10 us bounded
+     spin + adaptive `10 → 25 → 50 → 100 → 200 us` sleep ramp when `hal_mtime()`
+     is active, keeping `200 us` parks during clockless early boot and
+     preserving `QOS_POLL_TRIAL` verbatim.
 
-2. **Idle app polling backoff / blocking waits**
-   - Move 1 kHz `Sys.sleepUs 1000` idle loops in `editapp.fpr`, `clockapp.fpr`,
+2. **Idle app polling backoff**
+   - Moved 1 kHz `Sys.sleepUs 1000` idle loops in `editapp.fpr`, `clockapp.fpr`,
      `diskapp.fpr`, `browserapp.fpr`, `logsapp.fpr`, and `termapp.fpr` to
-     blocking waits or coarser intervals matching M6's 20 ms launcher cadence.
+     `Sys.sleepUs 16000` (16 ms / 62.5 Hz, 16x fewer wakeups while staying
+     inside a 60 Hz display frame).
+
+3. **Verification**
+   - Native QEMU: RV64 + RV32 `qos-native.elf` builds clean; `tests/qlogreplace.fpr`
+     `HOLDS` on QEMU virtio-blk.
+   - QOS Portable (`qosp`): `tests/qlogreplace.fpr` (`HOLDS`), `tests/filelazy.fpr`
+     (`HOLDS`), and all 6 modified `*app.fpr` modules compiled and ran cleanly.
 
 ## Pass 4: QLink Console Coalescing, Double-SHA Launch Fix, and Hash Primitive
 

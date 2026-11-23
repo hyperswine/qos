@@ -368,15 +368,26 @@ static int64_t disk_wait(uint64_t page, const char *src, uint64_t len, int write
   if (!qos_hal->blk_done(job)) {
     fpr_actor_cleanup_set(qos_hal->blk_release, job);
     uint64_t start = hal_mtime();
+    /* Fast page-cache hits finish in a few microseconds: spin briefly before
+     * parking, then ramp the sleep interval up to 200 us for slow flushes or
+     * stalled disks so deadline behavior stays unchanged. */
+    while (hal_mtime() - start < 100ULL) {
+      if (qos_hal->blk_done(job)) goto done;
+    }
+    uw sleep_us = 10;
     do {
-      fpr_actor_sleep_us(200);
+      fpr_actor_sleep_us(sleep_us);
       if (qos_hal->blk_done(job)) break;
       if (hal_mtime() - start >= QOS_BLK_DEADLINE_TICKS) {
         fpr_actor_cleanup_clear(job);
         qos_hal->blk_release(job); /* the worker's reference keeps the buffer */
         fpr_actor_fail("blk: request timed out (the disk worker stalled)");
       }
+      if (sleep_us < 200) {
+        sleep_us = sleep_us < 25 ? 25 : (sleep_us < 50 ? 50 : (sleep_us < 100 ? 100 : 200));
+      }
     } while (1);
+  done:
     fpr_actor_cleanup_clear(job);
   }
   int64_t result = qos_hal->blk_result(job, dst);
