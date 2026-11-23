@@ -33,6 +33,10 @@
 #
 # One tick period is honoured: every Game.tick of a model must name the same
 # number of milliseconds (the frame loop has one clock for update).
+#
+# Keys reach update as the game's own messages: a press is Game.Key code (from
+# MV's EKey), a release Game.KeyUp code (from EKeyUp), and a wheel movement
+# Game.Scroll.  An autorepeat is neither and never reaches the game.
 AC = use "std/actor".
 G = use "std/game".
 MV = use "std/mvu".
@@ -117,6 +121,7 @@ stepPendingJobs config app env w = case w.jobs of
 Taking = Type (Nothing | Taken i).
 input app w ev = case ev of
     MV.EKey k -> Taken (G.Key k)
+  | MV.EKeyUp k -> Taken (G.KeyUp k)
   | MV.EWheel dy dx -> Taken (G.Scroll dy dx)
   | MV.ETick -> Taken (G.Elapsed (clock (G.periods (G.subscriptions app w.game))))
   | e -> Nothing.
