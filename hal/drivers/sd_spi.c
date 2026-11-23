@@ -32,10 +32,15 @@ static void sd_read_pages(void *st, uint64_t page, uint32_t count, uint8_t *dst)
 }
 
 static void write_page(sd_spi_t *s, uint64_t page, const uint8_t *src, uint32_t len) {
-  for (uint32_t i = 0; i < BLOCK_PAGE; i++) scratch[i] = i < len ? src[i] : 0;
+  const uint8_t *buf = src;
+  if (len < BLOCK_PAGE) {
+    if (len) __builtin_memcpy(scratch, src, len);
+    __builtin_memset(scratch + len, 0, BLOCK_PAGE - len);
+    buf = scratch;
+  }
   uint32_t lba = s->lba0 + 8u * (uint32_t)page;
   for (uint32_t i = 0; i < 8; i++)
-    if (sd_write(&s->card, lba + i, scratch + 512u * i)) fpr_actor_fail("blk: sd write failed");
+    if (sd_write(&s->card, lba + i, buf + 512u * i)) fpr_actor_fail("blk: sd write failed");
 }
 
 static void sd_write_record(void *st, uint64_t page, const uint8_t *hdr, uint32_t hlen,

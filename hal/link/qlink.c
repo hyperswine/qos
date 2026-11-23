@@ -1,13 +1,21 @@
 /* qlink.c -- the qlink frame codec and session (qlink.h). */
 #include "qlink.h"
 
-uint16_t qlink_crc16(const uint8_t *p, size_t n) {
-  uint16_t crc = 0xffff;
+static uint16_t crc16_step(uint16_t crc, const uint8_t *p, size_t n) {
+  static const uint16_t tbl[16] = {
+    0x0000, 0x1021, 0x2042, 0x3063, 0x4084, 0x50a5, 0x60c6, 0x70e7,
+    0x8108, 0x9129, 0xa14a, 0xb16b, 0xc18c, 0xd1ad, 0xe1ce, 0xf1ef,
+  };
   while (n--) {
-    crc ^= (uint16_t)(*p++) << 8;
-    for (int k = 0; k < 8; k++) crc = (crc & 0x8000) ? (uint16_t)((crc << 1) ^ 0x1021) : (uint16_t)(crc << 1);
+    uint8_t b = *p++;
+    crc = (uint16_t)((crc << 4) ^ tbl[((crc >> 12) ^ (b >> 4)) & 0x0f]);
+    crc = (uint16_t)((crc << 4) ^ tbl[((crc >> 12) ^ b) & 0x0f]);
   }
   return crc;
+}
+
+uint16_t qlink_crc16(const uint8_t *p, size_t n) {
+  return crc16_step(0xffff, p, n);
 }
 
 static size_t put(uint8_t *out, size_t i, uint8_t b) {
@@ -18,16 +26,13 @@ static size_t put(uint8_t *out, size_t i, uint8_t b) {
 
 size_t qlink_encode(uint8_t ch, uint8_t seq, uint8_t ack, const uint8_t *payload, size_t n, uint8_t *out) {
   uint8_t head[4] = {ch, seq, ack, (uint8_t)n};
-  uint16_t crc = 0xffff;
   size_t i = 0;
   out[i++] = 0x7e;
   for (int k = 0; k < 4; k++) i = put(out, i, head[k]);
   for (size_t k = 0; k < n; k++) i = put(out, i, payload[k]);
-  /* crc over head then payload */
-  uint8_t tmp[QLINK_PAYLOAD_MAX + 4];
-  for (int k = 0; k < 4; k++) tmp[k] = head[k];
-  for (size_t k = 0; k < n; k++) tmp[4 + k] = payload[k];
-  crc = qlink_crc16(tmp, n + 4);
+  /* stream crc over head then payload with no temporary buffer copy */
+  uint16_t crc = crc16_step(0xffff, head, 4);
+  if (n) crc = crc16_step(crc, payload, n);
   i = put(out, i, (uint8_t)(crc >> 8));
   i = put(out, i, (uint8_t)crc);
   out[i++] = 0x7e;

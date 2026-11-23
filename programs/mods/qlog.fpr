@@ -322,17 +322,19 @@ metaOr dev head = case openMeta dev of Ok m -> m | Err why -> stop why.
 nextGen g = case g >= 1000000000 of True -> stop "superblock generation exhausted" | False -> g + 1.
 generationRoom dev needed = case latestSeal dev of Err why -> False | Ok s -> generationRoomSeal s needed.
 generationRoomSeal s needed = Seal m gen stage = s; gen <= 1000000000 - needed.
-sealWrite dev m gen stage = pageWrite dev (case imod gen 2 == 0 of True -> 0 | False -> pageCount dev - 1) (sealLine m gen stage).
+sealWriteNp dev m gen stage np = pageWrite dev (case imod gen 2 == 0 of True -> 0 | False -> np - 1) (sealLine m gen stage).
+sealWrite dev m gen stage = sealWriteNp dev m gen stage (pageCount dev).
 sealCommit dev m stage = case latestSeal dev of Err why -> stop why | Ok s -> sealCommitFrom dev m stage s.
 sealCommitFrom dev m stage s =
   _ = publishNextSeal dev m stage s;
   Unit.
-publishNextSeal dev m stage s =
+publishNextSealNp dev m stage s np =
   Seal old gen oldStage = s;
   g2 = nextGen gen;
-  _ = sealWrite dev m g2 stage;
+  _ = sealWriteNp dev m g2 stage np;
   _ = durableFlush dev;
   Seal m g2 stage.
+publishNextSeal dev m stage s = publishNextSealNp dev m stage s (pageCount dev).
 # Public metadata updates remain available to tools; durable images always
 # alternate slots and flush before returning. Normalize a changed SWAP bound.
 sbW dev m =
@@ -1087,11 +1089,21 @@ pairUp2 : unsafe Int -> List Int -> List Int .
 pairUp2 x r = case r of Nil -> x :: Nil | y :: r2 -> (hCombine x y) :: pairUp r2.
 
 writeBuf : unsafe PageSource -> Int -> List String -> Int .
-writeBuf dev p pages = case pages of Nil -> p | pg :: r -> writeBuf2 dev p r pg.
-writeBuf2 : unsafe PageSource -> Int -> List String -> String -> Int .
-writeBuf2 dev p r pg =
-  _ = pageWrite dev p pg;
-  writeBuf dev (p + 1) r.
+writeBuf dev p pages = case pages of
+    Nil -> p
+  | first :: rest -> writeBufBatch dev p first rest.
+writeBufBatch : unsafe PageSource -> Int -> String -> List String -> Int .
+writeBufBatch dev p first rest = case rest of
+    Nil -> _ = pageWrite dev p first; p + 1
+  | _ ->
+      (taken, tail, n) = takeBufPages rest 7 Nil 0;
+      _ = writeRun dev p first (strJoin "" (Core.revS taken Nil));
+      writeBuf dev (p + 1 + n) tail.
+takeBufPages : unsafe List String -> Int -> List String -> Int -> (List String, List String, Int) .
+takeBufPages pages left acc n =
+  if left <= 0 then (acc, pages, n) else case pages of
+      Nil -> (acc, Nil, n)
+    | pg :: rest -> takeBufPages rest (left - 1) (pg :: acc) (n + 1).
 
 # compact dev head -> the new head (idempotent: see the header comment)
 compactRes dev head =
@@ -1452,6 +1464,100 @@ icStep r url e = countTupleEntries (e :: r) url 0.
 # the ONE writer.  Reads consult the boot-scan index.
 # Compatibility composition for callers opening their own disk. Native boot
 # supplies the already-created service through actorWith instead.
+# Single-writer metadata cache: avoids re-reading superblock page(s) and
+# pageCount on every append/replace while preserving disk error detection.
+MetaCache = Type (CacheNone | CacheV2 Meta | CacheV3 Seal Int).
+loadCache dev =
+  np = pageCount dev;
+  primary = pageRead dev 0;
+  if np < 3 then (case legacyParse primary np of Ok m -> CacheV2 m | Err why -> stop why)
+  else case chooseSeal (sealParse primary np) (sealParse (pageRead dev (np - 1)) np) of
+      Ok seal -> CacheV3 seal np
+    | Err why -> (case legacyParse primary np of Ok m -> CacheV2 m | Err invalid -> stop invalid).
+wrGoCached dev head hdr s pl np cache = case cache of
+    CacheNone -> wrGoCached dev head hdr s pl np (loadCache dev)
+  | CacheV3 seal pages ->
+      Meta h v w c d sw mr = sealMeta seal;
+      end = head + 1 + np;
+      if head != h then Err "stale log head"
+      else if and2 (d > 0) (end > d) then Err "data partition full"
+      else if not (generationRoomSeal seal 1) then Err "superblock generation exhausted"
+      else
+        _ = writeRecordPages dev head hdr s pl;
+        _ = durableFlush dev;
+        nextSeal = publishNextSealNp dev (Meta end v 0 1 d sw mr) 0 seal pages;
+        Ok (end, CacheV3 nextSeal pages)
+  | CacheV2 m ->
+      Meta h v w c d sw mr = m;
+      end = head + 1 + np;
+      if head != h then Err "stale log head"
+      else if and2 (d > 0) (end > d) then Err "data partition full"
+      else
+        _ = pageWrite dev 0 (sbLineM (Meta head v 1 0 d sw mr));
+        _ = writeRecordPages dev head hdr s pl;
+        m2 = Meta end v 0 1 d sw mr;
+        _ = pageWrite dev 0 (sbLineM m2);
+        Ok (end, CacheV2 m2).
+appendCached dev head tag url s cache =
+  pl = strlen s;
+  np = ceilDiv pl pgsz;
+  hdr = hdrLineH tag np pl url (hashStr s);
+  if strlen hdr > pgsz then Err "record header exceeds one page"
+  else if strEq tag "QREC" or strEq tag "QDEL" then
+    if validKey url and (pl == 0 or strEq tag "QREC")
+    then wrGoCached dev head hdr s pl np cache else Err "invalid record fields"
+  else case appendAdmission hdr s of
+    Err why -> Err why
+  | Ok u -> wrGoCached dev head hdr s pl np cache.
+writeCountedPackCached dev head pay pl count cache =
+  np = ceilDiv pl pgsz;
+  hdr = hdrLineH "QBLK" np pl "{count}" (hashStr pay);
+  wrGoCached dev head hdr pay pl np cache.
+appendPairCached dev head firstKey firstPay secondKey secondPay seal pages =
+  Meta h v w c d sw mr = sealMeta seal;
+  firstSize = strlen firstPay;
+  secondSize = strlen secondPay;
+  firstPages = ceilDiv firstSize pgsz;
+  secondPages = ceilDiv secondSize pgsz;
+  second = head + 1 + firstPages;
+  end = second + 1 + secondPages;
+  if v != 3 or h != head then Err "requires current durable head"
+  else if end > d then Err "data partition full"
+  else if validKey firstKey and validKey secondKey and generationRoomSeal seal 1 then
+    firstHeader = hdrLineH "QREC" firstPages firstSize firstKey (hashStr firstPay);
+    secondHeader = hdrLineH "QREC" secondPages secondSize secondKey (hashStr secondPay);
+    if strlen firstHeader > pgsz or strlen secondHeader > pgsz then Err "record header exceeds one page"
+    else
+      _ = writePairPages dev head firstHeader firstPay firstPages secondHeader secondPay secondPages;
+      _ = durableFlush dev;
+      nextSeal = publishNextSealNp dev (Meta end v 0 1 d sw mr) 0 seal pages;
+      Ok (second, end, CacheV3 nextSeal pages)
+  else Err "pair admission refused".
+replaceSealedCached dev head url pay seal pages =
+  Meta h v w c d sw mr = sealMeta seal;
+  pl = strlen pay;
+  np = ceilDiv pl pgsz;
+  end = head + 2 + np;
+  if h != head then Err "stale log head"
+  else if end > d then Err "data partition full"
+  else
+    del = hdrLineH "QDEL" 0 0 url (hashStr "");
+    if strlen del > pgsz then Err "record header exceeds one page"
+    else if validKey url then
+      rec = hdrLineH "QREC" np pl url (hashStr pay);
+      if strlen rec > pgsz then Err "record header exceeds one page"
+      else if generationRoomSeal seal 1 then
+        _ = writePairPages dev head del "" 0 rec pay np;
+        _ = durableFlush dev;
+        nextSeal = publishNextSealNp dev (Meta end v 0 1 d sw mr) 0 seal pages;
+        Ok (end, CacheV3 nextSeal pages)
+      else Err "superblock generation exhausted"
+    else Err "invalid record fields".
+replaceCached dev head url pay cache = case cache of
+    CacheNone -> replaceCached dev head url pay (loadCache dev)
+  | CacheV3 seal pages -> replaceSealedCached dev head url pay seal pages
+  | CacheV2 m -> Err "replace requires durable v3 storage".
+
 actor dev me = block = B.serve me dev; actorWith (routed block) me.
 actorWith source me = case Wire.deadline Wire.defaultMs of
     Err why -> stop why
@@ -1459,47 +1565,49 @@ actorWith source me = case Wire.deadline Wire.defaultMs of
 actorWithUntil until source me = actorStart (withDeadline source until) me.
 actorStart dev me =
   head = Sys.arena (fn u -> ensure dev);
-  idx = Sys.arena (fn u ->
-    Meta h version w c d sw mr = metaOr dev head;
-    if version == 3 then (case verifiedScan True dev head of Err why -> stop why | Ok (count, entries) -> entries)
-    else scanEntriesRev dev head 1 Nil);
+  (cache, idx) = Sys.arena (fn u ->
+    c = loadCache dev;
+    entries = case c of
+        CacheV3 seal pages -> (case verifiedScan True dev head of Err why -> stop why | Ok (count, es) -> es)
+      | _ -> scanEntriesRev dev head 1 Nil;
+    (c, entries));
   # Reclaim boot temporaries before publishing the first reply. Thereafter
   # reclaim adaptively: copying a large index on every read is unnecessary.
-  aAgain me (AC.tidied me 1048576 (AC.boundary me (baseSource dev, head, idx))).
-aLoop : unsafe PageSource -> Int -> Int -> List Ent -> AC.Tidy -> zz .
-aLoop dev me head idx tidy = aAgain me (AC.tidy me ((dev, head, idx), tidy)).
-aAgain : unsafe Int -> ((PageSource, Int, List Ent), AC.Tidy) -> zz .
+  aAgain me (AC.tidied me 1048576 (AC.boundary me ((baseSource dev, head, idx), cache))).
+aLoop : unsafe PageSource -> Int -> Int -> List Ent -> MetaCache -> AC.Tidy -> zz .
+aLoop dev me head idx cache tidy = aAgain me (AC.tidy me (((dev, head, idx), cache), tidy)).
+aAgain : unsafe Int -> (((PageSource, Int, List Ent), MetaCache), AC.Tidy) -> zz .
 aAgain me fresh =
-  ((dev, head, idx), tidy) = fresh;
+  (((dev, head, idx), cache), tidy) = fresh;
   borrowed = receive me;
   case borrowed of
-      SVC.TimedRpc from id until tag url pay -> aTimed (baseSource dev) me head idx tidy borrowed (from, id, True) until tag url pay
+      SVC.TimedRpc from id until tag url pay -> aTimed (baseSource dev) me head idx cache tidy borrowed (from, id, True) until tag url pay
     | SVC.Rpc replyTo tag url pay -> case Wire.deadline Wire.defaultMs of
           Err why -> stop why
-        | Ok until -> aTimed (baseSource dev) me head idx tidy borrowed (replyTo, 0, False) until tag url pay.
+        | Ok until -> aTimed (baseSource dev) me head idx cache tidy borrowed (replyTo, 0, False) until tag url pay.
 usesRequestKey tag = tag == 1 or tag == 2 or tag == 3 or tag == 4 or tag == 5 or tag == 9 or tag == 10 or tag == 11.
 usesRequestPayload tag = tag == 2 or tag == 7 or tag == 9 or tag == 11 or tag == 13.
-aTimed dev me head idx tidy message ret until tag url pay =
+aTimed dev me head idx cache tidy message ret until tag url pay =
   if Wire.expired until then
     _ = drop message;
     _ = Wire.reply ret (Err "storage: deadline exceeded before execution");
-    aLoop dev me head idx tidy
+    aLoop dev me head idx cache tidy
   else case Wire.validate url pay of
-      Err why -> _ = drop message; _ = Wire.reply ret (Err why); aLoop dev me head idx tidy
+      Err why -> _ = drop message; _ = Wire.reply ret (Err why); aLoop dev me head idx cache tidy
     | Ok u ->
         # Block calls can receive again. Retain only fields the operation uses.
         key = if usesRequestKey tag then keep url else "";
         bytes = if usesRequestPayload tag then keep pay else "";
         _ = drop message;
         if tag == 2 then case receiveNow me of
-            Err empty -> aServe (withDeadline dev until) me head idx tidy ret tag key bytes
+            Err empty -> aServe (withDeadline dev until) me head idx cache tidy ret tag key bytes
           | Ok queued -> (case queued of
-                SVC.TimedRpc from id due op k v -> queueAfter dev me head idx tidy ret until key bytes queued (from, id, True) due op k v
+                SVC.TimedRpc from id due op k v -> queueAfter dev me head idx cache tidy ret until key bytes queued (from, id, True) due op k v
               | SVC.Rpc from op k v -> (case Wire.deadline Wire.defaultMs of
                     Err why -> stop why
-                  | Ok due -> queueAfter dev me head idx tidy ret until key bytes queued (from, 0, False) due op k v))
-        else aServe (withDeadline dev until) me head idx tidy ret tag key bytes.
-queueAfter dev me head idx tidy first until key bytes queued second due op k v =
+                  | Ok due -> queueAfter dev me head idx cache tidy ret until key bytes queued (from, 0, False) due op k v))
+        else aServe (withDeadline dev until) me head idx cache tidy ret tag key bytes.
+queueAfter dev me head idx cache tidy first until key bytes queued second due op k v =
   checked = Wire.validate k v;
   accepted = case checked of Ok u -> True | Err why -> False;
   nextKey = if accepted and usesRequestKey op then keep k else "";
@@ -1508,56 +1616,61 @@ queueAfter dev me head idx tidy first until key bytes queued second due op k v =
   shared = withDeadline dev (minI until due);
   pair = if op == 2 and not (Wire.expired (minI until due)) then case checked of
       Err why -> Err why
-    | Ok u -> (case latestSeal shared of Err why -> Err why | Ok seal -> appendPairSealed shared head key bytes nextKey nextPay seal)
+    | Ok u -> (case cache of
+        CacheV3 seal pages -> appendPairCached shared head key bytes nextKey nextPay seal pages
+      | CacheNone -> (case loadCache shared of CacheV3 seal pages -> appendPairCached shared head key bytes nextKey nextPay seal pages | _ -> Err "requires durable v3")
+      | CacheV2 m -> Err "requires durable v3")
     else Err "separate requests";
   case pair of
-    Ok (mid, end) ->
+    Ok (mid, end, cache2) ->
       updated = ordinaryEntry nextKey mid nextPay :: ordinaryEntry key head bytes :: idx;
       _ = Wire.reply first (Ok "");
       _ = Wire.reply second (Ok "");
-      aLoop dev me end updated tidy
+      aLoop dev me end updated cache2 tidy
   | Err ignored ->
-      result = appendRes (withDeadline dev until) head "QREC" key bytes;
-      (newHead, updated) = case result of
-          Err why -> Wire.reply first (Err why) >> (head, idx)
-        | Ok end -> Wire.reply first (Ok "") >> (end, ordinaryEntry key head bytes :: idx);
-      if Wire.expired due then Wire.reply second (Err "storage: deadline exceeded before execution") >> aLoop dev me newHead updated tidy
+      result = appendCached (withDeadline dev until) head "QREC" key bytes cache;
+      (newHead, updated, cache2) = case result of
+          Err why -> Wire.reply first (Err why) >> (head, idx, cache)
+        | Ok (end, c2) -> Wire.reply first (Ok "") >> (end, ordinaryEntry key head bytes :: idx, c2);
+      if Wire.expired due then Wire.reply second (Err "storage: deadline exceeded before execution") >> aLoop dev me newHead updated cache2 tidy
       else case checked of
-          Err why -> Wire.reply second (Err why) >> aLoop dev me newHead updated tidy
-        | Ok u -> aServe (withDeadline dev due) me newHead updated tidy second op nextKey nextPay.
+          Err why -> Wire.reply second (Err why) >> aLoop dev me newHead updated cache2 tidy
+        | Ok u -> aServe (withDeadline dev due) me newHead updated cache2 tidy second op nextKey nextPay.
 ordinaryEntry key page bytes =
   size = strlen bytes;
   Ent key page size 0 size (cacheable bytes).
 # Standalone Files owner: enumerate the live index, one row per name.
 # Namespace clients do not forward this whole-volume operation.
 indexNames : unsafe List Ent -> List String -> String -> String .
-indexNames idx seen rows = case idx of
-    Nil -> rows
-  | (Ent key page pl off len body) :: rest -> if member seen key then indexNames rest seen rows
-      else indexNames rest (key :: seen) (if rows == "" then key else "{rows}\n{key}").
+indexNames idx seen rows = collectIndexNames idx seen (if rows == "" then Nil else rows :: Nil).
+collectIndexNames : unsafe List Ent -> List String -> List String -> String .
+collectIndexNames idx seen acc = case idx of
+    Nil -> strJoin "\n" (Core.revS acc Nil)
+  | (Ent key page pl off len body) :: rest -> if member seen key then collectIndexNames rest seen acc
+      else collectIndexNames rest (key :: seen) (key :: acc).
 
-aServe : unsafe PageSource -> Int -> Int -> List Ent -> AC.Tidy -> (Int, Int, Bool) -> Int -> String -> String -> zz .
-aServe dev me head idx tidy replyTo tag url pay =
+aServe : unsafe PageSource -> Int -> Int -> List Ent -> MetaCache -> AC.Tidy -> (Int, Int, Bool) -> Int -> String -> String -> zz .
+aServe dev me head idx cache tidy replyTo tag url pay =
   case tag of
-    1 -> pageProbe dev >> Wire.reply replyTo (latestNewest dev idx url) >> aLoop dev me head idx tidy
-  | 14 -> pageProbe dev >> Wire.reply replyTo (Ok (indexNames idx Nil "")) >> aLoop dev me head idx tidy
-  | 2 -> aAppend dev me head idx tidy replyTo "QREC" url pay
-  | 3 -> aReplay dev me head idx tidy replyTo url
-  | 4 -> aAppend dev me head idx tidy replyTo "QDEL" url ""
-  | 5 -> Wire.reply replyTo (Ok (aStats dev head idx url))     >> aLoop dev me head idx tidy
+    1 -> pageProbe dev >> Wire.reply replyTo (latestNewest dev idx url) >> aLoop dev me head idx cache tidy
+  | 14 -> pageProbe dev >> Wire.reply replyTo (Ok (indexNames idx Nil "")) >> aLoop dev me head idx cache tidy
+  | 2 -> aAppend dev me head idx cache tidy replyTo "QREC" url pay
+  | 3 -> aReplay dev me head idx cache tidy replyTo url
+  | 4 -> aAppend dev me head idx cache tidy replyTo "QDEL" url ""
+  | 5 -> Wire.reply replyTo (Ok (aStatsCached dev head idx url cache)) >> aLoop dev me head idx cache tidy
   | 6 -> aCompact dev me head tidy replyTo
-  | 7 -> aAppendBulk dev me head idx tidy replyTo pay
-  | 13 -> aAppendBulk dev me head idx tidy replyTo pay
-  | 8 -> Wire.reply replyTo (verifyLog dev head)               >> aLoop dev me head idx tidy
-  | 9 -> aReplace dev me head idx tidy replyTo url pay
-  | 12 -> Wire.reply replyTo (saveGeneration dev) >> aLoop dev me head idx tidy
-  | 10 -> Wire.reply replyTo (snapshotNewest dev idx url) >> aLoop dev me head idx tidy
-  | 11 -> (case transactionSeal dev of
-      Err why -> Wire.reply replyTo (Err why) >> aLoop dev me head idx tidy
-    | Ok seal -> (case payloadAtSeal seal pay of
-        Err why -> Wire.reply replyTo (Err why) >> aLoop dev me head idx tidy
-      | Ok bytes -> replaceReply dev me head idx tidy replyTo url bytes (replaceSealed dev head url bytes seal)))
-  | _ -> Wire.reply replyTo (Err "storage: unknown request tag") >> aLoop dev me head idx tidy.
+  | 7 -> aAppendBulk dev me head idx cache tidy replyTo pay
+  | 13 -> aAppendBulk dev me head idx cache tidy replyTo pay
+  | 8 -> Wire.reply replyTo (verifyLog dev head)               >> aLoop dev me head idx cache tidy
+  | 9 -> aReplace dev me head idx cache tidy replyTo url pay
+  | 12 -> Wire.reply replyTo (saveGenerationCached dev cache) >> aLoop dev me head idx cache tidy
+  | 10 -> Wire.reply replyTo (snapshotNewestCached dev idx url cache) >> aLoop dev me head idx cache tidy
+  | 11 -> (case transactionSealCached dev cache of
+      Err why -> Wire.reply replyTo (Err why) >> aLoop dev me head idx cache tidy
+    | Ok (seal, pages) -> (case payloadAtSeal seal pay of
+        Err why -> Wire.reply replyTo (Err why) >> aLoop dev me head idx cache tidy
+      | Ok bytes -> replaceReply dev me head idx cache tidy replyTo url bytes (replaceSealedCached dev head url bytes seal pages)))
+  | _ -> Wire.reply replyTo (Err "storage: unknown request tag") >> aLoop dev me head idx cache tidy.
 # Snapshot and conditional replacement share the durable log-wide generation.
 # The sole writer processes validation and publication in the same turn.
 # A save handle needs only the current token. Buffered images explicitly
@@ -1565,6 +1678,12 @@ aServe dev me head idx tidy replyTo tag url pay =
 saveGeneration dev = case latestSeal dev of
     Ok (Seal m generation stage) -> Ok "{generation}"
   | Err why -> (case legacyMeta dev of Ok m -> Ok "buffered" | Err invalid -> Err invalid).
+saveGenerationCached dev cache =
+  _ = pageProbe dev;
+  case cache of
+      CacheV3 (Seal m generation stage) pages -> Ok "{generation}"
+    | CacheV2 m -> Ok "buffered"
+    | CacheNone -> saveGeneration dev.
 # A valid buffered disk cannot issue durable generation tokens. Distinguish
 # that capability refusal from an unreadable or conflicting durable seal.
 transactionSeal dev = case latestSeal dev of
@@ -1572,6 +1691,12 @@ transactionSeal dev = case latestSeal dev of
   | Err why -> case legacyMeta dev of
       Ok legacy -> Err "storage generations require durable v3 storage"
     | Err invalid -> Err why.
+transactionSealCached dev cache =
+  _ = pageProbe dev;
+  case cache of
+      CacheV3 seal pages -> Ok (seal, pages)
+    | CacheV2 legacy -> Err "storage generations require durable v3 storage"
+    | CacheNone -> (case loadCache dev of CacheV3 seal pages -> Ok (seal, pages) | CacheV2 legacy -> Err "storage generations require durable v3 storage" | CacheNone -> Err "invalid metadata").
 latestNewest : unsafe PageSource -> List Ent -> String -> Result String String .
 latestNewest dev idx url = case idx of
     Nil -> Err "no such file"
@@ -1581,6 +1706,11 @@ latestNewest dev idx url = case idx of
 snapshotNewest dev idx url = case transactionSeal dev of
     Err why -> Err why
   | Ok (Seal m generation stage) ->
+      (bytes, kept) = replayFill False True "{generation}\n" dev idx idx url Nil Nil 0 (0 - 1) "";
+      Ok bytes.
+snapshotNewestCached dev idx url cache = case transactionSealCached dev cache of
+    Err why -> Err why
+  | Ok (Seal m generation stage, pages) ->
       (bytes, kept) = replayFill False True "{generation}\n" dev idx idx url Nil Nil 0 (0 - 1) "";
       Ok bytes.
 snapshotReplay dev idx url = case transactionSeal dev of
@@ -1605,28 +1735,34 @@ generationLineEnd : unsafe String -> Int -> Int -> Int .
 generationLineEnd pay i end =
   if i >= end then (0 - 1) else if charAt pay i == 10 then i
   else generationLineEnd pay (i + 1) end.
-aReplace dev me head idx tidy replyTo url bytes =
-  replaceReply dev me head idx tidy replyTo url bytes (replaceRes dev head url bytes).
-replaceReply dev me head idx tidy replyTo url bytes result = case result of
-    Err why -> Wire.reply replyTo (Err why) >> aLoop dev me head idx tidy
-  | Ok end -> aAppendOk dev me (head + 1) (dropUrlE idx url) tidy replyTo "QREC" url bytes end.
-aReplay : unsafe PageSource -> Int -> Int -> List Ent -> AC.Tidy -> (Int, Int, Bool) -> String -> zz .
-aReplay dev me head idx tidy replyTo url =
+aReplace dev me head idx cache tidy replyTo url bytes =
+  replaceReply dev me head idx cache tidy replyTo url bytes (replaceCached dev head url bytes cache).
+replaceReply dev me head idx cache tidy replyTo url bytes result = case result of
+    Err why -> Wire.reply replyTo (Err why) >> aLoop dev me head idx cache tidy
+  | Ok (end, cache2) -> aAppendOk dev me (head + 1) (dropUrlE idx url) cache2 tidy replyTo "QREC" url bytes end.
+aReplay : unsafe PageSource -> Int -> Int -> List Ent -> MetaCache -> AC.Tidy -> (Int, Int, Bool) -> String -> zz .
+aReplay dev me head idx cache tidy replyTo url =
   _ = pageProbe dev;
   (bytes, idx2) = replayFill True True "" dev idx idx url Nil Nil 0 (0 - 1) "";
   _ = Wire.reply replyTo (Ok bytes);
-  aLoop dev me head idx2 tidy.
+  aLoop dev me head idx2 cache tidy.
 aStats dev head idx url = aStats2 head idx url (metaOr dev head).
+aStatsCached dev head idx url cache =
+  _ = pageProbe dev;
+  case cache of
+      CacheV3 seal pages -> aStats2 head idx url (sealMeta seal)
+    | CacheV2 m -> aStats2 head idx url m
+    | CacheNone -> aStats dev head idx url.
 aStats2 head idx url m =
   Meta h v w c d sw mr = m;
   "head={head} url-records={idxCountE idx url} v={v} w={w} c={c} data-end={d} swap-head={sw} merkle={mr} pool-bytes={heapUsed Unit}".
-aAppend : unsafe PageSource -> Int -> Int -> List Ent -> AC.Tidy -> (Int, Int, Bool) -> String -> String -> String -> zz .
-aAppend dev me head idx tidy replyTo tag url pay =
-  case appendRes dev head tag url pay of
-    Err e -> Wire.reply replyTo (Err e) >> aLoop dev me head idx tidy
-  | Ok h2 -> aAppendOk dev me head idx tidy replyTo tag url pay h2.
-aAppendOk : unsafe PageSource -> Int -> Int -> List Ent -> AC.Tidy -> (Int, Int, Bool) -> String -> String -> String -> Int -> zz .
-aAppendOk dev me head idx tidy replyTo tag url pay h2 =
+aAppend : unsafe PageSource -> Int -> Int -> List Ent -> MetaCache -> AC.Tidy -> (Int, Int, Bool) -> String -> String -> String -> zz .
+aAppend dev me head idx cache tidy replyTo tag url pay =
+  case appendCached dev head tag url pay cache of
+    Err e -> Wire.reply replyTo (Err e) >> aLoop dev me head idx cache tidy
+  | Ok (h2, cache2) -> aAppendOk dev me head idx cache2 tidy replyTo tag url pay h2.
+aAppendOk : unsafe PageSource -> Int -> Int -> List Ent -> MetaCache -> AC.Tidy -> (Int, Int, Bool) -> String -> String -> String -> Int -> zz .
+aAppendOk dev me head idx cache tidy replyTo tag url pay h2 =
   # aTimed keeps the key and payload in this actor before dropping its
   # mailbox root. Conditional replacement bytes are sliced from that copy.
   size = strlen pay;
@@ -1634,23 +1770,23 @@ aAppendOk dev me head idx tidy replyTo tag url pay h2 =
            True -> dropUrlE idx url
          | False -> Ent url head size 0 size (cacheable pay) :: idx;
   _ = Wire.reply replyTo (Ok "");
-  aLoop dev me h2 idx2 tidy.
-aAppendBulk : unsafe PageSource -> Int -> Int -> List Ent -> AC.Tidy -> (Int, Int, Bool) -> String -> zz .
-aAppendBulk dev me head idx tidy replyTo pay =
+  aLoop dev me h2 idx2 cache tidy.
+aAppendBulk : unsafe PageSource -> Int -> Int -> List Ent -> MetaCache -> AC.Tidy -> (Int, Int, Bool) -> String -> zz .
+aAppendBulk dev me head idx cache tidy replyTo pay =
   pl = strlen pay;
   count = packedCount pay 0 pl 0;
-  admitted = if count < 0 then Err "invalid bulk framing" else writeCountedPack dev head pay pl count;
+  admitted = if count < 0 then Err "invalid bulk framing" else writeCountedPackCached dev head pay pl count cache;
   case admitted of
-    Err e -> Wire.reply replyTo (Err e) >> aLoop dev me head idx tidy
-  | Ok h2 -> aAppendBulkOk dev me head idx tidy replyTo pay h2.
-aAppendBulkOk : unsafe PageSource -> Int -> Int -> List Ent -> AC.Tidy -> (Int, Int, Bool) -> String -> Int -> zz .
-aAppendBulkOk dev me head idx tidy replyTo pay h2 =
+    Err e -> Wire.reply replyTo (Err e) >> aLoop dev me head idx cache tidy
+  | Ok (h2, cache2) -> aAppendBulkOk dev me head idx cache2 tidy replyTo pay h2.
+aAppendBulkOk : unsafe PageSource -> Int -> Int -> List Ent -> MetaCache -> AC.Tidy -> (Int, Int, Bool) -> String -> Int -> zz .
+aAppendBulkOk dev me head idx cache tidy replyTo pay h2 =
   # Parsed keys belong to the storage actor.
   idx2 = packedEntriesRev pay head (strlen pay) 0 (strlen pay) idx;
   _ = Wire.reply replyTo (Ok "");
-  aLoop dev me h2 idx2 tidy.
+  aLoop dev me h2 idx2 cache tidy.
 aCompact : unsafe PageSource -> Int -> Int -> AC.Tidy -> (Int, Int, Bool) -> zz .
 aCompact dev me head tidy replyTo =
   case compactRes dev head of
-    Err why -> Wire.reply replyTo (Err why) >> aLoop dev me head (scanEntriesRev dev head 1 Nil) tidy
-  | Ok h2 -> Wire.reply replyTo (Ok "compacted head={h2}") >> aLoop dev me h2 (scanEntriesRev dev h2 1 Nil) tidy.
+    Err why -> Wire.reply replyTo (Err why) >> aLoop dev me head (scanEntriesRev dev head 1 Nil) CacheNone tidy
+  | Ok h2 -> Wire.reply replyTo (Ok "compacted head={h2}") >> aLoop dev me h2 (scanEntriesRev dev h2 1 Nil) (loadCache dev) tidy.
