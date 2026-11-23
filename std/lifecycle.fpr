@@ -58,18 +58,20 @@ stop caller ctx = _ = Sys.shutdownBegin Unit; case AC.callWithin 10000 caller (o
   | Err why -> Err "lifecycle: {why}".
 
 loop : unsafe Context -> Int -> Unit .
-loop ctx me =
+loop ctx me = _ = Sys.loop ctx (loopTurn me); Unit.
+loopTurn : unsafe Int -> Context -> (Bool, Context) .
+loopTurn me ctx =
   if Sys.shutdownRequested Unit != 0 then
     answer = finish ctx me;
     _ = Sys.shutdownComplete (case answer of Ok value -> 0 | Err why -> 1);
-    Unit
+    (False, ctx)
   else case receiveNow me of
-      Err why -> _ = Sys.sleepUs 1000; loop ctx me
+      Err why -> _ = Sys.sleepUs 25000; (True, ctx)
     | Ok borrowed ->
         (caller, id, q) = keep borrowed; _ = drop borrowed;
         answer = case q of Stop -> finish ctx me;
         _ = AC.reply (caller, id) answer;
-        Unit.
+        (False, ctx).
 
 finish : Context -> Int -> Result String String .
 finish (Context admin net disk store) me =

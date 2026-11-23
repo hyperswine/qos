@@ -236,13 +236,16 @@ fileActor st path me = fileActorOf 0 st path me.
 # when its last handle goes (see fileRetire), the manager retires it
 fileActorOf mgr st path me = fileServe mgr st path me (Err "file body not loaded") 1 Nil.
 fileServe : unsafe Int -> Int -> String -> Int -> Result String String -> Int -> List (Int, Int, Int) -> Unit .
-fileServe mgr st path me body next hs =
+fileServe mgr st path me body next hs = fileServeTidy mgr st path me body next hs AC.tidySmall.
+fileServeTidy : unsafe Int -> Int -> String -> Int -> Result String String -> Int -> List (Int, Int, Int) -> AC.Tidy -> Unit .
+fileServeTidy mgr st path me body next hs tidy =
+  ((path2, body2, hs2), tidy2) = AC.tidy me ((path, body, hs), tidy);
   borrowed = receive me;
   m = keep borrowed;
   _ = drop borrowed;
   case m of
-    (replyTo, id, q) -> fileMsg mgr st path me body next (fileSwept mgr me hs) (replyTo, id) replyTo q
-  | stale -> fileServe mgr st path me body next (fileSwept mgr me hs).
+    (replyTo, id, q) -> fileMsg mgr st path2 me body2 next (fileSwept mgr me hs2) tidy2 (replyTo, id) replyTo q
+  | stale -> fileServeTidy mgr st path2 me body2 next (fileSwept mgr me hs2) tidy2.
 # the leases of clients that have ended go; when that empties the list, the
 # manager hears this actor is idle (so a client that died without Close
 # does not hold the file's slot for ever)
@@ -275,10 +278,10 @@ sweepDead hs = case hs of
 # be answered.  It tells the manager it is idle and keeps serving; the
 # manager, which forwards every Open, asks it to retire (fileRetireAsk)
 # while no Open can be in flight.
-fileRetire : unsafe Int -> Int -> String -> Int -> Result String String -> Int -> List (Int, Int, Int) -> Unit .
-fileRetire mgr st path me body next hs = case hs of
-    Nil -> (if mgr > 0 then fileIdle mgr me >> fileServe mgr st path me body next hs else Unit)
-  | h :: rest -> fileServe mgr st path me body next hs.
+fileRetire : unsafe Int -> Int -> String -> Int -> Result String String -> Int -> List (Int, Int, Int) -> AC.Tidy -> Unit .
+fileRetire mgr st path me body next hs tidy = case hs of
+    Nil -> (if mgr > 0 then fileIdle mgr me >> fileServeTidy mgr st path me body next hs tidy else Unit)
+  | h :: rest -> fileServeTidy mgr st path me body next hs tidy.
 # Private retirement: Timed Write -1 (IInt marginMs); legacy Timed Close -1
 # uses the default margin. Retire
 # if no lease is held.  It ends only when the request is well inside its
@@ -286,92 +289,92 @@ fileRetire mgr st path me body next hs = case hs of
 # forwarded nothing since; anything else answers "busy" (Ok 0).  A forged
 # request can at most retire an idle actor (clients are not authenticated:
 # see filesMgr).
-fileRetireAsk : unsafe Int -> Int -> String -> Int -> Result String String -> Int -> List (Int, Int, Int) -> (Int, Int) -> Int -> Int -> Unit .
-fileRetireAsk mgr st path me body next hs ret sender until =
-  fileRetireWith (FP.marginMs FP.defaults) mgr st path me body next hs ret sender until.
-fileRetireWith margin mgr st path me body next hs ret sender until =
+fileRetireAsk : unsafe Int -> Int -> String -> Int -> Result String String -> Int -> List (Int, Int, Int) -> AC.Tidy -> (Int, Int) -> Int -> Int -> Unit .
+fileRetireAsk mgr st path me body next hs tidy ret sender until =
+  fileRetireWith (FP.marginMs FP.defaults) mgr st path me body next hs tidy ret sender until.
+fileRetireWith margin mgr st path me body next hs tidy ret sender until =
   idle = case hs of Nil -> True | h :: rest -> False;
   if mgr > 0 and sender == mgr and idle and margin > 0 and until - AC.nowMs Unit > margin
   then AC.reply ret (Ok 1) >> Unit
-  else AC.reply ret (Ok 0) >> fileServe mgr st path me body next hs.
+  else AC.reply ret (Ok 0) >> fileServeTidy mgr st path me body next hs tidy.
 # Load on the first operation that needs the previous bytes. Retry after a failed replay.
 fileLoaded : unsafe Int -> String -> Int -> Result String String -> Result String String .
 fileLoaded st path me body = case body of
     Ok b -> body
   | Err e -> storage me st (SP.Replay path).
-fileMsg : unsafe Int -> Int -> String -> Int -> Result String String -> Int -> List (Int, Int, Int) -> (Int, Int) -> Int -> EP.Ep -> Unit .
-fileMsg mgr st path me body next hs ret sender q = case q of
-    EP.Timed until command -> fileTimed mgr until st path me body next hs ret sender command
-  | Open url mode -> if strEq mode "replace" then fileTruncate mgr st path me body next hs ret sender
-      else if strEq mode "snapshot-save" then fileSnapshotOpen mgr st path me body next hs ret sender
-      else if strEq mode "save" then fileSaveOpen mgr st path me body next hs ret sender
-      else _ = AC.reply ret (Opened next); fileServe mgr st path me body (next + 1) ((next, sender, 0 - 1) :: hs)
-  | Read h n -> if hOwner hs h != sender then AC.reply ret (Err "no such handle") >> fileRetire mgr st path me body next hs
-      else loaded = fileLoaded st path me body; AC.reply ret (fileText path loaded) >> fileServe mgr st path me loaded next hs
-  | Write h v -> if hOwner hs h != sender then AC.reply ret (Err "no such handle") >> fileRetire mgr st path me body next hs
-      else generation = saveGeneration hs h; if generation >= 0 then (case v of IStr text -> fileReplaced mgr st path me body next hs ret text (storage me st (SP.ReplaceAt path generation text))
-        | other -> AC.reply ret (Err "file save requires bytes") >> fileServe mgr st path me body next hs)
-      else fileWr mgr st path me (fileLoaded st path me body) next hs ret sender v
-  | Close h -> if h < 0 then AC.reply ret (Ok 0) >> fileServe mgr st path me body next hs
-      else _ = AC.reply ret (Ok 0); fileRetire mgr st path me body next (hDrop2 hs h sender).
+fileMsg : unsafe Int -> Int -> String -> Int -> Result String String -> Int -> List (Int, Int, Int) -> AC.Tidy -> (Int, Int) -> Int -> EP.Ep -> Unit .
+fileMsg mgr st path me body next hs tidy ret sender q = case q of
+    EP.Timed until command -> fileTimed mgr until st path me body next hs tidy ret sender command
+  | Open url mode -> if strEq mode "replace" then fileTruncate mgr st path me body next hs tidy ret sender
+      else if strEq mode "snapshot-save" then fileSnapshotOpen mgr st path me body next hs tidy ret sender
+      else if strEq mode "save" then fileSaveOpen mgr st path me body next hs tidy ret sender
+      else _ = AC.reply ret (Opened next); fileServeTidy mgr st path me body (next + 1) ((next, sender, 0 - 1) :: hs) tidy
+  | Read h n -> if hOwner hs h != sender then AC.reply ret (Err "no such handle") >> fileRetire mgr st path me body next hs tidy
+      else loaded = fileLoaded st path me body; AC.reply ret (fileText path loaded) >> fileServeTidy mgr st path me loaded next hs tidy
+  | Write h v -> if hOwner hs h != sender then AC.reply ret (Err "no such handle") >> fileRetire mgr st path me body next hs tidy
+      else generation = saveGeneration hs h; if generation >= 0 then (case v of IStr text -> fileReplaced mgr st path me body next hs tidy ret text (storage me st (SP.ReplaceAt path generation text))
+        | other -> AC.reply ret (Err "file save requires bytes") >> fileServeTidy mgr st path me body next hs tidy)
+      else fileWr mgr st path me (fileLoaded st path me body) next hs tidy ret sender v
+  | Close h -> if h < 0 then AC.reply ret (Ok 0) >> fileServeTidy mgr st path me body next hs tidy
+      else _ = AC.reply ret (Ok 0); fileRetire mgr st path me body next (hDrop2 hs h sender) tidy.
 # Refresh from the durable owner even if this file actor has cached bytes.
 # Its captured generation guards the subsequent write on this handle.
-fileSnapshotOpen mgr st path me body next hs ret sender = case FS.snapshot me st path of
-    Err why -> AC.reply ret (Refused why) >> fileServe mgr st path me body next hs
-  | Ok (generation, bytes) -> AC.reply ret (Opened next) >> fileServe mgr st path me (Ok bytes) (next + 1) ((next, sender, generation) :: hs).
+fileSnapshotOpen mgr st path me body next hs tidy ret sender = case FS.snapshot me st path of
+    Err why -> AC.reply ret (Refused why) >> fileServeTidy mgr st path me body next hs tidy
+  | Ok (generation, bytes) -> AC.reply ret (Opened next) >> fileServeTidy mgr st path me (Ok bytes) (next + 1) ((next, sender, generation) :: hs) tidy.
 # Buffered Qlog images retain the original save protocol. Decide before
 # admitting the handle, so an uncertain replacement is never retried.
-fileSaveOpen mgr st path me body next hs ret sender = case storage me st (SP.Generation path) of
-    Err why -> AC.reply ret (Refused why) >> fileServe mgr st path me body next hs
-  | Ok token -> if token == "buffered" then fileTruncate mgr st path me body next hs ret sender
+fileSaveOpen mgr st path me body next hs tidy ret sender = case storage me st (SP.Generation path) of
+    Err why -> AC.reply ret (Refused why) >> fileServeTidy mgr st path me body next hs tidy
+  | Ok token -> if token == "buffered" then fileTruncate mgr st path me body next hs tidy ret sender
       else generation = parseInt token;
         if generation < 0 or generation > 1000000000 or token != "{generation}" then
-          AC.reply ret (Refused "invalid save generation") >> fileServe mgr st path me body next hs
-        else AC.reply ret (Opened next) >> fileServe mgr st path me body (next + 1) ((next, sender, generation) :: hs).
-fileReplaced mgr st path me body next hs ret text answer = case answer of
-    Ok u -> AC.reply ret (Ok (IInt (strlen text))) >> fileServe mgr st path me (Ok (strcat text "")) next hs
-  | Err why -> AC.reply ret (Err "write failed: {why}") >> fileServe mgr st path me (Err "reload after replacement: {why}") next hs.
+          AC.reply ret (Refused "invalid save generation") >> fileServeTidy mgr st path me body next hs tidy
+        else AC.reply ret (Opened next) >> fileServeTidy mgr st path me body (next + 1) ((next, sender, generation) :: hs) tidy.
+fileReplaced mgr st path me body next hs tidy ret text answer = case answer of
+    Ok u -> AC.reply ret (Ok (IInt (strlen text))) >> fileServeTidy mgr st path me (Ok (strcat text "")) next hs tidy
+  | Err why -> AC.reply ret (Err "write failed: {why}") >> fileServeTidy mgr st path me (Err "reload after replacement: {why}") next hs tidy.
 # open "replace": the file is emptied now (its records tombstoned), and what
 # the handle writes is its whole text -- open(2)'s O_TRUNC
-fileTruncate : unsafe Int -> Int -> String -> Int -> Result String String -> Int -> List (Int, Int, Int) -> (Int, Int) -> Int -> Unit .
-fileTruncate mgr st path me body next hs ret sender = case storage me st (SP.Delete path) of
-    Ok u -> AC.reply ret (Opened next) >> fileServe mgr st path me (Ok "") (next + 1) ((next, sender, 0 - 1) :: hs)
-  | Err why -> AC.reply ret (Refused "replace {path}: {why}") >> fileServe mgr st path me body next hs.
-fileTimed : unsafe Int -> Int -> Int -> String -> Int -> Result String String -> Int -> List (Int, Int, Int) -> (Int, Int) -> Int -> EP.Ep -> Unit .
-fileTimed mgr until st path me body next hs ret sender q =
-  if AC.nowMs Unit >= until then AC.reply ret (Err "endpoint: deadline exceeded before execution") >> fileServe mgr st path me body next hs else
+fileTruncate : unsafe Int -> Int -> String -> Int -> Result String String -> Int -> List (Int, Int, Int) -> AC.Tidy -> (Int, Int) -> Int -> Unit .
+fileTruncate mgr st path me body next hs tidy ret sender = case storage me st (SP.Delete path) of
+    Ok u -> AC.reply ret (Opened next) >> fileServeTidy mgr st path me (Ok "") (next + 1) ((next, sender, 0 - 1) :: hs) tidy
+  | Err why -> AC.reply ret (Refused "replace {path}: {why}") >> fileServeTidy mgr st path me body next hs tidy.
+fileTimed : unsafe Int -> Int -> Int -> String -> Int -> Result String String -> Int -> List (Int, Int, Int) -> AC.Tidy -> (Int, Int) -> Int -> EP.Ep -> Unit .
+fileTimed mgr until st path me body next hs tidy ret sender q =
+  if AC.nowMs Unit >= until then AC.reply ret (Err "endpoint: deadline exceeded before execution") >> fileServeTidy mgr st path me body next hs tidy else
   case q of
-      Write h (IInt margin) -> if h == 0 - 1 then fileRetireWith margin mgr st path me body next hs ret sender until
-        else fileMsg mgr st path me body next hs ret sender (Write h (IInt margin))
-    | Read h n -> if hOwner hs h != sender then AC.reply ret (Err "no such handle") >> fileRetire mgr st path me body next hs
-        else loaded = fileLoadedUntil until st path me body; AC.reply ret (fileText path loaded) >> fileServe mgr st path me loaded next hs
-    | Write h (IStr text) -> if hOwner hs h != sender then AC.reply ret (Err "no such handle") >> fileRetire mgr st path me body next hs
-        else generation = saveGeneration hs h; if generation >= 0 then fileReplaced mgr st path me body next hs ret text (storageUntil until me st (SP.ReplaceAt path generation text))
+      Write h (IInt margin) -> if h == 0 - 1 then fileRetireWith margin mgr st path me body next hs tidy ret sender until
+        else fileMsg mgr st path me body next hs tidy ret sender (Write h (IInt margin))
+    | Read h n -> if hOwner hs h != sender then AC.reply ret (Err "no such handle") >> fileRetire mgr st path me body next hs tidy
+        else loaded = fileLoadedUntil until st path me body; AC.reply ret (fileText path loaded) >> fileServeTidy mgr st path me loaded next hs tidy
+    | Write h (IStr text) -> if hOwner hs h != sender then AC.reply ret (Err "no such handle") >> fileRetire mgr st path me body next hs tidy
+        else generation = saveGeneration hs h; if generation >= 0 then fileReplaced mgr st path me body next hs tidy ret text (storageUntil until me st (SP.ReplaceAt path generation text))
         else loaded = fileLoadedUntil until st path me body; (case loaded of
-        Err why -> AC.reply ret (Err "write failed: {path} could not be read ({why})") >> fileServe mgr st path me loaded next hs
-      | Ok bytes -> fileWr2 mgr st path me bytes next hs ret text (storageUntil until me st (SP.Append path text)))
-    | Close h -> if h < 0 then fileRetireAsk mgr st path me body next hs ret sender until
-        else _ = AC.reply ret (Ok 0); fileRetire mgr st path me body next (hDrop2 hs h sender)
-    | EP.Timed other command -> fileTimed mgr (if other < until then other else until) st path me body next hs ret sender command
-    | command -> fileMsg mgr st path me body next hs ret sender command.
+        Err why -> AC.reply ret (Err "write failed: {path} could not be read ({why})") >> fileServeTidy mgr st path me loaded next hs tidy
+      | Ok bytes -> fileWr2 mgr st path me bytes next hs tidy ret text (storageUntil until me st (SP.Append path text)))
+    | Close h -> if h < 0 then fileRetireAsk mgr st path me body next hs tidy ret sender until
+        else _ = AC.reply ret (Ok 0); fileRetire mgr st path me body next (hDrop2 hs h sender) tidy
+    | EP.Timed other command -> fileTimed mgr (if other < until then other else until) st path me body next hs tidy ret sender command
+    | command -> fileMsg mgr st path me body next hs tidy ret sender command.
 fileLoadedUntil until st path me body = case body of Ok bytes -> body | Err why -> storageUntil until me st (SP.Replay path).
 fileText : unsafe String -> Result String String -> Result EP.IoV String .
 fileText path body = case body of
     Ok b -> Ok (IStr b)          # an empty file reads as "", like any other text
   | Err e -> Err "read failed: {path} ({e})".
-fileWr : unsafe Int -> Int -> String -> Int -> Result String String -> Int -> List (Int, Int, Int) -> (Int, Int) -> Int -> EP.IoV -> Unit .
-fileWr mgr st path me body next hs ret sender v = case v of
-    IStr text -> fileWr1 mgr st path me body next hs ret text
-  | o -> AC.reply ret (Err "write failed: {path} wants IStr") >> fileServe mgr st path me body next hs.
-fileWr1 : unsafe Int -> Int -> String -> Int -> Result String String -> Int -> List (Int, Int, Int) -> (Int, Int) -> String -> Unit .
-fileWr1 mgr st path me body next hs ret text = case body of
-    Err e -> AC.reply ret (Err "write failed: {path} could not be read ({e})") >> fileServe mgr st path me body next hs
-  | Ok b -> fileWr2 mgr st path me b next hs ret text (storage me st (SP.Append path text)).
-fileWr2 : unsafe Int -> Int -> String -> Int -> String -> Int -> List (Int, Int, Int) -> (Int, Int) -> String -> Result String String -> Unit .
-fileWr2 mgr st path me b next hs ret text r = case r of
-    Ok u -> AC.reply ret (Ok (IInt (strlen text))) >> fileServe mgr st path me (Ok (strcat b text)) next hs
-  | Err e -> AC.reply ret (Err "write failed: {e}") >> fileServe mgr st path me
-      (if strIndexOf "outcome unknown" e >= 0 then Err "write outcome unknown: {e}" else Ok b) next hs.
+fileWr : unsafe Int -> Int -> String -> Int -> Result String String -> Int -> List (Int, Int, Int) -> AC.Tidy -> (Int, Int) -> Int -> EP.IoV -> Unit .
+fileWr mgr st path me body next hs tidy ret sender v = case v of
+    IStr text -> fileWr1 mgr st path me body next hs tidy ret text
+  | o -> AC.reply ret (Err "write failed: {path} wants IStr") >> fileServeTidy mgr st path me body next hs tidy.
+fileWr1 : unsafe Int -> Int -> String -> Int -> Result String String -> Int -> List (Int, Int, Int) -> AC.Tidy -> (Int, Int) -> String -> Unit .
+fileWr1 mgr st path me body next hs tidy ret text = case body of
+    Err e -> AC.reply ret (Err "write failed: {path} could not be read ({e})") >> fileServeTidy mgr st path me body next hs tidy
+  | Ok b -> fileWr2 mgr st path me b next hs tidy ret text (storage me st (SP.Append path text)).
+fileWr2 : unsafe Int -> Int -> String -> Int -> String -> Int -> List (Int, Int, Int) -> AC.Tidy -> (Int, Int) -> String -> Result String String -> Unit .
+fileWr2 mgr st path me b next hs tidy ret text r = case r of
+    Ok u -> AC.reply ret (Ok (IInt (strlen text))) >> fileServeTidy mgr st path me (Ok (strcat b text)) next hs tidy
+  | Err e -> AC.reply ret (Err "write failed: {e}") >> fileServeTidy mgr st path me
+      (if strIndexOf "outcome unknown" e >= 0 then Err "write outcome unknown: {e}" else Ok b) next hs tidy.
 
 # the manager owns the file NAMESPACES (/tmp, /home) and every file in them.
 #
@@ -402,15 +405,15 @@ fileWr2 mgr st path me b next hs ret text r = case r of
 filesIndex = "sys/files".
 filesMgr : unsafe Int -> Int -> List String -> Int -> a .
 # Compatibility entry for callers constructing a private namespace manager.
-filesMgr st ns known me = filesServe (FilesCtx st ns FP.defaults 0 0) me (filesEntries known).
-FilesCtx = Type (FilesCtx Int Int FP.Policy Int Int).
+filesMgr st ns known me = filesServe (FilesCtx st ns FP.defaults 0 0 AC.tidySmall) me (filesEntries known).
+FilesCtx = Type (FilesCtx Int Int FP.Policy Int Int AC.Tidy).
 # The normal boot entry exposes a leased endpoint; the manager owns the only
 # policy copy and revision. The adapter carries the original deadline/client.
 filesManaged st ns known me =
   admin = Wire.spawn 8 Wire.inboxBytes (Slots.simpleUntil (filesPolicyRead me) (filesPolicyWrite me));
   _ = claim me ns FP.url admin;
   _ = claim me ns FP.schemaUrl admin;
-  filesServe (FilesCtx st ns FP.defaults 0 admin) me (filesEntries known).
+  filesServe (FilesCtx st ns FP.defaults 0 admin AC.tidySmall) me (filesEntries known).
 filesPolicyRead mgr until me client url =
   if strEq url FP.schemaUrl then Ok (IStr FP.schema)
   else if strEq url FP.url then filesPolicyCall until me mgr (Read client 0)
@@ -423,7 +426,7 @@ filesPolicyCall until me mgr command = case AC.callUntil until me mgr (EP.Timed 
     Ok result -> result
   | Err why -> Err "file policy: {why}; read current revision before retrying".
 filesConfigure until ctx me act ret client value =
-  FilesCtx st ns policy revision admin = ctx;
+  FilesCtx st ns policy revision admin tidy = ctx;
   if Sys.pidOf client != 0 then AC.reply ret (Err "file policy: updates are system-only") >> filesServe ctx me act
   else case value of
     IStr text -> (case FP.parse text of
@@ -433,12 +436,12 @@ filesConfigure until ctx me act ret client value =
         | Ok next -> filesCommit until ctx me act ret next))
   | other -> AC.reply ret (Err "file policy: update wants IStr") >> filesServe ctx me act.
 filesCommit until ctx me act ret next =
-  FilesCtx st ns policy revision admin = ctx;
+  FilesCtx st ns policy revision admin tidy = ctx;
   case AC.deadlineAfter (FP.reclaimMs next) of
     Err why -> AC.reply ret (Err "file policy: reclaim deadline would overflow") >> filesServe ctx me act
   | Ok deadline -> if AC.nowMs Unit >= until then AC.reply ret (Err "file policy: deadline exceeded before update") >> filesServe ctx me act
       else _ = AC.reply ret (Ok (IStr (FP.snapshot (revision + 1) next (filesLive act))));
-        filesServe (FilesCtx st ns next (revision + 1) admin) me act.
+        filesServe (FilesCtx st ns next (revision + 1) admin tidy) me act.
 filesEntries Nil = Nil.
 filesEntries (p :: rest) = (p, 0) :: filesEntries rest.
 # boot: the files the record names (and the seeded two), registered for mgr
@@ -470,13 +473,17 @@ filesNote st me change = case storage me st (SP.Append filesIndex "{change}\n") 
 
 filesServe : unsafe FilesCtx -> Int -> List (String, Int) -> a .
 filesServe ctx me act =
+  FilesCtx st ns policy revision admin tidy = ctx;
+  ((ctx0, act2), tidy2) = AC.tidy me ((ctx, act), tidy);
+  FilesCtx st2 ns2 policy2 revision2 admin2 _ = ctx0;
+  ctx2 = FilesCtx st2 ns2 policy2 revision2 admin2 tidy2;
   m = receive me;
   case m of
-      (from, id, q) -> filesMsg (intMax Unit) ctx me act (from, id) from q
-    | stale -> filesServe ctx me act.   # e.g. a retire answer that came after its deadline
+      (from, id, q) -> filesMsg (intMax Unit) ctx2 me act2 (from, id) from q
+    | stale -> filesServe ctx2 me act2.   # e.g. a retire answer that came after its deadline
 filesMsg : unsafe Int -> FilesCtx -> Int -> List (String, Int) -> (Int, Int) -> Int -> EP.Ep -> a .
 filesMsg deadline ctx me act ret from q =
-  FilesCtx st ns policy revision admin = ctx;
+  FilesCtx st ns policy revision admin tidy = ctx;
   case q of
     EP.Timed until command -> if AC.nowMs Unit >= until then AC.reply ret (Err "endpoint: deadline exceeded before execution") >> filesServe ctx me act else filesMsg (if until < deadline then until else deadline) ctx me act ret from command
   | Open url mode -> filesOpen ctx me act ret from url mode
@@ -489,7 +496,7 @@ filesMsg deadline ctx me act ret from q =
 # manager asks the actor itself, and retires it only on its own yes.
 filesIdle : unsafe FilesCtx -> Int -> List (String, Int) -> Int -> a .
 filesIdle ctx me act a =
-  FilesCtx st ns policy revision admin = ctx;
+  FilesCtx st ns policy revision admin tidy = ctx;
   case filesUrlOf act a of
     Nil -> filesServe ctx me act
   | url :: none -> filesServe ctx me (if filesRetireWith policy (filesDeadline policy) me a then filesSet act url 0 else act).
@@ -543,7 +550,7 @@ filesDrop act url = case act of
   | (p, b) :: rest -> if strEq p url then rest else (p, b) :: filesDrop rest url.
 filesOpen : unsafe FilesCtx -> Int -> List (String, Int) -> (Int, Int) -> Int -> String -> String -> a .
 filesOpen ctx me act ret from url mode =
-  FilesCtx st ns policy revision admin = ctx;
+  FilesCtx st ns policy revision admin tidy = ctx;
   a0 = filesEntry act url;
   reading = strEq mode "read";
   deleting = strEq mode "delete";
@@ -571,7 +578,7 @@ filesRecords text = at = strIndexOf "url-records=" text;
 # record, its records leave the log
 filesDelete : unsafe FilesCtx -> Int -> List (String, Int) -> (Int, Int) -> String -> Int -> a .
 filesDelete ctx me act ret url a =
-  FilesCtx st ns policy revision admin = ctx;
+  FilesCtx st ns policy revision admin tidy = ctx;
   # the actor may already have retired on its last close: only kill it live
   _ = (if a > 0 and Sys.alive a then kill a else Unit);
   _ = EP.unregister me ns url;
@@ -584,7 +591,7 @@ filesDelete ctx me act ret url a =
 # a new path: registered, recorded, then served like a known one
 filesMake : unsafe FilesCtx -> Int -> List (String, Int) -> (Int, Int) -> Int -> String -> String -> a .
 filesMake ctx me act ret from url mode =
-  FilesCtx st ns policy revision admin = ctx;
+  FilesCtx st ns policy revision admin tidy = ctx;
   if strlen url > FP.maxPath policy then AC.reply ret (Refused "path longer than {FP.maxPath policy} bytes") >> filesServe ctx me act else
   _ = (if filesTransient url then Unit else Sys.logAt 0 "system: creating {url}");
   _ = EP.register me ns url 0;
@@ -596,7 +603,7 @@ filesTransient url = strlen url > 6 and strEq (substr url (strlen url - 6) 6) ".
 # caches its file's text; known files cost only their namespace entry)
 filesSpawn : unsafe FilesCtx -> Int -> List (String, Int) -> (Int, Int) -> Int -> String -> String -> a .
 filesSpawn ctx me act ret from url mode =
-  FilesCtx st ns policy revision admin = ctx;
+  FilesCtx st ns policy revision admin tidy = ctx;
   act2 = if filesLive act >= FP.maxLive policy then filesReclaimWith policy (filesDeadline policy) me act else act;
   if filesLive act2 >= FP.maxLive policy then AC.reply ret (Refused "file actor budget exhausted ({FP.maxLive policy} live files)") >> filesServe ctx me act2 else
   p2 = strcat url "";      # OWN COPY: curried into the actor + the set

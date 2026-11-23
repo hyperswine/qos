@@ -35,7 +35,7 @@
 EP = use "ep#d65056c9d7dc9c18".
 SV = use "svc#b4e4e109ca696787".
 UM = use "uart#3eedf3bc88217cb1".
-TM = use "timer#f11a31ca977152b0".
+TM = use "timer".
 Endpoint = use "epservice#436f606333c44f26".
 AC = use "std/actor#2de24bf2bdd5cb87".
 
@@ -226,11 +226,13 @@ keyboard usvc me =
   _ = Sys.loop (Nil, 1, (0, 0, 0), "") (kTurn usvc me); Unit.
 # Pushes reach the keyboard shaped like a request from sender 0 (no actor
 # has id 0 as a client here), so the keyboard's turn reads one message type.
-kbdSub : unsafe Int -> Int -> a .
-kbdSub kbd me =
+kbdSub : unsafe Int -> Int -> Unit .
+kbdSub kbd me = _ = Sys.loop Unit (kbdSubTurn kbd me); Unit.
+kbdSubTurn : unsafe Int -> Int -> Unit -> (Bool, Unit) .
+kbdSubTurn kbd me u =
   m = receive me;
   _ = case m of UM.URx s -> send kbd (0, 0, EP.Write 0 (EP.IStr (strcat s "")));
-  kbdSub kbd me.
+  (True, Unit).
 # One turn of Sys.loop per request, push or poll: the runtime rewinds the
 # turn's arena. As a hand-written recursion every poll's small allocations
 # stayed (about 23 KB/s while the launcher polled the keyboard).

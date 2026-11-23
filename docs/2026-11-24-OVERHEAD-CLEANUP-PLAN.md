@@ -53,24 +53,46 @@ verified independently with before/after measurements.
      `tests/qlogreplayreads.fpr`, `tests/qlogblankrange.fpr`,
      `tests/qlogpackedframing.fpr`, and `tests/qlogreplace.fpr` all `HOLDS`.
 
-## Pass 2: Convert Remaining Leaking Service Loops & Timer Actor Spawns
+## Pass 2: Convert Remaining Leaking Service Loops & Timer Actor Spawns — DONE
 
-1. **Convert hand-written `receive` loops to `Sys.loop` / `AC.tidy`**
-   - `programs/mods/qsys.fpr`: `fileServe` (L194) and `filesServe` (L368).
-   - `programs/mods/timer.fpr`: `loop` (L59), plus replace per-request
-     `spawn (sleeper me ms)` on Portable (`nat == 0`) with a single reusable
-     sleeper or bounded wakeup.
-   - `programs/mods/sysep.fpr`: `kbdSub` (L234).
-   - `std/lifecycle.fpr`: `loop` (L60), eliminating both the hand-written
-     recursion and the 1 kHz `Sys.sleepUs 1000` polling loop for shutdown.
+1. **Converted hand-written `receive` loops to `Sys.loop` / `AC.tidy`**
+   - `programs/mods/qsys.fpr`: threaded `AC.tidy` (`AC.tidySmall`) through
+     `fileServe` (preserving the 7-arg `fileServe` entry via `fileServeTidy`)
+     and `filesServe` (inside `FilesCtx`).
+   - `programs/mods/timer.fpr`: converted `loop` to `Sys.loop` and replaced
+     per-request `spawn (sleeper me ms)` on Portable (`nat == 0`) with a single
+     reusable `sleeperActor` (parks in blocking `receive` when idle, slices long
+     waits to 10 ms so newly arrived shorter deadlines are picked up promptly
+     with zero spawns).
+   - `programs/mods/sysep.fpr`: converted `kbdSub` to `Sys.loop` and unpinned
+     `TM = use "timer"` to match `programs/system.fpr` and `std/timer.fpr`.
+   - `std/lifecycle.fpr`: converted `loop` to `Sys.loop` and backed off the
+     idle `Sys.shutdownRequested` poll from 1 kHz (`1000` us) to 40 Hz
+     (`25000` us, 25x fewer wakeups).
 
-2. **Trim per-message O(N) / copy churn in `epservice.fpr` and `graphics.fpr`**
-   - `programs/mods/epservice.fpr` (`simpleUntil` / `untilStep`): sweep expired
-     and dead leases on `Open` (or periodically / near cap) instead of calling
-     `Sys.alive` and rebuilding the handle list on every `Read`/`Write`.
-   - `programs/mods/graphics.fpr`: switch `loop` from per-message `AC.boundary`
-     to adaptive `AC.tidy`, and sweep `notes` only on focus/session transitions
-     rather than every `Poll`.
+2. **Trimmed per-message O(N) / copy churn in `epservice.fpr` and `graphics.fpr`**
+   - `programs/mods/epservice.fpr` (`simpleUntil` / `untilStep`): deferred
+     `liveLeases` full-list sweep + `Sys.alive` scan to `Open` and `stale`
+     messages; `Read`/`Write` check only the target handle's expiry directly.
+   - `programs/mods/graphics.fpr`: switched `loop` from per-message
+     `AC.boundary` to adaptive `AC.tidy` (`AC.tidySmall`); in `poll`, skipped
+     `liveNotes` and `setNote` rebuilds when focus state is unchanged and
+     deferred `liveNotes` sweeps to session/focus transitions (`admit`,
+     `ctlWrite`, `dropH`, `nextFocus`) and new pollers.
+
+3. **Verification**
+   - Native QEMU (`make -C qos native`, RV64 + RV32 built cleanly):
+     - `tests/timer.fpr` (`mode=1 sleep50=ok after=ok order=ok`)
+     - `tests/timerroute.fpr` (`write=ok fire=ok`)
+     - `tests/gfxshare.fpr` (`HOLDS`)
+     - `tests/gfxmemory.fpr` (`100000 frames retain under 2 MiB; backend state survives`)
+     - Standalone `epservice.simpleUntil` Open/Read/Write/Close check (`HOLDS`)
+     - Standalone `std/lifecycle` start → idle `Sys.loop` → `Stop` check (`HOLDS`)
+   - QOS Portable (`qosp`):
+     - `tests/timer.fpr` (`mode=0 sleep50=ok after=ok order=ok` — reusable sleeper)
+     - `tests/kbdread.fpr` (`seq=wxyz00 first=97 second=98 poll=0 HOLDS`)
+     - `tests/filesreclaim.fpr` (`HOLDS`)
+     - `tests/filelazy.fpr` (`HOLDS`)
 
 ## Pass 3: Eliminate 200 us Disk Sleep-Polling & 1 kHz Idle App Loops
 

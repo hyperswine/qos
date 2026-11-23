@@ -47,37 +47,40 @@ nowMs u = Sys.uptimeMs u.
 intMax u = 1073741823.
 armTicks left = (if left < 0 then 0 else if left > armMaxMs then armMaxMs else left) * ticksPerMs.
 
-actor : unsafe Int -> a .
+actor : unsafe Int -> Unit .
 actor me =
   cl = device "clint";
   clk = reg32 cl 49144;
   nat = Sys.timerBind me;
-  loop me clk nat Nil.
+  slp = case nat == 1 of True -> 0 | False -> spawn (sleeperActor me);
+  _ = Sys.loop Nil (turn me clk nat slp);
+  Unit.
 
-loop : unsafe Int -> Int -> Int -> List (Int, Int) -> a .
-loop me clk nat pend =
+turn : unsafe Int -> Int -> Int -> Int -> List (Int, Int) -> (Bool, List (Int, Int)) .
+turn me clk nat slp pend =
   m = receive me;
-  case m of
-    (from, req) -> dispatch me clk nat pend from req
-  | k -> fireDue me clk nat pend.
+  pend2 = case m of
+      (from, req) -> dispatch me clk nat slp pend from req
+    | k -> fireDue me clk nat slp pend;
+  (True, pend2).
     # ^ bare Int: the bridge's CLINT fire or a sleeper's poke --
     #   matched by fallthrough (the uart actor's irq shape)
 
-dispatch : unsafe Int -> Int -> Int -> List (Int, Int) -> Int -> TMsg -> a .
-dispatch me clk nat pend from req =
+dispatch : unsafe Int -> Int -> Int -> Int -> List (Int, Int) -> Int -> TMsg -> List (Int, Int) .
+dispatch me clk nat slp pend from req =
   case req of
-    TAfter ms -> doAfter me clk nat pend from ms
-  | TPing -> send from (TOkI nat) >> loop me clk nat pend.
+    TAfter ms -> doAfter me clk nat slp pend from ms
+  | TPing -> send from (TOkI nat) >> pend.
 
-doAfter : unsafe Int -> Int -> Int -> List (Int, Int) -> Int -> Int -> a .
-doAfter me clk nat pend from ms =
+doAfter : unsafe Int -> Int -> Int -> Int -> List (Int, Int) -> Int -> Int -> List (Int, Int) .
+doAfter me clk nat slp pend from ms =
   now = nowMs Unit;
   dl = if ms <= 0 then now else if ms > intMax Unit - now then intMax Unit else now + ms;
   pend2 = insert dl from pend;
   _ = case nat == 1 of
         True -> armNearest clk pend2
-      | False -> sleepChild me ms;
-  fireDue me clk nat pend2.
+      | False -> armSleeper slp pend2;
+  fireDue me clk nat slp pend2.
   # ^ fire immediately-due entries (ms = 0, or a deadline that passed
   #   while we were parked) instead of waiting for the next poke
 
@@ -98,33 +101,48 @@ armNearest clk pend =
     Nil -> Unit
   | p :: rest -> case p of (dl, w) -> Sys.timerArm (armTicks (dl - nowMs Unit)).
 
-# hosted mode: a child sleeps the interval and pokes us (bare Int).
-# An early poke (host sleep undershot) just re-sleeps the remainder
-# via the rearm path below.
-sleepChild : unsafe Int -> Int -> Unit .
-sleepChild me ms =
-  c = spawn (sleeper me ms);
-  Unit.
-# unlike the loops above this one RETURNS -- `send` answers a Result, so
-# that is its type.  `a` would have promised the caller any type it liked
-# out of a value that is always a Result (fprisc/docs/2026-08-25-SAFETY.md).
-sleeper : unsafe Int -> Int -> Int -> Result Unit String .
-sleeper t ms me2 =
-  _ = Sys.sleepUs ((if ms > sleepMaxMs then sleepMaxMs else if ms < 0 then 0 else ms) * 1000);
-  send t 0.
+# hosted mode: one reusable sleeper actor woken with the nearest deadline.
+# Parks in blocking receive when idle (0) and slices long sleeps to 10 ms so
+# newly arrived shorter deadlines are picked up promptly without spawning.
+armSleeper : unsafe Int -> List (Int, Int) -> Unit .
+armSleeper slp pend =
+  case pend of
+    Nil -> Unit
+  | p :: rest -> case p of (dl, w) -> _ = send slp dl; Unit.
+
+sleeperActor : unsafe Int -> Int -> Unit .
+sleeperActor t me2 = _ = Sys.loop 0 (sleeperTurn t me2); Unit.
+
+sleeperDrain : unsafe Int -> Int -> Int .
+sleeperDrain me2 dl = case receiveNow me2 of
+    Err why -> dl
+  | Ok next ->
+      best = if dl == 0 or (next > 0 and next < dl) then next else dl;
+      sleeperDrain me2 best.
+
+sleeperTurn : unsafe Int -> Int -> Int -> (Bool, Int) .
+sleeperTurn t me2 dl =
+  d0 = if dl == 0 then receive me2 else dl;
+  d1 = sleeperDrain me2 d0;
+  if d1 <= 0 then (True, 0) else
+    left = d1 - nowMs Unit;
+    if left <= 0 then _ = send t 0; (True, 0) else
+      slice = if left > 10 then 10 else left;
+      _ = Sys.sleepUs (slice * 1000);
+      (True, d1).
 
 # pop everything due, notify the waiters, re-arm for the remainder
-fireDue : unsafe Int -> Int -> Int -> List (Int, Int) -> a .
-fireDue me clk nat pend =
+fireDue : unsafe Int -> Int -> Int -> Int -> List (Int, Int) -> List (Int, Int) .
+fireDue me clk nat slp pend =
   case pend of
-    Nil -> loop me clk nat pend
+    Nil -> pend
   | p :: rest -> case p of (dl, who) ->
       case nowMs Unit >= dl of
-        True -> send who TFire >> fireDue me clk nat rest
-      | False -> rearm me clk nat pend dl.
-rearm : unsafe Int -> Int -> Int -> List (Int, Int) -> Int -> a .
-rearm me clk nat pend dl =
+        True -> send who TFire >> fireDue me clk nat slp rest
+      | False -> rearm me clk nat slp pend dl.
+rearm : unsafe Int -> Int -> Int -> Int -> List (Int, Int) -> Int -> List (Int, Int) .
+rearm me clk nat slp pend dl =
   _ = case nat == 1 of
         True -> Sys.timerArm (armTicks (dl - nowMs Unit))
-      | False -> sleepChild me (dl - nowMs Unit + 1);
-  loop me clk nat pend.
+      | False -> _ = send slp dl; Unit;
+  pend.
