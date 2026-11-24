@@ -1294,8 +1294,7 @@ static void walk_entity(V v) {
 static void walk_list(V v, void (*each)(V)) {
   for (;;) {
     if (ISINT(v) || TID(v) != T_LIST) fpr_cpanic("gfx: expected a list in scene");
-    hdr_t *h = (hdr_t *)v;
-    if (h->var == 0) return;
+    if (VAR(v) == 0) return; /* Nil: the V_NIL immediate, never dereferenced */
     V *f = (V *)((char *)v + 8);
     each(f[0]);
     v = f[1];
@@ -1447,7 +1446,7 @@ static int gfx_render_pass(uint64_t scenev, int64_t *draws_out, int64_t *dyn_byt
   v3 sky = {0.06f, 0.07f, 0.09f}, amb = {0.15f, 0.15f, 0.15f};
   float fogNear = 1000.0f, fogFar = 2000.0f; /* no sky entry: fog off */
   V lv = f[2];
-  if (!ISINT(lv) && TID(lv) == T_LIST && ((hdr_t *)lv)->var == 1) {
+  if (!ISINT(lv) && TID(lv) == T_LIST && VAR(lv) == 1) {
     V *lf = (V *)((char *)lv + 8);
     V *l0 = fields(lf[0], 4, "gfx: light must be (pos, color)");
     lp = walk_v3(l0[0]); lc = walk_v3(l0[1]);
@@ -1455,7 +1454,7 @@ static int gfx_render_pass(uint64_t scenev, int64_t *draws_out, int64_t *dyn_byt
      * it, distance fog settles the far edge of the world into the sky
      * between 30 and 78 units from the eye */
     V rest = lf[1];
-    if (!ISINT(rest) && TID(rest) == T_LIST && ((hdr_t *)rest)->var == 1) {
+    if (!ISINT(rest) && TID(rest) == T_LIST && VAR(rest) == 1) {
       V *rf = (V *)((char *)rest + 8);
       V *l1 = fields(rf[0], 4, "gfx: sky must be (fogColor, ambient)");
       sky = walk_v3(l1[0]); amb = walk_v3(l1[1]);
@@ -1607,14 +1606,14 @@ int gfx_render_scene(uint64_t scenev, int64_t *draws_out, int64_t *dyn_bytes_out
  * Only a UI over an empty 3D scene with the default clear colour qualifies.
  * This lets a CPU renderer leave its previous frame visible while input is
  * polled at the normal MVU rate. Animated text/geometry still redraws. */
-static int nil_list(V v) { return !ISINT(v) && TID(v) == T_LIST && ((hdr_t *)v)->var == 0; }
+static int nil_list(V v) { return !ISINT(v) && TID(v) == T_LIST && VAR(v) == 0; }
 static int retain_ui(V scene, V ui, int64_t dist) {
   static unsigned char *previous, *current;
   static size_t previous_size, previous_cap, current_cap;
   V *s = nfields(scene, "gfx: expected scene");
   V lights = s[2];
   int default_clear = nil_list(lights) ||
-    (!ISINT(lights) && TID(lights) == T_LIST && ((hdr_t *)lights)->var == 1 &&
+    (!ISINT(lights) && TID(lights) == T_LIST && VAR(lights) == 1 &&
      nil_list(((V *)((char *)lights + 8))[1]));
   if (!getenv("FPR_GFX_RETAIN_UI") || !nil_list(s[0]) || !nil_list(s[1]) || !default_clear || !ISINT(s[3])) {
     retained_ui_valid = 0;

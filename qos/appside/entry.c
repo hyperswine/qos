@@ -136,7 +136,7 @@ void fpr_mod_detach(const uw *tab);
 extern const uw qos_exports[];
 
 static qos_span_t span_of(V v, const char *who) {
-  if (ISINT(v) || ((hdr_t *)v)->tid != T_STR) fpr_cpanic(who);
+  if (ISINT(v) || TID(v) != T_STR) fpr_cpanic(who);
   str_t *s = (str_t *)v;
   return (qos_span_t){s->bytes, s->len};
 }
@@ -163,7 +163,7 @@ static uw dec(const unsigned char **p, const unsigned char *e) {
 /* the n-th element of a List String, as a span */
 static qos_span_t list_str(V l, uw n, const char *who) {
   for (;;) {
-    if (ISINT(l) || TID(l) != T_LIST || ((hdr_t *)l)->var != 1) fpr_cpanic(who);
+    if (ISINT(l) || TID(l) != T_LIST || VAR(l) != 1) fpr_cpanic(who); /* Nil is the V_NIL immediate */
     if (n == 0) return span_of(*(V *)((char *)l + 8), who);
     l = *(V *)((char *)l + 8 + sizeof(uw));
     n--;
@@ -349,9 +349,9 @@ FPR_FN(fpr_g_Sys_x2eattachImage, h_sys_attach_image, 6);
  * passthrough. */
 static V h_sys_compile(V profv, V srcv) {
   fpr_confined_refuse("Sys.compile (the host compiler)");
-  if (ISINT(profv) || ((hdr_t *)profv)->tid != T_STR)
+  if (ISINT(profv) || TID(profv) != T_STR)
     fpr_cpanic("Sys.compile: profile must be a String");
-  if (ISINT(srcv) || ((hdr_t *)srcv)->tid != T_STR)
+  if (ISINT(srcv) || TID(srcv) != T_STR)
     fpr_cpanic("Sys.compile: source must be a String");
   if (!qos_hal->compile_submit || !qos_hal->compile_done || !qos_hal->compile_reply ||
       !qos_hal->compile_release)
@@ -386,7 +386,7 @@ FPR_FN(fpr_g_Sys_x2ecompile, h_sys_compile, 2);
 static V h_sys_store_req(V tagv, V payv) {
   fpr_confined_refuse("Sys.storeReq (the host's store)");
   if (!ISINT(tagv)) fpr_cpanic("Sys.storeReq: tag must be an Int");
-  if (ISINT(payv) || ((hdr_t *)payv)->tid != T_STR)
+  if (ISINT(payv) || TID(payv) != T_STR)
     fpr_cpanic("Sys.storeReq: payload must be a String");
   if (!g_syscall) return fpr_mkresult(1, "no syscall channel (standalone run)");
   str_t *s = (str_t *)payv;
