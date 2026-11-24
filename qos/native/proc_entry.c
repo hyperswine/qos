@@ -44,7 +44,7 @@ static sw (*g_syscall)(uw, const char *, uw, char *, uw);
 #define QOS_STORE_SCRATCH (64u * 1024)
 static V h_sys_store_req(V tagv, V payv) {
   if (!ISINT(tagv)) fpr_cpanic("Sys.storeReq: tag must be an Int");
-  if (ISINT(payv) || ((hdr_t *)payv)->tid != T_STR) fpr_cpanic("Sys.storeReq: payload must be a String");
+  if (ISINT(payv) || TID(payv) != T_STR) fpr_cpanic("Sys.storeReq: payload must be a String");
   if (!g_syscall) return fpr_mkresult(1, "no syscall channel (standalone run)");
   str_t *s = (str_t *)payv;
   /* a reply larger than the scratch comes back as -6 + its size and lands in

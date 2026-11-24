@@ -49,7 +49,7 @@ static V g_ns;            /* Sys.bindNs, at boot: the namespace a process reache
 static uw g_rpc_tid; /* from the bind-time prototype */
 static uw g_rpc_var;
 static V g_sys_bind_store(V a, V rpc_proto) {
-  if (ISINT(rpc_proto) || ((hdr_t *)rpc_proto)->var != 1)
+  if (!ISPTR(rpc_proto) || ((hdr_t *)rpc_proto)->var != 1)
     fpr_cpanic("Sys.bindStore: expected TimedRpc prototype");
   hdr_t *p = (hdr_t *)rpc_proto;
   g_rpc_tid = p->tid;
@@ -59,7 +59,7 @@ static V g_sys_bind_store(V a, V rpc_proto) {
 }
 /* the id the NEXT placement is launched as (copied into its image record) */
 static V g_sys_bind_app(V idv) {
-  if (ISINT(idv) || ((hdr_t *)idv)->tid != T_STR) fpr_cpanic("Sys.bindApp: id must be a String");
+  if (ISINT(idv) || TID(idv) != T_STR) fpr_cpanic("Sys.bindApp: id must be a String");
   g_app_id = (str_t *)idv;
   return V_UNIT;
 }
