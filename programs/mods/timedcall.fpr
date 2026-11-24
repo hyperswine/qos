@@ -1,0 +1,40 @@
+# timedcall.fpr -- std/actor's deadline call, waiting in a deadline receive.
+#
+# The pinned std/actor (v4.0, 2de24bf2) waits for a deadline call's reply by
+# polling receiveFromNow and napping 100 us between looks: 154 us per call
+# where the blocking wait answers in under 1 us (2026-11-24 overhead review).
+# FP-RISC main's std/actor parks on its builtin receiveFromUntil
+# (hyperswine/fprisc#112). Until QOS's fprisc pin moves there (and re-pins
+# std/actor), this module is that call on QOS's Sys.receiveFromUntil
+# (hal/timed_receive.c) for the hottest caller, the app session (every app
+# event, startup and close). Same wire and answers as std/actor
+# callWithin/callUntil: request (me, id, q), reply (id, r); Err "deadline
+# exceeded before admission", a send refusal, Err "deadline exceeded
+# (outcome unknown)", or the dead-sender Err. Stale replies are dropped and
+# the deadline is checked before every wait, so a stream of them cannot hold
+# the caller past its budget; other senders' messages stay queued.
+# Delete with the pin bump: AC.callWithin/callUntil then park on their own.
+unsafe module.
+AC = use "std/actor#2de24bf2bdd5cb87".
+
+callWithin ms me a q = case AC.deadlineAfter ms of
+    Err why -> Err why
+  | Ok deadline -> callUntil deadline me a q.
+callUntil : unsafe Int -> Int -> Int -> q -> Result r String .
+callUntil deadline me a q =
+  id = Sys.nextId Unit;
+  if AC.nowMs Unit >= deadline then Err "deadline exceeded before admission" else
+  case send a (me, id, q) of
+      Err why -> Err why
+    | Ok u -> awaitReplyUntil deadline me a id.
+awaitReplyUntil : unsafe Int -> Int -> Int -> Int -> Result r String .
+awaitReplyUntil deadline me a id =
+  if AC.nowMs Unit >= deadline then Err "deadline exceeded (outcome unknown)" else
+  case Sys.receiveFromUntil me a deadline of
+      Err why -> Err (if why == "deadline" then "deadline exceeded (outcome unknown)" else why)
+    | Ok m -> replyUntil deadline me a id m.
+replyUntil deadline me a id m =
+  (rid, r) = m;
+  if rid == id then AC.replyKept m r else
+    _ = drop m;
+    awaitReplyUntil deadline me a id.

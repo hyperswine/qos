@@ -325,9 +325,9 @@ configurePreferences until client text m = case Prefs.parse text of Err why -> E
   | Ok (Prefs.Snapshot expected p) -> case PC.check until client expected m.preferenceRevision of Err why -> Err why
     | Ok u -> case applyPreferences p m of Err why -> Err why
       | Ok fresh -> if AC.nowMs Unit >= until then Err "preference update expired" else Ok {fresh | preferenceRevision = expected + 1}.
-preferencesStep me ctx m = if m.preferenceAdapter == 0 then _ = Sys.sleepUs 16000; (True, (ctx, m)) else
+preferencesStep me ctx m = if m.preferenceAdapter == 0 then _ = AS.idle me; (True, (ctx, m)) else
   case receiveFromNow me m.preferenceAdapter of
-    Err why -> _ = Sys.sleepUs 16000; (True, (ctx, m))
+    Err why -> _ = AS.idle me; (True, (ctx, m))
   | Ok borrowed ->
       (from, id, request) = PC.owned borrowed;
       case request of
