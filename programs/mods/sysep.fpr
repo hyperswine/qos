@@ -210,8 +210,8 @@ pinSet url x =
 # arrive as URx pushes from the service (the receive interrupt, on
 # native).  With a read held and the queue empty the actor also polls the
 # service (UGet, the Portable tier, which has no receive interrupt) every
-# 20 ms, taking requests as they come (receiveNow); with nothing held it
-# parks in receive.  (It polled every millisecond: 1,000 UART.qa turns a
+# 20 ms, and between polls waits in a deadline receive, so a request or a
+# push is taken the moment it arrives; with nothing held it parks in receive.  (It polled every millisecond: 1,000 UART.qa turns a
 # second on an idle prompt, a real cost on an 84 MHz single hart.)
 # The pushes arrive through a SUBSCRIBER actor of the keyboard's own, not
 # straight from UART.qa: the service's replies to UGet and its URx pushes
@@ -262,7 +262,14 @@ kPollUart me usvc = case usvc == 0 of
 kIdle : unsafe Int -> Int -> List (Int, String, Int) -> Int -> (Int, Int, Int) -> String -> _ -> (Bool, (List (Int, String, Int), Int, (Int, Int, Int), String)) .
 kIdle usvc me hs next pend rxq r = case r of
     Ok m -> kTake usvc me hs next pend rxq m
-  | Err e -> Sys.sleepUs 20000 >> (True, (hs, next, pend, rxq)).
+  | Err e -> kWait usvc me hs next pend rxq (Sys.receiveUntil me (Sys.uptimeMs Unit + 20)).
+# between polls of the service: a request, a push or a Close wakes the
+# keyboard at once (a deadline receive, hal/timed_receive.c); the 20 ms
+# deadline only paces the UGet poll the Portable tier needs
+kWait : unsafe Int -> Int -> List (Int, String, Int) -> Int -> (Int, Int, Int) -> String -> _ -> (Bool, (List (Int, String, Int), Int, (Int, Int, Int), String)) .
+kWait usvc me hs next pend rxq r = case r of
+    Ok m -> kTake usvc me hs next pend rxq m
+  | Err e -> (True, (hs, next, pend, rxq)).
 # a message: a request envelope, or the service's push
 kTake : unsafe Int -> Int -> List (Int, String, Int) -> Int -> (Int, Int, Int) -> String -> _ -> (Bool, (List (Int, String, Int), Int, (Int, Int, Int), String)) .
 kTake usvc me hs next pend rxq m = case m of
