@@ -10,9 +10,9 @@
 #     delivers a bare Int message when the deadline is due.  ALL
 #     interrupt and CLINT driver work stays inside this one actor.
 #   * On QOS Portable Sys.timerBind answers 0 (no hardware timer):
-#     the SAME actor instead spawns a sleeper child per request
-#     (Sys.sleepUs then a bare-Int poke) -- the same protocol, a
-#     hosted backend.
+#     the SAME actor waits for its nearest deadline in a deadline
+#     receive (Sys.receiveUntil) -- the same protocol, a hosted backend,
+#     with no helper actor.
 #   * A client does `std.timer.after svc ms` -- one SEND, no reply
 #     round trip.  When the deadline passes, Timer.qa sends TFire to
 #     the CALLER's mailbox: a blocked receiver moves from the backlog
@@ -24,16 +24,15 @@
 #   TAfter ms          -> (nothing now; TFire to the SENDER later)
 #   TPing              -> TOkI nat   liveness probe; nat = 1 iff the
 #                                    hardware bridge is live
-# and the BRIDGE's arm: a bare Int (a due CLINT deadline, or a sleeper
-# child's poke).
+# and the BRIDGE's arm: a bare Int (a due CLINT deadline).
 #
 # State: the pending set as a deadline-sorted list of (deadline, who),
 # in milliseconds since boot (Sys.uptimeMs, the clock /services/clock
 # answers): a 31-bit RV32 Int holds it for 12.4 days, where the old
 # low-word CLINT ticks wrapped after 107 s.  The hardware arm converts
-# at most ARM_MAX_MS to ticks and a hosted sleeper sleeps at most
-# SLEEP_MAX_MS; a longer wait is re-armed for the remainder when it
-# fires early, the same path an undershooting host sleep takes.
+# at most ARM_MAX_MS to ticks; a longer wait is re-armed for the
+# remainder when it fires early.  The hosted deadline receive takes the
+# millisecond deadline as it is.
 # ============================================================================
 
 TMsg = Type (TAfter ms | TPing).
@@ -41,7 +40,6 @@ TRep = Type (TOkI n | TFire).
 
 ticksPerMs = 10000.   # CLINT runs at 10 MHz on virt and qosp alike
 armMaxMs = 100000.     # 1e9 ticks: inside a 31-bit Int
-sleepMaxMs = 1000000.  # 1e9 microseconds: inside a 31-bit Int
 nowMs u = Sys.uptimeMs u.
 # the largest deadline an Int holds; a later one waits there (12.4 days on RV32)
 intMax u = 1073741823.
@@ -52,37 +50,48 @@ actor me =
   cl = device "clint";
   clk = reg32 cl 49144;
   nat = Sys.timerBind me;
-  slp = case nat == 1 of True -> 0 | False -> spawn (sleeperActor me);
-  _ = Sys.loop Nil (turn me clk nat slp);
+  _ = Sys.loop Nil (turn me clk nat);
   Unit.
 
-turn : unsafe Int -> Int -> Int -> Int -> List (Int, Int) -> (Bool, List (Int, Int)) .
-turn me clk nat slp pend =
-  m = receive me;
-  pend2 = case m of
-      (from, req) -> dispatch me clk nat slp pend from req
-    | k -> fireDue me clk nat slp pend;
-  (True, pend2).
-    # ^ bare Int: the bridge's CLINT fire or a sleeper's poke --
-    #   matched by fallthrough (the uart actor's irq shape)
+# One message (or one due deadline) per turn.  Hardware mode, and any mode
+# with nothing pending, blocks in receive.  Hosted mode with a deadline
+# pending waits in a DEADLINE RECEIVE (Sys.receiveUntil, hal/timed_receive.c)
+# on the nearest one: a new request wakes it at once -- a shorter deadline
+# takes effect immediately -- and otherwise it wakes exactly once, at the
+# deadline.  (Until 2026-11-24 a sleeper child slept in 10 ms slices: a
+# shorter deadline arriving mid-slice fired up to ~10 ms late, and any long
+# pending timer cost 100 wakeups a second.)
+turn : unsafe Int -> Int -> Int -> List (Int, Int) -> (Bool, List (Int, Int)) .
+turn me clk nat pend = case nextMessage me nat pend of
+    Ok m -> (True, onMessage me clk nat pend m)
+  | Err why -> (True, fireDue me clk nat pend).
 
-dispatch : unsafe Int -> Int -> Int -> Int -> List (Int, Int) -> Int -> TMsg -> List (Int, Int) .
-dispatch me clk nat slp pend from req =
+nextMessage : unsafe Int -> Int -> List (Int, Int) -> Result a String .
+nextMessage me nat pend = case pend of
+    Nil -> Ok (receive me)
+  | p :: rest -> if nat == 1 then Ok (receive me) else (case p of (dl, w) -> Sys.receiveUntil me dl).
+
+onMessage me clk nat pend m = case m of
+    (from, req) -> dispatch me clk nat pend from req
+  | k -> fireDue me clk nat pend.
+    # ^ bare Int: the bridge's CLINT fire -- matched by fallthrough
+    #   (the uart actor's irq shape)
+
+dispatch : unsafe Int -> Int -> Int -> List (Int, Int) -> Int -> TMsg -> List (Int, Int) .
+dispatch me clk nat pend from req =
   case req of
-    TAfter ms -> doAfter me clk nat slp pend from ms
+    TAfter ms -> doAfter me clk nat pend from ms
   | TPing -> send from (TOkI nat) >> pend.
 
-doAfter : unsafe Int -> Int -> Int -> Int -> List (Int, Int) -> Int -> Int -> List (Int, Int) .
-doAfter me clk nat slp pend from ms =
+doAfter : unsafe Int -> Int -> Int -> List (Int, Int) -> Int -> Int -> List (Int, Int) .
+doAfter me clk nat pend from ms =
   now = nowMs Unit;
   dl = if ms <= 0 then now else if ms > intMax Unit - now then intMax Unit else now + ms;
   pend2 = insert dl from pend;
-  _ = case nat == 1 of
-        True -> armNearest clk pend2
-      | False -> armSleeper slp pend2;
-  fireDue me clk nat slp pend2.
+  _ = if nat == 1 then armNearest clk pend2 else Unit;
+  fireDue me clk nat pend2.
   # ^ fire immediately-due entries (ms = 0, or a deadline that passed
-  #   while we were parked) instead of waiting for the next poke
+  #   while we were parked) instead of waiting for the next wake
 
 # deadline-sorted insert, oldest deadline first
 insert : unsafe Int -> Int -> List (Int, Int) -> List (Int, Int) .
@@ -101,48 +110,18 @@ armNearest clk pend =
     Nil -> Unit
   | p :: rest -> case p of (dl, w) -> Sys.timerArm (armTicks (dl - nowMs Unit)).
 
-# hosted mode: one reusable sleeper actor woken with the nearest deadline.
-# Parks in blocking receive when idle (0) and slices long sleeps to 10 ms so
-# newly arrived shorter deadlines are picked up promptly without spawning.
-armSleeper : unsafe Int -> List (Int, Int) -> Unit .
-armSleeper slp pend =
-  case pend of
-    Nil -> Unit
-  | p :: rest -> case p of (dl, w) -> _ = send slp dl; Unit.
-
-sleeperActor : unsafe Int -> Int -> Unit .
-sleeperActor t me2 = _ = Sys.loop 0 (sleeperTurn t me2); Unit.
-
-sleeperDrain : unsafe Int -> Int -> Int .
-sleeperDrain me2 dl = case receiveNow me2 of
-    Err why -> dl
-  | Ok next ->
-      best = if dl == 0 or (next > 0 and next < dl) then next else dl;
-      sleeperDrain me2 best.
-
-sleeperTurn : unsafe Int -> Int -> Int -> (Bool, Int) .
-sleeperTurn t me2 dl =
-  d0 = if dl == 0 then receive me2 else dl;
-  d1 = sleeperDrain me2 d0;
-  if d1 <= 0 then (True, 0) else
-    left = d1 - nowMs Unit;
-    if left <= 0 then _ = send t 0; (True, 0) else
-      slice = if left > 10 then 10 else left;
-      _ = Sys.sleepUs (slice * 1000);
-      (True, d1).
-
 # pop everything due, notify the waiters, re-arm for the remainder
-fireDue : unsafe Int -> Int -> Int -> Int -> List (Int, Int) -> List (Int, Int) .
-fireDue me clk nat slp pend =
+# (hosted mode re-arms nothing: the next turn's deadline receive waits for
+# the new nearest deadline)
+fireDue : unsafe Int -> Int -> Int -> List (Int, Int) -> List (Int, Int) .
+fireDue me clk nat pend =
   case pend of
     Nil -> pend
   | p :: rest -> case p of (dl, who) ->
       case nowMs Unit >= dl of
-        True -> send who TFire >> fireDue me clk nat slp rest
-      | False -> rearm me clk nat slp pend dl.
-rearm : unsafe Int -> Int -> Int -> Int -> List (Int, Int) -> Int -> List (Int, Int) .
-rearm me clk nat slp pend dl =
-  _ = case nat == 1 of
-        True -> Sys.timerArm (armTicks (dl - nowMs Unit))
-      | False -> _ = send slp dl; Unit;
+        True -> send who TFire >> fireDue me clk nat rest
+      | False -> rearm clk nat pend dl.
+rearm : unsafe Int -> Int -> List (Int, Int) -> Int -> List (Int, Int) .
+rearm clk nat pend dl =
+  _ = if nat == 1 then Sys.timerArm (armTicks (dl - nowMs Unit)) else Unit;
   pend.

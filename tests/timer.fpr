@@ -4,8 +4,8 @@
 #     CLINT mtimecmp arms, MTIP pops the IRQ HART (the last live hart,
 #     auxiliary by design) out of wfi, and the bridge delivers the due
 #     message.  Expect mode=1.
-#   * portable (qosp): no hardware timer -- Timer.qa spawns sleeper
-#     children over Sys.sleepUs.  Expect mode=0.
+#   * portable (qosp): no hardware timer -- Timer.qa waits in a
+#     deadline receive (Sys.receiveUntil).  Expect mode=0.
 #
 #   make qos-app PROG=tests/timer.fpr && (cd qos && ./qosp --yes ../app.qa)
 #   make bare-metal-run PROG=tests/timer.fpr
