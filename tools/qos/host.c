@@ -126,7 +126,7 @@ FPR_FN(fpr_g_Qos_x2eunsetEnv, h_unsetenv, 1);
 /* Qos.envNames : Unit -> List String */
 static V h_env_names(V u) {
   (void)u;
-  V l = (V)&os_nil;
+  V l = V_NIL;
   for (char **e = environ; *e; e++) {
     const char *eq = strchr(*e, '=');
     l = os_cons(os_str(*e, eq ? (uw)(eq - *e) : (uw)strlen(*e)), l);
@@ -356,7 +356,7 @@ FPR_FN(fpr_g_Qos_x2ezeros, h_zeros, 1);
 static V h_differences(V av, V bv) {
   const str_t *a = want_str(av, "Qos.differences: not a String"), *b = want_str(bv, "Qos.differences: not a String");
   uw n = a->len < b->len ? a->len : b->len;
-  V l = (V)&os_nil;
+  V l = V_NIL;
   for (uw i = n; i-- > 0;)
     if (a->bytes[i] != b->bytes[i]) l = os_cons(TAG((sw)i), l);
   return l;
