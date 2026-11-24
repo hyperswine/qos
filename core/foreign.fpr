@@ -83,6 +83,14 @@ Sys.takeConsole : Int -> Result String String .
 Sys.releaseConsole : Int -> Result String String .
 # the host's physical memory in bytes, 0 when it cannot say (qos/appside/hal.c)
 Sys.memTotal : Unit -> Int .
+# deadline receives (hal/timed_receive.c): park until a message or the std/actor
+# deadline (ms since boot), whichever is first; Err "deadline" at the deadline.
+# Sys.receiveFromUntil leaves other senders queued and answers a sender that
+# ended with receiveFromNow's dead-sender Err. Sys.waitInbox takes nothing:
+# 1 ready, 2 woken after parking, 0 no timed wait here (pace yourself).
+Sys.receiveUntil : Int -> Int -> Result a String .
+Sys.receiveFromUntil : Int -> Int -> Int -> Result a String .
+Sys.waitInbox : Int -> Int -> Int .
 Sys.shutdownRequested : Unit -> Int .
 Sys.shutdownBegin : Unit -> Unit .
 Sys.shutdownComplete : Int -> Unit .
