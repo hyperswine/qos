@@ -1,0 +1,73 @@
+# epheldbench.fpr -- a held endpoint write through each endpoint OWNER this
+# tree ships, at the module sources in this checkout (unpinned on purpose:
+# it measures the code as it is, not a committed version).
+#   simple       epservice.simple: AC.tidy-bounded callbacks, no deadlines
+#   until        epservice.simpleUntil: leases, a 10 s budget per operation
+#   slots        leaseslots.simpleUntil: the 64-slot lease owner (files)
+# Each is one EC.open, then only EC.write on the held endpoint (2 messages),
+# the echo checked.  Nanoseconds per write, the clock read around each loop.
+# Also checks the client fast path's error: a write to an owner that has
+# ended answers Err "the owner dead actor", as EP.flat (AC.call ..) did.
+#
+#   fpr build tests/epheldbench.fpr --harts 1 -o /tmp/epheldbench && /tmp/epheldbench
+#: expect epheldbench: DONE
+
+unsafe program.
+
+Endpoint = use "../programs/mods/epservice".
+Slots = use "../programs/mods/leaseslots".
+EC = use "../programs/mods/epclient".
+EP = use "../programs/mods/ep#d65056c9d7dc9c18".
+AC = use "std/actor#2de24bf2bdd5cb87".
+
+Sys.mtime : Unit -> Int .
+
+must r = case r of Ok v -> v | Err e -> error "epheldbench: {e}".
+rdU until me client url = Ok (EP.IInt 0).
+wrU until me client url v = Ok v.
+rdS me client url = Ok (EP.IInt 0).
+wrS me client url v = Ok v.
+
+checkEcho k v = case v of EP.IInt n -> if n == k then Unit else error "wrong echo" | other -> error "wrong reply shape".
+held me ep k = if k == 0 then ep else
+  (w, kept) = EC.write me ep (EP.IInt k);
+  _ = checkEcho k (must w);
+  held me kept (k - 1).
+
+report name n t0 t1 = print "epheldbench: {name} {(t1 - t0) * 100 / n} ns per write".
+
+run me ns name url n =
+  warm = must (EC.open me ns url "rw");
+  _ = must (EC.close me (held me warm 1000));
+  ep = must (EC.open me ns url "rw");
+  t0 = Sys.mtime Unit;
+  kept = held me ep n;
+  t1 = Sys.mtime Unit;
+  _ = must (EC.close me kept);
+  report name n t0 t1.
+
+deadOwner me ns =
+  svc = AC.spawnWith (AC.Dynamic 64) (Endpoint.simple rdS wrS);
+  _ = must (EP.register me ns "/services/dead" svc);
+  ep = must (EC.open me ns "/services/dead" "rw");
+  _ = kill svc;
+  (w, kept) = EC.write me ep (EP.IInt 1);
+  _ = EC.close me kept;
+  case w of
+      Ok v -> error "epheldbench: a write to an ended owner answered Ok"
+    | Err why -> if why == "the owner dead actor" then Unit else error "epheldbench: unexpected error {why}".
+
+main =
+  me = myself 0;
+  ns = AC.spawnWith (AC.Dynamic 64) Endpoint.namespace;
+  lst = AC.spawnWith (AC.Dynamic 64) (Endpoint.lister ns);
+  _ = EP.register me ns "/" lst;
+  _ = must (EP.register me ns "/services/simple" (AC.spawnWith (AC.Dynamic 64) (Endpoint.simple rdS wrS)));
+  _ = must (EP.register me ns "/services/until" (AC.spawnWith (AC.Dynamic 64) (Endpoint.simpleUntil rdU wrU)));
+  _ = must (EP.register me ns "/services/slots" (AC.spawnWith (AC.Dynamic 64) (Slots.simpleUntil rdU wrU)));
+  n = 20000;
+  _ = run me ns "simple" "/services/simple" n;
+  _ = run me ns "until" "/services/until" n;
+  _ = run me ns "slots" "/services/slots" n;
+  _ = deadOwner me ns;
+  print "epheldbench: DONE".
