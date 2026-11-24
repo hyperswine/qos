@@ -113,7 +113,34 @@ see [README](README.md)) into FPGA SRAM and run fprisc's
 starts and stops on each pair, the 3.3 V rail stays steady, and pin 76
 finishes low. Record physical observations alongside the UART transcript.
 The UART side of this run passed on 23 November. The motor did not spin
-with the first layout. This revised layout has not been tried yet.
+with the first layout.
+
+## Bench results, 23 November 2026
+
+What the user tried, and what happened:
+
+| Circuit | Motor |
+|---|---|
+| Pin 76 through the 1 kΩ to the BC550 base, 1N5819 across the motor, FP-RISC motor program running | did not spin |
+| Base through 1 kΩ to 3.3 V instead of pin 76 | did not spin |
+| Base through 100 Ω to 3.3 V | did not spin |
+| Base straight to 3.3 V, no resistor | spun (not a safe way to drive it: see Limits) |
+| A push button in place of pin 76, with the BC550 and 1N5819 | did not spin |
+| Motor, supply and a push button only, with no transistor or diode | spun |
+
+The button tests leave out the FPGA and the program entirely. So the motor
+and its supply work, and the fault is in the transistor and diode stage
+itself, not in pin 76, the bitstream or FP-RISC. The cause is not yet
+found. Candidates:
+
+- the BC550 wired in the wrong orientation, or damaged by the
+  no-resistor test
+- the BC550's 100 mA rating being below what the motor needs to start
+- the diode or a ground connection in the wrong strip
+
+The meter check and bench checks above are the next step. It is not
+recorded which layout, the first or this revised one, the button tests
+used.
 
 The planner started from NeoProlog's
 [Infera breadboard planner example](https://github.com/hyperswine/NeoProlog/blob/main/examples/breadboard.nprolog).
