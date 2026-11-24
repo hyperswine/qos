@@ -52,13 +52,15 @@ jobs:
           sol tools/checkout.sol pack tests/sol-hello.fpr --out build/sol-smoke/hello --bundle
           build/sol-smoke/hello/run
       - name: Type-check QOS modules and apps against pinned compiler
-        env:
-          FPRISC_ROOT: ${{ github.workspace }}/fprisc
-          FPR_HOME: ${{ github.workspace }}
-          FPR_PATH: ${{ github.workspace }}/programs:${{ github.workspace }}/fprisc
-          FPR_FOREIGN: ${{ github.workspace }}/core/foreign.fpr
         run: |
           set -e
+          # Paths from $GITHUB_WORKSPACE, the checkout as THIS container sees
+          # it (/__w/...). ${{ github.workspace }} is the runner host's path,
+          # so FPR_PATH roots built from it missed std/encoding in fprisc.
+          export FPRISC_ROOT="$GITHUB_WORKSPACE/fprisc"
+          export FPR_HOME="$GITHUB_WORKSPACE"
+          export FPR_PATH="$GITHUB_WORKSPACE/programs:$GITHUB_WORKSPACE/fprisc"
+          export FPR_FOREIGN="$GITHUB_WORKSPACE/core/foreign.fpr"
           check_file() {
             echo "checking $1"
             if ! "$FPRISC_ROOT/fpr" --target=qx64 --plugin --editor-json --prelude="$FPRISC_ROOT/core/prelude.fpr" "$1" /dev/null > /dev/null 2>&1; then
