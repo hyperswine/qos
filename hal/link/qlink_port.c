@@ -160,16 +160,21 @@ static void qport_poll_rx(qport_t *p) {
   replay_some(p);
 }
 
-void qport_poll(qport_t *p) {
-  qport_poll_rx(p);
+/* send the line buffer now if the window has room; never waits */
+static void con_kick(qport_t *p) {
   if (!p->ready || !p->session) return;
-  /* console bytes waiting in the line buffer go out as soon as the window
-   * allows: an interrupt-driven writer (UART.qa) may have nothing more to
-   * write, so no later write would carry them. The backlog goes first. */
   if (!p->replay && p->con_out_n && qlink_can_send(&p->link)) {
     qlink_send(&p->link, QLINK_CH_CONSOLE, p->con_out, p->con_out_n);
     p->con_out_n = 0;
   }
+}
+
+void qport_poll(qport_t *p) {
+  qport_poll_rx(p);
+  /* console bytes waiting in the line buffer go out as soon as the window
+   * allows: an interrupt-driven writer (UART.qa) may have nothing more to
+   * write, so no later write would carry them. The backlog goes first. */
+  con_kick(p);
 }
 
 int qport_send(qport_t *p, uint8_t ch, const uint8_t *msg, uint32_t n) {
@@ -210,9 +215,18 @@ uint32_t qport_con_write(qport_t *p, const uint8_t *b, uint32_t n) {
     if (c == '\n') has_nl = 1;
   }
   /* Coalesce small writes into p->con_out; flush immediately on newline (or
-   * full buffer above), while prompt lines without '\n' flush on the next
-   * qport_poll / qport_con_read / qport_drain. */
+   * full buffer above). Bytes after the last '\n' wait for the next newline,
+   * qport_con_write_all, qport_poll / qport_con_read or qport_drain. */
   if (has_nl && p->con_out_n && !p->replay && qlink_can_send(&p->link)) qport_con_flush(p);
+  return took;
+}
+
+uint32_t qport_con_write_all(qport_t *p, const uint8_t *b, uint32_t n) {
+  uint32_t took = qport_con_write(p, b, n);
+  /* Nagle-style: with nothing in flight the tail goes out now; while frames
+   * are unacknowledged it keeps coalescing, and the ack (a received byte,
+   * so a receive interrupt and a qport_poll) sends it */
+  if (qlink_idle(&p->link)) con_kick(p);
   return took;
 }
 

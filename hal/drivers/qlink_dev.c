@@ -9,7 +9,9 @@ static qport_t *port(void *st) {
 }
 
 static void con_open(void *st) { qport_poll(port(st)); }
-static uint32_t con_write(void *st, const uint8_t *p, uint32_t n) { return qport_con_write(port(st), p, n); }
+/* UART.qa hands over its whole queue (and has nothing left that a later
+ * write would carry), so the tail after the last newline goes out now too */
+static uint32_t con_write(void *st, const uint8_t *p, uint32_t n) { return qport_con_write_all(port(st), p, n); }
 static uint32_t con_read(void *st, uint8_t *dst, uint32_t max) { return qport_con_read(port(st), dst, max); }
 static void con_arm(void *st, int rx, int tx) {
   /* acknowledgements arrive as received bytes, so transmit progress needs
