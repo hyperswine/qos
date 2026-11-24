@@ -583,7 +583,7 @@ void hal_heap_before_reserve(void) {
 }
 
 static V h_init(V tracev) {
-  g_trace = !ISINT(tracev) && ((hdr_t *)tracev)->var != 0;
+  g_trace = BOOL_VAL(tracev); /* Bool is a 010 small immediate (V_TRUE/V_FALSE) since fprisc 151b3eeb */
   if (getenv("QOSP_TRACE")) g_trace = 1;
   struct sigaction sa = {0};
   sa.sa_sigaction = bus_handler;
