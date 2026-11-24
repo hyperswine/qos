@@ -4,6 +4,8 @@ unsafe module.
 CP = use "apppolicy".
 AW = use "appwire".
 AC = use "std/actor#2de24bf2bdd5cb87".
+# deadline calls wait in a deadline receive until the fprisc pin bump (timedcall.fpr)
+TC = use "timedcall".
 S2 = use "scene2d".
 Manifest = use "manifest".
 Cmd = Type (Open Int | OpenNamed String Int | Deliver AW.Event | Resize Int Int | Home | Stop | Inspect | PolicyNow | Using CP.Snapshot Cmd).
@@ -74,7 +76,7 @@ startAsWith p policies appId ns storage w h me start idle =
   actor = spawn start;
   session = Sys.nextId Unit;
   state = {idle | actor = actor, session = session, sequence = 0, revision = 0, policy = p};
-  boot = AC.callWithin (CP.startupMs (CP.recovery p)) me actor (AW.magic, AW, (session, (w, h), (ns, storage, policies, appId)));
+  boot = TC.callWithin (CP.startupMs (CP.recovery p)) me actor (AW.magic, AW, (session, (w, h), (ns, storage, policies, appId)));
   case boot of
     Ok (magic, schema, sid) -> if magic == AW.magic and schema == AW and sid == session then exchangeWith p me AW.Tick state
       else abortStartup state "app-session version/schema refused"
@@ -82,7 +84,7 @@ startAsWith p policies appId ns storage w h me start idle =
 exchange me event state = exchangeWith CP.defaults me event state.
 exchangeWith p me event state = if state.actor == 0 then (state, Err "app session is closed") else
   sequence = state.sequence + 1;
-  case AC.callWithin (CP.responseMs (CP.recovery p)) me state.actor (AW.Event state.session sequence event) of
+  case TC.callWithin (CP.responseMs (CP.recovery p)) me state.actor (AW.Event state.session sequence event) of
     Ok (AW.Frame sid revision tree vals status) ->
       if sid == state.session and revision > state.revision then
         ({state | sequence = sequence, revision = revision}, Ok (AW.Frame sid revision tree vals status))
@@ -100,7 +102,7 @@ leaveWith p me state =
       if state.cleanup == "" then Ok Unit else Err state.cleanup
     else case AC.deadlineAfter (CP.closeMs (CP.recovery p)) of
       Err why -> Err why
-    | Ok until -> case AC.callUntil until me state.actor (AW.CloseWith state.session until (CP.workerStopMs (CP.recovery p))) of
+    | Ok until -> case TC.callUntil until me state.actor (AW.CloseWith state.session until (CP.workerStopMs (CP.recovery p))) of
         Ok (AW.Closed sid answer) -> if sid == state.session then answer else Err "close session mismatch"
       | Ok other -> Err "invalid close acknowledgement"
       | Err why -> Err "app forced stop; cleanup unconfirmed: {why}";
@@ -109,12 +111,12 @@ leaveWith p me state =
   failures = case result of Err why -> if state.actor == 0 then state.failures else bump state.failures | Ok u -> state.failures;
   ({empty | cleanup = cleanup, failures = failures, w = state.w, h = state.h, policy = p, policyRevision = state.policyRevision}, if cleanup != "" then Err cleanup
     else Ok (AW.Closed state.session (Ok Unit))).
-call me owner Inspect = case AC.callWithin CP.controlMs me owner Inspect of
+call me owner Inspect = case TC.callWithin CP.controlMs me owner Inspect of
     Err why -> Err "session owner: {why}" | Ok answer -> answer.
-call me owner command = case AC.callWithin CP.controlMs me owner PolicyNow of
+call me owner command = case TC.callWithin CP.controlMs me owner PolicyNow of
     Err why -> Err "session policy: {why}"
   | Ok (Err why) -> Err why
-  | Ok (Ok snapshot) -> case AC.callWithin (CP.ownerMs (CP.policy snapshot)) me owner (Using snapshot command) of
+  | Ok (Ok snapshot) -> case TC.callWithin (CP.ownerMs (CP.policy snapshot)) me owner (Using snapshot command) of
       Err why -> Err "session owner: {why}" | Ok answer -> answer.
 stop me owner = case call me owner Stop of Ok reply -> Ok Unit | Err why -> Err why.
 

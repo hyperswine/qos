@@ -50,6 +50,7 @@ platformSources root fprisc =
      ("hal/blk_pack.h", "{root}/hal/blk_pack.h"),
      ("hal/blk_hash.h", "{root}/hal/blk_hash.h"),
      ("hal/net_actor_bridge.c", "{root}/hal/net_actor_bridge.c"),
+     ("hal/timed_receive.c", "{root}/hal/timed_receive.c"),
      ("hal/drivers/uart16550.c", "{root}/hal/drivers/uart16550.c"),
      ("hal/drivers/uart16550.h", "{root}/hal/drivers/uart16550.h"),
      ("hal/classes/console.h", "{root}/hal/classes/console.h"),

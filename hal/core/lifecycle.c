@@ -1,6 +1,7 @@
 /* Native has no host SIGTERM or readiness file. The FP-RISC lifecycle
  * coordinator remains useful for ordinary startup-app completion. */
 #include "fpr.h"
+#include "../timed_receive.c" /* Sys.receiveUntil / receiveFromUntil / waitInbox */
 static V lifecycle_requested(V u) { (void)u; return TAG(0); }
 static V lifecycle_begin(V u) { (void)u; return (V)&fpr_unit; }
 static V lifecycle_complete(V status) { (void)status; return (V)&fpr_unit; }

@@ -65,8 +65,10 @@ loopTurn me ctx =
     answer = finish ctx me;
     _ = Sys.shutdownComplete (case answer of Ok value -> 0 | Err why -> 1);
     (False, ctx)
-  else case receiveNow me of
-      Err why -> _ = Sys.sleepUs 25000; (True, ctx)
+  else case Sys.receiveUntil me (Sys.uptimeMs Unit + 25) of
+      # a Stop wakes the turn at once; the 25 ms deadline only paces the
+      # check of the host's shutdown flag, which arrives as no message
+      Err why -> (True, ctx)
     | Ok borrowed ->
         (caller, id, q) = keep borrowed; _ = drop borrowed;
         answer = case q of Stop -> finish ctx me;

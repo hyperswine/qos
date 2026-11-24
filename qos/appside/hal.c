@@ -11,6 +11,7 @@
 #include "fpr.h"
 #include "blk_pack.h"
 #include "qos_abi.h"
+#include "timed_receive.c" /* Sys.receiveUntil / receiveFromUntil / waitInbox (hal/) */
 
 extern const qos_hal_t *qos_hal; /* entry.c installs it first thing */
 

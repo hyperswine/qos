@@ -6,6 +6,7 @@ AW = use "appwire".
 AJ = use "appjobs".
 L = use "shelllayout".
 AC = use "std/actor#2de24bf2bdd5cb87".
+TC = use "timedcall".
 Inbox = Type (Message (Int, Int) AW.Request | JobResult Int (Result AW.Snapshot String) | Idle | Gone).
 start me = case bootstrap (AC.nowMs Unit + CP.bootstrapReceiveMs) me of
     Err why -> Err why
@@ -39,6 +40,17 @@ next me ctx = if not (Sys.alive ctx.parent) then Gone else case receiveFromNow m
     | Err why -> if Sys.alive ctx.parent then
         if Sys.alive ctx.worker then selfResult me else Gone
         else Gone.
+# Nothing to do this turn: park until a message reaches the app's mailbox
+# or 16 ms pass (Sys.waitInbox, hal/timed_receive.c), so a request, input
+# or job result is handled the moment it arrives instead of up to 16 ms
+# later.  The deadline still paces the liveness checks in `next` (a parent
+# or worker that ends sends nothing).  When the inbox was already non-empty
+# (a message `next` does not take) or the wait is unavailable, it naps the
+# 16 ms as before: never a spin.
+idleMs = 16.
+idle me = case Sys.waitInbox me (AC.nowMs Unit + idleMs) of
+    2 -> Unit
+  | other -> Sys.sleepUs (idleMs * 1000).
 valid ctx session sequence = session == ctx.session and sequence > ctx.sequence.
 advance ctx sequence = {ctx | revision = ctx.revision + 1, sequence = sequence}.
 resized ctx (AW.Resize w h) = if L.valid w h then {ctx | w = w, h = h} else ctx.
@@ -54,7 +66,7 @@ finish me ctx = case CP.current me ctx.policies of
   | Ok snapshot -> finishWithin (CP.workerStopMs (CP.recovery (CP.policy snapshot))) (intMax Unit) me ctx.
 finishWithin stopMs until me ctx =
   deadline = case AC.deadlineAfter stopMs of Ok d -> if d < until then d else until | Err why -> AC.nowMs Unit;
-  result = case AC.callUntil deadline me ctx.worker AW.Stop of
+  result = case TC.callUntil deadline me ctx.worker AW.Stop of
       Err why -> Err "worker forced stop: {why}"
     | Ok (AW.Stopped result) -> result
     | Ok other -> Err "invalid worker stop acknowledgement";
@@ -78,10 +90,16 @@ selfResult me = case receiveFromNow me me of
       (case owned of (id, AW.Completed token result) -> JobResult token result | other -> Idle)
   | other -> Idle.
 
+# the startup request: the first message, or the startup deadline.  It
+# parks on the mailbox (Sys.waitInbox); a plane process, which has no timed
+# wait until the fprisc pin bump, naps 100 us between looks as before.
 bootstrap deadline me = if AC.nowMs Unit >= deadline then Err "startup deadline exceeded" else
   case receiveNow me of
     Ok borrowed -> owned = keep borrowed; _ = drop borrowed; Ok owned
-  | Err why -> _ = AC.napUntil deadline; bootstrap deadline me.
+  | Err why -> _ = bootWait deadline me; bootstrap deadline me.
+bootWait deadline me = case Sys.waitInbox me deadline of
+    0 -> AC.napUntil deadline
+  | other -> Unit.
 
 abandon me ctx = case finish me ctx of
     Ok u -> Unit

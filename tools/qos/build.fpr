@@ -28,7 +28,7 @@ appCflags u = "-O2" :: "-ffreestanding" :: "-nostdlib" :: "-fno-stack-protector"
 movedDelta = "0x10000000".
 movedDeltaInt = 268435456.
 # platform files another file #includes instead of compiling them itself
-includedBy name = case name of "hal/net_actor_bridge.c" -> "appside/hal.c" | _ -> name.
+includedBy name = case name of "hal/net_actor_bridge.c" -> "appside/hal.c" | "hal/timed_receive.c" -> "appside/hal.c" | _ -> name.
 
 # (arch, target, importsArch, triple)
 native u = case H.machine Unit of

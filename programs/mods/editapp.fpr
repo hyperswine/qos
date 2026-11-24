@@ -782,9 +782,9 @@ controlled until client expected action revision m =
   else if AC.nowMs Unit >= until then Err "Editor command expired"
   else Ok (transition action m).
 controlStep me ctx model adapter = if adapter == 0 then
-    _ = Sys.sleepUs 16000; (True, (ctx, model, adapter))
+    _ = AS.idle me; (True, (ctx, model, adapter))
   else case receiveFromNow me adapter of
-    Err why -> _ = Sys.sleepUs 16000; (True, (ctx, model, adapter))
+    Err why -> _ = AS.idle me; (True, (ctx, model, adapter))
   | Ok borrowed ->
       owned = keep borrowed;
       _ = drop borrowed;
