@@ -1,3 +1,4 @@
+#include "blk_hash.h"
 /* Pack the part of a two-record write that follows its first header page. */
 static V h_blkPackPair(V first, V header, V second) {
   if (ISINT(first) || TID(first) != T_STR || ISINT(header) || TID(header) != T_STR ||
@@ -22,8 +23,8 @@ static V h_blkPackPair(V first, V header, V second) {
 FPR_FN(fpr_g_blkPackPair, h_blkPackPair, 3);
 
 /* QLog 31-polynomial chunk hash mod 1e9+7 over s[off..off+len), seeded with
- * acc. 64-bit intermediate matches qlog.fpr's RV32-safe hashByte bit-for-bit
- * without per-byte FP-RISC recursion or division. */
+ * acc: the fold of qlog.fpr's hashByte (blk_hash.h), without per-byte FP-RISC
+ * recursion and with no 64-bit division per byte. */
 static V h_blkHashSlice(V sv, V offv, V lenv, V accv) {
   if (ISINT(sv) || TID(sv) != T_STR || !ISINT(offv) || !ISINT(lenv) || !ISINT(accv))
     fpr_cpanic("blkHashSlice: expected (String, Int, Int, Int)");
@@ -31,11 +32,8 @@ static V h_blkHashSlice(V sv, V offv, V lenv, V accv) {
   sw off = UNTAG(offv), len = UNTAG(lenv);
   if (off < 0 || len < 0 || (uw)off > s->len || (uw)len > s->len - (uw)off)
     fpr_cpanic("blkHashSlice: slice out of bounds");
-  uint64_t acc = (uint64_t)(sw)UNTAG(accv);
-  const uint8_t *p = s->bytes + (uw)off;
-  for (uw i = 0; i < (uw)len; i++) {
-    acc = (acc * 31ULL + (uint64_t)p[i]) % 1000000007ULL;
-  }
+  if (!len) return accv; /* nothing folded: the seed as given */
+  uint32_t acc = blk_hash_bytes((uint64_t)(sw)UNTAG(accv), (const uint8_t *)s->bytes + (uw)off, (uw)len);
   return TAG((sw)acc);
 }
 FPR_FN(fpr_g_blkHashSlice, h_blkHashSlice, 4);

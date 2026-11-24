@@ -48,6 +48,7 @@ platformSources root fprisc =
      ("portable/sha256.c", "{root}/qos/portable/sha256.c"),
      ("loader/qaimg.c", "{root}/loader/qaimg.c"),
      ("hal/blk_pack.h", "{root}/hal/blk_pack.h"),
+     ("hal/blk_hash.h", "{root}/hal/blk_hash.h"),
      ("hal/net_actor_bridge.c", "{root}/hal/net_actor_bridge.c"),
      ("hal/drivers/uart16550.c", "{root}/hal/drivers/uart16550.c"),
      ("hal/drivers/uart16550.h", "{root}/hal/drivers/uart16550.h"),
