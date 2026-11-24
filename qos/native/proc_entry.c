@@ -112,7 +112,7 @@ static V proc_root(V self) {
     fpr_actor_sleep_us(1000);
   }
   if (g_on_exit) g_on_exit();
-  return (V)&fpr_unit;
+  return V_UNIT;
 }
 
 V fpr_process_entry(void *heap_base, uw heap_size, fpr_grant_t (*grow)(uw want_bytes),
@@ -163,13 +163,13 @@ V fpr_process_entry(void *heap_base, uw heap_size, fpr_grant_t (*grow)(uw want_b
       sb->refused = "plane actors ABI mismatch: rebuild the process with sol tools/build-process-app.sol";
     else if (!sb->memory || sb->memory->abi != FPR_PLANE_MEMORY_ABI)
       sb->refused = "plane memory ABI mismatch: rebuild the process with sol tools/build-process-app.sol";
-    if (sb->refused) { sb->root = 0; return (V)&fpr_unit; }
+    if (sb->refused) { sb->root = 0; return V_UNIT; }
     fpr_plane_actors = sb->actors;
     fpr_plane_memory = sb->memory;
 #ifdef FPR_COMPACT_CELLS
     if (fpr_layout_register(0)) {
       sb->refused = "constructor layout metadata rejected";
-      sb->root = 0; return (V)&fpr_unit;
+      sb->root = 0; return V_UNIT;
     }
 #endif
     /* OUR OWN statics window: the shared span (heap_lo..heap_hi)
@@ -198,7 +198,7 @@ V fpr_process_entry(void *heap_base, uw heap_size, fpr_grant_t (*grow)(uw want_b
     root->nargs = 0;
     *(V *)((char *)root + sizeof(pap0_t)) = 0;
     sb->root = (void *)fpr_plane_actors->spawn_pid((V)root, sb->pid);
-    return (V)&fpr_unit; /* launched; the result arrives as a message */
+    return V_UNIT; /* launched; the result arrives as a message */
   }
 
   fpr_hart_t *h = &fpr_harts[0];

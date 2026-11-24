@@ -38,7 +38,7 @@ static V owner_received(V m) {
     if (key && !ISINT(m) && TID(m) == T_TUP3 &&
         (uw)FPR_FLD(m,0) == key && FPR_FLD(m,1) == trace_id)
         dequeued = hal_mtime();
-    return (V)&fpr_unit;
+    return V_UNIT;
 }
 FPR_FN(fpr_g_Sys_x2eownerReceived, owner_received, 1);
 static V reuse_page;
@@ -47,7 +47,7 @@ static V trial_interval(V us, V reuse) {
     if (n != 50 && n != 100 && n != 200) fpr_cpanic("invalid trial interval");
     reuse_page = reuse;
     qos_trial_poll_us = n;
-    return (V)&fpr_unit;
+    return V_UNIT;
 }
 FPR_FN(fpr_g_Sys_x2etrialInterval, trial_interval, 2);
 static V trial_reuse(V ignored) { (void)ignored; return reuse_page; }
@@ -71,7 +71,7 @@ static V mark_stage(V stage, V id) {
         if (trace_id) fpr_cpanic("overlapping block request");
         trace_id = id;
     }
-    if (!trace_id) return (V)&fpr_unit;
+    if (!trace_id) return V_UNIT;
     if (id != trace_id || n >= 6 || stamp[n])
         fpr_cpanic("uncorrelated block timeline");
     stamp[n] = hal_mtime();
@@ -87,7 +87,7 @@ static V mark_stage(V stage, V id) {
         published = dequeued = 0;
     }
 #endif
-    return (V)&fpr_unit;
+    return V_UNIT;
 }
 FPR_FN(fpr_g_Sys_x2eblockStage, mark_stage, 2);
 
@@ -108,7 +108,7 @@ static V finish_timeline(V end) {
         stamp[i] = 0;
     }
     trace_id = 0;
-    return (V)&fpr_unit;
+    return V_UNIT;
 }
 FPR_FN(fpr_g_Sys_x2eblockTimelineEnd, finish_timeline, 1);
 
@@ -132,7 +132,7 @@ static V page_begin(V page) {
 #endif
     if (__atomic_exchange_n(&expected_page, (uw)UNTAG(page) + 1, __ATOMIC_ACQ_REL))
         fpr_cpanic("overlapping replay pages");
-    return (V)&fpr_unit;
+    return V_UNIT;
 }
 FPR_FN(fpr_g_Sys_x2ereplayPageBegin, page_begin, 1);
 
@@ -153,7 +153,7 @@ static V page_cost(V ticks) {
     if (completed >= 128) fpr_cpanic("unexpected replay page");
     replay_samples[completed][PAGES]++;
     replay_samples[completed][PAGE_TICKS] += UNTAG(ticks);
-    return (V)&fpr_unit;
+    return V_UNIT;
 }
 FPR_FN(fpr_g_Sys_x2ereplayPageCost, page_cost, 1);
 
@@ -161,7 +161,7 @@ static V payload_cost(V payload, V slice) {
     if (completed >= 128) fpr_cpanic("unexpected replay payload");
     replay_samples[completed][PAYLOAD_TICKS] += UNTAG(payload);
     replay_samples[completed][SLICE_TICKS] += UNTAG(slice);
-    return (V)&fpr_unit;
+    return V_UNIT;
 }
 FPR_FN(fpr_g_Sys_x2ereplayPayloadCost, payload_cost, 2);
 
@@ -171,14 +171,14 @@ static V record_cost(V read_ticks, V concat_ticks) {
     row[RECORDS]++;
     row[READ_TICKS] += UNTAG(read_ticks);
     row[CONCAT_TICKS] += UNTAG(concat_ticks);
-    return (V)&fpr_unit;
+    return V_UNIT;
 }
 FPR_FN(fpr_g_Sys_x2ereplayRecordCost, record_cost, 2);
 
 static V replay_done(V ticks) {
     if (completed >= 128) fpr_cpanic("unexpected replay completion");
     replay_samples[completed++][REPLAY_TICKS] = UNTAG(ticks);
-    return (V)&fpr_unit;
+    return V_UNIT;
 }
 FPR_FN(fpr_g_Sys_x2ereplayDone, replay_done, 1);
 

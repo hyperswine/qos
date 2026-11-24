@@ -12,7 +12,7 @@ runtime fpr xlen = virt = "{fpr}/machine/virt"; rt = "{fpr}/runtime";
          else ["build/virt-clint.s","{virt}/rawunit.c","build/qos-plic.s","build/qos-virtio.s","build/qos-blockpolicy.s","build/qos-netpolicy.s"]);
   List.append (List.append raw ["hal/virt/plic.c","hal/virt/pins.c","hal/core/lifecycle.c","build/board-{board xlen}/devtable.c",
     "qos/native/proc_entry.c","{virt}/ctx.S","{virt}/ctx_fab.c","{rt}/runtime.c","{rt}/i32.c","{virt}/hal.c","{virt}/memshim.c"])
-    (List.map (fn name -> "{rt}/{name}.c") ["actors","buddy","mod","bits","vec","sstr"]).
+    (List.map (fn name -> "{rt}/{name}.c") ["actors","buddy","mod","bits","vec"]).
 board xlen = if xlen == 32 then "virt32" else "virt".
 link extra env fpr layout assembly units base elf xlen =
   flags = List.concat [["riscv64-unknown-elf-gcc",layout], ABI.archFlags xlen, ["-mcmodel=medany","-ffixed-x27","-DFPR_NHARTS=1",

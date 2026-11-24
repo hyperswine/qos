@@ -16,7 +16,7 @@ hal = ["-Dhal_mtime=spectre_raw_ticks","-Dhal_timer_arm=spectre_raw_arm","-Dhal_
 kernel runtime = List.append ["-nostdlib","-Wl,--gc-sections","-T","src/machine/tangnano20k/link.ld","src/machine/tangnano20k/crt0.S",
   "src/machine/virt/ctx.S","src/machine/virt/ctx_fab.c","src/machine/virt/memshim.c"]
   (List.append (List.map (fn name -> "src/runtime/{name}.c") runtime) ["hal.o"]).
-base = ["runtime","actors","buddy","i32","sstr","vec"].
+base = ["runtime","actors","buddy","i32","vec"].
 withMod = List.append base ["mod"].
 sd board = ["-I{board}/boards/tangnano20k/c","{board}/boards/tangnano20k/c/sd.c"].
 # the BLOCK class and its SD driver, from the QOS checkout QOS names

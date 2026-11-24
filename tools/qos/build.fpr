@@ -16,7 +16,7 @@ OS = use "std/os".
 # Both are part of the platform cache key.
 platformUnits = "appside/entry.c" :: "appside/hal.c" :: "appside/support.c" ::
   "runtime/runtime.c" :: "runtime/i32.c" :: "runtime/actors.c" :: "runtime/bits.c" ::
-  "runtime/vec.c" :: "runtime/sstr.c" :: "runtime/mod.c" :: "runtime/buddy.c" ::
+  "runtime/vec.c" :: "runtime/mod.c" :: "runtime/buddy.c" ::
   "loader/qaimg.c" :: "portable/sha256.c" :: "machine/unix/ctx_a64.S" :: Nil.
 platformLinkerScript = "appside/link-qosapp-a64.ld".
 # macOS reserves 0x180000000-0x7000000000 in every process, so Darwin hosts
@@ -28,7 +28,7 @@ appCflags u = "-O2" :: "-ffreestanding" :: "-nostdlib" :: "-fno-stack-protector"
 movedDelta = "0x10000000".
 movedDeltaInt = 268435456.
 # platform files another file #includes instead of compiling them itself
-includedBy name = case name of "hal/net_actor_bridge.c" -> "appside/hal.c" | "hal/timed_receive.c" -> "appside/hal.c" | _ -> name.
+includedBy name = case name of "hal/net_actor_bridge.c" -> "appside/hal.c" | "hal/timed_receive.c" -> "appside/hal.c" | "runtime/bigint.inc" -> "runtime/runtime.c" | _ -> name.
 
 # (arch, target, importsArch, triple)
 native u = case H.machine Unit of

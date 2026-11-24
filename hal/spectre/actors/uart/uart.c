@@ -27,7 +27,7 @@ void hal_irq_ack(uw src){if(src!=10)fail();CLAIM=10;ENABLE=1u<<10;acks++;}
 extern V fpr_g_Sys_x2eirqInstall_call1(V),fpr_g_Sys_x2eirqTarget_call1(V),
  fpr_g_Sys_x2eirqOpen_call1(V),fpr_g_Sys_x2eirqAck_call1(V);
 static V worker(V me){
- if(fpr_g_Sys_x2eirqInstall_call1(me)!=(V)&fpr_true)fail();
+ if(fpr_g_Sys_x2eirqInstall_call1(me)!=V_TRUE)fail();
  fpr_g_Sys_x2eirqTarget_call1(TAG(1));
  fpr_g_Sys_x2eirqOpen_call1(TAG(10));CTRL=1;
  for(int i=0;i<2;i++){

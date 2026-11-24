@@ -514,7 +514,7 @@ static const str_t *arg_str(V v, const char *who) {
 static V h_log(V sv) {
   const str_t *t = arg_str(sv, "Host.log: expected a String");
   qos_hostlog("%.*s", (int)t->len, (const char *)t->bytes);
-  return (V)&fpr_unit;
+  return V_UNIT;
 }
 FPR_FN(fpr_g_Host_x2elog, h_log, 1);
 

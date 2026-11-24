@@ -55,13 +55,13 @@ static V g_sys_bind_store(V a, V rpc_proto) {
   g_rpc_tid = p->tid;
   g_rpc_var = p->var;
   g_store_actor = a;
-  return (V)&fpr_unit;
+  return V_UNIT;
 }
 /* the id the NEXT placement is launched as (copied into its image record) */
 static V g_sys_bind_app(V idv) {
   if (ISINT(idv) || ((hdr_t *)idv)->tid != T_STR) fpr_cpanic("Sys.bindApp: id must be a String");
   g_app_id = (str_t *)idv;
-  return (V)&fpr_unit;
+  return V_UNIT;
 }
 FPR_FN(fpr_g_Sys_x2ebindStore, g_sys_bind_store, 2);
 FPR_FN(fpr_g_Sys_x2ebindApp, g_sys_bind_app, 1);
@@ -69,7 +69,7 @@ FPR_FN(fpr_g_Sys_x2ebindApp, g_sys_bind_app, 1);
  * handed in its boot record -- its Sys.ns -- so it opens urls like any
  * actor on the plane, judged by the grants the launcher recorded under
  * its pid */
-static V g_sys_bind_ns(V a) { g_ns = a; return (V)&fpr_unit; }
+static V g_sys_bind_ns(V a) { g_ns = a; return V_UNIT; }
 FPR_FN(fpr_g_Sys_x2ebindNs, g_sys_bind_ns, 1);
 
 /* mint a TimedRpc constructor value (6 fields) with the bind-time tag.
@@ -209,7 +209,7 @@ sw qos_store_call(uw tag, const char *pay, uw plen, char *out, uw outcap) {
   /* the calling PROCESS ACB is the replyTo -- kv IO is an ordinary actor
    * round trip (a blocking receive frees the hart) */
   void *me = fpr_hart()->current;
-  V id = fpr_g_Sys_x2enextId_call1((V)&fpr_unit);
+  V id = fpr_g_Sys_x2enextId_call1(V_UNIT);
   uint64_t until = hal_mtime() / 10 + 10000000; /* same default as storage.fpr */
   V msg = mkrpc((V)me, id, TAG((sw)until), TAG((sw)tag), urlv, payv);
 #ifdef QOS_STORE_REPLY_TRACE
@@ -442,7 +442,7 @@ static V g_sys_check_image(V qa, V extv, V numsv, V sha, V relsha) {
   if (bad) return fpr_mkresult(1, bad);
   hdr_t *ok = (hdr_t *)fpr_alloc(8 + sizeof(V));
   ok->tid = T_RESULT; ok->var = 0;
-  *(V *)((char *)ok + 8) = (V)&fpr_unit;
+  *(V *)((char *)ok + 8) = V_UNIT;
   return (V)ok;
 }
 FPR_FN(fpr_g_Sys_x2echeckImage, g_sys_check_image, 5);
@@ -450,7 +450,7 @@ FPR_FN(fpr_g_Sys_x2echeckImage, g_sys_check_image, 5);
 #ifdef QOS_PROCESS_TEST
 static uw test_image_allocs;
 static uw g_test_place_delay_us; /* placement waits this long after the entry */
-static V g_test_place_delay(V us) { g_test_place_delay_us = (uw)UNTAG(us); return (V)&fpr_unit; }
+static V g_test_place_delay(V us) { g_test_place_delay_us = (uw)UNTAG(us); return V_UNIT; }
 FPR_FN(fpr_g_Sys_x2etestPlaceDelay, g_test_place_delay, 1);
 static V g_test_image_allocs(V unit) { (void)unit; return TAG(test_image_allocs); }
 FPR_FN(fpr_g_Sys_x2etestImageAllocs, g_test_image_allocs, 1);
@@ -586,7 +586,7 @@ FPR_FN(fpr_g_Sys_x2eplaceImageAt, g_sys_place_image_at, 6);
 /* Sys.init : Unit -> Unit -- a no-op kept in the boot protocol (see
  * fpr_proc_arena_init above): the buddy is initialised for every image
  * by fpr_rt_init, so there is nothing left to set up here. */
-static V g_sys_init(V d) { (void)d; fpr_proc_arena_init(); return (V)&fpr_unit; }
+static V g_sys_init(V d) { (void)d; fpr_proc_arena_init(); return V_UNIT; }
 FPR_FN(fpr_g_Sys_x2einit, g_sys_init, 1);
 
 /* Sys.images : Int -> Int -- process images loaded now (each goes when its

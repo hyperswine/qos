@@ -34,7 +34,7 @@ static V h_pin_mode(V nv, V mv) {
   sw n = UNTAG(nv);
   if (n < 0 || n >= NPINS) fpr_cpanic("Pin.mode: pin out of range");
   pin_mode[n] = UNTAG(mv) ? 1 : 0;
-  return (V)&fpr_unit;
+  return V_UNIT;
 }
 static V h_pin_write(V nv, V vv) {
   pins_init();
@@ -44,7 +44,7 @@ static V h_pin_write(V nv, V vv) {
   if (UNTAG(vv)) pin_out |= (1u << n); else pin_out &= ~(1u << n);
   if (pin_trace_n < PIN_TRACE_CAP)
     pin_trace[pin_trace_n++] = (uint16_t)(n * 2 + (UNTAG(vv) ? 1 : 0));
-  return (V)&fpr_unit;
+  return V_UNIT;
 }
 static V h_pin_read(V nv) {
   pins_init();
@@ -69,7 +69,7 @@ static V h_pin_feed(V bv, V patv, V nv) {
   pin_feed_pat[b] = (uint32_t)UNTAG(patv);
   pin_feed_n[b] = (uint8_t)UNTAG(nv);
   pin_feed_i[b] = 0;
-  return (V)&fpr_unit;
+  return V_UNIT;
 }
 FPR_FN(fpr_g_Pin_x2efeed, h_pin_feed, 3);
 
@@ -78,13 +78,13 @@ static V h_pin_wire(V av, V bv) { /* SIM ONLY: out-pin a -> in-pin b (a<0 unwire
   sw a = UNTAG(av), b = UNTAG(bv);
   if (b < 0 || b >= NPINS) fpr_cpanic("Pin.wire: dst out of range");
   pin_src[b] = (a >= 0 && a < NPINS) ? (int8_t)a : -1;
-  return (V)&fpr_unit;
+  return V_UNIT;
 }
 /* signal trace: every Pin.write records (pin, value) in order -- the
  * sim's logic analyzer.  Tests decode the captured WAVEFORM back into
  * protocol bytes (see tests/bbspi.fpr), which is how "are the signals
  * generally working" is answerable without silicon. */
-static V h_pin_tclear(V d) { (void)d; pin_trace_n = 0; return (V)&fpr_unit; }
+static V h_pin_tclear(V d) { (void)d; pin_trace_n = 0; return V_UNIT; }
 static V h_pin_tlen(V d) { (void)d; return TAG((sw)pin_trace_n); }
 static V h_pin_tget(V iv) { /* 1-based; -> pin*2 + value */
   sw i = UNTAG(iv);

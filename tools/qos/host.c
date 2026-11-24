@@ -20,7 +20,7 @@
 
 extern char **environ;
 
-static V unit_ok(void) { return os_ok((V)&fpr_unit); }
+static V unit_ok(void) { return os_ok(V_UNIT); }
 static const str_t *want_str(V v, const char *who) {
   if (ISINT(v) || TID(v) != T_STR) fpr_cpanic(who);
   return (const str_t *)v;
@@ -112,14 +112,14 @@ static V h_setenv(V namev, V valuev) {
   char *name = os_cstr(namev, "Qos.setEnv: name"), *value = os_cstr(valuev, "Qos.setEnv: value");
   if (setenv(name, value, 1)) fpr_cpanic("Qos.setEnv: invalid name");
   free(name); free(value);
-  return (V)&fpr_unit;
+  return V_UNIT;
 }
 FPR_FN(fpr_g_Qos_x2esetEnv, h_setenv, 2);
 static V h_unsetenv(V namev) {
   char *name = os_cstr(namev, "Qos.unsetEnv: name");
   unsetenv(name);
   free(name);
-  return (V)&fpr_unit;
+  return V_UNIT;
 }
 FPR_FN(fpr_g_Qos_x2eunsetEnv, h_unsetenv, 1);
 
@@ -223,7 +223,7 @@ static V h_remove_tree(V pathv) {
   char *path = os_cstr(pathv, "Qos.removeTree: path");
   remove_tree(path);
   free(path);
-  return (V)&fpr_unit;
+  return V_UNIT;
 }
 FPR_FN(fpr_g_Qos_x2eremoveTree, h_remove_tree, 1);
 

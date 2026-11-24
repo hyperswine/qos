@@ -47,7 +47,7 @@ static V h_shutdown_begin(V u) {
   fpr_confined_refuse("Sys.shutdownBegin (the system's lifecycle)");
   (void)u;
   if (qos_hal->shutdown_begin) qos_hal->shutdown_begin();
-  return (V)&fpr_unit;
+  return V_UNIT;
 }
 static V h_shutdown_complete(V status) {
   fpr_confined_refuse("Sys.shutdownComplete (the system's lifecycle)");
@@ -60,14 +60,14 @@ static V h_shutdown_complete(V status) {
   /* A one-microsecond sleep can expire before it parks. Always hand back
    * to the scheduler so acknowledged failure cannot resume into a panic. */
   fpr_fuel_exhausted(); /* fpr_process_done makes the scheduler return */
-  return (V)&fpr_unit;
+  return V_UNIT;
 }
 static V h_ready(V u) {
   fpr_confined_refuse("Sys.ready (the system's lifecycle)");
   (void)u;
   if (qos_hal->ready && qos_hal->ready() < 0)
     fpr_actor_fail("Sys.ready: could not publish readiness");
-  return (V)&fpr_unit;
+  return V_UNIT;
 }
 FPR_FN(fpr_g_Sys_x2eshutdownRequested, h_shutdown_requested, 1);
 FPR_FN(fpr_g_Sys_x2eshutdownBegin, h_shutdown_begin, 1);

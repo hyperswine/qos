@@ -56,7 +56,7 @@ platformSources root fprisc =
      ("hal/classes/console.h", "{root}/hal/classes/console.h"),
      ("machine/unix/ctx_a64.S", "{fprisc}/machine/unix/ctx_a64.S")]
   + List.map (fn n -> ("runtime/{n}", "{fprisc}/runtime/{n}"))
-      ["runtime.c", "i32.c", "actors.c", "bits.c", "vec.c", "sstr.c", "mod.c", "buddy.c", "fpr.h", "i32.h", "vec_layout.h"]
+      ["runtime.c", "bigint.inc", "i32.c", "actors.c", "bits.c", "vec.c", "mod.c", "buddy.c", "fpr.h", "i32.h", "vec_layout.h"]
   + (if K.isFile "{fprisc}/runtime/sched_probe.h" then [("runtime/sched_probe.h","{fprisc}/runtime/sched_probe.h")] else []).
 
 # tools/qos/qos.fpr + host.c -> the SDK's `qos` binary, built by the SDK's

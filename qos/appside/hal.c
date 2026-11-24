@@ -172,7 +172,7 @@ static V h_write(V rv, V x) {
   else if (TID(x) == T_BITS) v = ((bits_t *)x)->val;
   else fpr_cpanic("write: value must be Int or Array Bit");
   qos_hal->mmio_write(r->addr, v, r->var);
-  return (V)&fpr_unit;
+  return V_UNIT;
 }
 FPR_FN(fpr_g_reg8, h_reg8, 2);
 FPR_FN(fpr_g_reg32, h_reg32, 2);

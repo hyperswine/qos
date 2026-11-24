@@ -116,8 +116,8 @@ FPR_FN(fpr_g_spectrePrompt,prompt,1);
 
 static int digit(unsigned c){return c>='0'&&c<='9'?c-'0':c>='a'&&c<='f'?c-'a'+10:-1;}
 static V job_put(app_job *j,V s){str_t *v=(str_t*)s;uw pos=(uw)s-(uw)j->image;
- if(pos>sizeof(j->image)-sizeof(str_t)||pos%4||v->tid!=T_STR||v->len>sizeof(j->image)-pos-sizeof(str_t))return (V)&fpr_unit;
- for(uw i=0;i<v->len;i++)hal_putc(v->bytes[i]);hal_putc('\n');return (V)&fpr_unit;}
+ if(pos>sizeof(j->image)-sizeof(str_t)||pos%4||v->tid!=T_STR||v->len>sizeof(j->image)-pos-sizeof(str_t))return V_UNIT;
+ for(uw i=0;i<v->len;i++)hal_putc(v->bytes[i]);hal_putc('\n');return V_UNIT;}
 static void poll_job(app_job *j){
  if ((++j->polls & 127)==0){j->yields++;fpr_fuel_exhausted();}
 }
@@ -142,7 +142,7 @@ typedef V (*app_entry)(V (*)(V),void (*)(void),V (*)(V),V (*)(V));
 static V run_job(app_job *j,V (*put)(V),void (*poll)(void)){
  V v=((app_entry)(uintptr_t)j->image)(put,poll,j==jobs?send_from_first:send_from_second,receive_int);
  j->status=ISINT(v)&&UNTAG(v)>=0&&UNTAG(v)<=255?(int)UNTAG(v):-1;
- return (V)&fpr_unit;
+ return V_UNIT;
 }
 static V first_body(V me){return run_job(&jobs[0],put_first,poll_first);}
 static V second_body(V me){return run_job(&jobs[1],put_second,poll_second);}
