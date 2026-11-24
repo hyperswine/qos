@@ -54,18 +54,46 @@ openRep me owner id2 rep = case rep of
   | Refused why -> Err why
   | Redirect a -> openAwait me a id2.
 
-read : Int -> Endpoint -> Int -> (Result IoV String, Endpoint) .
+read : unsafe Int -> Endpoint -> Int -> (Result IoV String, Endpoint) .
 read me ep n =
   Endpoint o h = ep;
-  (EP.flat (AC.call me o (Read h n)), Endpoint o h).
-write : Int -> Endpoint -> IoV -> (Result IoV String, Endpoint) .
+  (callFlat me o (Read h n), Endpoint o h).
+write : unsafe Int -> Endpoint -> IoV -> (Result IoV String, Endpoint) .
 write me ep v =
   Endpoint o h = ep;
-  (EP.flat (AC.call me o (Write h v)), Endpoint o h).
-close : Int -> Endpoint -> Result Int String .
+  (callFlat me o (Write h v), Endpoint o h).
+close : unsafe Int -> Endpoint -> Result Int String .
 close me ep =
   Endpoint o h = ep;
-  EP.flat (AC.call me o (Close h)).
+  callFlat me o (Close h).
+
+# The held-endpoint fast path: EP.flat (AC.call me o q) without the two
+# Results between them.  AC.call answers Ok (keep r) and EP.flat unwraps it
+# again; here the owner's own `Result r String` is kept and returned as is,
+# so a successful operation allocates no wrapper.  Same wire, same
+# correlation id, same stale-reply drop and the same errors as
+# EP.flat (AC.call ..): a refused send or a dead owner is
+# Err "the owner {why}".  No deadline, so no clock read.
+callFlat : unsafe Int -> Int -> q -> Result r String .
+callFlat me o q =
+  id = Sys.nextId Unit;
+  case send o (me, id, q) of
+    Err why -> Err "the owner {why}"
+  | Ok u -> awaitFlat me o id.
+awaitFlat : unsafe Int -> Int -> Int -> Result r String .
+awaitFlat me o id = case receiveFromRes me o of
+    Err why -> Err "the owner {why}"
+  | Ok m -> flatOf me o id m.
+flatOf : unsafe Int -> Int -> Int -> (Int, Result r String) -> Result r String .
+flatOf me o id m =
+  (rid, r) = m;
+  if rid == id then flatKept m r else
+    _ = drop m;
+    awaitFlat me o id.
+flatKept m r =
+  v = keep r;
+  _ = drop m;
+  v.
 # close, giving up after ms milliseconds (a shutdown path that must not hang)
 closeWithin : Int -> Int -> Endpoint -> Result Int String .
 closeWithin ms me ep =
@@ -87,26 +115,26 @@ openedPair : (Int, Int) -> Result Endpoint String .
 openedPair p =
   (o, h) = p;
   Ok (Endpoint o h).
-readUntil : Int -> Int -> Endpoint -> Int -> (Result IoV String, Endpoint) .
+readUntil : unsafe Int -> Int -> Endpoint -> Int -> (Result IoV String, Endpoint) .
 readUntil until me ep n =
   Endpoint o h = ep;
   (EP.flat (AC.callUntil until me o (EP.Timed until (Read h n))), Endpoint o h).
-writeUntil : Int -> Int -> Endpoint -> IoV -> (Result IoV String, Endpoint) .
+writeUntil : unsafe Int -> Int -> Endpoint -> IoV -> (Result IoV String, Endpoint) .
 writeUntil until me ep v =
   Endpoint o h = ep;
   (EP.flat (AC.callUntil until me o (EP.Timed until (Write h v))), Endpoint o h).
-closeUntil : Int -> Int -> Endpoint -> Result Int String .
+closeUntil : unsafe Int -> Int -> Endpoint -> Result Int String .
 closeUntil until me ep =
   Endpoint o h = ep;
   EP.flat (AC.callUntil until me o (EP.Timed until (Close h))).
 
 # one operation, then close
-readClose : Int -> Endpoint -> Result IoV String .
+readClose : unsafe Int -> Endpoint -> Result IoV String .
 readClose me ep =
   (r, kept) = read me ep 0;
   _ = close me kept;
   r.
-writeClose : Int -> Endpoint -> IoV -> Result IoV String .
+writeClose : unsafe Int -> Endpoint -> IoV -> Result IoV String .
 writeClose me ep v =
   (r, kept) = write me ep v;
   _ = close me kept;
@@ -117,11 +145,11 @@ routeOf : Endpoint -> (Route, Endpoint) .
 routeOf ep =
   Endpoint o h = ep;
   (Route o h, Endpoint o h).
-readRoute : Int -> Route -> Int -> Result IoV String .
+readRoute : unsafe Int -> Route -> Int -> Result IoV String .
 readRoute me route n = case route of
     NoRoute -> Err "not opened"
-  | Route o h -> EP.flat (AC.call me o (Read h n)).
-writeRoute : Int -> Route -> IoV -> Result IoV String .
+  | Route o h -> callFlat me o (Read h n).
+writeRoute : unsafe Int -> Route -> IoV -> Result IoV String .
 writeRoute me route v = case route of
     NoRoute -> Err "not opened"
-  | Route o h -> EP.flat (AC.call me o (Write h v)).
+  | Route o h -> callFlat me o (Write h v).

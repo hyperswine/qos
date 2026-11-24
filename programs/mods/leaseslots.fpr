@@ -70,28 +70,30 @@ simpleUntil rd wr me = _ = Sys.loop (Empty, 1, 0) (step rd wr me); Unit.
 step rd wr me state =
   (slots, next, cursor) = state;
   msg = receive me;
-  (live, following) = sweepCursor slots slots cursor 0 64;
+  # ONE clock read per request: the sweep, Open's lease, the Timed check and
+  # an untimed operation's 10 s budget all use this `now`.
+  now = AC.nowMs Unit;
+  (live, following) = sweepCursor now slots slots cursor 0 64;
   changed = case msg of
-    (client, id, command) -> dispatch rd wr me live next (client, id) client command
+    (client, id, command) -> dispatch rd wr me now live next (client, id) client command
   | stale -> (live, next);
   _ = drop msg;
   (after, serial) = changed;
   (True, (after, serial, following)).
 # An empty subtree covers a consecutive run of indices. Visit its successor
 # next turn; a later insertion into the skipped run is picked up on wrap.
-sweepCursor : unsafe Slots -> Slots -> Int -> Int -> Int -> (Slots, Int) .
-sweepCursor root node cursor base size = case node of
+sweepCursor : unsafe Int -> Slots -> Slots -> Int -> Int -> Int -> (Slots, Int) .
+sweepCursor now root node cursor base size = case node of
     Empty -> (root, (base + size) % 64)
   | Branch left right ->
       half = size / 2;
-      if cursor < base + half then sweepCursor root left cursor base half
-      else sweepCursor root right cursor (base + half) half
+      if cursor < base + half then sweepCursor now root left cursor base half
+      else sweepCursor now root right cursor (base + half) half
   | Occupied handle url client until ->
-      live = if AC.nowMs Unit >= until or not (Sys.alive client) then clear root cursor 32 else root;
+      live = if now >= until or not (Sys.alive client) then clear root cursor 32 else root;
       (live, (cursor + 1) % 64).
-dispatch rd wr me slots next ret client command = case command of
+dispatch rd wr me now slots next ret client command = case command of
     EP.Open url mode ->
-      now = AC.nowMs Unit;
       h = if strlen url > 2048 then 0 else freeHandle slots next now 64;
       (case h == 0 of
         True -> _ = AC.reply ret (EP.Refused "endpoint: handle budget exhausted"); (slots, next)
@@ -100,13 +102,10 @@ dispatch rd wr me slots next ret client command = case command of
           _ = AC.reply ret (EP.Opened h);
           (after, nextHandle h))
   | EP.Timed until q ->
-      now = AC.nowMs Unit;
       if now >= until then
       _ = AC.reply ret (Err "endpoint: deadline exceeded before execution"); (slots, next)
       else operateAt rd wr me slots next ret client now until q
-  | other ->
-      now = AC.nowMs Unit;
-      operateAt rd wr me slots next ret client now (now + 10000) other.
+  | other -> operateAt rd wr me slots next ret client now (now + 10000) other.
 operateAt rd wr me slots next ret client now until command = case command of
     EP.Close h -> _ = AC.reply ret (Ok 0); (close slots h client, next)
   | EP.Read h n -> url = access slots h client now;

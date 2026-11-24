@@ -101,11 +101,15 @@ lsRead ns me pre = case strlen pre == 0 of
 simple : unsafe _ -> _ -> Int -> a .
 simple rd wr me = sLoop rd wr me Nil 1 AC.tidySmall.
 sLoop : unsafe _ -> _ -> Int -> List (Int, String, Int) -> Int -> AC.Tidy -> a .
-sLoop rd wr me hs next tidy =
-  # Closures are state too: preserve their heap-owned captures along with
-  # the live handles. Closed handles and request temporaries are garbage.
-  (((rd2, wr2), (hs2, next2)), t2) = AC.tidy me (((rd, wr), (hs, next)), tidy);
-  sReceive rd2 wr2 me hs2 next2 t2.
+sLoop rd wr me hs next tidy = case tidy of
+  AC.Tidy slack limit ->
+    # Below the limit AC.tidy hands its pair back unchanged: test the limit
+    # first, so the common request builds no state tuple to take apart.
+    if heapUsed Unit < limit then sReceive rd wr me hs next tidy else
+    # Closures are state too: preserve their heap-owned captures along with
+    # the live handles. Closed handles and request temporaries are garbage.
+    (((rd2, wr2), (hs2, next2)), t2) = AC.tidy me (((rd, wr), (hs, next)), tidy);
+    sReceive rd2 wr2 me hs2 next2 t2.
 sReceive : unsafe _ -> _ -> Int -> List (Int, String, Int) -> Int -> AC.Tidy -> a .
 sReceive rd wr me hs next tidy =
   m = receive me;
@@ -129,36 +133,50 @@ simpleUntil rd wr me = _ = Sys.loop (Nil, 1) (untilStep rd wr me); Unit.
 untilStep rd wr me state =
   (handles, next) = state;
   m = receive me;
-  live = liveLeases (AC.nowMs Unit) handles;
+  # ONE clock read per request: the sweep, the Open lease, the Timed check
+  # and an untimed operation's 10 s budget all use this `now`.
+  now = AC.nowMs Unit;
+  # When nothing expired or died, `cur` is the state the loop already holds
+  # and a Read or Write hands it back as is: no list or pair is rebuilt.
+  cur = if allLive now handles then state else (sweepLeases now handles, next);
   # A timed-out downstream call may reply after this owner resumes serving.
   # Correlated replies are pairs; endpoint requests are triples.
   fresh = case m of
-    (from, id, command) -> untilDispatch rd wr me live next (from, id) from command
-  | stale -> (live, next);
+    (from, id, command) -> untilDispatch rd wr me now cur (from, id) from command
+  | stale -> cur;
   _ = drop m;
   (True, fresh).
-untilDispatch rd wr me handles next ret from command = case command of
+untilDispatch rd wr me now cur ret from command =
+  (handles, next) = cur;
+  case command of
     EP.Open url mode -> if leaseCount handles >= 64 or strlen url > 2048 then
-      _ = AC.reply ret (EP.Refused "endpoint: handle budget exhausted"); (handles, next)
+      _ = AC.reply ret (EP.Refused "endpoint: handle budget exhausted"); cur
       else _ = AC.reply ret (EP.Opened next);
-        (Lease next (strcat url "") from (AC.nowMs Unit + 60000) :: handles, next + 1)
+        (Lease next (strcat url "") from (now + 60000) :: handles, next + 1)
   | EP.Close h -> _ = AC.reply ret (Ok 0); (removeLease handles h from, next)
-  | EP.Timed until q -> if AC.nowMs Unit >= until then
-      _ = AC.reply ret (Err "endpoint: deadline exceeded before execution"); (handles, next)
-      else untilOperation rd wr until me handles next ret from q
-  | other -> untilOperation rd wr (AC.nowMs Unit + 10000) me handles next ret from other.
-untilOperation rd wr until me handles next ret from command = case command of
+  | EP.Timed until q -> if now >= until then
+      _ = AC.reply ret (Err "endpoint: deadline exceeded before execution"); cur
+      else untilOperation rd wr until me cur ret from q
+  | other -> untilOperation rd wr (now + 10000) me cur ret from other.
+untilOperation rd wr until me cur ret from command =
+  (handles, next) = cur;
+  case command of
     EP.Read h n -> (url, client) = findLease handles h;
       _ = AC.reply ret (if client != from or url == "" then Err "no such handle" else rd until me client url);
-      (handles, next)
+      cur
   | EP.Write h value -> (url, client) = findLease handles h;
       _ = AC.reply ret (if client != from or url == "" then Err "no such handle" else wr until me client url value);
-      (handles, next)
+      cur
   | EP.Close h -> _ = AC.reply ret (Ok 0); (removeLease handles h from, next)
-  | other -> _ = AC.reply ret (Err "endpoint: invalid timed operation"); (handles, next).
-liveLeases now Nil = Nil.
-liveLeases now (Lease h url client until :: rest) =
-  tail = liveLeases now rest;
+  | other -> _ = AC.reply ret (Err "endpoint: invalid timed operation"); cur.
+# A lease is swept once it has expired or its client has ended. The list is
+# rebuilt only when one has (allLive first, without allocating).
+allLive now Nil = True.
+allLive now (Lease h url client until :: rest) =
+  if now >= until or not (Sys.alive client) then False else allLive now rest.
+sweepLeases now Nil = Nil.
+sweepLeases now (Lease h url client until :: rest) =
+  tail = sweepLeases now rest;
   if now >= until or not (Sys.alive client) then tail else Lease h url client until :: tail.
 leaseCount Nil = 0.
 leaseCount (_ :: rest) = 1 + leaseCount rest.
