@@ -51,3 +51,27 @@ jobs:
           sol tools/checkout.sol build host
           sol tools/checkout.sol pack tests/sol-hello.fpr --out build/sol-smoke/hello --bundle
           build/sol-smoke/hello/run
+      - name: Type-check QOS modules and apps against pinned compiler
+        env:
+          FPRISC_ROOT: ${{ github.workspace }}/fprisc
+          FPR_HOME: ${{ github.workspace }}
+          FPR_PATH: ${{ github.workspace }}/programs:${{ github.workspace }}/fprisc
+          FPR_FOREIGN: ${{ github.workspace }}/core/foreign.fpr
+        run: |
+          set -e
+          check_file() {
+            echo "checking $1"
+            if ! "$FPRISC_ROOT/fpr" --target=qx64 --plugin --editor-json --prelude="$FPRISC_ROOT/core/prelude.fpr" "$1" /dev/null > /dev/null 2>&1; then
+              "$FPRISC_ROOT/fpr" --target=qx64 --plugin --editor-json --prelude="$FPRISC_ROOT/core/prelude.fpr" "$1" /dev/null 2>/dev/null || true
+              exit 1
+            fi
+          }
+          for app in apps/browser.fpr apps/clock.fpr apps/disk.fpr apps/editor.fpr apps/hello_proc.fpr apps/logs.fpr apps/terminal.fpr; do
+            check_file "$app"
+          done
+          tmp=$(mktemp -d)
+          trap 'rm -rf "$tmp"' EXIT
+          for mod in gamerun guishell qsys; do
+            printf 'unsafe program.\nM = use "mods/%s".\nmain = Unit.\n' "$mod" > "$tmp/$mod.fpr"
+            check_file "$tmp/$mod.fpr"
+          done

@@ -8,8 +8,7 @@ strings text = List.map (fn value -> unwrap (J.text value)) (unwrap (J.parse tex
 revision value = case value of
     J.JArr [J.JStr commit,dirty] -> (commit,J.render dirty)
   | _ -> error "invalid SDK revision result".
-build qos fpr compiler sol kind qr fr work output scratch limit daemon py stdlib extensions arch glibc bootstrap =
-  _ = if py == "" and stdlib == "" and extensions == "" then Unit else error "Python SDK runtime was retired; use the Sol-only SDK";
+build qos fpr compiler sol kind qr fr work output scratch limit daemon arch glibc bootstrap =
   served = if daemon == "" then "" else "native";
   sdk = "{work}/sdk";
   tools = "{qos}/tools/pi4";
@@ -21,9 +20,8 @@ build qos fpr compiler sol kind qr fr work output scratch limit daemon py stdlib
       (qRev,qDirty) = revision q;
       (fRev,fDirty) = revision f;
       _ = invoke (child "inputs" [qos,fpr,sdk,kind,"{work}/probe.toml",served]);
-
-      invoke (child "package" (List.append [tools,sdk,compiler,arch,served,kind,glibc,qRev,fRev,qDirty,fDirty,stdlib,extensions,output,scratch,limit] roots))
+      invoke (child "package" (List.append [tools,sdk,compiler,arch,served,kind,glibc,qRev,fRev,qDirty,fDirty,output,scratch,limit] roots))
   | _ -> error "expected revisions for both SDK source trees".
-> case args Unit of qos :: fpr :: compiler :: sol :: kind :: qr :: fr :: work :: output :: scratch :: limit :: daemon :: py :: stdlib :: extensions :: arch :: glibc :: bootstrap ->
-    build qos fpr compiler sol kind qr fr work output scratch limit daemon py stdlib extensions arch glibc bootstrap
+> case args Unit of qos :: fpr :: compiler :: sol :: kind :: qr :: fr :: work :: output :: scratch :: limit :: daemon :: arch :: glibc :: bootstrap ->
+    build qos fpr compiler sol kind qr fr work output scratch limit daemon arch glibc bootstrap
   | _ -> error "expected compiler SDK build parameters".

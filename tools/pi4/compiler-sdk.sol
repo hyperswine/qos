@@ -21,9 +21,8 @@ package parsed =
   separate = if provided != "" then query ["realpath",provided] else if kind == "editor" then query ["which","sol"] else "";
   # Preserve the sol argv[0] name when bootstrapping a multi-call compiler.
   bootstrap = if provided != "" then [provided] else if separate != "" then [separate] else [compiler,"sol"];
-  # the native compiler daemon (tools/fprd/QosFprd.hs) takes the retired Python slot
+  # the native compiler daemon (tools/fprd/QosFprd.hs)
   daemon = (if opt "daemon" "" == "" then "" else query ["realpath",opt "daemon" ""]);
-  py = [daemon,"","",""];
   glibc = query ["getconf","GNU_LIBC_VERSION"];
   limit = opt "max-compressed-mib" "40";
   _ = parseInt limit;
@@ -32,7 +31,7 @@ package parsed =
   work = query ["mktemp","-d","{parent}/.qos-sdk-XXXXXXXX"];
   env = [("FPR_HOME",fpr),("XDG_STATE_HOME","{work}/state"),("XDG_CACHE_HOME","{work}/cache")];
   argv = List.concat [bootstrap,["{qos}/tools/pi4/compiler-sdk-build.sol",qos,fpr,compiler,separate,kind,
-    opt "qos-revision" "",opt "fprisc-revision" "",work,output,work,limit],py,[arch,glibc],bootstrap];
+    opt "qos-revision" "",opt "fprisc-revision" "",work,output,work,limit,daemon,arch,glibc],bootstrap];
   result = Proc.streamNow (ProcessSpec argv "" env "" 0);
   _ = query ["rm","-rf",work];
   case result of Ok 0 -> Unit | failed -> error "SDK build failed: {failed}".

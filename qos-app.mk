@@ -53,9 +53,9 @@ QOSAPP_X64_LINK = $(QOSAPP_X64_CC) \
 # FORCE: the .s is regenerated every time, and a make with 1-second mtimes
 # (Apple's 3.81) otherwise packs the PREVIOUS program's image into this .qa
 $(BUILD)/qosapp.elf: $(BUILD)/qosapp-prog.s $(QOSAPP_RT) $(QOS)/appside/link-qosapp.ld tools/mkexports.sol tools/elf-symbols.sol FORCE
-	SOL="$(SOL)" "$(SOL)" tools/ccobj.sol tools/ccobj-worker.sol $(QOS_OBJ_CACHE) $(QOSAPP_X64_CC) -- $(BUILD)/qosapp-prog.s $$(cat $(BUILD)/qosapp-prog.s.units) $(QOSAPP_RT) > $(BUILD)/qosapp-prog.objs
+	FPRC="$(FPRC)" "$(FPRC)" sol tools/ccobj.sol tools/ccobj-worker.sol $(QOS_OBJ_CACHE) $(QOSAPP_X64_CC) -- $(BUILD)/qosapp-prog.s $$(cat $(BUILD)/qosapp-prog.s.units) $(QOSAPP_RT) > $(BUILD)/qosapp-prog.objs
 	$(QOSAPP_X64_LINK) -Wl,--defsym=QOS_SLOT_BASE=0 -Wl,--unresolved-symbols=ignore-all -o $(BUILD)/qosapp.pre.elf
-	"$(SOL)" tools/mkexports.sol $(BUILD)/qosapp.pre.elf $(BUILD)/qosapp-exports.s
+	"$(FPRC)" sol tools/mkexports.sol $(BUILD)/qosapp.pre.elf $(BUILD)/qosapp-exports.s
 	$(QOSAPP_X64_LINK) -Wl,--defsym=QOS_SLOT_BASE=0 $(BUILD)/qosapp-exports.s -o $@
 	$(QOSAPP_X64_LINK) -Wl,--defsym=QOS_SLOT_BASE=0x10000000 $(BUILD)/qosapp-exports.s -o $(BUILD)/qosapp.moved.elf
 
@@ -63,11 +63,11 @@ QA_PACK_SOURCES = $(addprefix tools/,qa-pack.sol elf-image.sol elf-symbols.sol q
 QOS_APP_ID = $(if $(QA_ID),$(QA_ID),$(basename $(notdir $(SOURCE))))
 QOS_APP_NAME = $(if $(QA_NAME),$(QA_NAME),$(QOS_APP_ID))
 QOS_APP_VERSION = $(if $(QA_VERSION),$(QA_VERSION),1)
-QOS_APP_MANIFEST = "$(SOL)" tools/app-manifest.sol "$(QOS)/appside/qos_abi.h" "$(1).abirev" $(2) "$(BUILD)/qosapp-gen.toml" "$(QOS_APP_ID)" "$(QOS_APP_NAME)" "$(QOS_APP_VERSION)"
+QOS_APP_MANIFEST = "$(FPRC)" sol tools/app-manifest.sol "$(QOS)/appside/qos_abi.h" "$(1).abirev" $(2) "$(BUILD)/qosapp-gen.toml" "$(QOS_APP_ID)" "$(QOS_APP_NAME)" "$(QOS_APP_VERSION)"
 
 qos-app-x64: $(BUILD)/qosapp.elf $(QA_PACK_SOURCES)
 	@$(call QOS_APP_MANIFEST,$(BUILD)/qosapp-prog.s,optional)
-	"$(SOL)" tools/qa-pack.sol process "$(BUILD)/qosapp-gen.toml" "$(BUILD)/qosapp.elf" "$(BUILD)/qosapp.moved.elf" 268435456 "$(QA_OUT)"
+	"$(FPRC)" sol tools/qa-pack.sol process "$(BUILD)/qosapp-gen.toml" "$(BUILD)/qosapp.elf" "$(BUILD)/qosapp.moved.elf" 268435456 "$(QA_OUT)"
 	@echo "$(QA_OUT) built (relocatable) — run with: (make -C qos portable && qos/qosp --yes $(QA_OUT))"
 
 # ---- QOS app for an AArch64 host: Apple Silicon, arm64 Linux (a Pi 4) --------
@@ -91,15 +91,15 @@ QOSAPP_A64_LINK = $(QOSAPP_A64_CC) -fuse-ld=lld \
 	  $$(cat $(BUILD)/qosapp-a64.objs)
 
 $(BUILD)/qosapp-a64.elf: $(BUILD)/qosapp-a64.s $(QOSAPP_RT_COMMON) $(FMACHINE)/unix/ctx_a64.S $(QOS)/appside/link-qosapp-a64.ld tools/mkexports.sol tools/elf-symbols.sol FORCE
-	SOL="$(SOL)" "$(SOL)" tools/ccobj.sol tools/ccobj-worker.sol $(QOS_OBJ_CACHE) $(QOSAPP_A64_CC) -- $(BUILD)/qosapp-a64.s $$(cat $(BUILD)/qosapp-a64.s.units) $(QOSAPP_RT_COMMON) $(FMACHINE)/unix/ctx_a64.S > $(BUILD)/qosapp-a64.objs
+	FPRC="$(FPRC)" "$(FPRC)" sol tools/ccobj.sol tools/ccobj-worker.sol $(QOS_OBJ_CACHE) $(QOSAPP_A64_CC) -- $(BUILD)/qosapp-a64.s $$(cat $(BUILD)/qosapp-a64.s.units) $(QOSAPP_RT_COMMON) $(FMACHINE)/unix/ctx_a64.S > $(BUILD)/qosapp-a64.objs
 	$(QOSAPP_A64_LINK) -Wl,--defsym=QOS_SLOT_BASE=0 -Wl,--unresolved-symbols=ignore-all -o $(BUILD)/qosapp-a64.pre.elf
-	"$(SOL)" tools/mkexports.sol $(BUILD)/qosapp-a64.pre.elf $(BUILD)/qosapp-a64-exports.s
+	"$(FPRC)" sol tools/mkexports.sol $(BUILD)/qosapp-a64.pre.elf $(BUILD)/qosapp-a64-exports.s
 	$(QOSAPP_A64_LINK) -Wl,--defsym=QOS_SLOT_BASE=0 $(BUILD)/qosapp-a64-exports.s -o $@
 	$(QOSAPP_A64_LINK) -Wl,--defsym=QOS_SLOT_BASE=0x10000000 $(BUILD)/qosapp-a64-exports.s -o $(BUILD)/qosapp-a64.moved.elf
 
 qos-app-a64: $(BUILD)/qosapp-a64.elf $(QA_PACK_SOURCES)
 	@$(call QOS_APP_MANIFEST,$(BUILD)/qosapp-a64.s,optional)
-	"$(SOL)" tools/qa-pack.sol process "$(BUILD)/qosapp-gen.toml" "$(BUILD)/qosapp-a64.elf" "$(BUILD)/qosapp-a64.moved.elf" 268435456 "$(QA_OUT)"
+	"$(FPRC)" sol tools/qa-pack.sol process "$(BUILD)/qosapp-gen.toml" "$(BUILD)/qosapp-a64.elf" "$(BUILD)/qosapp-a64.moved.elf" 268435456 "$(QA_OUT)"
 	@echo "$(QA_OUT) built for Apple Silicon (relocatable)"
 
 # ---- plugin .qa: a library image loaded into a RUNNING app -----------------
@@ -119,7 +119,7 @@ qos-app-a64: $(BUILD)/qosapp-a64.elf $(QA_PACK_SOURCES)
 # loads it, and one that does not says which names are missing.
 PLUGID    = $(basename $(notdir $(SOURCE)))
 PLUG_OUT ?= $(PLUGID).qa
-PLUG_MF = "$(SOL)" tools/app-manifest.sol plugin "$(QOS)/appside/qos_abi.h" "$(1).s.abirev" "$(1)-gen.toml" "$(PLUGID)"
+PLUG_MF = "$(FPRC)" sol tools/app-manifest.sol plugin "$(QOS)/appside/qos_abi.h" "$(1).s.abirev" "$(1)-gen.toml" "$(PLUGID)"
 
 PLUG_X64_LINK = gcc -O2 -Wall -Wextra -ffreestanding -nostdlib -nostartfiles -static \
 	  -fno-stack-protector -fno-asynchronous-unwind-tables -fno-pic \
@@ -131,13 +131,13 @@ plugin-qa-x64: fprc $(FPRISC_ROOT)/core/prelude.fpr tools/mkimports.sol tools/el
 	LC_ALL=C.UTF-8 "$(FPRC)" --target=qx64 --plugin --prelude=$(FPRISC_ROOT)/core/prelude.fpr $(SOURCE) $(BUILD)/plug-$(PLUGID).s
 	$(PLUG_X64_LINK) -Wl,--defsym=PLUG_BASE=0 -Wl,--unresolved-symbols=ignore-all \
 	  $(BUILD)/plug-$(PLUGID).s $$(cat $(BUILD)/plug-$(PLUGID).s.units) -o $(BUILD)/plug-$(PLUGID).u.elf
-	"$(SOL)" tools/mkimports.sol x64 $(BUILD)/plug-$(PLUGID).u.elf $(BUILD)/plug-$(PLUGID).imp.s
+	"$(FPRC)" sol tools/mkimports.sol x64 $(BUILD)/plug-$(PLUGID).u.elf $(BUILD)/plug-$(PLUGID).imp.s
 	$(PLUG_X64_LINK) -Wl,--defsym=PLUG_BASE=0 \
 	  $(BUILD)/plug-$(PLUGID).s $$(cat $(BUILD)/plug-$(PLUGID).s.units) $(BUILD)/plug-$(PLUGID).imp.s -o $(BUILD)/plug-$(PLUGID).elf
 	$(PLUG_X64_LINK) -Wl,--defsym=PLUG_BASE=0x10000000 \
 	  $(BUILD)/plug-$(PLUGID).s $$(cat $(BUILD)/plug-$(PLUGID).s.units) $(BUILD)/plug-$(PLUGID).imp.s -o $(BUILD)/plug-$(PLUGID).moved.elf
 	@$(call PLUG_MF,$(BUILD)/plug-$(PLUGID))
-	"$(SOL)" tools/qa-pack.sol plugin "$(BUILD)/plug-$(PLUGID)-gen.toml" "$(BUILD)/plug-$(PLUGID).elf" "$(BUILD)/plug-$(PLUGID).moved.elf" 268435456 "$(PLUG_OUT)"
+	"$(FPRC)" sol tools/qa-pack.sol plugin "$(BUILD)/plug-$(PLUGID)-gen.toml" "$(BUILD)/plug-$(PLUGID).elf" "$(BUILD)/plug-$(PLUGID).moved.elf" 268435456 "$(PLUG_OUT)"
 	@echo "$(PLUG_OUT) built (relocatable) -- install: make -C ../qos disk-seed QAS=..."
 
 # Native Pi SDKs assemble and link these freestanding units with GNU tools;
@@ -151,13 +151,13 @@ plugin-qa-a64: fprc $(FPRISC_ROOT)/core/prelude.fpr tools/mkimports.sol tools/el
 	LC_ALL=C.UTF-8 "$(FPRC)" --target=qa64 --plugin --prelude=$(FPRISC_ROOT)/core/prelude.fpr $(SOURCE) $(BUILD)/plug-$(PLUGID)-a64.s
 	$(PLUG_A64_LINK) -Wl,--defsym=PLUG_BASE=0 -Wl,--unresolved-symbols=ignore-all \
 	  $(BUILD)/plug-$(PLUGID)-a64.s $$(cat $(BUILD)/plug-$(PLUGID)-a64.s.units) -o $(BUILD)/plug-$(PLUGID)-a64.u.elf
-	"$(SOL)" tools/mkimports.sol a64 $(BUILD)/plug-$(PLUGID)-a64.u.elf $(BUILD)/plug-$(PLUGID)-a64.imp.s
+	"$(FPRC)" sol tools/mkimports.sol a64 $(BUILD)/plug-$(PLUGID)-a64.u.elf $(BUILD)/plug-$(PLUGID)-a64.imp.s
 	$(PLUG_A64_LINK) -Wl,--defsym=PLUG_BASE=0 \
 	  $(BUILD)/plug-$(PLUGID)-a64.s $$(cat $(BUILD)/plug-$(PLUGID)-a64.s.units) $(BUILD)/plug-$(PLUGID)-a64.imp.s -o $(BUILD)/plug-$(PLUGID)-a64.elf
 	$(PLUG_A64_LINK) -Wl,--defsym=PLUG_BASE=0x10000000 \
 	  $(BUILD)/plug-$(PLUGID)-a64.s $$(cat $(BUILD)/plug-$(PLUGID)-a64.s.units) $(BUILD)/plug-$(PLUGID)-a64.imp.s -o $(BUILD)/plug-$(PLUGID)-a64.moved.elf
 	@$(call PLUG_MF,$(BUILD)/plug-$(PLUGID)-a64)
-	"$(SOL)" tools/qa-pack.sol plugin "$(BUILD)/plug-$(PLUGID)-a64-gen.toml" "$(BUILD)/plug-$(PLUGID)-a64.elf" "$(BUILD)/plug-$(PLUGID)-a64.moved.elf" 268435456 "$(PLUG_OUT)"
+	"$(FPRC)" sol tools/qa-pack.sol plugin "$(BUILD)/plug-$(PLUGID)-a64-gen.toml" "$(BUILD)/plug-$(PLUGID)-a64.elf" "$(BUILD)/plug-$(PLUGID)-a64.moved.elf" 268435456 "$(PLUG_OUT)"
 	@echo "$(PLUG_OUT) built (relocatable) -- install: make -C ../qos disk-seed QAS=..."
 
 qos-app-a64-run: qos-app-a64
@@ -218,13 +218,13 @@ QOSAPP_RV64_LINK = $(QOS_RV64_CC) $(RV64_IMAGE_FLAGS) \
 
 $(BUILD)/qosapp-rv64.elf: $(BUILD)/qosapp-rv64.s $(QOSAPP_RT_COMMON) $(FMACHINE)/unix/ctx_rv64.S $(QOS)/appside/link-qosapp-rv64.ld tools/mkexports.sol tools/elf-symbols.sol FORCE
 	$(QOSAPP_RV64_LINK) -Wl,--defsym=QOS_SLOT_BASE=0 -Wl,--unresolved-symbols=ignore-all -o $(BUILD)/qosapp-rv64.pre.elf
-	"$(SOL)" tools/mkexports.sol $(BUILD)/qosapp-rv64.pre.elf $(BUILD)/qosapp-rv64-exports.s
+	"$(FPRC)" sol tools/mkexports.sol $(BUILD)/qosapp-rv64.pre.elf $(BUILD)/qosapp-rv64-exports.s
 	$(QOSAPP_RV64_LINK) -Wl,--defsym=QOS_SLOT_BASE=0 $(BUILD)/qosapp-rv64-exports.s -o $@
 	$(QOSAPP_RV64_LINK) -Wl,--defsym=QOS_SLOT_BASE=0x10000000 $(BUILD)/qosapp-rv64-exports.s -o $(BUILD)/qosapp-rv64.moved.elf
 
 qos-app-rv64: $(BUILD)/qosapp-rv64.elf $(QA_PACK_SOURCES)
 	@$(call QOS_APP_MANIFEST,$(BUILD)/qosapp-rv64.s,required)
-	"$(SOL)" tools/qa-pack.sol process "$(BUILD)/qosapp-gen.toml" "$(BUILD)/qosapp-rv64.elf" "$(BUILD)/qosapp-rv64.moved.elf" 268435456 "$(QA_OUT)"
+	"$(FPRC)" sol tools/qa-pack.sol process "$(BUILD)/qosapp-gen.toml" "$(BUILD)/qosapp-rv64.elf" "$(BUILD)/qosapp-rv64.moved.elf" 268435456 "$(QA_OUT)"
 	@echo "$(QA_OUT) built for Linux RV64 (relocatable)"
 
 PLUG_RV64_LINK = $(QOS_RV64_CC) $(RV64_IMAGE_FLAGS) -T $(QOS)/appside/link-qosplug-rv64.ld
@@ -233,10 +233,10 @@ plugin-qa-rv64: fprc $(FPRISC_ROOT)/core/prelude.fpr tools/mkimports.sol tools/e
 	LC_ALL=C.UTF-8 "$(FPRC)" --target=qrv64 --plugin --prelude=$(FPRISC_ROOT)/core/prelude.fpr $(SOURCE) $(BUILD)/plug-$(PLUGID)-rv64.s
 	$(PLUG_RV64_LINK) -Wl,--defsym=PLUG_BASE=0 -Wl,--unresolved-symbols=ignore-all \
 	  $(BUILD)/plug-$(PLUGID)-rv64.s $$(cat $(BUILD)/plug-$(PLUGID)-rv64.s.units) -o $(BUILD)/plug-$(PLUGID)-rv64.u.elf
-	"$(SOL)" tools/mkimports.sol rv64 $(BUILD)/plug-$(PLUGID)-rv64.u.elf $(BUILD)/plug-$(PLUGID)-rv64.imp.s
+	"$(FPRC)" sol tools/mkimports.sol rv64 $(BUILD)/plug-$(PLUGID)-rv64.u.elf $(BUILD)/plug-$(PLUGID)-rv64.imp.s
 	$(PLUG_RV64_LINK) -Wl,--defsym=PLUG_BASE=0 \
 	  $(BUILD)/plug-$(PLUGID)-rv64.s $$(cat $(BUILD)/plug-$(PLUGID)-rv64.s.units) $(BUILD)/plug-$(PLUGID)-rv64.imp.s -o $(BUILD)/plug-$(PLUGID)-rv64.elf
 	$(PLUG_RV64_LINK) -Wl,--defsym=PLUG_BASE=0x10000000 \
 	  $(BUILD)/plug-$(PLUGID)-rv64.s $$(cat $(BUILD)/plug-$(PLUGID)-rv64.s.units) $(BUILD)/plug-$(PLUGID)-rv64.imp.s -o $(BUILD)/plug-$(PLUGID)-rv64.moved.elf
 	@$(call PLUG_MF,$(BUILD)/plug-$(PLUGID)-rv64)
-	"$(SOL)" tools/qa-pack.sol plugin "$(BUILD)/plug-$(PLUGID)-rv64-gen.toml" "$(BUILD)/plug-$(PLUGID)-rv64.elf" "$(BUILD)/plug-$(PLUGID)-rv64.moved.elf" 268435456 "$(PLUG_OUT)"
+	"$(FPRC)" sol tools/qa-pack.sol plugin "$(BUILD)/plug-$(PLUGID)-rv64-gen.toml" "$(BUILD)/plug-$(PLUGID)-rv64.elf" "$(BUILD)/plug-$(PLUGID)-rv64.moved.elf" 268435456 "$(PLUG_OUT)"

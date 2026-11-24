@@ -20,11 +20,13 @@ build : unsafe String -> String -> List String -> Unit .
 build worker cache argv =
   (cc,sources) = splitArgs argv [];
   driver = (case cc of first :: _ -> first | [] -> error "expected compiler");
-  sol = (case unwrap (Env.get "SOL") of EnvText value -> value | EnvMissing -> "sol");
+  runner = (case unwrap (Env.get "FPRC") of
+      EnvText value -> if value != "" then [value,"sol"] else (case unwrap (Env.get "SOL") of EnvText s -> [s] | EnvMissing -> ["sol"])
+    | EnvMissing -> (case unwrap (Env.get "SOL") of EnvText s -> [s] | EnvMissing -> ["sol"]));
   _ = K.mkdirs cache; scratch = tempDir "ccobj-version"; version = "{scratch}/version";
   spec = ProcessSpec [driver,"--version"] "" [] "" 0;
   job = K.need (Proc.start (PipelineSpec [spec] (PipeBytes (Bytes.empty Unit)) (PipeFileNew version) PipeOutputInherit 0 PipeFail));
   _ = finish job;
-  print (Str.join " " (compile [sol,worker,cache,version] cc sources)).
+  print (Str.join " " (compile (runner + [worker,cache,version]) cc sources)).
 main : unsafe Unit -> Unit .
 > case args Unit of worker :: cache :: rest -> build worker cache rest | _ -> error "expected WORKER CACHE CC FLAGS... -- SOURCE...".
