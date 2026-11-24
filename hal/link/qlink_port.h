@@ -105,6 +105,12 @@ int qport_send(qport_t *p, uint8_t ch, const uint8_t *msg, uint32_t n);
 /* console: write takes what fits without waiting (all of it with no session:
  * into the backlog); flush sends the line buffer, waiting for window room. */
 uint32_t qport_con_write(qport_t *p, const uint8_t *b, uint32_t n);
+/* The same, for a writer that hands over everything it has queued (the
+ * console device op UART.qa calls, which then has nothing left that a later
+ * write would carry): a tail with no newline is not held for one. It goes
+ * out now when no frame is in flight; otherwise it keeps coalescing until
+ * the next poll, which the pending ack (a received byte) brings. Never waits. */
+uint32_t qport_con_write_all(qport_t *p, const uint8_t *b, uint32_t n);
 void qport_con_flush(qport_t *p);
 uint32_t qport_con_read(qport_t *p, uint8_t *dst, uint32_t max);
 int qport_drain(qport_t *p, uint32_t ms); /* flush, then wait for acks up to ms */
