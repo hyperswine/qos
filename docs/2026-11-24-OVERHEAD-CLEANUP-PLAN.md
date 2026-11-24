@@ -156,7 +156,10 @@ verified independently with before/after measurements.
      `tests/qlogreplayreads.fpr` (`HOLDS` on RV64 QEMU), `tests/qlogreplace.fpr`
      (`HOLDS` on both RV64 QEMU and QOS Portable).
 
-## Pass 5: Local Disk Cache Hygiene (Optional / On Request)
+## Pass 5: Local Disk Cache Hygiene — DONE
 
-- Prune stale `.qos/validation`, `build/`, `qos/build/units/`, and root `*.qa`
-  artifacts (~34 GB total) once no longer needed for regression bisecting.
+- Verified zero git-tracked files under `.qos/validation`, `build/`,
+  `qos/build/units/`, and the 17 root `*.qa` artifacts.
+- Pruned `.qos/validation` (19 GB), `build/` (951 MB), `qos/build/units/`
+  (119 MB), and the 17 untracked root `*.qa` files (~3.3 MB), reclaiming
+  ~20.1 GB of local disk space.
