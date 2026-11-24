@@ -12,6 +12,7 @@
  */
 #include "fpr.h"
 #include "../qos/store_abi.h"
+#include "imgcache.h"
 
 /* set from system.fpr's boot path via a thin wrapper below; keeps
  * buddy_init out of the fully-shared fpr_rt_init (a plain machine boot
@@ -356,69 +357,34 @@ static int digest_is(V wantv, const unsigned char *a, uw an, const unsigned char
  * before any of its layout is read. */
 #define QOS_NATIVE_ABI_ID ((uw)FPR_NATIVE_ABI + (sizeof(uw) == 4 ? 500000000u : 0u))
 
-/* One-shot cache of the last Sys.checkImage digest verification so an
- * immediately following Sys.placeImageAt on the exact same immutable archive
- * skips hashing IMAGE + RELOC twice. Consumed on hit; direct placeImageAt
- * callers or any modified/different buffer always run full SHA-256. */
+/* The launch path's "already verified" record (imgcache.h): a placement of
+ * the same bytes the same process just checked skips the second SHA-256. */
 static fpr_lock_t g_check_cache_lock;
-static struct {
-  int valid;
-  const str_t *qa_ptr;
-  uw qa_len;
-  uw ext[6];
-  unsigned char sha[64];
-  unsigned char relsha[64];
-  unsigned char head_bytes[8];
-  unsigned char tail_bytes[8];
-} g_check_cache;
+static imgcache_t g_check_cache;
 
-static void image_edge_sample(const str_t *qa, uw ioff, uw ilen,
-                              unsigned char head_out[8], unsigned char tail_out[8]) {
-  for (uw i = 0; i < 8; i++) {
-    head_out[i] = i < ilen ? qa->bytes[ioff + i] : 0;
-    tail_out[i] = i < ilen ? qa->bytes[ioff + ilen - 1 - i] : 0;
-  }
+static int digest_strs(V shav, V relshav) {
+  return !ISINT(shav) && TID(shav) == T_STR && ((str_t *)shav)->len == 64 &&
+         !ISINT(relshav) && TID(relshav) == T_STR && ((str_t *)relshav)->len == 64;
 }
 
-static int check_cache_consume(const str_t *qa, const uw ext[6], V shav, V relshav) {
-  if (ISINT(shav) || TID(shav) != T_STR || ISINT(relshav) || TID(relshav) != T_STR) return 0;
-  str_t *s1 = (str_t *)shav, *s2 = (str_t *)relshav;
-  if (s1->len != 64 || s2->len != 64) return 0;
-  unsigned char hb[8], tb[8];
-  image_edge_sample(qa, ext[0], ext[1], hb, tb);
-  int hit = 0;
+/* take the record out, whatever the caller then decides (imgcache.h) */
+static imgcache_t check_cache_take(void) {
   fpr_lock(&g_check_cache_lock);
-  if (g_check_cache.valid && g_check_cache.qa_ptr == qa && g_check_cache.qa_len == qa->len) {
-    hit = 1;
-    for (uw i = 0; i < 6 && hit; i++)
-      if (g_check_cache.ext[i] != ext[i]) hit = 0;
-    for (uw i = 0; i < 8 && hit; i++)
-      if (g_check_cache.head_bytes[i] != hb[i] || g_check_cache.tail_bytes[i] != tb[i]) hit = 0;
-    for (uw i = 0; i < 64 && hit; i++)
-      if (g_check_cache.sha[i] != s1->bytes[i] || g_check_cache.relsha[i] != s2->bytes[i]) hit = 0;
-    if (hit) g_check_cache.valid = 0;
-  }
+  imgcache_t r = imgcache_take(&g_check_cache);
   fpr_unlock(&g_check_cache_lock);
-  return hit;
+  return r;
 }
 
-static void check_cache_store(const str_t *qa, const uw ext[6], V shav, V relshav) {
-  str_t *s1 = (str_t *)shav, *s2 = (str_t *)relshav;
-  unsigned char hb[8], tb[8];
-  image_edge_sample(qa, ext[0], ext[1], hb, tb);
+static void check_cache_key(imgcache_t *k, const str_t *qa, const uw ext[6], V shav, V relshav) {
+  uintptr_t e[6];
+  for (int i = 0; i < 6; i++) e[i] = (uintptr_t)ext[i];
+  imgcache_key(k, (uintptr_t)fpr_current_pid(), qa, (const unsigned char *)qa->bytes, (uintptr_t)qa->len, e,
+               (const unsigned char *)((str_t *)shav)->bytes, (const unsigned char *)((str_t *)relshav)->bytes);
+}
+
+static void check_cache_store(const imgcache_t *k) {
   fpr_lock(&g_check_cache_lock);
-  g_check_cache.valid = 1;
-  g_check_cache.qa_ptr = qa;
-  g_check_cache.qa_len = qa->len;
-  for (uw i = 0; i < 6; i++) g_check_cache.ext[i] = ext[i];
-  for (uw i = 0; i < 8; i++) {
-    g_check_cache.head_bytes[i] = hb[i];
-    g_check_cache.tail_bytes[i] = tb[i];
-  }
-  for (uw i = 0; i < 64; i++) {
-    g_check_cache.sha[i] = s1->bytes[i];
-    g_check_cache.relsha[i] = s2->bytes[i];
-  }
+  g_check_cache = *k;
   fpr_unlock(&g_check_cache_lock);
 }
 
@@ -428,6 +394,9 @@ static void check_cache_store(const str_t *qa, const uw ext[6], V shav, V relsha
 static const char *check_image(V qastr, V extv, V numsv, V shav, V relshav,
                                uw ext[6], uw nums[8], int allow_cached) {
   if (ISINT(qastr) || TID(qastr) != T_STR) fpr_cpanic("native image archive must be a String");
+  /* every check and placement empties the record first, so nothing a failed
+   * launch left behind outlives the next one */
+  imgcache_t prev = check_cache_take();
   if (!fpr_list_ints(extv, ext, 6))
     return "native image extents must cover IMAGE, RELOC and IMPORT";
   if (!fpr_list_ints(numsv, nums, 8))
@@ -449,14 +418,19 @@ static const char *check_image(V qastr, V extv, V numsv, V shav, V relshav,
     return "not a relocatable image (linked for a fixed slot): rebuild it with sol tools/build-process-app.sol";
   if (!nums[4] || ext[1] > nums[4] || nums[2] > ext[1] || nums[1] >= nums[2] || nums[3] > nums[4])
     return "native image LOAD spans inconsistent";
-  if (!(allow_cached && check_cache_consume(qa, ext, shav, relshav))) {
+  /* the key costs a fingerprint pass (a few instructions a byte): a
+   * placement with no record to match skips it */
+  imgcache_t key;
+  int keyed = digest_strs(shav, relshav) && (!allow_cached || prev.valid);
+  if (keyed) check_cache_key(&key, qa, ext, shav, relshav);
+  if (!(allow_cached && keyed && imgcache_same(&prev, &key))) {
     if (!digest_is(shav, qa->bytes + ext[0], ext[1], 0, 0))
       return "IMAGE sha256 mismatch (corrupt archive or missing digest)";
     if (!digest_is(relshav, qa->bytes + ext[2], ext[3], qa->bytes + ext[4], ext[5]))
       return "RELOC sha256 mismatch (corrupt archive or missing digest)";
   }
   if (ext[5]) return "native process IMPORT is unsupported: rebuild a self-contained process";
-  if (!allow_cached) check_cache_store(qa, ext, shav, relshav);
+  if (!allow_cached && keyed) check_cache_store(&key);
   return 0;
 }
 
