@@ -143,7 +143,7 @@ void qport_init(qport_t *p, const qport_serial *io) {
 
 int qport_session(const qport_t *p) { return p->ready && p->session; }
 
-void qport_poll(qport_t *p) {
+static void qport_poll_rx(qport_t *p) {
   if (!p->ready) return;
   rx_pull(p);
   while (p->rx_tail != p->rx_head) {
@@ -158,6 +158,11 @@ void qport_poll(qport_t *p) {
   if (!p->session) return;
   qlink_poll(&p->link);
   replay_some(p);
+}
+
+void qport_poll(qport_t *p) {
+  qport_poll_rx(p);
+  if (!p->ready || !p->session) return;
   /* console bytes waiting in the line buffer go out as soon as the window
    * allows: an interrupt-driven writer (UART.qa) may have nothing more to
    * write, so no later write would carry them. The backlog goes first. */
@@ -184,24 +189,30 @@ void qport_con_flush(qport_t *p) {
   if (!p->con_out_n) return;
   if (!p->session) { backlog_put(p, p->con_out, p->con_out_n); p->con_out_n = 0; return; }
   uint8_t s = p->session;
-  while (p->session == s && (p->replay || !qlink_can_send(&p->link))) qport_poll(p);
+  while (p->session == s && (p->replay || !qlink_can_send(&p->link))) qport_poll_rx(p);
   if (p->session != s || !p->con_out_n) { p->con_out_n = 0; return; }
   qlink_send(&p->link, QLINK_CH_CONSOLE, p->con_out, p->con_out_n);
   p->con_out_n = 0;
 }
 
 uint32_t qport_con_write(qport_t *p, const uint8_t *b, uint32_t n) {
-  qport_poll(p);
+  qport_poll_rx(p);
   if (!p->session) { backlog_put(p, b, n); return n; } /* nobody is listening: kept for the next host */
   uint32_t took = 0;
+  int has_nl = 0;
   while (took < n) {
     if (p->con_out_n == QPORT_CON_OUT) {
       if (p->replay || !qlink_can_send(&p->link)) break; /* the window is full: the caller retries */
       qport_con_flush(p);
     }
-    p->con_out[p->con_out_n++] = b[took++];
+    uint8_t c = b[took++];
+    p->con_out[p->con_out_n++] = c;
+    if (c == '\n') has_nl = 1;
   }
-  if (p->con_out_n && !p->replay && qlink_can_send(&p->link)) qport_con_flush(p);
+  /* Coalesce small writes into p->con_out; flush immediately on newline (or
+   * full buffer above), while prompt lines without '\n' flush on the next
+   * qport_poll / qport_con_read / qport_drain. */
+  if (has_nl && p->con_out_n && !p->replay && qlink_can_send(&p->link)) qport_con_flush(p);
   return took;
 }
 

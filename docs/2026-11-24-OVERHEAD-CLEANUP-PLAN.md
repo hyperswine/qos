@@ -120,21 +120,41 @@ verified independently with before/after measurements.
    - QOS Portable (`qosp`): `tests/qlogreplace.fpr` (`HOLDS`), `tests/filelazy.fpr`
      (`HOLDS`), and all 6 modified `*app.fpr` modules compiled and ran cleanly.
 
-## Pass 4: QLink Console Coalescing, Double-SHA Launch Fix, and Hash Primitive
+## Pass 4: QLink Console Coalescing, Double-SHA Launch Fix, and Hash Primitive — DONE
 
 1. **QLink console coalescing (`hal/link/qlink_port.c`)**
-   - Stop calling `qport_con_flush` at the end of every small `qport_con_write`;
-     flush on newline, buffer full, `qport_poll`, or `qport_drain`.
+   - Split `qport_poll` into `qport_poll_rx` (RX drain + `qlink_poll` + backlog
+     replay) and `qport_poll` (which also flushes pending `con_out`).
+   - Updated `qport_con_write` to call `qport_poll_rx` and coalesce small
+     writes into `p->con_out`, flushing immediately on newline (`'\n'`) or
+     buffer full (`QPORT_CON_OUT`), while prompts without a newline flush on
+     the next `qport_poll`, `qport_con_read`, or `qport_drain`.
 
 2. **Skip duplicate SHA-256 on process launch (`loader/process.c`)**
-   - Cache the last verified `(qa_ptr, qa_len, ext, sha, relsha)` or return a
-     verified token from `Sys.checkImage` so `Sys.placeImageAt` does not hash
-     the full `IMAGE` + `RELOC` bytes twice.
+   - Added a lock-protected one-shot verification cache (`g_check_cache`)
+     keyed on `(qa_ptr, qa_len, ext[0..5], sha[64], relsha[64], head/tail edge
+     bytes)` populated by `Sys.checkImage` and consumed by `Sys.placeImageAt`
+     so the launcher no longer hashes the full `IMAGE` + `RELOC` bytes twice.
+     Direct `Sys.placeImageAt` callers or any changed buffer still run full
+     SHA-256.
 
-3. **Runtime primitive for QLog chunk hashing**
-   - Replace per-byte FP-RISC division in `qlog.fpr` `hashStr` (`hGo`) with a
-     small C runtime primitive computing the exact same 31-polynomial mod 1e9+7
-     hash.
+3. **Runtime primitive for QLog chunk hashing (`hal/blk_pack.h`, `programs/mods/qlog.fpr`)**
+   - Added `blkHashSlice(s, off, len, acc)` in `hal/blk_pack.h` (included by
+     Portable, Native VirtIO, and SD-SPI), computing the exact 31-polynomial
+     mod `1e9+7` fold in a tight 64-bit C loop, and delegated `qlog.fpr`'s
+     `hGo` to it (eliminating per-byte FP-RISC recursion and division across
+     `hashStr`, `hashPayload`, and `bufferLeafPages`).
+
+4. **Verification**
+   - Standalone QLink C harness (`cc -O2 -Wall -Wextra`): `qport-coalesce: PASS`
+     (6+6 single-byte writes coalesced into 1 frame on `'\n'`; prompt flushed
+     on `qport_poll`).
+   - Native QEMU `tools/native-image-check.sol`: `rv64` (3/3 passed) and `rv32`
+     (3/3 passed), exercising `Sys.checkImage` → `Sys.placeImageAt` and refusal
+     paths.
+   - QLog `blkHashSlice`: `tests/qloghashrv32.fpr` (`HOLDS` on RV32 QEMU),
+     `tests/qlogreplayreads.fpr` (`HOLDS` on RV64 QEMU), `tests/qlogreplace.fpr`
+     (`HOLDS` on both RV64 QEMU and QOS Portable).
 
 ## Pass 5: Local Disk Cache Hygiene (Optional / On Request)
 

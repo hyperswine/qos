@@ -166,7 +166,8 @@ hashByte acc byte =
   q = acc / split;
   raw = (acc - q * split) * 31 + byte - q * (hprime - split * 31);
   if raw < 0 then raw + hprime else if raw >= hprime then raw - hprime else raw.
-hGo s i n acc = case i >= n of True -> acc | False -> hGo s (i + 1) n (hashByte acc (charAt s i)).
+blkHashSlice : String -> Int -> Int -> Int -> Int .
+hGo s i n acc = if i >= n then acc else blkHashSlice s i (n - i) acc.
 # interior merkle node over two child hashes, (a * 1000003 + b + 17) mod p
 # without forming a value past p (p < 2^30): RV32's tagged Int is 31 bits
 addMod a b = if a >= hprime - b then a - (hprime - b) else a + b.
