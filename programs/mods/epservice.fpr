@@ -129,41 +129,31 @@ simpleUntil rd wr me = _ = Sys.loop (Nil, 1) (untilStep rd wr me); Unit.
 untilStep rd wr me state =
   (handles, next) = state;
   m = receive me;
+  live = liveLeases (AC.nowMs Unit) handles;
   # A timed-out downstream call may reply after this owner resumes serving.
   # Correlated replies are pairs; endpoint requests are triples.
   fresh = case m of
-    (from, id, command) -> untilDispatch rd wr me handles next (from, id) from command
-  | stale -> (liveLeases (AC.nowMs Unit) handles, next);
+    (from, id, command) -> untilDispatch rd wr me live next (from, id) from command
+  | stale -> (live, next);
   _ = drop m;
   (True, fresh).
 untilDispatch rd wr me handles next ret from command = case command of
-    EP.Open url mode ->
-      now = AC.nowMs Unit;
-      live = liveLeases now handles;
-      if leaseCount live >= 64 or strlen url > 2048 then
-        _ = AC.reply ret (EP.Refused "endpoint: handle budget exhausted"); (live, next)
+    EP.Open url mode -> if leaseCount handles >= 64 or strlen url > 2048 then
+      _ = AC.reply ret (EP.Refused "endpoint: handle budget exhausted"); (handles, next)
       else _ = AC.reply ret (EP.Opened next);
-        (Lease next (strcat url "") from (now + 60000) :: live, next + 1)
+        (Lease next (strcat url "") from (AC.nowMs Unit + 60000) :: handles, next + 1)
   | EP.Close h -> _ = AC.reply ret (Ok 0); (removeLease handles h from, next)
   | EP.Timed until q -> if AC.nowMs Unit >= until then
       _ = AC.reply ret (Err "endpoint: deadline exceeded before execution"); (handles, next)
       else untilOperation rd wr until me handles next ret from q
   | other -> untilOperation rd wr (AC.nowMs Unit + 10000) me handles next ret from other.
 untilOperation rd wr until me handles next ret from command = case command of
-    EP.Read h n ->
-      now = AC.nowMs Unit;
-      (url, client, exp) = findLease handles h;
-      if client != from or url == "" or now >= exp then
-        _ = AC.reply ret (Err "no such handle");
-        (if now >= exp and url != "" then dropLease handles h else handles, next)
-      else _ = AC.reply ret (rd until me client url); (handles, next)
-  | EP.Write h value ->
-      now = AC.nowMs Unit;
-      (url, client, exp) = findLease handles h;
-      if client != from or url == "" or now >= exp then
-        _ = AC.reply ret (Err "no such handle");
-        (if now >= exp and url != "" then dropLease handles h else handles, next)
-      else _ = AC.reply ret (wr until me client url value); (handles, next)
+    EP.Read h n -> (url, client) = findLease handles h;
+      _ = AC.reply ret (if client != from or url == "" then Err "no such handle" else rd until me client url);
+      (handles, next)
+  | EP.Write h value -> (url, client) = findLease handles h;
+      _ = AC.reply ret (if client != from or url == "" then Err "no such handle" else wr until me client url value);
+      (handles, next)
   | EP.Close h -> _ = AC.reply ret (Ok 0); (removeLease handles h from, next)
   | other -> _ = AC.reply ret (Err "endpoint: invalid timed operation"); (handles, next).
 liveLeases now Nil = Nil.
@@ -172,9 +162,7 @@ liveLeases now (Lease h url client until :: rest) =
   if now >= until or not (Sys.alive client) then tail else Lease h url client until :: tail.
 leaseCount Nil = 0.
 leaseCount (_ :: rest) = 1 + leaseCount rest.
-findLease Nil h = ("", 0, 0).
-findLease (Lease id url client until :: rest) h = if id == h then (url, client, until) else findLease rest h.
-dropLease Nil h = Nil.
-dropLease (Lease id url client until :: rest) h = if id == h then rest else Lease id url client until :: dropLease rest h.
+findLease Nil h = ("", 0).
+findLease (Lease id url client until :: rest) h = if id == h then (url, client) else findLease rest h.
 removeLease Nil h from = Nil.
 removeLease (Lease id url client until :: rest) h from = if id == h and client == from then rest else Lease id url client until :: removeLease rest h from.

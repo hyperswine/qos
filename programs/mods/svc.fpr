@@ -123,5 +123,5 @@ Svc = Struct {
 
 requestFields message = case message of
     TimedRpc caller id until tag key payload -> ((caller, id, True), (until, (tag, key, payload)))
-  | Rpc caller tag key payload -> ((caller, 0, False), (Wire.now Unit + Wire.defaultMs * 1000, (tag, key, payload))).
+  | Rpc caller tag key payload -> ((caller, 0, False), (Wire.now Unit + Wire.defaultMs, (tag, key, payload))).
 reply ret answer = Wire.reply ret answer.
