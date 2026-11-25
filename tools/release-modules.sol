@@ -47,7 +47,10 @@ main argv =
     ["commit"] -> if commitAll mods root fpr == 0 then Unit else Script.exit 1
   | ["check"] ->
       scratch = B.query ["mktemp","-d"];
-      _ = B.command ["cp","-a","{root}/.","{scratch}/tree"];
+      # only what module resolution reads: never build outputs or a nested
+      # fprisc checkout (CI clones the compiler inside the workspace)
+      _ = B.command ["mkdir","{scratch}/tree"];
+      _ = List.map (fn p -> B.command ["cp","-a","{root}/{p}","{scratch}/tree/{p}"]) [".fpr","core","programs","std","release.toml"];
       bad = commitAll mods "{scratch}/tree" fpr;
       _ = B.command ["rm","-rf",scratch];
       if bad == 0 then Unit else Script.exit 1
