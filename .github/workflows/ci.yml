@@ -77,3 +77,9 @@ jobs:
             printf 'unsafe program.\nM = use "mods/%s".\nmain = Unit.\n' "$mod" > "$tmp/$mod.fpr"
             check_file "$tmp/$mod.fpr"
           done
+      - name: Release modules commit cleanly against pinned compiler
+        run: |
+          # Every release.toml module must `fpr commit` without a refusal
+          # (in a throwaway copy; tools/release-modules.sol check).
+          export FPRISC_ROOT="$GITHUB_WORKSPACE/fprisc"
+          sol tools/release-modules.sol check

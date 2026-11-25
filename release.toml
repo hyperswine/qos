@@ -6,7 +6,10 @@
 #   apps      the programs packed as stamped, self-contained bundles
 #             (dist/qos-fpr-vX.Y.Z/<name>/: .qa + qosp + run.sh)
 #   modules   the library modules `fpr commit`ed on every release, so each
-#             pin in the tree names a committed version (fpr.lock)
+#             pin in the tree names a committed version (fpr.lock).
+#             `sol tools/release-modules.sol commit` commits them in this
+#             order (dependencies first); CI runs `... check`, which fails if
+#             fpr refuses any (docs/2026-11-25-FPR-COMMIT-CLEAN.md)
 
 version = "1.1.0"
 
@@ -23,6 +26,7 @@ modules = [
   "programs/mods/uart.fpr",
   "programs/mods/timer.fpr",
   "programs/mods/svc.fpr",
+  "std/blockio.fpr",
   "programs/mods/qlog.fpr",
   "programs/mods/timefmt.fpr",
   "programs/mods/tui.fpr",
@@ -30,7 +34,6 @@ modules = [
   "programs/mods/ep.fpr",
   "programs/mods/epdeadline.fpr",
   "programs/mods/epservice.fpr",
-  "std/blockio.fpr",
   "std/block.fpr",
   "std/fs.fpr",
   "std/net.fpr",
