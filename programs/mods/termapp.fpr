@@ -43,16 +43,16 @@ update AW.Cancel m = (AV.focus m.focused m, Nil).
 update AW.Tick m = (m, Nil).
 update (AW.Wheel dy dx) m = (unfollow (AV.wheel (rows m) dy m), Nil).
 update (AW.Pointer x y buttons) m = (unfollow (AV.pointer (rows m) x y buttons m), Nil).
-update (AW.Key 28) m = submit m.input {m | input = "", histAt = 0 - 1, draft = ""}.
-update (AW.Key 14) m = ({m | input = dropLast m.input}, Nil).
-update (AW.Key 103) m = (recall (m.histAt + 1) m, Nil).
-update (AW.Key 108) m = (recall (m.histAt - 1) m, Nil).
-update (AW.Key 104) m = spec = AV.metrics m; (unfollow (AV.scroll (rows m) (0 - spec.visible) m), Nil).
-update (AW.Key 109) m = spec = AV.metrics m; (unfollow (AV.scroll (rows m) spec.visible m), Nil).
-update (AW.Key 102) m = (unfollow (AV.seek (rows m) 0 m), Nil).
-update (AW.Key 107) m = (bottom {m | follow = True}, Nil).
-update (AW.Key 4038) m = ({m | out = Nil, scroll = 0}, Nil).          # ctrl-L
-update (AW.Key 4022) m = ({m | input = ""}, Nil).                      # ctrl-U
+update (AW.Key k) m | k == AW.keyEnter = submit m.input {m | input = "", histAt = 0 - 1, draft = ""}.
+update (AW.Key k) m | k == AW.keyBackspace = ({m | input = dropLast m.input}, Nil).
+update (AW.Key k) m | k == AW.keyUp = (recall (m.histAt + 1) m, Nil).
+update (AW.Key k) m | k == AW.keyDown = (recall (m.histAt - 1) m, Nil).
+update (AW.Key k) m | k == AW.keyPageUp = spec = AV.metrics m; (unfollow (AV.scroll (rows m) (0 - spec.visible) m), Nil).
+update (AW.Key k) m | k == AW.keyPageDown = spec = AV.metrics m; (unfollow (AV.scroll (rows m) spec.visible m), Nil).
+update (AW.Key k) m | k == AW.keyHome = (unfollow (AV.seek (rows m) 0 m), Nil).
+update (AW.Key k) m | k == AW.keyEnd = (bottom {m | follow = True}, Nil).
+update (AW.Key k) m | k == AW.ctrl AW.keyL = ({m | out = Nil, scroll = 0}, Nil).
+update (AW.Key k) m | k == AW.ctrl AW.keyU = ({m | input = ""}, Nil).
 update (AW.Key k) m = c = AK.keyChar k;
   if strlen c == 0 or strlen c > Prefs.inputBytes m.preferences - strlen m.input then (m, Nil) else ({m | input = strcat m.input c}, Nil).
 update (AW.Arrived token result) m = if token != m.token or not m.busy then (m, Nil) else

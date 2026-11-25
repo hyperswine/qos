@@ -22,12 +22,20 @@ status Loading = "Loading".
 status Ready = "Ready".
 status (Failed why) = "{why} - R RETRY".
 
-# Standard evdev keycodes so desktop apps match named keys instead of raw ints.
+# Standard evdev keycodes and modifier offsets so desktop apps match named keys.
+modShift = 1000.  modCtrl = 4000.   modAlt = 8000.
+shift k = modShift + k.
+ctrl k = modCtrl + k.
+ctrlShift k = modCtrl + modShift + k.
+alt k = modAlt + k.
+
 keyEsc = 1.       key1 = 2.         key2 = 3.         key3 = 4.         key4 = 5.
 key5 = 6.         key6 = 7.         key7 = 8.         key8 = 9.         key9 = 10.
 key0 = 11.        keyBackspace = 14. keyTab = 15.     keyQ = 16.        keyW = 17.
-keyE = 18.        keyR = 19.        keyP = 25.        keyEnter = 28.    keyA = 30.
-keyS = 31.        keyD = 32.        keyG = 34.        keyH = 35.        keyL = 38.
-keyC = 46.        keyN = 49.        keySpace = 57.    keyHome = 102.    keyUp = 103.
-keyPageUp = 104.  keyLeft = 105.    keyRight = 106.   keyEnd = 107.     keyDown = 108.
-keyPageDown = 109. keyDelete = 111.
+keyE = 18.        keyR = 19.        keyY = 21.        keyU = 22.        keyO = 24.
+keyP = 25.        keyLBracket = 26. keyRBracket = 27. keyEnter = 28.    keyA = 30.
+keyS = 31.        keyD = 32.        keyF = 33.        keyG = 34.        keyH = 35.
+keyJ = 36.        keyK = 37.        keyL = 38.        keyZ = 44.        keyX = 45.
+keyC = 46.        keyV = 47.        keyB = 48.        keyN = 49.        keySpace = 57.
+keyHome = 102.    keyUp = 103.      keyPageUp = 104.  keyLeft = 105.    keyRight = 106.
+keyEnd = 107.     keyDown = 108.    keyPageDown = 109. keyDelete = 111.

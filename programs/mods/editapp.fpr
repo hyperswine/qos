@@ -77,7 +77,7 @@ update AW.Cancel m = (AV.focus m.focused m, Nil).
 update AW.Tick m = tick m.
 update (AW.Wheel dy dx) m = (wheelBy dy m, Nil).
 update (AW.Pointer x y buttons) m = (pointer x y buttons m, Nil).
-update (AW.Key k) m = if appKeys m and k != 4019 and k != 4036 then (tellProg (PG.KeyIn k) m, Nil)
+update (AW.Key k) m = if appKeys m and k != AW.ctrl AW.keyR and k != AW.ctrl AW.keyJ then (tellProg (PG.KeyIn k) m, Nil)
   else if m.mode == State.Editing then editKey k m else promptKey k m.
 update (AW.Arrived token result) m = arrived token result m.
 update other m = (m, Nil).
@@ -117,52 +117,63 @@ follow m =
   {m | top = top3, left = E.imax 0 left}.
 
 # ---- keys ---------------------------------------------------------------------
-# keycodes are the input tier's: shift +1000, ctrl +4000, alt +8000
-editKey 4031 m = save m.
-editKey 5031 m = (prompt State.SaveAsPrompt (if m.path == "" then "/home/" else m.path) m, Nil).
-editKey 4024 m = openPicker m.
-editKey 4049 m = (newFile m, Nil).
-editKey 4033 m = (prompt State.FindPrompt (findSeed m) m, Nil).
-editKey 4034 m = (prompt State.GotoPrompt "" m, Nil).
-editKey 4036 m = if m.running and m.appRun then ({m | progFocus = not m.progFocus}, Nil) else ({m | outOpen = not m.outOpen}, Nil).
-editKey 4048 m = build m.
-editKey 4019 m = if m.running then halt m else runIt m.
-editKey 4044 m = (undo m, Nil).
-editKey 4021 m = (redo m, Nil).
-editKey 5044 m = (redo m, Nil).
-editKey 4030 m = (moved (E.selectAll m.buf) m, Nil).
-editKey 4046 m = (copy m, Nil).
-editKey 4045 m = (cut m, Nil).
-editKey 4047 m = (paste m, Nil).
-editKey 4032 m = (edit State.Structural (E.duplicateLine m.buf) m, Nil).
-editKey 4037 m = (edit State.Structural (E.deleteLines m.buf) m, Nil).
-editKey 4027 m = (edit State.Structural (E.indent m.buf) m, Nil).
-editKey 4026 m = (edit State.Structural (E.outdent m.buf) m, Nil).
-editKey 8103 m = (edit State.Structural (E.moveLines (0 - 1) m.buf) m, Nil).
-editKey 8108 m = (edit State.Structural (E.moveLines 1 m.buf) m, Nil).
-editKey 15 m = (edit State.Structural (tab m.buf) m, Nil).
-editKey 28 m = (edit State.LineBreak (E.newline m.buf) m, Nil).
-editKey 14 m = (edit State.Deleting (E.backspace m.buf) m, Nil).
-editKey 111 m = (edit State.Deleting (E.deleteForward m.buf) m, Nil).
+editKey k m | k == AW.ctrl AW.keyS = save m.
+editKey k m | k == AW.ctrlShift AW.keyS = (prompt State.SaveAsPrompt (if m.path == "" then "/home/" else m.path) m, Nil).
+editKey k m | k == AW.ctrl AW.keyO = openPicker m.
+editKey k m | k == AW.ctrl AW.keyN = (newFile m, Nil).
+editKey k m | k == AW.ctrl AW.keyF = (prompt State.FindPrompt (findSeed m) m, Nil).
+editKey k m | k == AW.ctrl AW.keyG = (prompt State.GotoPrompt "" m, Nil).
+editKey k m | k == AW.ctrl AW.keyJ = if m.running and m.appRun then ({m | progFocus = not m.progFocus}, Nil) else ({m | outOpen = not m.outOpen}, Nil).
+editKey k m | k == AW.ctrl AW.keyB = build m.
+editKey k m | k == AW.ctrl AW.keyR = if m.running then halt m else runIt m.
+editKey k m | k == AW.ctrl AW.keyZ = (undo m, Nil).
+editKey k m | k == AW.ctrl AW.keyY = (redo m, Nil).
+editKey k m | k == AW.ctrlShift AW.keyZ = (redo m, Nil).
+editKey k m | k == AW.ctrl AW.keyA = (moved (E.selectAll m.buf) m, Nil).
+editKey k m | k == AW.ctrl AW.keyC = (copy m, Nil).
+editKey k m | k == AW.ctrl AW.keyX = (cut m, Nil).
+editKey k m | k == AW.ctrl AW.keyV = (paste m, Nil).
+editKey k m | k == AW.ctrl AW.keyD = (edit State.Structural (E.duplicateLine m.buf) m, Nil).
+editKey k m | k == AW.ctrl AW.keyK = (edit State.Structural (E.deleteLines m.buf) m, Nil).
+editKey k m | k == AW.ctrl AW.keyRBracket = (edit State.Structural (E.indent m.buf) m, Nil).
+editKey k m | k == AW.ctrl AW.keyLBracket = (edit State.Structural (E.outdent m.buf) m, Nil).
+editKey k m | k == AW.alt AW.keyUp = (edit State.Structural (E.moveLines (0 - 1) m.buf) m, Nil).
+editKey k m | k == AW.alt AW.keyDown = (edit State.Structural (E.moveLines 1 m.buf) m, Nil).
+editKey k m | k == AW.keyTab = (edit State.Structural (tab m.buf) m, Nil).
+editKey k m | k == AW.keyEnter = (edit State.LineBreak (E.newline m.buf) m, Nil).
+editKey k m | k == AW.keyBackspace = (edit State.Deleting (E.backspace m.buf) m, Nil).
+editKey k m | k == AW.keyDelete = (edit State.Deleting (E.deleteForward m.buf) m, Nil).
 editKey k m = case navigate k m of
     (True, b) -> (moved b m, Nil)
   | (False, b) -> c = AK.keyChar k;
       if strlen c == 0 then (m, Nil) else (edit State.Typing (E.insert c m.buf) m, Nil).
 # a navigation key: (True, the buffer with the caret moved); others (False, _)
-navigate k m = g = geo m; b = m.buf; case k of
-    105 -> (True, E.left False b)          | 1105 -> (True, E.left True b)
-  | 106 -> (True, E.right False b)         | 1106 -> (True, E.right True b)
-  | 103 -> (True, E.up False b)            | 1103 -> (True, E.up True b)
-  | 108 -> (True, E.down False b)          | 1108 -> (True, E.down True b)
-  | 102 -> (True, E.home False b)          | 1102 -> (True, E.home True b)
-  | 107 -> (True, E.endOfLine False b)     | 1107 -> (True, E.endOfLine True b)
-  | 104 -> (True, E.page False (0 - g.rows) b) | 1104 -> (True, E.page True (0 - g.rows) b)
-  | 109 -> (True, E.page False g.rows b)   | 1109 -> (True, E.page True g.rows b)
-  | 4105 -> (True, E.wordLeft False b)     | 5105 -> (True, E.wordLeft True b)
-  | 4106 -> (True, E.wordRight False b)    | 5106 -> (True, E.wordRight True b)
-  | 4102 -> (True, E.docStart False b)     | 5102 -> (True, E.docStart True b)
-  | 4107 -> (True, E.docEnd False b)       | 5107 -> (True, E.docEnd True b)
-  | other -> (False, b).
+navigate k m = g = geo m; b = m.buf;
+  if k == AW.keyLeft then (True, E.left False b)
+  else if k == AW.shift AW.keyLeft then (True, E.left True b)
+  else if k == AW.keyRight then (True, E.right False b)
+  else if k == AW.shift AW.keyRight then (True, E.right True b)
+  else if k == AW.keyUp then (True, E.up False b)
+  else if k == AW.shift AW.keyUp then (True, E.up True b)
+  else if k == AW.keyDown then (True, E.down False b)
+  else if k == AW.shift AW.keyDown then (True, E.down True b)
+  else if k == AW.keyHome then (True, E.home False b)
+  else if k == AW.shift AW.keyHome then (True, E.home True b)
+  else if k == AW.keyEnd then (True, E.endOfLine False b)
+  else if k == AW.shift AW.keyEnd then (True, E.endOfLine True b)
+  else if k == AW.keyPageUp then (True, E.page False (0 - g.rows) b)
+  else if k == AW.shift AW.keyPageUp then (True, E.page True (0 - g.rows) b)
+  else if k == AW.keyPageDown then (True, E.page False g.rows b)
+  else if k == AW.shift AW.keyPageDown then (True, E.page True g.rows b)
+  else if k == AW.ctrl AW.keyLeft then (True, E.wordLeft False b)
+  else if k == AW.ctrlShift AW.keyLeft then (True, E.wordLeft True b)
+  else if k == AW.ctrl AW.keyRight then (True, E.wordRight False b)
+  else if k == AW.ctrlShift AW.keyRight then (True, E.wordRight True b)
+  else if k == AW.ctrl AW.keyHome then (True, E.docStart False b)
+  else if k == AW.ctrlShift AW.keyHome then (True, E.docStart True b)
+  else if k == AW.ctrl AW.keyEnd then (True, E.docEnd False b)
+  else if k == AW.ctrlShift AW.keyEnd then (True, E.docEnd True b)
+  else (False, b).
 # Tab: a selection is indented, otherwise spaces to the next two-column stop
 tab b = if E.hasSelection b then E.indent b else E.insert (E.spaces (2 - b.col % 2)) b.
 
@@ -194,14 +205,14 @@ dirty m = m.version != m.savedVersion.
 cancelPrompt m = {m | mode = State.Editing, confirm = State.NoConfirmation}.
 prompt mode seed m = {m | mode = mode, query = seed, pick = 0, confirm = State.NoConfirmation}.
 findSeed m = s = E.selected m.buf; if strlen s > 0 and strIndexOf "\n" s < 0 then s else m.findText.
-promptKey 28 m = submit m.
-promptKey 14 m = if strlen m.query == 0 then (cancelPrompt m, Nil) else ({m | query = E.before m.query (E.prevB m.query (strlen m.query)), pick = 0, confirm = State.NoConfirmation}, Nil).
-promptKey 103 m = ({m | pick = E.imax 0 (m.pick - 1), confirm = State.NoConfirmation}, Nil).
-promptKey 108 m = ({m | pick = E.imin (E.imax 0 (E.count (pickList m) - 1)) (m.pick + 1), confirm = State.NoConfirmation}, Nil).
+promptKey k m | k == AW.keyEnter = submit m.
+promptKey k m | k == AW.keyBackspace = if strlen m.query == 0 then (cancelPrompt m, Nil) else ({m | query = E.before m.query (E.prevB m.query (strlen m.query)), pick = 0, confirm = State.NoConfirmation}, Nil).
+promptKey k m | k == AW.keyUp = ({m | pick = E.imax 0 (m.pick - 1), confirm = State.NoConfirmation}, Nil).
+promptKey k m | k == AW.keyDown = ({m | pick = E.imin (E.imax 0 (E.count (pickList m) - 1)) (m.pick + 1), confirm = State.NoConfirmation}, Nil).
 promptKey k m = if k == ownKey m.mode then (cancelPrompt m, Nil) else
   c = AK.keyChar k;
   if strlen c == 0 then (m, Nil) else ({m | query = strcat m.query c, pick = 0, confirm = State.NoConfirmation}, Nil).
-ownKey State.OpenPrompt = 4024. ownKey State.SaveAsPrompt = 5031. ownKey State.FindPrompt = 4033. ownKey State.GotoPrompt = 4034. ownKey State.Editing = 0 - 1.
+ownKey State.OpenPrompt = AW.ctrl AW.keyO. ownKey State.SaveAsPrompt = AW.ctrlShift AW.keyS. ownKey State.FindPrompt = AW.ctrl AW.keyF. ownKey State.GotoPrompt = AW.ctrl AW.keyG. ownKey State.Editing = 0 - 1.
 submit m = case m.mode of
     State.OpenPrompt -> pickOpen m
   | State.SaveAsPrompt -> saveAs m.query m
