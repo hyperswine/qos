@@ -147,3 +147,12 @@ fs v10.0 eb554fc5f32fe8fc
 timer v3.0 f11a31ca977152b0
 uart v5.0 3eedf3bc88217cb1
 net v5.0 0e7c699bca3ce421
+coreutil v1.2 b215e7bf4b116aa9
+timer v4.0 23ac435f71062f74
+qlog v27.0 730a3e3a9f482c58
+epservice v5.0 7d698506fa09b5df
+blockio v8.0 2cc92a7438b15e35
+block v8.0 54c05bd3470ec9f1
+fs v10.1 222bb998acb8c59a
+lifecycle v9.0 92d9cd52a794823e
+files v6.0 30a20a7244b6e5de
