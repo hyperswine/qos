@@ -1,0 +1,127 @@
+# ============================================================================
+# timer.fpr -- Timer.qa: the time service.  ONE actor owns the CLINT
+# driver and the timer interrupt; everything else asks it in messages.
+#
+#   * The actor binds itself to the machine's timer bridge at startup
+#     (Sys.timerBind, actors.c).  On native QOS that bridge is REAL:
+#     Timer.qa arms one CLINT deadline at a time (Sys.timerArm, a
+#     delta in ticks), the IRQ HART -- the last live hart, an
+#     auxiliary hart, never hart 0 -- pops out of wfi on MTIP and
+#     delivers a bare Int message when the deadline is due.  ALL
+#     interrupt and CLINT driver work stays inside this one actor.
+#   * On QOS Portable Sys.timerBind answers 0 (no hardware timer):
+#     the SAME actor waits for its nearest deadline in a deadline
+#     receive (Sys.receiveUntil) -- the same protocol, a hosted backend,
+#     with no helper actor.
+#   * A client does `std.timer.after svc ms` -- one SEND, no reply
+#     round trip.  When the deadline passes, Timer.qa sends TFire to
+#     the CALLER's mailbox: a blocked receiver moves from the backlog
+#     into the ready zone under the scheduler's ordinary admission
+#     bounds (RQ_CAP batches, aging) and runs soon after.  sleep is
+#     the blocking wrapper (after + receive the fire).
+#
+# The message surface (RPC envelope: send svc (me, <msg>)):
+#   TAfter ms          -> (nothing now; TFire to the SENDER later)
+#   TPing              -> TOkI nat   liveness probe; nat = 1 iff the
+#                                    hardware bridge is live
+# and the BRIDGE's arm: a bare Int (a due CLINT deadline).
+#
+# State: the pending set as a deadline-sorted list of (deadline, who),
+# in milliseconds since boot (Sys.uptimeMs, the clock /services/clock
+# answers): a 31-bit RV32 Int holds it for 12.4 days, where the old
+# low-word CLINT ticks wrapped after 107 s.  The hardware arm converts
+# at most ARM_MAX_MS to ticks; a longer wait is re-armed for the
+# remainder when it fires early.  The hosted deadline receive takes the
+# millisecond deadline as it is.
+# ============================================================================
+
+TMsg = Type (TAfter ms | TPing).
+TRep = Type (TOkI n | TFire).
+
+ticksPerMs = 10000.   # CLINT runs at 10 MHz on virt and qosp alike
+armMaxMs = 100000.     # 1e9 ticks: inside a 31-bit Int
+nowMs u = Sys.uptimeMs u.
+# the largest deadline an Int holds; a later one waits there (12.4 days on RV32)
+intMax u = 1073741823.
+armTicks left = (if left < 0 then 0 else if left > armMaxMs then armMaxMs else left) * ticksPerMs.
+
+actor : unsafe Int -> Unit .
+actor me =
+  cl = device "clint";
+  clk = reg32 cl 49144;
+  nat = Sys.timerBind me;
+  _ = Sys.loop Nil (turn me clk nat);
+  Unit.
+
+# One message (or one due deadline) per turn.  Hardware mode, and any mode
+# with nothing pending, blocks in receive.  Hosted mode with a deadline
+# pending waits in a DEADLINE RECEIVE (Sys.receiveUntil, hal/timed_receive.c)
+# on the nearest one: a new request wakes it at once -- a shorter deadline
+# takes effect immediately -- and otherwise it wakes exactly once, at the
+# deadline.  (Until 2026-11-24 a sleeper child slept in 10 ms slices: a
+# shorter deadline arriving mid-slice fired up to ~10 ms late, and any long
+# pending timer cost 100 wakeups a second.)
+turn : unsafe Int -> Int -> Int -> List (Int, Int) -> (Bool, List (Int, Int)) .
+turn me clk nat pend = case nextMessage me nat pend of
+    Ok m -> (True, onMessage me clk nat pend m)
+  | Err why -> (True, fireDue me clk nat pend).
+
+nextMessage : unsafe Int -> Int -> List (Int, Int) -> Result a String .
+nextMessage me nat pend = case pend of
+    Nil -> Ok (receive me)
+  | p :: rest -> if nat == 1 then Ok (receive me) else (case p of (dl, w) -> Sys.receiveUntil me dl).
+
+onMessage me clk nat pend m = case m of
+    (from, req) -> dispatch me clk nat pend from req
+  | k -> fireDue me clk nat pend.
+    # ^ bare Int: the bridge's CLINT fire -- matched by fallthrough
+    #   (the uart actor's irq shape)
+
+dispatch : unsafe Int -> Int -> Int -> List (Int, Int) -> Int -> TMsg -> List (Int, Int) .
+dispatch me clk nat pend from req =
+  case req of
+    TAfter ms -> doAfter me clk nat pend from ms
+  | TPing -> send from (TOkI nat) >> pend.
+
+doAfter : unsafe Int -> Int -> Int -> List (Int, Int) -> Int -> Int -> List (Int, Int) .
+doAfter me clk nat pend from ms =
+  now = nowMs Unit;
+  dl = if ms <= 0 then now else if ms > intMax Unit - now then intMax Unit else now + ms;
+  pend2 = insert dl from pend;
+  _ = if nat == 1 then armNearest clk pend2 else Unit;
+  fireDue me clk nat pend2.
+  # ^ fire immediately-due entries (ms = 0, or a deadline that passed
+  #   while we were parked) instead of waiting for the next wake
+
+# deadline-sorted insert, oldest deadline first
+insert : unsafe Int -> Int -> List (Int, Int) -> List (Int, Int) .
+insert dl who pend =
+  case pend of
+    Nil -> (dl, who) :: Nil
+  | p :: rest -> case p of (d2, w2) ->
+      case dl < d2 of
+        True -> (dl, who) :: pend
+      | False -> (d2, w2) :: insert dl who rest.
+
+# hardware mode: ONE armed deadline, always the nearest pending
+armNearest : unsafe Int -> List (Int, Int) -> Unit .
+armNearest clk pend =
+  case pend of
+    Nil -> Unit
+  | p :: rest -> case p of (dl, w) -> Sys.timerArm (armTicks (dl - nowMs Unit)).
+
+# pop everything due, notify the waiters, re-arm for the remainder
+# (hosted mode re-arms nothing: the next turn's deadline receive waits for
+# the new nearest deadline)
+fireDue : unsafe Int -> Int -> Int -> List (Int, Int) -> List (Int, Int) .
+fireDue me clk nat pend =
+  case pend of
+    Nil -> pend
+  | p :: rest -> case p of (dl, who) ->
+      case nowMs Unit >= dl of
+        True -> send who TFire >> fireDue me clk nat rest
+      | False -> rearm clk nat pend dl.
+rearm : unsafe Int -> Int -> List (Int, Int) -> Int -> List (Int, Int) .
+rearm clk nat pend dl =
+  _ = if nat == 1 then Sys.timerArm (armTicks (dl - nowMs Unit)) else Unit;
+  pend.

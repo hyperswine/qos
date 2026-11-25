@@ -1,0 +1,22 @@
+# Typed facade over the stable v2 storage wire. Explicit target roles prevent
+# tag 7 from turning bulk bytes into an accidental Files shutdown.
+P = use "std/storageprotocol#bc38f0b3a5b682a6".
+Wire = use "std/storage#d3bc6af554583437".
+SVC = use "../programs/mods/svc#b4e4e109ca696787".
+Target = Type (Owner Int | Log Int | Adapter Int).
+kind (Owner _) = P.FilesOwner.
+kind (Log _) = P.Qlog.
+kind (Adapter _) = P.FilesAdapter.
+actor (Owner a) = a.
+actor (Log a) = a.
+actor (Adapter a) = a.
+request me target op = within Wire.defaultMs me target op.
+within ms me target op = case P.decodeResult (Wire.deadline ms) of
+    Err why -> Err why
+  | Ok until -> requestUntil until me target op.
+requestUntil : Int -> Int -> Target -> P.StorageOp -> Result String P.StorageError .
+requestUntil until me target op = case P.encode P.DeadlineV2 (kind target) op of
+    Err why -> Err why
+  | Ok (tag, key, bytes) -> if actor target == 0 then Err (P.fromLegacy "no disk") else
+      P.decodeResult (Wire.callUntil until me (actor target) SVC.TimedRpc tag key bytes).
+schema target = P.schema (kind target).

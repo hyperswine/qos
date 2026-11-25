@@ -54,7 +54,13 @@ wordCh s i n acc c = case or2 (c == 32) (c == 10) of
     True -> (acc, i + 1)
   | False -> wordGo s (i + 1) n (strcat acc (chr c)).
 
-# Strict natural-number parsing for format boundaries.
+# Strict natural-number parsing for format boundaries. Int is exact (it never
+# wraps or traps), so the bound below is a format rule, not overflow
+# protection: a boundary value must stay a one-word Int (63-bit fixnum,
+# 2^62 - 1), so downstream sizes and counters keep fixed-cost arithmetic.
+# Larger inputs are refused with an error, never truncated. (This is the
+# value the retired `intMax` builtin had; v1.0 removes it.)
+natMax = 4611686018427387903.
 parseNat : unsafe String -> Result Int String .
 parseNat s = case strlen s == 0 of
     True -> Err "empty natural number"
@@ -65,7 +71,7 @@ parseNatGo s i n acc = case i >= n of
   | False -> parseNatCh s i n acc (charAt s i).
 parseNatCh : unsafe String -> Int -> Int -> Int -> Int -> Result Int String .
 parseNatCh s i n acc c = case and2 (c >= 48) (c <= 57) of
-    True -> (case acc <= (intMax Unit - (c - 48)) / 10 of
+    True -> (case acc <= (natMax - (c - 48)) / 10 of
         True -> parseNatGo s (i + 1) n (acc * 10 + (c - 48))
       | False -> Err "natural number overflow")
   | False -> Err "not a natural number".

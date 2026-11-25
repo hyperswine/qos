@@ -6,8 +6,8 @@
 
 AC = use "std/actor#2de24bf2bdd5cb87".
 Net = use "std/net#0e7c699bca3ce421".
-FS = use "std/fs".
-IO = use "std/blockio".
+FS = use "std/fs#222bb998acb8c59a".
+IO = use "std/blockio#2cc92a7438b15e35".
 
 Context = Type (Context Int Int Int Int).
 Request = Type (Stop).
@@ -57,9 +57,9 @@ stop caller ctx = _ = Sys.shutdownBegin Unit; case AC.callWithin 10000 caller (o
     Ok answer -> answer
   | Err why -> Err "lifecycle: {why}".
 
-loop : unsafe Context -> Int -> Unit .
+loop : Context -> Int -> Unit .
 loop ctx me = _ = Sys.loop ctx (loopTurn me); Unit.
-loopTurn : unsafe Int -> Context -> (Bool, Context) .
+loopTurn : Int -> Context -> (Bool, Context) .
 loopTurn me ctx =
   if Sys.shutdownRequested Unit != 0 then
     answer = finish ctx me;

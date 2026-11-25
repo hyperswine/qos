@@ -1,6 +1,6 @@
 # Typed facade over the stable v2 storage wire. Explicit target roles prevent
 # tag 7 from turning bulk bytes into an accidental Files shutdown.
-P = use "std/storageprotocol".
+P = use "std/storageprotocol#bc38f0b3a5b682a6".
 Wire = use "std/storage#d3bc6af554583437".
 SVC = use "../programs/mods/svc#b4e4e109ca696787".
 Target = Type (Owner Int | Log Int | Adapter Int).
