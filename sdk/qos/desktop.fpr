@@ -6,7 +6,18 @@ S = use "programs/mods/scene2d".
 Event = Type (Key Int | Tick | Resize Int Int | Pointer Int Int Int | Wheel Int Int | Focus Bool | Cancel | Arrived Int (Result Snapshot String)).
 Job = Type (Clock | Read String | Write String String | Remove String).
 Snapshot = Type (Time Int | Missing | Value String | Saved | Removed).
-Cmd = Type (Fetch Int Job).
+Cmd = Type (Fetch Int Job | Log String).
+
+# Standard evdev keycodes so desktop apps match named keys instead of raw ints.
+keyEsc = 1.       key1 = 2.         key2 = 3.         key3 = 4.         key4 = 5.
+key5 = 6.         key6 = 7.         key7 = 8.         key8 = 9.         key9 = 10.
+key0 = 11.        keyBackspace = 14. keyTab = 15.     keyQ = 16.        keyW = 17.
+keyE = 18.        keyR = 19.        keyP = 25.        keyEnter = 28.    keyA = 30.
+keyS = 31.        keyD = 32.        keyG = 34.        keyH = 35.        keyL = 38.
+keyC = 46.        keyN = 49.        keySpace = 57.    keyHome = 102.    keyUp = 103.
+keyPageUp = 104.  keyLeft = 105.    keyRight = 106.   keyEnd = 107.     keyDown = 108.
+keyPageDown = 109. keyDelete = 111.
+
 text viewport title subtitle rows =
   (w, h) = viewport;
   S.Box [S.Col, S.W w, S.H h, S.Pad 20, S.Gap 14, S.Bg (18, 30, 60), S.Clip]
@@ -34,3 +45,9 @@ commands (Fetch token Clock :: rest) = AW.Fetch token AW.Clock :: commands rest.
 commands (Fetch token (Read key) :: rest) = AW.Fetch token (AW.StoreRead key) :: commands rest.
 commands (Fetch token (Write key text) :: rest) = AW.Fetch token (AW.StoreWrite key text) :: commands rest.
 commands (Fetch token (Remove key) :: rest) = AW.Fetch token (AW.StoreRemove key) :: commands rest.
+commands (Log _ :: rest) = commands rest.
+
+# Pure log extraction so the generated adapter performs prints outside update.
+performLogs Nil = Unit.
+performLogs (Log s :: rest) = _ = print s; performLogs rest.
+performLogs (_ :: rest) = performLogs rest.

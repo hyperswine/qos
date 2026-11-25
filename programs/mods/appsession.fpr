@@ -104,3 +104,34 @@ bootWait deadline me = case Sys.waitInbox me deadline of
 abandon me ctx = case finish me ctx of
     Ok u -> Unit
   | Err why -> _ = Sys.logAt 2 "app owner ended; {why}"; Unit.
+
+# Standard MVU actor loop for desktop apps without custom control/preference
+# sidecars. Keeps transport, sequencing, worker dispatch, and shutdown in one place.
+run me initVal updateFn viewFn = case start me of
+    Err why -> Unit
+  | Ok ctx ->
+      (initial, commands) = initVal;
+      (model, ignored) = updateFn (AW.Resize ctx.w ctx.h) initial;
+      _ = issue me ctx commands;
+      _ = Sys.loop (ctx, model) (runStep me updateFn viewFn); Unit.
+runStep me updateFn viewFn state =
+  (ctx, model) = state;
+  case next me ctx of
+    Idle -> _ = idle me; (True, state)
+  | Gone -> _ = abandon me ctx; (False, state)
+  | JobResult token result ->
+      (fresh, commands) = updateFn (AW.Arrived token result) model;
+      _ = issue me ctx commands;
+      (True, (advance ctx ctx.sequence, fresh))
+  | Message ret request -> case request of
+      AW.CloseWith session until stopMs -> (closeWithin until stopMs me ctx ret session, state)
+    | AW.Close session -> (close me ctx ret session, state)
+    | AW.Event session sequence event -> case valid ctx session sequence of
+        False -> _ = AC.reply ret (AW.Refused "stale session or sequence"); (True, state)
+      | True ->
+          nextCtx = advance (resized ctx event) sequence;
+          (fresh, commands) = updateFn event model;
+          _ = issue me nextCtx commands;
+          (tree, vals) = viewFn (nextCtx.w, nextCtx.h) fresh;
+          _ = AC.reply ret (AW.Frame nextCtx.session nextCtx.revision tree vals (AW.status fresh.phase));
+          (True, (nextCtx, fresh)).

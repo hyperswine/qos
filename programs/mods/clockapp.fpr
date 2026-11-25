@@ -6,7 +6,6 @@ AV = use "appview".
 L = use "shelllayout".
 ST = use "scrolltext".
 AK = use "appkit".
-AC = use "std/actor#2de24bf2bdd5cb87".
 
 # the stopwatch runs on the same runtime seconds: SPACE starts and stops,
 # L takes a lap, BACKSPACE resets
@@ -19,10 +18,10 @@ update AW.Cancel m = (AV.focus m.focused m, Nil).
 update AW.Tick m | not m.focused = (m, Nil).
 
 update AW.Tick m = fetch m.
-update (AW.Key 19) m = fetch m.
-update (AW.Key 57) m = ({m | swOn = not m.swOn, swStart = m.time, swAcc = (if m.swOn then elapsed m else m.swAcc)}, Nil).
-update (AW.Key 14) m = ({m | swOn = False, swAcc = 0, laps = Nil}, Nil).
-update (AW.Key 38) m = if m.swOn or m.swAcc > 0 then ({m | laps = take 6 ("lap {1 + count m.laps}   {hms (elapsed m)}" :: m.laps)}, Nil) else (m, Nil).
+update (AW.Key k) m | k == AW.keyR = fetch m.
+update (AW.Key k) m | k == AW.keySpace = ({m | swOn = not m.swOn, swStart = m.time, swAcc = (if m.swOn then elapsed m else m.swAcc)}, Nil).
+update (AW.Key k) m | k == AW.keyBackspace = ({m | swOn = False, swAcc = 0, laps = Nil}, Nil).
+update (AW.Key k) m | k == AW.keyL = if m.swOn or m.swAcc > 0 then ({m | laps = take 6 ("lap {1 + count m.laps}   {hms (elapsed m)}" :: m.laps)}, Nil) else (m, Nil).
 update (AW.Key k) m = ({m | keys = m.keys + 1}, Nil).
 elapsed m = if m.swOn then m.swAcc + m.time - m.swStart else m.swAcc.
 count Nil = 0.
@@ -38,32 +37,4 @@ update other m = (m, Nil).
 view vp m = (AV.clockWith vp (hms m.time) "{if m.swOn then "stopwatch " else "stopwatch paused "}{hms (elapsed m)}" m.laps
   "SPACE START/STOP   L LAP   BKSP RESET   {m.keys} KEYS", Nil).
 
-# This actor owns the child model. Transport and effects exchange data only.
-run me = case AS.start me of
-    Err why -> Unit
-  | Ok ctx ->
-      (initial, commands) = init;
-      (model, ignored) = update (AW.Resize ctx.w ctx.h) initial;
-      _ = AS.issue me ctx commands;
-      _ = Sys.loop (ctx, model) (step me); Unit.
-step me state =
-  (ctx, model) = state;
-  case AS.next me ctx of
-    AS.Idle -> _ = AS.idle me; (True, state)
-  | AS.Gone -> _ = AS.abandon me ctx; (False, state)
-  | AS.JobResult token result ->
-      (fresh, commands) = update (AW.Arrived token result) model;
-      _ = AS.issue me ctx commands;
-      (True, (AS.advance ctx ctx.sequence, fresh))
-  | AS.Message ret request -> case request of
-      AW.CloseWith session until stopMs -> (AS.closeWithin until stopMs me ctx ret session, state)
-    | AW.Close session -> (AS.close me ctx ret session, state)
-    | AW.Event session sequence event -> case AS.valid ctx session sequence of
-        False -> _ = AC.reply ret (AW.Refused "stale session or sequence"); (True, state)
-      | True ->
-          next = AS.advance (AS.resized ctx event) sequence;
-          (fresh, commands) = update event model;
-          _ = AS.issue me next commands;
-          (tree, vals) = view (next.w, next.h) fresh;
-          _ = AC.reply ret (AW.Frame next.session next.revision tree vals (AW.status fresh.phase));
-          (True, (next, fresh)).
+run me = AS.run me init update view.
