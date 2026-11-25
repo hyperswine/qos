@@ -21,10 +21,10 @@
 # payloads are first-class -- records are length-carried end to end.
 # ============================================================================
 
-QL = use "../programs/mods/qlog".
+QL = use "../programs/mods/qlog#730a3e3a9f482c58".
 SVC = use "../programs/mods/svc#b4e4e109ca696787".
 AC = use "std/actor#2de24bf2bdd5cb87".
-B = use "std/blockio".
+B = use "std/blockio#2cc92a7438b15e35".
 EP = use "../programs/mods/ep#d65056c9d7dc9c18".
 Wire = use "std/storage#d3bc6af554583437".
 ED = use "../programs/mods/epdeadline#96e69ecbbd8c7fce".

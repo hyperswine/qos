@@ -3,10 +3,10 @@
 # Only System (pid 0) may compact the whole log. Apps receive grants to
 # their record prefix; opening a record does not give them a raw disk.
 unsafe module.
-Endpoint = use "./leaseslots".
+Endpoint = use "./leaseslots#36e69a2284e973d2".
 EP = use "ep#d65056c9d7dc9c18".
-Storage = use "std/storageclient".
-SP = use "std/storageprotocol".
+Storage = use "std/storageclient#6b27d44ed8e24c3d".
+SP = use "std/storageprotocol#bc38f0b3a5b682a6".
 AC = use "std/actor#2de24bf2bdd5cb87".
 
 serve : unsafe Int -> Int -> Unit .
