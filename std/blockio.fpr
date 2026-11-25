@@ -73,6 +73,7 @@ blockStep me (ctx, state) =
     | other -> (case receiveNow me of Err why -> ready | Ok message -> handleMessage ctx ready me message);
   (True, (ctx, next)).
 
+handleMessage : unsafe Context -> Owner -> Int -> (Int, Int, Request) -> Owner .
 handleMessage ctx ready me borrowed =
   (from, id, q) = borrowed;
   handled = case q of
@@ -83,6 +84,7 @@ handleMessage ctx ready me borrowed =
   handled.
 
 # Return the next owner state directly so successful receives need no extra Result.
+pollActive : unsafe Context -> Owner -> Int -> Int -> Owner .
 pollActive ctx ready me until = case receiveNow me of
     Ok message -> handleMessage ctx ready me message
   | Err why -> if AC.nowMs Unit >= until then ready else
@@ -197,6 +199,7 @@ relayWorkerReply owner me worker token = case receiveFromRes me worker of
         sent = AC.sendSure me owner (me, token, Completed result);
         _ = drop envelope;
         relayNext owner me sent.
+relayNext : unsafe Int -> Int -> Bool -> Unit .
 relayNext owner me sent = case sent of
     False -> Unit
   | True -> fresh = AC.boundary me owner; completion fresh me.
