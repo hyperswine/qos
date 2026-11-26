@@ -219,11 +219,12 @@ pollActor me actor = case AC.call me actor Poll of
     Ok step -> step
   | Err why -> Step "" Nil False (endedHow why).
 
+# Actor handles are opaque values. Zero marks an absent handle.
 tellActor : Int -> PG.ToProgram Int -> Unit .
-tellActor actor x = if actor <= 0 then Unit else _ = send actor (0, 0, Tell x); Unit.
+tellActor actor x = if actor == 0 then Unit else _ = send actor (0, 0, Tell x); Unit.
 
 stopActor : Int -> Int -> String .
-stopActor me actor = if actor <= 0 then "" else case AC.call me actor Stop of
+stopActor me actor = if actor == 0 then "" else case AC.call me actor Stop of
     Ok (Step text said running how) -> text
   | Err why -> "".
 
