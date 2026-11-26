@@ -7,6 +7,7 @@ mods/epclient v3.0 decd41e2d3f54b1b programs/dungeon.fpr
 std/actor v4.0 2de24bf2bdd5cb87 programs/mods/appclient.fpr
 ep v4.0 d65056c9d7dc9c18 programs/mods/appjobs.fpr
 std/actor v4.0 2de24bf2bdd5cb87 programs/mods/appjobs.fpr
+std/storage v2.0 d3bc6af554583437 programs/mods/appjobs.fpr
 std/actor v4.0 2de24bf2bdd5cb87 programs/mods/appkit.fpr
 ep v4.0 d65056c9d7dc9c18 programs/mods/appkit.fpr
 std/actor v4.0 2de24bf2bdd5cb87 programs/mods/apppolicy.fpr
@@ -14,7 +15,6 @@ ep v4.0 d65056c9d7dc9c18 programs/mods/apppolicy.fpr
 leaseslots v4.0 0eba65251ebb9450 programs/mods/apppolicy.fpr
 ep v4.0 d65056c9d7dc9c18 programs/mods/appsep.fpr
 std/actor v4.0 2de24bf2bdd5cb87 programs/mods/appsession.fpr
-std/storage v2.0 d3bc6af554583437 programs/mods/appstore.fpr
 ep v4.0 d65056c9d7dc9c18 programs/mods/blockep.fpr
 std/actor v4.0 2de24bf2bdd5cb87 programs/mods/blockep.fpr
 std/blockio v7.0 12684c106eacea7e programs/mods/blockep.fpr

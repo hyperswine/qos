@@ -8,7 +8,8 @@ PLUG_OUT ?= $(PLUGID).qa
 QOS_APP_ID = $(if $(QA_ID),$(QA_ID),$(basename $(notdir $(SOURCE))))
 QOS_APP_NAME = $(if $(QA_NAME),$(QA_NAME),$(QOS_APP_ID))
 QOS_APP_VERSION = $(if $(QA_VERSION),$(QA_VERSION),1)
-QOS_APP_ASSIGN = QA_ID=$(QOS_APP_ID) QA_NAME=$(QOS_APP_NAME) QA_VERSION=$(QOS_APP_VERSION)
+qos_shell_arg = '$(subst ','"'"',$(1))'
+QOS_APP_ASSIGN = $(call qos_shell_arg,QA_ID=$(QOS_APP_ID)) $(call qos_shell_arg,QA_NAME=$(QOS_APP_NAME)) $(call qos_shell_arg,QA_VERSION=$(QOS_APP_VERSION))
 
 ifneq ($(filter arm64 aarch64,$(shell uname -m)),)
 APP_HOST ?= a64
