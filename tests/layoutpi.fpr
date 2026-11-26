@@ -1,4 +1,4 @@
 # Normal shell code with a private capture tag for isolated GPU validation.
 unsafe program.
-S = use "../programs/mods/guishell".
+S = use "../external/qos-guishell/src/guishell".
 main = S.runWindow "qos-layout-pi-check" S.update 0 0.

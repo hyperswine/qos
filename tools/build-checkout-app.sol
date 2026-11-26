@@ -130,7 +130,7 @@ buildApp source archive buildDir harts manifestArgs =
   fprisc = resolveFprisc root;
   fprc = "{fprisc}/fpr";
   runner = solCmd fprisc;
-  env = [("FPRISC_ROOT", fprisc), ("FPR_HOME", root), ("FPR_PATH", fprisc),
+  env = [("FPRISC_ROOT", fprisc), ("FPR_HOME", root), ("FPR_PATH", "{root}/programs:{fprisc}"),
          ("FPR_FOREIGN", "{root}/core/foreign.fpr"), ("FPRC", fprc), ("LC_ALL", "C.UTF-8")];
   _ = K.mkdirs buildDir;
   _ = K.mkdirs (K.parent archive);
@@ -170,10 +170,10 @@ buildPlugin source archive buildDir =
   fprisc = resolveFprisc root;
   fprc = "{fprisc}/fpr";
   runner = solCmd fprisc;
-  env = [("FPRISC_ROOT", fprisc), ("FPR_HOME", root), ("FPR_PATH", fprisc),
+  env = [("FPRISC_ROOT", fprisc), ("FPR_HOME", root), ("FPR_PATH", "{root}/programs:{fprisc}"),
          ("FPR_FOREIGN", "{root}/core/foreign.fpr"), ("FPRC", fprc), ("LC_ALL", "C.UTF-8")];
   _ = K.mkdirs buildDir;
-  _ = K.mkdirs (K.parent (K.realpath archive));
+  _ = K.mkdirs (K.parent archive);
   spec = archSpec detectArch root fprisc;
   pid = stem source;
   prefix = "{buildDir}/plug-{pid}-{spec.name}";
@@ -208,7 +208,7 @@ plugins directory pairs = case pairs of
       archives = plugins directory pairs;
       root = resolveRoot;
       fprisc = resolveFprisc root;
-      invoke [("FPRISC_ROOT", fprisc), ("FPR_HOME", root), ("FPR_PATH", fprisc)]
+      invoke [("FPRISC_ROOT", fprisc), ("FPR_HOME", root), ("FPR_PATH", "{root}/programs:{fprisc}")]
              (solCmd fprisc + [diskTool, image, size] + archives)
   | ["plugin", source, archive, directory] ->
       buildPlugin source archive directory

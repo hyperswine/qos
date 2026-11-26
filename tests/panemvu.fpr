@@ -4,7 +4,7 @@ unsafe program.
 PN = use "../programs/mods/panemvu".
 PJ = use "../programs/mods/panejobs".
 EP = use "../programs/mods/ep#d65056c9d7dc9c18".
-S = use "../programs/mods/guishell".
+S = use "../external/qos-guishell/src/guishell".
 QS = use "../programs/mods/qsys".
 AC = use "std/actor#2de24bf2bdd5cb87".
 MV = use "std/mvu".

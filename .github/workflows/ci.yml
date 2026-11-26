@@ -23,6 +23,8 @@ jobs:
           apt-get update
           apt-get install -y --no-install-recommends git ca-certificates make gcc pkg-config ghc cabal-install libghc-megaparsec-dev libghc-network-dev libghc-utf8-string-dev libgit2-dev libarchive-dev libcurl4-openssl-dev libegl-dev libgl-dev jq
       - uses: actions/checkout@v4
+        with:
+          submodules: true
       - name: Read compiler pin
         id: pin
         run: echo "revision=$(jq -r .revision fprisc.lock.json)" >> "$GITHUB_OUTPUT"
@@ -41,7 +43,7 @@ jobs:
         env:
           FPRISC_ROOT: ${{ github.workspace }}/fprisc
           FPR_HOME: ${{ github.workspace }}
-          FPR_PATH: ${{ github.workspace }}/fprisc
+          FPR_PATH: ${{ github.workspace }}/programs:${{ github.workspace }}/fprisc
           SOL: /usr/local/bin/sol
         run: |
           ln -s "$FPRISC_ROOT/fpr" /usr/local/bin/sol

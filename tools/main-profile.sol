@@ -21,9 +21,10 @@ profileBuild argv =
   arch = CLI.valueOr "" "arch" parsed; cc = CLI.valueOr "" "cc" parsed;
   _ = K.check "expected a64, x64 or rv64" (List.has arch ["","a64","x64","rv64"]);
   _ = K.check "--cc requires --arch=rv64" (cc == "" or arch == "rv64");
-  env = [("FPRISC_ROOT",fpr),("FPR_HOME",root),("FPR_PATH",fpr),("FPR_FOREIGN","{root}/core/foreign.fpr"),("XDG_CACHE_HOME","{out}/cache")];
+  env = [("FPRISC_ROOT",fpr),("FPR_HOME",root),("FPR_PATH","{root}/programs:{fpr}"),("FPR_FOREIGN","{root}/core/foreign.fpr"),("XDG_CACHE_HOME","{out}/cache")];
   lines = List.filter (fn line -> line != "" and not (Str.startsWith "#" line)) (List.map Str.trim (Str.lines (K.readText "{root}/profiles/Main.toml")));
   source = K.need (J.parse (field lines "entry") |>? J.text);
+  _ = K.check "Main source is missing; run git submodule update --init" (K.isFile "{root}/{source}");
   profile = Str.join "\n" lines;
   begin = Str.find 91 profile; end = Str.find 93 profile;
   _ = K.check "profile needs an apps array" (begin >= 0 and end > begin);

@@ -1,7 +1,7 @@
 # Pi soak entry: normal Main boot plus opt-in F11 reload/storage probes and
 # F12 allocator samples. The shipping Main entry has no validation hotkeys.
 unsafe program.
-Shell = use "../programs/mods/guishell".
+Shell = use "../external/qos-guishell/src/guishell".
 QS = use "../programs/mods/qsys".
 FS = use "std/fs#eb554fc5f32fe8fc".
 AC = use "std/actor#2de24bf2bdd5cb87".

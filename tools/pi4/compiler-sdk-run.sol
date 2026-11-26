@@ -12,7 +12,7 @@ cliMain argv =
   root = command ["pwd","-P"];
   _ = check "run from the extracted SDK root" (isFile "{root}/sdk.json");
   inheritedPath = case need (Env.get "PATH") of EnvText path -> path | EnvMissing -> "/usr/bin:/bin";
-  env = [("PATH","{root}/bin:{inheritedPath}"),("GHCRTS","-M512m -K64m"),("FPRISC_ROOT","{root}/fprisc"),("FPR_HOME","{root}/qos"),("FPR_PATH","{root}/fprisc"),
+  env = [("PATH","{root}/bin:{inheritedPath}"),("GHCRTS","-M512m -K64m"),("FPRISC_ROOT","{root}/fprisc"),("FPR_HOME","{root}/qos"),("FPR_PATH","{root}/qos/programs:{root}/fprisc"),
     ("FPR_FOREIGN","{root}/qos/core/foreign.fpr"),("SOL","{root}/bin/sol"),
     ("COMPILER_PATH","{root}/bin"),("LC_ALL","C.UTF-8"),
     ("PLUG_A64_LINK","gcc -fno-use-linker-plugin -nostdlib -nostartfiles -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack -Wl,--no-relax -T $(QOS)/appside/link-qosplug.ld -Wl,--emit-relocs")];

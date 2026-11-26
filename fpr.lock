@@ -43,10 +43,6 @@ std/actor v4.0 2de24bf2bdd5cb87 programs/mods/fprlive.fpr
 ep v4.0 d65056c9d7dc9c18 programs/mods/graphics.fpr
 epclient v3.0 decd41e2d3f54b1b programs/mods/graphics.fpr
 std/actor v4.0 2de24bf2bdd5cb87 programs/mods/graphics.fpr
-ep v4.0 d65056c9d7dc9c18 programs/mods/guishell.fpr
-epclient v3.0 decd41e2d3f54b1b programs/mods/guishell.fpr
-std/fs v10.0 eb554fc5f32fe8fc programs/mods/guishell.fpr
-std/actor v4.0 2de24bf2bdd5cb87 programs/mods/guishell.fpr
 ep v4.0 d65056c9d7dc9c18 programs/mods/leaseslots.fpr
 std/actor v4.0 2de24bf2bdd5cb87 programs/mods/leaseslots.fpr
 std/net v5.0 0e7c699bca3ce421 programs/mods/liveview.fpr

@@ -11,7 +11,7 @@ From this checkout, with a compatible Sol runtime installed:
 ```sh
 export FPRISC_ROOT=/path/to/fprisc
 export FPR_HOME="$PWD"
-export FPR_PATH="$FPRISC_ROOT"
+export FPR_PATH="$PWD/programs:$FPRISC_ROOT"
 ./qbuild build host
 ./qbuild app tests/sol-hello.fpr
 ./qbuild pack tests/sol-hello.fpr --out dist/hello --bundle
@@ -46,3 +46,9 @@ fail explicitly while those service implementations are absent.
 Native C/Haskell code, FP-RISC application and test fixtures, Makefiles and
 upstream vendor toolchains remain. Removing repository scripts does not remove
 all external toolchain dependencies.
+
+The Main profile builds its GUI shell from the pinned
+[`external/qos-guishell`](https://github.com/hyperswine/qos-guishell) submodule.
+After cloning QOS, run `git submodule update --init` before building the Main
+profile or staging the Portable SDK. Make shell changes in the standalone
+repository first, then advance the submodule pin and test the Main build.

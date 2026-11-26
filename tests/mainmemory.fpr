@@ -1,7 +1,7 @@
 # Opt-in Main soak entry: F12 samples allocator reservations and ARC roots.
 # The normal Main profile keeps its usual update callback and key behavior.
 unsafe program.
-Shell = use "../programs/mods/guishell".
+Shell = use "../external/qos-guishell/src/guishell".
 MV = use "std/mvu".
 probe me env (MV.EKey 88) model =
   ledger = Sys.memInfo 0;

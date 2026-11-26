@@ -1,7 +1,7 @@
 # Diagnostic entry: the normal shell is a child MVU model. Only this entry
 # records timestamps. No production key bindings or view behavior change.
 unsafe program.
-Shell = use "../programs/mods/guishell".
+Shell = use "../external/qos-guishell/src/guishell".
 MV = use "std/mvu".
 AC = use "std/actor#2de24bf2bdd5cb87".
 init env = (Shell.init env, (0, 0, 0)).

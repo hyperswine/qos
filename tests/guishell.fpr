@@ -1,7 +1,7 @@
 # Pointer protocol, empty/partial grids, page clamps and refusal behavior.
 #: expect guishell: HOLDS
 unsafe program.
-S = use "../programs/mods/guishell".
+S = use "../external/qos-guishell/src/guishell".
 I = use "../programs/mods/shellinput".
 QS = use "../programs/mods/qsys".
 MV = use "std/mvu".

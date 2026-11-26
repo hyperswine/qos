@@ -1,6 +1,6 @@
 #: expect shelllayout: HOLDS
 unsafe program.
-S = use "../programs/mods/guishell".
+S = use "../external/qos-guishell/src/guishell".
 L = use "../programs/mods/shelllayout".
 I = use "../programs/mods/shellinput".
 PN = use "../programs/mods/panemvu".

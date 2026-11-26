@@ -30,6 +30,7 @@ sourceTree source target dirs =
   sources source target ".fpr/store" ["-name","*.fpr"].
 stage qos fpr sdk kind py =
   _ = sourceTree qos "{sdk}/qos" ["core","std","programs/mods"];
+  _ = command ["cp","-pL","{qos}/external/qos-guishell/src/guishell.fpr","{sdk}/qos/programs/mods/guishell.fpr"];
   _ = sourceTree fpr "{sdk}/fprisc" ["core","std"];
   _ = sources fpr "{sdk}/fprisc" "sol/lib" ["-name","*.sol"];
   _ = stageFiles qos "{sdk}/qos" "." ["Makefile","dependency.mk","qos-app.mk"];

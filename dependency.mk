@@ -23,7 +23,7 @@ $(error no fprisc checkout at $(FPRISC_ROOT): export FPRISC_ROOT=/path/to/fprisc
 endif
 export FPRISC_ROOT
 export FPR_HOME := $(QOS_ROOT)
-export FPR_PATH := $(FPRISC_ROOT)
+export FPR_PATH := $(QOS_ROOT)/programs:$(FPRISC_ROOT)
 # the primitives QOS implements, declared by QOS (core/foreign.fpr): the
 # compiler types the language, its runtime and its machine layer, not an OS
 export FPR_FOREIGN := $(QOS_ROOT)/core/foreign.fpr

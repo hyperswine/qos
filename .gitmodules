@@ -1,0 +1,3 @@
+[submodule "external/qos-guishell"]
+	path = external/qos-guishell
+	url = https://github.com/hyperswine/qos-guishell.git
