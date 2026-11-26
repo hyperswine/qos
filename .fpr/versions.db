@@ -156,3 +156,6 @@ block v8.0 54c05bd3470ec9f1
 fs v10.1 222bb998acb8c59a
 lifecycle v9.0 92d9cd52a794823e
 files v6.0 30a20a7244b6e5de
+epclient v4.0 e843297bdf07a846
+fs v10.2 0732c4363793153a
+lifecycle v10.0 b484b7c9a6c840d8

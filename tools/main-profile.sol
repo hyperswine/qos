@@ -28,14 +28,14 @@ profileBuild argv =
   begin = Str.find 91 profile; end = Str.find 93 profile;
   _ = K.check "profile needs an apps array" (begin >= 0 and end > begin);
   apps = List.map (fn value -> K.need (J.text value)) (K.need (J.parse (substr profile begin (end - begin+1)) |>? J.items));
-  switches = (if arch == "" then [] else ["APP_HOST={arch}"]) + (if cc == "" then [] else ["QOS_RV64_CC={cc}"]);
+  runner = setting "SOL" "sol";
+  buildEnv = (if arch == "" then [] else [("APP_HOST",arch)]) + (if cc == "" then [] else [("QOS_RV64_CC",cc)]) + env;
   _ = execute root env ["make","-s","fpr"];
   archives = List.map (fn app ->
     stem = K.baseName app; name = substr stem 0 (Str.len stem - 4); archive = "{out}/{name}.qa";
-    _ = execute root env (["make","-s","plugin-qa","PROG={app}","PLUG_OUT={archive}","BUILD={out}/plugin-{name}"]+switches);
+    _ = execute root buildEnv [runner,"{root}/tools/build-checkout-app.sol","plugin",app,archive,"{out}/plugin-{name}"];
     archive) apps;
-  _ = execute root env (["make","-s","qos-app","PROG={source}","QA_OUT={out}/main.qa","BUILD={out}/shell-build"]+switches);
-  runner = setting "SOL" "sol";
+  _ = execute root buildEnv [runner,"{root}/tools/build-checkout-app.sol","app",source,"{out}/main.qa","{out}/shell-build",""];
   disk = "{out}/Main.disk";
   preserve = if K.exists disk then ["--preserve"] else [];
   _ = execute root env ([runner,"{root}/tools/mkdisk.sol"]+preserve+[disk,"32"]+archives);
@@ -43,7 +43,7 @@ profileBuild argv =
   _ = print "Main Profile: {out}/main.qa";
   if CLI.flag "run" parsed then
     _ = K.check "cross-built profiles cannot run on this host" (arch == "" or arch == (if K.command ["uname","-m"] == "riscv64" then "rv64" else "a64"));
-    _ = execute "{root}/qos" env ["make","-s","portable-gl"];
+    _ = execute root env [runner,"{root}/tools/build-host.sol","gl"];
     compiler = if CLI.flag "no-compiler" parsed then [] else [startCompiler root fpr out env runner];
     _ = execute out (("FPR_DISK",disk)::env) ["{root}/qos/qosp-gl","--yes","{out}/main.qa"];
     _ = List.map (fn job -> Proc.cancel job) compiler;

@@ -6,7 +6,7 @@
 
 AC = use "std/actor#2de24bf2bdd5cb87".
 Net = use "std/net#0e7c699bca3ce421".
-FS = use "std/fs#222bb998acb8c59a".
+FS = use "std/fs#0732c4363793153a".
 IO = use "std/blockio#2cc92a7438b15e35".
 
 Context = Type (Context Int Int Int Int).

@@ -1,4 +1,5 @@
 # Pure child layout shared by app view and app input handlers.
+AW = use "appwire".
 S2 = use "scene2d".
 ST = use "scrolltext".
 L = use "shelllayout".
@@ -13,6 +14,13 @@ focus active m = {m | focused = active, down = False, capture = 0 - 1, wheel = 0
 scroll rows delta m = spec = metrics m; {m | scroll = ST.offsetWith spec (ST.count rows) (m.scroll + delta)}.
 seek rows target m = spec = metrics m; {m | scroll = ST.offsetWith spec (ST.count rows) target}.
 wheel rows dy m = amount = m.wheel - dy * 3; scroll rows (amount / 10) {m | wheel = amount % 10}.
+navigate rows k m | k == AW.keyUp = scroll rows (0 - 1) m.
+navigate rows k m | k == AW.keyDown = scroll rows 1 m.
+navigate rows k m | k == AW.keyPageUp = spec = metrics m; scroll rows (0 - spec.visible) m.
+navigate rows k m | k == AW.keyPageDown = spec = metrics m; scroll rows spec.visible m.
+navigate rows k m | k == AW.keyHome = seek rows 0 m.
+navigate rows k m | k == AW.keyEnd = seek rows (ST.count rows) m.
+navigate rows other m = m.
 bar m = a = layout m.w m.h;
   L.rect (a.margin + a.metrics.w + 16) a.top 12 a.metrics.h.
 rowAt m x y = a = layout m.w m.h;

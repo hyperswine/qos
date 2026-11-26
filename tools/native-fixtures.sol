@@ -21,7 +21,8 @@ runOne root work env name =
   want = header "expect" text;
   cflags = header "cflags" text;
   kernel = "{work}/{name}.elf"; disk = "{work}/{name}.img";
-  build = Proc.runNow (ProcessSpec ["make","-s","-C","{root}/qos","native","SYSTEM={src}","KERNEL={kernel}","BUILD={work}/build-{name}","NATIVE_CFLAGS_EXTRA={cflags}"] "" env "" 0);
+  buildEnv = [("SYSTEM",src),("BUILD","{work}/build-{name}"),("NATIVE_CFLAGS_EXTRA",cflags)] + env;
+  build = Proc.runNow (ProcessSpec [B.setting "SOL" "sol","{root}/tools/build-native.sol",kernel,"rv64"] "" buildEnv "" 0);
   case build of
     Ok (ProcessResult 0 _ _) ->
       _ = B.runWith env [B.setting "SOL" "sol","{root}/tools/mkdisk.sol",disk,"8"];

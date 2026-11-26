@@ -32,9 +32,6 @@ std/actor v4.0 2de24bf2bdd5cb87 programs/mods/endpointstate.fpr
 std/actor v4.0 2de24bf2bdd5cb87 programs/mods/ep.fpr
 ep v4.0 d65056c9d7dc9c18 programs/mods/epclient.fpr
 std/actor v4.0 2de24bf2bdd5cb87 programs/mods/epclient.fpr
-epdeadline v2.0 96e69ecbbd8c7fce programs/mods/epclient.fpr
-ep v4.0 d65056c9d7dc9c18 programs/mods/epdeadline.fpr
-std/actor v4.0 2de24bf2bdd5cb87 programs/mods/epdeadline.fpr
 ep v4.0 d65056c9d7dc9c18 programs/mods/epservice.fpr
 std/actor v4.0 2de24bf2bdd5cb87 programs/mods/epservice.fpr
 std/storage v2.0 d3bc6af554583437 programs/mods/filepolicy.fpr
@@ -116,7 +113,7 @@ std/actor v4.0 2de24bf2bdd5cb87 std/fs.fpr
 std/blockio v7.0 12684c106eacea7e std/fs.fpr
 ../programs/mods/ep v4.0 d65056c9d7dc9c18 std/fs.fpr
 std/storage v2.0 d3bc6af554583437 std/fs.fpr
-../programs/mods/epdeadline v2.0 96e69ecbbd8c7fce std/fs.fpr
+../programs/mods/epclient v4.0 e843297bdf07a846 std/fs.fpr
 std/actor v4.0 2de24bf2bdd5cb87 std/lifecycle.fpr
 std/net v5.0 0e7c699bca3ce421 std/lifecycle.fpr
 std/blockio v7.0 12684c106eacea7e std/lifecycle.fpr
@@ -315,7 +312,7 @@ std/actor v4.0 2de24bf2bdd5cb87 tests/storagedeadlines.fpr
 std/storage v2.0 d3bc6af554583437 tests/storagedeadlines.fpr
 ../programs/mods/svc v6.0 b4e4e109ca696787 tests/storagedeadlines.fpr
 ../programs/mods/ep v4.0 d65056c9d7dc9c18 tests/storagedeadlines.fpr
-../programs/mods/epdeadline v2.0 96e69ecbbd8c7fce tests/storagedeadlines.fpr
+../programs/mods/epclient v4.0 e843297bdf07a846 tests/storagedeadlines.fpr
 ../programs/mods/epservice v4.0 436f606333c44f26 tests/storagedeadlines.fpr
 ../programs/mods/files v5.0 8303a8f9f02909ff tests/storagedeadlines.fpr
 std/fs v10.0 eb554fc5f32fe8fc tests/storageprotocol.fpr

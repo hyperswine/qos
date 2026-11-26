@@ -644,9 +644,7 @@ static void blk_rw(u64 page, u32 bytes, u32 type) {
 #endif
 #else
       fpr_actor_sleep_us(sleep_us);
-      if (start && sleep_us < 200) {
-        sleep_us = sleep_us < 25 ? 25 : (sleep_us < 50 ? 50 : (sleep_us < 100 ? 100 : 200));
-      }
+      if (start && sleep_us < 200) sleep_us = blk_next_sleep_us(sleep_us);
 #endif
       FENCE();
     } while (QUSED->idx == before);

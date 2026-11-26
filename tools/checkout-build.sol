@@ -12,7 +12,9 @@ invoke root env argv =
 hostBuild root env gfx =
   name = if gfx then "qosp-gl" else "qosp";
   if K.isFile "{root}/.installed" then K.check "installed SDK has no {name}" (K.isFile "{root}/qos/{name}")
-  else invoke "{root}/qos" env ["make","-s",if gfx then "portable-gl" else "portable"].
+  else
+    runner = setting "SOL" "sol";
+    invoke root env [runner,"{root}/tools/build-host.sol",if gfx then "gl" else "plain"].
 compilerBuild root env = if K.isFile "{root}/.installed" then K.check "installed SDK has no compiler" (K.isFile "{root}/toolchain/fpr") else invoke root env ["make","-s","fpr"].
 identifier name = Str.len name > 0 and Str.len name <= 64 and
   List.all (fn c -> (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or (c >= 48 and c <= 57) or List.has c [45,46,95]) (Str.codes name)
@@ -120,14 +122,15 @@ main argv =
     _ = K.check "expected fpr, host, native or all" (List.has what ["fpr","host","native","all"]);
     _ = compilerBuild root env;
     _ = if what == "host" or what == "all" then hostBuild root env False else Unit;
-    if what == "native" or what == "all" then invoke "{root}/qos" env ["make","-s","native","KERNEL={workspace}/qos-native.elf"] else Unit
+    if what == "native" or what == "all" then invoke root env [runner,"{root}/tools/build-native.sol","{workspace}/qos-native.elf"] else Unit
   | ["app",source] ->
     item = project source; out = CLI.valueOr "{workspace}/{stem item.source}.qa" "out" parsed;
     buildDir = "{workspace}/build"; _ = K.mkdirs buildDir;
     invoke root env ([runner,"{root}/tools/build-checkout-app.sol","app",item.source,out,buildDir,CLI.valueOr "" "harts" parsed]+item.assignments)
   | ["plugin",source] ->
     out = CLI.valueOr "{workspace}/{stem source}.qa" "out" parsed;
-    invoke root env ["make","-s","plugin-qa","PROG={K.realpath source}","PLUG_OUT={out}","BUILD={workspace}/build"]
+    buildDir = "{workspace}/build"; _ = K.mkdirs buildDir;
+    invoke root env [runner,"{root}/tools/build-checkout-app.sol","plugin",K.realpath source,out,buildDir]
   | ["profile"] -> invoke root env [runner,"{root}/tools/main-profile.sol","--root",root,"--fprisc",fpr,"--output",CLI.valueOr "{root}/build/profiles/Main" "out" parsed]
   | ["pack",source] -> package root env runner parsed source workspace
   | _ -> error "unknown build command or operands; use --help".

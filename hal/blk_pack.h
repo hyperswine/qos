@@ -37,3 +37,9 @@ static V h_blkHashSlice(V sv, V offv, V lenv, V accv) {
   return TAG((sw)acc);
 }
 FPR_FN(fpr_g_blkHashSlice, h_blkHashSlice, 4);
+
+/* Adaptive I/O poll backoff (10 -> 25 -> 50 -> 100 -> 200 us) shared by
+ * native virtio-blk and portable disk_wait. */
+static inline uw blk_next_sleep_us(uw sleep_us) {
+  return sleep_us < 25 ? 25 : (sleep_us < 50 ? 50 : (sleep_us < 100 ? 100 : 200));
+}

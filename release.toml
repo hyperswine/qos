@@ -32,7 +32,7 @@ modules = [
   "programs/mods/tui.fpr",
   "std/storage.fpr",
   "programs/mods/ep.fpr",
-  "programs/mods/epdeadline.fpr",
+  "programs/mods/epclient.fpr",
   "programs/mods/epservice.fpr",
   "std/block.fpr",
   "std/fs.fpr",

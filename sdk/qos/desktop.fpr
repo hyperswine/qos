@@ -9,14 +9,14 @@ Snapshot = Type (Time Int | Missing | Value String | Saved | Removed).
 Cmd = Type (Fetch Int Job | Log String).
 
 # Standard evdev keycodes so desktop apps match named keys instead of raw ints.
-keyEsc = 1.       key1 = 2.         key2 = 3.         key3 = 4.         key4 = 5.
-key5 = 6.         key6 = 7.         key7 = 8.         key8 = 9.         key9 = 10.
-key0 = 11.        keyBackspace = 14. keyTab = 15.     keyQ = 16.        keyW = 17.
-keyE = 18.        keyR = 19.        keyP = 25.        keyEnter = 28.    keyA = 30.
-keyS = 31.        keyD = 32.        keyG = 34.        keyH = 35.        keyL = 38.
-keyC = 46.        keyN = 49.        keySpace = 57.    keyHome = 102.    keyUp = 103.
-keyPageUp = 104.  keyLeft = 105.    keyRight = 106.   keyEnd = 107.     keyDown = 108.
-keyPageDown = 109. keyDelete = 111.
+keyEsc = AW.keyEsc.       key1 = AW.key1.         key2 = AW.key2.         key3 = AW.key3.         key4 = AW.key4.
+key5 = AW.key5.           key6 = AW.key6.         key7 = AW.key7.         key8 = AW.key8.         key9 = AW.key9.
+key0 = AW.key0.           keyBackspace = AW.keyBackspace. keyTab = AW.keyTab. keyQ = AW.keyQ.         keyW = AW.keyW.
+keyE = AW.keyE.           keyR = AW.keyR.         keyP = AW.keyP.         keyEnter = AW.keyEnter. keyA = AW.keyA.
+keyS = AW.keyS.           keyD = AW.keyD.         keyG = AW.keyG.         keyH = AW.keyH.         keyL = AW.keyL.
+keyC = AW.keyC.           keyN = AW.keyN.         keySpace = AW.keySpace. keyHome = AW.keyHome.   keyUp = AW.keyUp.
+keyPageUp = AW.keyPageUp. keyLeft = AW.keyLeft.   keyRight = AW.keyRight. keyEnd = AW.keyEnd.     keyDown = AW.keyDown.
+keyPageDown = AW.keyPageDown. keyDelete = AW.keyDelete.
 
 text viewport title subtitle rows =
   (w, h) = viewport;

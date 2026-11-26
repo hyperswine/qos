@@ -11,6 +11,9 @@
 #include "fpr.h"
 #include "blk_pack.h"
 #include "qos_abi.h"
+#include "classes/input.h"
+#include "classes/clock.h"
+#include "classes/audio.h"
 #include "timed_receive.c" /* Sys.receiveUntil / receiveFromUntil / waitInbox (hal/) */
 
 extern const qos_hal_t *qos_hal; /* entry.c installs it first thing */
@@ -180,47 +183,17 @@ FPR_FN(fpr_g_read, h_read, 1);
 FPR_FN(fpr_g_write, h_write, 2);
 
 /* ---- raw pins: not carried by the current QOS HAL table ------------ */
-static V h_pin_mode(V pin, V mode) {
-  fpr_confined_refuse("Pin.mode (the pin bus)");
-  (void)pin;
-  (void)mode;
-  fpr_cpanic("Pin.mode: capability not granted by this host's HAL table");
+static V pin_refuse(const char *cap, const char *msg) {
+  fpr_confined_refuse(cap);
+  fpr_cpanic(msg);
   return 0;
 }
-static V h_pin_read(V pin) {
-  fpr_confined_refuse("Pin.read (the pin bus)");
-  (void)pin;
-  fpr_cpanic("Pin.read: capability not granted by this host's HAL table");
-  return 0;
-}
-static V h_pin_write(V pin, V value) {
-  fpr_confined_refuse("Pin.write (the pin bus)");
-  (void)pin;
-  (void)value;
-  fpr_cpanic("Pin.write: capability not granted by this host's HAL table");
-  return 0;
-}
-static V h_pin_wire(V source, V destination) {
-  fpr_confined_refuse("Pin.wire (the pin bus)");
-  (void)source;
-  (void)destination;
-  fpr_cpanic("Pin.wire: capability not granted by this host's HAL table");
-  return 0;
-}
-static V h_pin_feed(V pin, V pattern, V bits) {
-  fpr_confined_refuse("Pin.feed (the pin bus)");
-  (void)pin;
-  (void)pattern;
-  (void)bits;
-  fpr_cpanic("Pin.feed: capability not granted by this host's HAL table");
-  return 0;
-}
-static V h_pin_trace(V value) {
-  fpr_confined_refuse("Pin.tget/tlen/tclear (the pin bus)");
-  (void)value;
-  fpr_cpanic("Pin trace: capability not granted by this host's HAL table");
-  return 0;
-}
+static V h_pin_mode(V p, V m) { (void)p; (void)m; return pin_refuse("Pin.mode (the pin bus)", "Pin.mode: capability not granted by this host's HAL table"); }
+static V h_pin_read(V p) { (void)p; return pin_refuse("Pin.read (the pin bus)", "Pin.read: capability not granted by this host's HAL table"); }
+static V h_pin_write(V p, V v) { (void)p; (void)v; return pin_refuse("Pin.write (the pin bus)", "Pin.write: capability not granted by this host's HAL table"); }
+static V h_pin_wire(V s, V d) { (void)s; (void)d; return pin_refuse("Pin.wire (the pin bus)", "Pin.wire: capability not granted by this host's HAL table"); }
+static V h_pin_feed(V p, V pat, V b) { (void)p; (void)pat; (void)b; return pin_refuse("Pin.feed (the pin bus)", "Pin.feed: capability not granted by this host's HAL table"); }
+static V h_pin_trace(V v) { (void)v; return pin_refuse("Pin.tget/tlen/tclear (the pin bus)", "Pin trace: capability not granted by this host's HAL table"); }
 FPR_FN(fpr_g_Pin_x2emode, h_pin_mode, 2);
 FPR_FN(fpr_g_Pin_x2eread, h_pin_read, 1);
 FPR_FN(fpr_g_Pin_x2ewrite, h_pin_write, 2);
@@ -280,20 +253,28 @@ static fpr_dev_t devcells[8];
 static char devnames[8][16];
 static int ndevcells;
 
+static int str_eq_lit(const str_t *s, const char *lit) {
+  uw i = 0;
+  while (i < s->len && lit[i] && (char)s->bytes[i] == lit[i]) i++;
+  return i == s->len && lit[i] == '\0';
+}
+
 static V h_device(V nameStr) {
   fpr_confined_refuse("device (the machine's devices)");
   if (ISINT(nameStr) || TID(nameStr) != T_STR)
     fpr_cpanic("device: name must be a String");
   str_t *s = (str_t *)nameStr;
   for (int i = 0; i < ndevcells; i++) {
-    const char *n = devnames[i];
-    uw j = 0;
-    for (; j < s->len && n[j] && n[j] == (char)s->bytes[j]; j++) {}
-    if (j == s->len && n[j] == '\0') return (V)&devcells[i];
+    if (str_eq_lit(s, devnames[i])) return (V)&devcells[i];
   }
-  uint64_t base;
-  if (qos_hal->dev_lookup((const char *)s->bytes, s->len, &base) &&
-      ndevcells < 8 && s->len < 16) {
+  uint64_t base = 0;
+  int found = qos_hal->dev_lookup((const char *)s->bytes, s->len, &base);
+  if (!found && ((str_eq_lit(s, "in0") && qos_hal->gfx_input_poll) ||
+                 (str_eq_lit(s, "clk0") && qos_hal->clock_now) ||
+                 (str_eq_lit(s, "aud0") && qos_hal->snd_play))) {
+    found = 1;
+  }
+  if (found && ndevcells < 8 && s->len < 16) {
     fpr_dev_t *d = &devcells[ndevcells];
     d->tid = T_DEVICE;
     d->var = 0;
@@ -384,9 +365,7 @@ static int64_t disk_wait(uint64_t page, const char *src, uint64_t len, int write
         qos_hal->blk_release(job); /* the worker's reference keeps the buffer */
         fpr_actor_fail("blk: request timed out (the disk worker stalled)");
       }
-      if (sleep_us < 200) {
-        sleep_us = sleep_us < 25 ? 25 : (sleep_us < 50 ? 50 : (sleep_us < 100 ? 100 : 200));
-      }
+      if (sleep_us < 200) sleep_us = blk_next_sleep_us(sleep_us);
     } while (1);
   done:
     fpr_actor_cleanup_clear(job);
@@ -489,6 +468,35 @@ FPR_FN(fpr_g_blkWaitInbox, h_blkWaitInbox, 2);
  * there; the app stays freestanding.  A host built without GFX=1
  * leaves these entries NULL, and calling one is a missing capability,
  * reported the same honest way stubs.c reports the bus tier. */
+static uw put_dec(char *d, uw v) {
+  char t[24];
+  uw n = 0, k = 0;
+  do { t[n++] = (char)('0' + v % 10); v /= 10; } while (v);
+  while (n) d[k++] = t[--n];
+  return k;
+}
+
+static V mktup2i(sw a, sw b) {
+  V *r = (V *)fpr_alloc(24);
+  ((hdr_t *)r)->tid = 4; ((hdr_t *)r)->var = 0;
+  r[1] = TAG(a); r[2] = TAG(b);
+  return (V)r;
+}
+
+static void copy_cstr(V sv, char *dst, uw cap, const char *what) {
+  if (ISINT(sv) || TID(sv) != T_STR) fpr_cpanic(what);
+  str_t *s = (str_t *)sv;
+  uw n = s->len < cap - 1 ? s->len : cap - 1;
+  for (uw i = 0; i < n; i++) dst[i] = (char)s->bytes[i];
+  dst[n] = 0;
+}
+
+/* ---- gfx: the nullable table tier ----------------------------------
+ * The renderer (and Mesa's dynamic linking) lives in the HOST image --
+ * the one boundary the static philosophy concedes, kept concentrated
+ * there; the app stays freestanding.  A host built without GFX=1
+ * leaves these entries NULL, and calling one is a missing capability,
+ * reported the same honest way stubs.c reports the bus tier. */
 static void need_gfx(void) {
   if (!qos_hal->gfx_init)
     fpr_cpanic("gfx: capability not granted by this host (build qosp with GFX=1)");
@@ -498,30 +506,21 @@ static void need_gfx(void) {
  * panicking on its first frame */
 static V h_glHas(V d) { (void)d; return TAG(qos_hal->gfx_init ? 1 : 0); }
 FPR_FN(fpr_g_glHas, h_glHas, 1);
-static V h_glInit_ret(void) {
-  int w = 0, h = 0;
-  if (qos_hal->gfx_dims) qos_hal->gfx_dims(&w, &h);
-  V *r = (V *)fpr_alloc(24);
-  ((hdr_t *)r)->tid = 4; ((hdr_t *)r)->var = 0;
-  r[1] = TAG(w); r[2] = TAG(h);
-  return (V)r;
-}
 static V h_glInit(V wv, V hv) {
   fpr_confined_refuse("glInit (the display)");
   need_gfx();
   if (!ISINT(wv) || !ISINT(hv)) fpr_cpanic("glInit: w h must be Ints");
   qos_hal->gfx_init((int)UNTAG(wv), (int)UNTAG(hv));
-  return h_glInit_ret();
+  int w = 0, h = 0;
+  if (qos_hal->gfx_dims) qos_hal->gfx_dims(&w, &h);
+  return mktup2i(w, h);
 }
 static V h_glRender(V scene) {
   fpr_confined_refuse("glRender (the display)");
   need_gfx();
   int64_t draws, dynBytes;
   qos_hal->gfx_render((uint64_t)scene, &draws, &dynBytes);
-  V *r = (V *)fpr_alloc(24);
-  ((hdr_t *)r)->tid = 4; ((hdr_t *)r)->var = 0; /* (draws, dynBytes) */
-  r[1] = TAG((sw)draws); r[2] = TAG((sw)dynBytes);
-  return (V)r;
+  return mktup2i((sw)draws, (sw)dynBytes);
 }
 /* ---- glRenderUi scene ui dist -> (draws, dynBytes): the scene, then the 2D layer */
 static V h_glRenderUi(V scene, V ui, V distv) {
@@ -531,20 +530,13 @@ static V h_glRenderUi(V scene, V ui, V distv) {
   if (!ISINT(distv)) fpr_cpanic("glRenderUi: dist must be an Int (milli)");
   int64_t draws, dynBytes;
   qos_hal->gfx_render_ui((uint64_t)scene, (uint64_t)ui, (int64_t)UNTAG(distv), &draws, &dynBytes);
-  V *r = (V *)fpr_alloc(24);
-  ((hdr_t *)r)->tid = 4; ((hdr_t *)r)->var = 0;
-  r[1] = TAG((sw)draws); r[2] = TAG((sw)dynBytes);
-  return (V)r;
+  return mktup2i((sw)draws, (sw)dynBytes);
 }
 static V h_glSavePpm(V pathv) {
   fpr_confined_refuse("glSavePpm (the display)");
   need_gfx();
-  if (ISINT(pathv) || TID(pathv) != T_STR) fpr_cpanic("glSavePpm: path must be a String");
-  str_t *p = (str_t *)pathv;
   char path[256];
-  uw n = p->len < sizeof path - 1 ? p->len : sizeof path - 1;
-  for (uw i = 0; i < n; i++) path[i] = (char)p->bytes[i];
-  path[n] = 0;
+  copy_cstr(pathv, path, sizeof path, "glSavePpm: path must be a String");
   return TAG(qos_hal->gfx_save_ppm(path));
 }
 static V h_inputPoll(V u) {
@@ -582,13 +574,9 @@ FPR_FN(fpr_g_sndPlay, h_sndPlay, 1);
 static V h_sndMusic(V pathv, V volv) {
   fpr_confined_refuse("sndMusic (the sound device)");
   if (!qos_hal->snd_music) fpr_cpanic("snd: music not granted by this host (a pre-v9 qosp)");
-  if (ISINT(pathv) || TID(pathv) != T_STR) fpr_cpanic("sndMusic: path must be a String");
   if (!ISINT(volv)) fpr_cpanic("sndMusic: vol must be an Int");
-  str_t *p = (str_t *)pathv;
   char path[256];
-  uw n = p->len < sizeof path - 1 ? p->len : sizeof path - 1;
-  for (uw i = 0; i < n; i++) path[i] = (char)p->bytes[i];
-  path[n] = 0;
+  copy_cstr(pathv, path, sizeof path, "sndMusic: path must be a String");
   return TAG((sw)qos_hal->snd_music(path, (int64_t)UNTAG(volv)));
 }
 FPR_FN(fpr_g_sndMusic, h_sndMusic, 2);
@@ -597,13 +585,10 @@ static V h_glMesh(V namev, V textv) {
   fpr_confined_refuse("glMesh (the display)");
   need_gfx();
   if (!qos_hal->gfx_mesh_load) fpr_cpanic("gfx: mesh registry not granted by this host (a pre-v8 qosp)");
-  if (ISINT(namev) || TID(namev) != T_STR) fpr_cpanic("glMesh: name must be a String");
-  if (ISINT(textv) || TID(textv) != T_STR) fpr_cpanic("glMesh: mesh text must be a String");
-  str_t *n = (str_t *)namev, *t = (str_t *)textv;
   char name[32];
-  uw k = n->len < sizeof name - 1 ? n->len : sizeof name - 1;
-  for (uw i = 0; i < k; i++) name[i] = (char)n->bytes[i];
-  name[k] = 0;
+  copy_cstr(namev, name, sizeof name, "glMesh: name must be a String");
+  if (ISINT(textv) || TID(textv) != T_STR) fpr_cpanic("glMesh: mesh text must be a String");
+  str_t *t = (str_t *)textv;
   return TAG((sw)qos_hal->gfx_mesh_load(name, (const char *)t->bytes, t->len));
 }
 FPR_FN(fpr_g_glMesh, h_glMesh, 2);
@@ -619,6 +604,66 @@ static V h_timeNow(V u) {
 FPR_FN(fpr_g_timeNow, h_timeNow, 1);
 FPR_FN(fpr_g_glSavePpm, h_glSavePpm, 1);
 FPR_FN(fpr_g_inputPoll, h_inputPoll, 1);
+
+/* ---- input, clock, and audio device classes (hal/classes) ----------- */
+static uint32_t portable_in_read(void *st, uint8_t *dst, uint32_t max) {
+  (void)st;
+  if (!qos_hal->gfx_input_poll) return 0;
+  uint32_t off = 0;
+  while (off + QOS_INPUT_EVENT <= max) {
+    int64_t kind = 0, a = 0, c = 0;
+    qos_hal->gfx_input_poll(&kind, &a, &c);
+    if (!kind) break;
+    if (kind == 1) {
+      dst[off++] = 1;
+      dst[off++] = (uint8_t)(a & 0xff);
+      dst[off++] = (uint8_t)((a >> 8) & 0xff);
+      dst[off++] = (uint8_t)(c ? 1 : 0);
+    }
+  }
+  return off;
+}
+static const qos_input_ops portable_input_ops = {QOS_INPUT_OPS_VERSION, portable_in_read};
+static V h_inRead(V d) {
+  fpr_confined_refuse("inRead (the keyboard and pointer)");
+  if (ISINT(d) || !d || TID(d) != T_DEVICE) fpr_cpanic("inRead: not a Device");
+  if (!qos_hal->gfx_input_poll) fpr_cpanic("inRead: capability not granted by this host");
+  uint8_t buf[64 * QOS_INPUT_EVENT];
+  uint32_t n = portable_input_ops.read(0, buf, sizeof buf);
+  return (V)fpr_mkstr(buf, n);
+}
+FPR_FN(fpr_g_inRead, h_inRead, 1);
+
+static uint32_t portable_clk_now(void *st, char *dst, uint32_t max) {
+  (void)st;
+  if (!qos_hal->clock_now || max < 21) return 0;
+  int64_t secs = qos_hal->clock_now();
+  if (secs <= 0) return 0;
+  return (uint32_t)put_dec(dst, (uw)secs * 1000u);
+}
+static const qos_clock_ops portable_clock_ops = {QOS_CLOCK_OPS_VERSION, portable_clk_now};
+static V h_clkNow(V d) {
+  if (ISINT(d) || !d || TID(d) != T_DEVICE) fpr_cpanic("clkNow: not a Device");
+  char buf[24];
+  uint32_t n = portable_clock_ops.now(0, buf, sizeof buf);
+  return (V)fpr_mkstr((const uint8_t *)buf, n);
+}
+FPR_FN(fpr_g_clkNow, h_clkNow, 1);
+
+static int portable_aud_tone(void *st, uint32_t freq_hz, uint32_t ms) {
+  (void)st;
+  if (!qos_hal->snd_play) return -1;
+  return qos_hal->snd_play(0, (int64_t)freq_hz, (int64_t)freq_hz, (int64_t)ms, 500, 0) < 0 ? -1 : 0;
+}
+static const qos_audio_ops portable_audio_ops = {QOS_AUDIO_OPS_VERSION, portable_aud_tone};
+static V h_audTone(V d, V f, V ms) {
+  fpr_confined_refuse("audTone (the sound device)");
+  if (ISINT(d) || !d || TID(d) != T_DEVICE) fpr_cpanic("audTone: not a Device");
+  if (!ISINT(f) || !ISINT(ms) || UNTAG(f) < 0 || UNTAG(ms) < 0)
+    fpr_cpanic("audTone: frequency and duration must be non-negative Ints");
+  return TAG((sw)portable_audio_ops.tone(0, (uint32_t)UNTAG(f), (uint32_t)UNTAG(ms)));
+}
+FPR_FN(fpr_g_audTone, h_audTone, 3);
 
 /* Shared actor binding; Portable uses its socket transport inside the actor.
  * Found by -I (QOS: hal/; the installed SDK: platform/hal/), so an image
@@ -656,13 +701,6 @@ static V h_capture_console(V pidv) {
 }
 FPR_FN(fpr_g_Sys_x2ecaptureConsole, h_capture_console, 1);
 
-static uw put_dec(char *d, uw v) {
-  char t[24];
-  uw n = 0, k = 0;
-  do { t[n++] = (char)('0' + v % 10); v /= 10; } while (v);
-  while (n) d[k++] = t[--n];
-  return k;
-}
 static V h_take_console(V pidv) {
   fpr_confined_refuse("Sys.takeConsole (another program's console)");
   if (!ISINT(pidv)) fpr_cpanic("Sys.takeConsole: pid must be an Int");

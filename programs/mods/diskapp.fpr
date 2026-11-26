@@ -18,7 +18,7 @@ update AW.Tick m | not m.focused = (m, Nil).
 update (AW.Key k) m | k == AW.keyR = fetch m.
 update (AW.Wheel dy dx) m = (AV.wheel (rows m) dy m, Nil).
 update (AW.Pointer x y buttons) m = (AV.pointer (rows m) x y buttons m, Nil).
-update (AW.Key k) m = (navigate k m, Nil).
+update (AW.Key k) m = (AV.navigate (rows m) k m, Nil).
 update AW.Tick m = case m.phase of
     AW.Ready -> if m.ticks >= 9 then fetch m else ({m | ticks = m.ticks + 1}, Nil)
   | other -> (m, Nil).
@@ -29,13 +29,6 @@ update (AW.Arrived token result) m = if token != m.token or not m.busy then (m, 
   | other -> ({m | busy = False, phase = AW.Failed "invalid storage result"}, Nil).
 update other m = (m, Nil).
 rows m = ST.wrapLinesWith (AV.metrics m) m.rows.
-navigate k m | k == AW.keyUp = AV.scroll (rows m) (0 - 1) m.
-navigate k m | k == AW.keyDown = AV.scroll (rows m) 1 m.
-navigate k m | k == AW.keyPageUp = spec = AV.metrics m; AV.scroll (rows m) (0 - spec.visible) m.
-navigate k m | k == AW.keyPageDown = spec = AV.metrics m; AV.scroll (rows m) spec.visible m.
-navigate k m | k == AW.keyHome = AV.seek (rows m) 0 m.
-navigate k m | k == AW.keyEnd = AV.seek (rows m) (ST.count (rows m)) m.
-navigate other m = m.
 view vp m = (AV.frame vp "Disk" "Read-only storage statistics" (rows m) m.scroll, Nil, AW.status m.phase).
 
 run me = AS.run me init update view.

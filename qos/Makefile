@@ -1,21 +1,5 @@
-# qos/Makefile — the QOS backend, built SEPARATELY from the programs.
-#
-#   make portable          # qosp: the QOS Portable host (unix)
-#   make portable-run      # qosp running ../app.qa
-#   make portable-gl       # qosp-gl: the same, in a GLFW window (a desktop)
-#   make portable-es       # qosp-es: the same, on EGL/GLES + KMS, no window
-#                          #   system at all (a Pi; see tools/buildroot)
-#   make native            # qos-native.elf: the kernel (system.fpr) for QEMU virt
-#   make native-run        # boot it as a kernel with a seeded disk
-#
-# QOS Portable is NOT an OS: qosp hosts ONE FP-RISC .qa by satisfying
-# its std assumptions through the qos_hal_t table.  QOS Native IS the
-# OS: system.fpr compiled AOT for RISC-V, linked with hal/{core,virt},
-# loaded by QEMU as the kernel.  Both consume ../hal — the C layer is
-# a HAL, not an implementation.  The kernel is itself an FP-RISC
-# program, so `native` invokes the fprisc checkout's fpr as a TOOL; the build
-# products and dependency graph stay entirely on this side.
-
+# qos/Makefile — compatibility wrapper for QOS backends and QEMU/disk targets.
+# Host and kernel build logic lives in tools/build-host.sol and tools/build-native.sol.
 include ../dependency.mk
 
 HAL    = ../hal
@@ -24,180 +8,62 @@ FPR    = ..
 
 HARTS ?= 2
 QOSHARTS ?= 8
-# (the host arena has no size: qosp reserves address space for it at run
-# time -- portable/host.c, docs/2026-09-19-BOUNDS.md; QOSP_ARENA_MB caps a run)
-CROSS  = riscv64-unknown-elf-
 QEMU   = qemu-system-riscv64
-# outputs qos.py redirects into the project's .qos/ (an installed tree is
-# never written to); the host binaries qosp / qosp-gl stay beside this file
 BUILD  ?= build
 KERNEL ?= qos-native.elf
 DISK   ?= disk.img
 PDISK  ?= qosp.disk
 ACCEL  = -accel tcg,thread=multi
 TIMEOUT := $(shell command -v timeout 2>/dev/null || echo "")
-UNAME_S := $(shell uname -s)
-ifeq ($(UNAME_S),Darwin)
-HOST_LDFLAGS :=
-DESKTOP_GL_LIBS := $(shell pkg-config --libs glfw3 2>/dev/null) -framework OpenGL -lpthread -lm
-# the sound tier (hal/unix/snd_raw.c): AudioQueue on macOS
-SND_FLAGS := -DQOSP_SND_AQ
-SND_LIBS := -framework AudioToolbox -framework CoreFoundation
-else
-HOST_LDFLAGS := -no-pie
-DESKTOP_GL_LIBS := $(shell pkg-config --libs glfw3 2>/dev/null) -lGL -lpthread -lm
-# the sound tier: ALSA when its headers are installed (libasound2-dev),
-# else the WAV dump only (FPR_SND_DUMP) -- never a build failure
-ALSA_LIBS := $(shell pkg-config --libs alsa 2>/dev/null)
-SND_FLAGS := $(if $(ALSA_LIBS),-DQOSP_SND_ALSA,)
-SND_LIBS := $(ALSA_LIBS)
-endif
-DESKTOP_GL_CFLAGS := $(shell pkg-config --cflags glfw3 2>/dev/null)
 
-# ---- QOS Portable: the qosp host ---------------------------------------
 QOSP_SRC = portable/host.c portable/sha256.c portable/haltab.c portable/store.c \
            portable/compile.c portable/park.c \
            $(HAL)/unix/net_raw.c $(HAL)/unix/blk_raw.c $(HAL)/unix/hostlog.c \
            $(HAL)/unix/tty_raw.c $(HAL)/unix/evdev_raw.c $(HAL)/unix/mice_raw.c $(HAL)/unix/snd_raw.c \
            ../loader/qaimg.c
+QOSP_FPR = portable/qosp.fpr ../programs/mods/qar.fpr ../programs/mods/manifest.fpr ../programs/mods/qaimg.fpr
+QOSP_GL_SRC = $(QOSP_SRC) $(HAL)/unix/gfx.c
+RT_CORE = $(FRUNTIME)/runtime.c $(FRUNTIME)/actors.c $(FRUNTIME)/bits.c \
+          $(FRUNTIME)/vec.c $(FRUNTIME)/sstr.c $(FRUNTIME)/mod.c $(FRUNTIME)/buddy.c
 
-# the shell's half of the ABI stamp is DERIVED from the authoritative
-# source (Codegen.hs codegenRev), not hardcoded -- the first stamped
-# build caught main.c's #define 7 lagging a rev-8 compiler within the
-# hour.  Falls back to main.c's #define if the compiler tree is absent.
 CODEGEN_REV := $(shell grep -m1 '^codegenRev = ' $(FPRISC_ROOT)/compiler/Codegen.hs 2>/dev/null | grep -o '[0-9]\+' | head -1)
 REV_FLAG := $(if $(CODEGEN_REV),-DQOSP_CODEGEN_REV=$(CODEGEN_REV),)
-
-# qosp IS an FP-RISC program (portable/qosp.fpr, a Base program for the posix
-# system).  $(QOSP_SRC) is its HAL: the device tiers and the five primitives
-# in portable/host.c that qosp.fpr declares and does not define.  `fpr build
-# --with` links them beside the runtime; --harts 1 because the host's own
-# runtime only ever runs main (the APP's harts are pthreads host.c starts).
-# FPR_HOME names the compiler's checkout here: dependency.mk points it at QOS
-# for module resolution, and qosp.fpr's `use` lines are importer-relative.
-QOSP_FPR = portable/qosp.fpr ../programs/mods/qar.fpr ../programs/mods/manifest.fpr ../programs/mods/qaimg.fpr
-QOSP_DEFS = -DQOSP_HOST $(REV_FLAG)
-# on arm64 the app keeps its hart in x28; the host's C must never borrow it,
-# or its fault handler could not ask the app which actor was running.
-# QOSP_ARCH is the TARGET's arch -- the host's own, unless a cross build
-# (tools/buildroot) names another.
 QOSP_ARCH ?= $(shell uname -m)
-ifneq ($(filter arm64 aarch64,$(QOSP_ARCH)),)
-QOSP_DEFS += -ffixed-x27 -ffixed-x28 -DFPR_HART_X28
-endif
-QOSP_INCS = -I$(HAL)/unix -Iappside -Iportable
-# FPRBUILD_EXTRA is how a cross build hands `fpr build` its --cc, so that
-# one source list serves the host build and the image (tools/buildroot)
-fpr_host = FPR_HOME="$(FPRISC_ROOT)" "$(FPRC)" build portable/qosp.fpr -o $(1) --harts 1 \
-	  $(FPRBUILD_EXTRA) \
-	  $(foreach f,$(2),--with $(f)) \
-	  $(foreach f,$(QOSP_DEFS) $(QOSP_INCS) $(3),--cflag '$(f)') \
-	  $(foreach f,$(4),--link $(f))
 
 QOSP_OUT ?= qosp
 portable: $(QOSP_OUT)
 $(QOSP_OUT): $(QOSP_SRC) $(QOSP_FPR) $(RT_CORE) $(FPRC) $(FPRISC_ROOT)/core/prelude.fpr appside/qos_abi.h portable/park.h $(FPRISC_ROOT)/compiler/Codegen.hs
-	$(call fpr_host,$(QOSP_OUT),$(QOSP_SRC),$(SND_FLAGS),$(SND_LIBS))
+	QOSP_ARCH="$(QOSP_ARCH)" QOSP_OUT="$(QOSP_OUT)" FPRBUILD_EXTRA="$(FPRBUILD_EXTRA)" "$(FPRC)" sol ../tools/build-host.sol plain "$(QOSP_OUT)"
 
 portable-run: portable
 	./qosp --yes $(FPR)/app.qa
 
-# ---- QOS Portable with the desktop-GL gfx tier --------
-# GLFW window + OpenGL 3.3-core shaders; keys arrive as SYNTHETIC EVDEV
-# (gfx.c translates GLFW keycodes and injects them into evdev_raw's one
-# modifier machine, so the appkit keymap and FPR_EVDEV replay are
-# untouched).  The same source builds on macOS (OpenGL/gl3.h declares
-# prototypes; Linux needs GL_GLEXT_PROTOTYPES, set in gfx.c).
-QOSP_GL_SRC = $(QOSP_SRC) $(HAL)/unix/gfx.c
 portable-gl: qosp-gl
 qosp-gl: $(QOSP_GL_SRC) $(QOSP_FPR) $(RT_CORE) $(FPRC) $(FPRISC_ROOT)/core/prelude.fpr appside/qos_abi.h portable/park.h $(FPRISC_ROOT)/compiler/Codegen.hs
-	$(call fpr_host,qosp-gl,$(QOSP_GL_SRC),-DQOSP_GFX -DFPR_DESKTOP_GL $(SND_FLAGS) $(DESKTOP_GL_CFLAGS),$(DESKTOP_GL_LIBS) $(SND_LIBS))
+	QOSP_ARCH="$(QOSP_ARCH)" FPRBUILD_EXTRA="$(FPRBUILD_EXTRA)" "$(FPRC)" sol ../tools/build-host.sol gl qosp-gl
 
-# ---- QOS Portable with the EGL/GLES gfx tier (no window system) --------
-# The tier gfx.c was WRITTEN for and the one a Pi runs: surfaceless EGL,
-# an offscreen ES 3.1 FBO, and drm_scanout.h putting each frame on the
-# monitor through a KMS dumb buffer.  No GLFW, no X, no Wayland -- the
-# only libraries are Mesa's EGL and GLESv2, so this is what goes in a
-# Buildroot image (tools/buildroot).  Keys and the mouse come from the
-# real evdev/mice tiers rather than GLFW's synthetic ones.  Linux only:
-# macOS has no EGL, and `portable-gl` is its full-screen answer.
 ES_GL_LIBS ?= -lEGL -lGLESv2 -lpthread -lm
 QOSP_ES_OUT ?= qosp-es
 portable-es: $(QOSP_GL_SRC) $(QOSP_FPR) appside/qos_abi.h portable/park.h $(FPRISC_ROOT)/compiler/Codegen.hs
-	$(call fpr_host,$(QOSP_ES_OUT),$(QOSP_GL_SRC),-DQOSP_GFX $(SND_FLAGS),$(ES_GL_LIBS) $(SND_LIBS))
+	QOSP_ARCH="$(QOSP_ARCH)" ES_GL_LIBS="$(ES_GL_LIBS)" FPRBUILD_EXTRA="$(FPRBUILD_EXTRA)" "$(FPRC)" sol ../tools/build-host.sol es "$(QOSP_ES_OUT)"
 
-# ---- QOS Portable, aarch64 cross (verifies the x28 hart discipline
 portable-a64: $(QOSP_SRC) appside/qos_abi.h portable/park.h $(FPRISC_ROOT)/compiler/Codegen.hs
 	aarch64-linux-gnu-gcc -static -O2 -Wall -Wextra -DFPR_POSIX -DQOSP_HOST -DFPR_NHARTS=$(QOSHARTS) $(REV_FLAG) \
 	  -I$(FRUNTIME) -I$(HAL)/unix -Iappside $(QOSP_SRC) -o qosp-a64 -lpthread -lm
 
-# ---- QOS Native: the kernel --------------------------------------------
-ACTORS_SRC ?= $(FRUNTIME)/actors.c
-RT_CORE = $(FRUNTIME)/runtime.c $(ACTORS_SRC) $(FRUNTIME)/bits.c \
-          $(FRUNTIME)/vec.c $(FRUNTIME)/sstr.c $(FRUNTIME)/mod.c $(FRUNTIME)/buddy.c
-RT_VIRT = $(FMACHINE)/virt/crt0.S $(FMACHINE)/virt/ctx.S $(FMACHINE)/virt/ctx_fab.c \
-          $(FMACHINE)/virt/hal.c $(FMACHINE)/virt/memshim.c
-# XLEN=32: an RV32 kernel for qemu-system-riscv32 (bsp/virt32). rv32imac has
-# a libgcc multilib in the toolchain; rv32ima would link the rv64 one.
 XLEN ?= 64
 ifeq ($(XLEN),32)
-ARCHFLAGS = -march=rv32imac_zicsr_zifencei -mabi=ilp32 -mcmodel=medany -ffixed-x27
-FPRC_TARGET = --target=rv32
 QEMU = qemu-system-riscv32
-else
-ARCHFLAGS = -march=rv64imafdc_zicsr -mabi=lp64 -mcmodel=medany -ffixed-x27
-FPRC_TARGET =
 endif
-CFLAGS = $(FPR_LAYOUT_CFLAGS) $(ARCHFLAGS) -DFPR_NHARTS=$(HARTS) \
-         -ffreestanding -nostdlib -nostartfiles -O2 -Wall -Wextra \
-         -fno-builtin -fno-stack-protector -ffunction-sections -fdata-sections
-
-# the rodata fallback registry: placeholder .qa's from the manifests
-QAPPS = TUIAppLauncher TUINotes TUIClock HelloProc
-$(BUILD)/qa0/%.qa: $(FPR)/apps/%.toml $(FPR)/tools/qa-placeholder.sol
-	@mkdir -p $(BUILD)/qa0
-	"$(SOL)" "$(FPR)/tools/qa-placeholder.sol" "$<" "$@"
-
-$(BUILD)/apps_data.c: $(patsubst %,$(BUILD)/qa0/%.qa,$(QAPPS)) ../tools/qa-registry.sol
-	"$(SOL)" "../tools/qa-registry.sol" "$@" $(patsubst %,$(BUILD)/qa0/%.qa,$(QAPPS))
-
-# SYSTEM: the kernel program (a test kernel, e.g. tests/nativeimage.fpr,
-# can stand in for it; pair it with KERNEL=<another elf>)
+ACTORS_SRC ?= $(FRUNTIME)/actors.c
 SYSTEM ?= $(FPR)/programs/system.fpr
-$(BUILD)/system.s: $(FPRC) $(SYSTEM) $(FPRISC_ROOT)/core/prelude.fpr FORCE
-	@mkdir -p $(BUILD)
-	LC_ALL=C.UTF-8 "$(FPRC)" --system=qos-native $(FPRC_TARGET) --prelude=$(FPRISC_ROOT)/core/prelude.fpr \
-	  $(SYSTEM) $@
-
-# the MACHINE LAYER is the compiler tree's (its CLINT unit is FP-RISC: virt.mk);
-# the DEVICES are this tree's (../hal/virt, qos-virt.mk).  One copy of each.
-VIRT_MACHINE := $(FMACHINE)
-include $(FMACHINE)/virt/virt.mk
-ifeq ($(XLEN),32)
-VIRT_FPR = $(FMACHINE)/virt/rawunit.c # the CLINT is hal.c's C on rv32 (raw units lower to rv64 only)
-endif
-QOS_HAL := $(abspath $(HAL))
-include $(HAL)/virt/qos-virt.mk
-
-# NATIVE_CFLAGS_EXTRA: test-only switches for a test kernel (e.g.
-# -DQOS_BLK_TEST, tools/disk-harden-check.py); empty in every real build
 NATIVE_CFLAGS_EXTRA ?=
-native: portable/sha256.c $(BUILD)/system.s $(BUILD)/apps_data.c $(RT_VIRT) $(VIRT_FPR) $(QOS_VIRT_HAL) $(RT_CORE) $(FMACHINE)/virt/link.ld
-	$(CROSS)gcc $(CFLAGS) $(NATIVE_CFLAGS_EXTRA) -Wl,--gc-sections -T $(FMACHINE)/virt/link.ld -I$(FRUNTIME) -I$(FMACHINE)/virt \
-	  $(RT_VIRT) $(VIRT_FPR) $(QOS_VIRT_HAL) $(BUILD)/system.s $$(cat $(BUILD)/system.s.units) $(RT_CORE) \
-	  ../loader/apps.c $(BUILD)/apps_data.c ../loader/qaimg.c ../loader/process.c portable/sha256.c $(NATIVE_TEST_SRC) \
-	  -lgcc -o $(KERNEL)
+native: portable/sha256.c $(SYSTEM) $(FPRC)
+	XLEN=$(XLEN) HARTS=$(HARTS) BUILD="$(abspath $(BUILD))" SYSTEM="$(abspath $(SYSTEM))" KERNEL="$(abspath $(KERNEL))" ACTORS_SRC="$(ACTORS_SRC)" NATIVE_CFLAGS_EXTRA="$(NATIVE_CFLAGS_EXTRA)" NATIVE_TEST_SRC="$(NATIVE_TEST_SRC)" "$(FPRC)" sol ../tools/build-native.sol "$(abspath $(KERNEL))"
 
 $(DISK): $(FPR)/tools/mkdisk.sol $(FPR)/tools/qlog-seed.sol $(FPR)/tools/qlog-preserve.sol
 	"$(SOL)" $(FPR)/tools/mkdisk.sol $(DISK) 8
 
-# ---- the portable disk ---------------------------------------------------
-# qosp.disk is a QLOG image -- the SAME format native-run's disk.img
-# uses, seeded by the SAME tool.  qosp creates a blank one on first
-# `device "blk"` (FPR_DISK / FPR_DISK_MB override path and size);
-# `make disk-seed QAS="a.qa b.qa"` installs built .qa apps onto it as
-# apps/<Id>.qa records plus the apps/index, ready for the System.qa
-# loading path.
 disk-seed: $(FPR)/tools/mkdisk.sol $(FPR)/tools/qlog-seed.sol $(FPR)/tools/qlog-preserve.sol
 	"$(SOL)" $(FPR)/tools/mkdisk.sol $(PDISK) 8 $(QAS)
 

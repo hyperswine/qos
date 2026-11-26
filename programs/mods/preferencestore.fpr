@@ -4,7 +4,7 @@ unsafe module.
 E = use "editorpreferences".
 T = use "terminalpreferences".
 EP = use "ep#d65056c9d7dc9c18".
-ED = use "epdeadline".
+ED = use "epclient".
 Endpoint = use "leaseslots#0eba65251ebb9450".
 AC = use "std/actor#2de24bf2bdd5cb87".
 Storage = use "std/storageclient".
@@ -68,8 +68,8 @@ migrate until me ns old proposed recovery = Err "preference type mismatch".
 # Namespace forwards new opens from its own actor. Keep those envelopes off
 # the correlated namespace reply channel used by the migration worker.
 copyRecovery until owner id ns path recovery me =
-  result = case ED.openUntil until me ns path "save" of Err why -> Err why
-    | Ok endpoint -> case ED.withClose until me endpoint (ED.writeUntil until me endpoint (EP.IStr recovery)) of
+  result = case ED.openPairUntil until me ns path "save" of Err why -> Err why
+    | Ok endpoint -> case ED.withClose until me endpoint (ED.writePairUntil until me endpoint (EP.IStr recovery)) of
         Err why -> Err "recovery migration: {why}"
       | Ok u -> Ok Unit;
   _ = AC.reply (owner, id) result; Unit.

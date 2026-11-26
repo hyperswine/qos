@@ -19,7 +19,7 @@ update (AW.Wheel dy dx) m = (AV.wheel (rows m) dy m, Nil).
 update (AW.Pointer x y buttons) m = (AV.pointer (rows m) x y buttons m, Nil).
 update (AW.Key k) m = if k == AW.keyN or k == AW.keyW or k == AW.keyE or k == AW.keyH then
   fetch {m | wanted = (if k == AW.keyN then 0 else if k == AW.keyW then 1 else if k == AW.keyE then 2 else 3)}
-  else if k == AW.keyR then fetch m else if k == AW.keyP then ({m | paused = not m.paused}, Nil) else (navigate k m, Nil).
+  else if k == AW.keyR then fetch m else if k == AW.keyP then ({m | paused = not m.paused}, Nil) else (AV.navigate (rows m) k m, Nil).
 update AW.Tick m = case m.phase of
     AW.Ready -> if m.paused then (m, Nil) else if m.ticks >= 9 then fetch m else ({m | ticks = m.ticks + 1}, Nil)
   | other -> (m, Nil).
@@ -31,13 +31,6 @@ update (AW.Arrived token result) m = if token != m.token or not m.busy then (m, 
   | other -> ({m | busy = False, phase = AW.Failed "invalid logs result"}, Nil).
 update other m = (m, Nil).
 rows m = ST.wrapLinesWith (AV.metrics m) m.rows.
-navigate k m | k == AW.keyUp = AV.scroll (rows m) (0 - 1) m.
-navigate k m | k == AW.keyDown = AV.scroll (rows m) 1 m.
-navigate k m | k == AW.keyPageUp = spec = AV.metrics m; AV.scroll (rows m) (0 - spec.visible) m.
-navigate k m | k == AW.keyPageDown = spec = AV.metrics m; AV.scroll (rows m) spec.visible m.
-navigate k m | k == AW.keyHome = AV.seek (rows m) 0 m.
-navigate k m | k == AW.keyEnd = AV.seek (rows m) (ST.count (rows m)) m.
-navigate other m = m.
 sevPath 0 = "/logs/normal".
 sevPath 1 = "/logs/warns".
 sevPath 2 = "/logs/errors".

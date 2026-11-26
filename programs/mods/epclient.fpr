@@ -21,7 +21,6 @@
 
 EP = use "ep#d65056c9d7dc9c18".
 AC = use "std/actor#2de24bf2bdd5cb87".
-ED = use "epdeadline#96e69ecbbd8c7fce".
 
 IoV = EP.IoV.
 NsOpen = EP.NsOpen.
@@ -105,25 +104,54 @@ owner ep =
   Endpoint o h = ep;
   (o, Endpoint o h).
 
-# Deadline-aware forms (ep's Timed protocol, as epdeadline.fpr): every call
-# gives up at `until` (Wire.now microseconds) instead of waiting.
-openUntil : Int -> Int -> Int -> String -> String -> Result Endpoint String .
-openUntil until me ns url mode = case ED.openUntil until me ns url mode of
+# Deadline-aware pair forms (formerly epdeadline.fpr) and owned Endpoint wrappers.
+openPairUntil : unsafe Int -> Int -> Int -> String -> String -> Result (Int, Int) String .
+openPairUntil until me ns url mode = case AC.callUntil until me ns (NsOpen url mode) of
+    Err why -> Err "namespace: {why}"
+  | Ok answer -> case answer of
+        Err why -> Err why
+      | Ok (owner, id) -> awaitOpen until me owner id.
+awaitOpen : unsafe Int -> Int -> Int -> Int -> Result (Int, Int) String .
+awaitOpen until me owner id = case AC.awaitReplyUntil until me owner id of
+    Err why -> Err "the owner {why} before answering open"
+  | Ok answer -> (case answer of
+        Opened handle -> Ok (owner, handle)
+      | Refused why -> Err why
+      | Redirect other -> awaitOpen until me other id).
+readPairUntil until me ep n = (owner, h) = ep; EP.flat (AC.callUntil until me owner (EP.Timed until (Read h n))).
+writePairUntil until me ep bytes = (owner, h) = ep; EP.flat (AC.callUntil until me owner (EP.Timed until (Write h bytes))).
+closePairUntil until me ep = (owner, h) = ep; EP.flat (AC.callUntil until me owner (EP.Timed until (Close h))).
+readOnceUntil : unsafe Int -> Int -> Int -> String -> Result IoV String .
+readOnceUntil until me ns url = case openPairUntil until me ns url "read" of
+    Err why -> Err why
+  | Ok ep -> withClose until me ep (readPairUntil until me ep 0).
+writeOnceUntil : unsafe Int -> Int -> Int -> String -> IoV -> Result IoV String .
+writeOnceUntil until me ns url bytes = case openPairUntil until me ns url "write" of
+    Err why -> Err why
+  | Ok ep -> withClose until me ep (writePairUntil until me ep bytes).
+withClose until me ep primary = case closePairUntil until me ep of
+    Ok value -> primary
+  | Err cleanup -> (case primary of
+        Ok value -> Err "endpoint close failed: {cleanup}"
+      | Err why -> Err "{why}; endpoint close failed: {cleanup}").
+
+openUntil : unsafe Int -> Int -> Int -> String -> String -> Result Endpoint String .
+openUntil until me ns url mode = case openPairUntil until me ns url mode of
     Err why -> Err why
   | Ok p -> openedPair p.
 openedPair : (Int, Int) -> Result Endpoint String .
 openedPair p =
   (o, h) = p;
   Ok (Endpoint o h).
-readUntil : unsafe Int -> Int -> Endpoint -> Int -> (Result IoV String, Endpoint) .
+readUntil : Int -> Int -> Endpoint -> Int -> (Result IoV String, Endpoint) .
 readUntil until me ep n =
   Endpoint o h = ep;
   (EP.flat (AC.callUntil until me o (EP.Timed until (Read h n))), Endpoint o h).
-writeUntil : unsafe Int -> Int -> Endpoint -> IoV -> (Result IoV String, Endpoint) .
+writeUntil : Int -> Int -> Endpoint -> IoV -> (Result IoV String, Endpoint) .
 writeUntil until me ep v =
   Endpoint o h = ep;
   (EP.flat (AC.callUntil until me o (EP.Timed until (Write h v))), Endpoint o h).
-closeUntil : unsafe Int -> Int -> Endpoint -> Result Int String .
+closeUntil : Int -> Int -> Endpoint -> Result Int String .
 closeUntil until me ep =
   Endpoint o h = ep;
   EP.flat (AC.callUntil until me o (EP.Timed until (Close h))).

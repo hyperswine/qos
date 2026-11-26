@@ -28,9 +28,9 @@ header key text = pre = "#: {key} ";
 kernel root work env xlen name =
   elf = "{work}/{name}-rv{xlen}.elf";
   cflags = header "cflags" (readPath "{root}/tests/{name}.fpr");
-  board = if xlen == 32 then ["XLEN=32","QOS_BOARD=virt32"] else [];
-  _ = B.runWith env (List.concat [["make","-s","-C","{root}/qos","native"], board,
-        ["SYSTEM={root}/tests/{name}.fpr","KERNEL={elf}","BUILD={work}/build-{name}-rv{xlen}","NATIVE_CFLAGS_EXTRA={cflags}"]]);
+  board = if xlen == 32 then [("XLEN","32"),("QOS_BOARD","virt32")] else [];
+  buildEnv = board + [("SYSTEM","{root}/tests/{name}.fpr"),("BUILD","{work}/build-{name}-rv{xlen}"),("NATIVE_CFLAGS_EXTRA",cflags)] + env;
+  _ = B.runWith buildEnv [B.setting "SOL" "sol","{root}/tools/build-native.sol",elf,"rv{xlen}"];
   elf.
 boot root work xlen name elf apps =
   disk = "{work}/{name}-rv{xlen}.img";

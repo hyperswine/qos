@@ -6,7 +6,7 @@ AC = use "std/actor#2de24bf2bdd5cb87".
 W = use "std/storage#d3bc6af554583437".
 S = use "../programs/mods/svc#b4e4e109ca696787".
 EP = use "../programs/mods/ep#d65056c9d7dc9c18".
-ED = use "../programs/mods/epdeadline#96e69ecbbd8c7fce".
+ED = use "../programs/mods/epclient#e843297bdf07a846".
 Endpoint = use "../programs/mods/epservice#436f606333c44f26".
 Files = use "../programs/mods/files#8303a8f9f02909ff".
 Sys.alive : Int -> Bool .

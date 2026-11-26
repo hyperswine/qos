@@ -23,7 +23,8 @@ session work kernel qhostArgs =
   B.query ["/bin/sh","-c",script].
 build root work env name system =
   kernel = "{work}/{name}.elf";
-  _ = B.runWith env ["make","-s","-C","{root}/qos","native","QOS_BOARD=virt-qlink","SYSTEM={system}","KERNEL={kernel}","BUILD={work}/build-{name}"];
+  buildEnv = [("QOS_BOARD","virt-qlink"),("SYSTEM",system),("BUILD","{work}/build-{name}")] + env;
+  _ = B.runWith buildEnv [B.setting "SOL" "sol","{root}/tools/build-native.sol",kernel,"rv64"];
   kernel.
 report name ok out = _ = print (if ok then "PASS {name}" else "FAIL {name}:\n{Str.slice out (Numeric.max 0 (Str.len out - 800)) (Str.len out)}"); ok.
 devices root work env =

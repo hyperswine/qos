@@ -12,7 +12,6 @@
  */
 #include "fpr.h"
 #include "../qos/store_abi.h"
-#include "imgcache.h"
 
 /* set from system.fpr's boot path via a thin wrapper below; keeps
  * buddy_init out of the fully-shared fpr_rt_init (a plain machine boot
@@ -357,46 +356,12 @@ static int digest_is(V wantv, const unsigned char *a, uw an, const unsigned char
  * before any of its layout is read. */
 #define QOS_NATIVE_ABI_ID ((uw)FPR_NATIVE_ABI + (sizeof(uw) == 4 ? 500000000u : 0u))
 
-/* The launch path's "already verified" record (imgcache.h): a placement of
- * the same bytes the same process just checked skips the second SHA-256. */
-static fpr_lock_t g_check_cache_lock;
-static imgcache_t g_check_cache;
-
-static int digest_strs(V shav, V relshav) {
-  return !ISINT(shav) && TID(shav) == T_STR && ((str_t *)shav)->len == 64 &&
-         !ISINT(relshav) && TID(relshav) == T_STR && ((str_t *)relshav)->len == 64;
-}
-
-/* take the record out, whatever the caller then decides (imgcache.h) */
-static imgcache_t check_cache_take(void) {
-  fpr_lock(&g_check_cache_lock);
-  imgcache_t r = imgcache_take(&g_check_cache);
-  fpr_unlock(&g_check_cache_lock);
-  return r;
-}
-
-static void check_cache_key(imgcache_t *k, const str_t *qa, const uw ext[6], V shav, V relshav) {
-  uintptr_t e[6];
-  for (int i = 0; i < 6; i++) e[i] = (uintptr_t)ext[i];
-  imgcache_key(k, (uintptr_t)fpr_current_pid(), qa, (const unsigned char *)qa->bytes, (uintptr_t)qa->len, e,
-               (const unsigned char *)((str_t *)shav)->bytes, (const unsigned char *)((str_t *)relshav)->bytes);
-}
-
-static void check_cache_store(const imgcache_t *k) {
-  fpr_lock(&g_check_cache_lock);
-  g_check_cache = *k;
-  fpr_unlock(&g_check_cache_lock);
-}
-
-/* Shared by launcher preflight and placement itself. No image backing,
- * publication or execution can happen until this gate succeeds. Hashes are
- * integrity claims supplied from LOAD, not signatures or authorization. */
+/* Shared gate for placement. No image backing, publication or execution
+ * can happen until this gate succeeds. Hashes are integrity claims
+ * supplied from LOAD, not signatures or authorization. */
 static const char *check_image(V qastr, V extv, V numsv, V shav, V relshav,
-                               uw ext[6], uw nums[8], int allow_cached) {
+                               uw ext[6], uw nums[8]) {
   if (ISINT(qastr) || TID(qastr) != T_STR) fpr_cpanic("native image archive must be a String");
-  /* every check and placement empties the record first, so nothing a failed
-   * launch left behind outlives the next one */
-  imgcache_t prev = check_cache_take();
   if (!fpr_list_ints(extv, ext, 6))
     return "native image extents must cover IMAGE, RELOC and IMPORT";
   if (!fpr_list_ints(numsv, nums, 8))
@@ -418,34 +383,13 @@ static const char *check_image(V qastr, V extv, V numsv, V shav, V relshav,
     return "not a relocatable image (linked for a fixed slot): rebuild it with sol tools/build-process-app.sol";
   if (!nums[4] || ext[1] > nums[4] || nums[2] > ext[1] || nums[1] >= nums[2] || nums[3] > nums[4])
     return "native image LOAD spans inconsistent";
-  /* the key costs a fingerprint pass (a few instructions a byte): a
-   * placement with no record to match skips it */
-  imgcache_t key;
-  int keyed = digest_strs(shav, relshav) && (!allow_cached || prev.valid);
-  if (keyed) check_cache_key(&key, qa, ext, shav, relshav);
-  if (!(allow_cached && keyed && imgcache_same(&prev, &key))) {
-    if (!digest_is(shav, qa->bytes + ext[0], ext[1], 0, 0))
-      return "IMAGE sha256 mismatch (corrupt archive or missing digest)";
-    if (!digest_is(relshav, qa->bytes + ext[2], ext[3], qa->bytes + ext[4], ext[5]))
-      return "RELOC sha256 mismatch (corrupt archive or missing digest)";
-  }
+  if (!digest_is(shav, qa->bytes + ext[0], ext[1], 0, 0))
+    return "IMAGE sha256 mismatch (corrupt archive or missing digest)";
+  if (!digest_is(relshav, qa->bytes + ext[2], ext[3], qa->bytes + ext[4], ext[5]))
+    return "RELOC sha256 mismatch (corrupt archive or missing digest)";
   if (ext[5]) return "native process IMPORT is unsupported: rebuild a self-contained process";
-  if (!allow_cached && keyed) check_cache_store(&key);
   return 0;
 }
-
-/* Preflight before the launcher reserves a pid or records permission grants.
- * Placement repeats the gate so direct callers cannot skip integrity checks. */
-static V g_sys_check_image(V qa, V extv, V numsv, V sha, V relsha) {
-  uw ext[6], nums[8];
-  const char *bad = check_image(qa, extv, numsv, sha, relsha, ext, nums, 0);
-  if (bad) return fpr_mkresult(1, bad);
-  hdr_t *ok = (hdr_t *)fpr_alloc(8 + sizeof(V));
-  ok->tid = T_RESULT; ok->var = 0;
-  *(V *)((char *)ok + 8) = V_UNIT;
-  return (V)ok;
-}
-FPR_FN(fpr_g_Sys_x2echeckImage, g_sys_check_image, 5);
 
 #ifdef QOS_PROCESS_TEST
 static uw test_image_allocs;
@@ -466,7 +410,7 @@ static V g_sys_place_image_at(V qastr, V extv, V numsv, V capsv, V pidv, V diges
   if (ISINT(capsv) || TID(capsv) != T_STR) fpr_cpanic("Sys.placeImageAt: caps must be a String");
   if (!ISINT(pidv) || UNTAG(pidv) < 0) fpr_cpanic("Sys.placeImageAt: pid must be an Int");
   uw ext[6], nums[8];
-  const char *invalid = check_image(qastr, extv, numsv, shav, relshav, ext, nums, 1);
+  const char *invalid = check_image(qastr, extv, numsv, shav, relshav, ext, nums);
   if (invalid) return refuse(invalid);
   str_t *qa = (str_t *)qastr;
   uw ioff = ext[0], ilen = ext[1], roff = ext[2], rlen = ext[3];

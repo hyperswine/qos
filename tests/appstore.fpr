@@ -1,6 +1,5 @@
 #: expect appstore: HOLDS
 unsafe program.
-Store = use "../programs/mods/appstore".
 AW = use "../programs/mods/appwire".
 AJ = use "../programs/mods/appjobs".
 ES = use "../programs/mods/endpointstate".
@@ -37,32 +36,32 @@ stalled observer me =
 longKey n = if n <= 0 then "" else strcat "k" (longKey (n - 1)).
 main =
   me = myself 0;
-  _ = check "escaped key" (Store.address "counter" "a/../b" == Ok "app-data/counter/612f2e2e2f62");
-  _ = check "different identities" (Store.address "one" "x" != Store.address "two" "x");
-  _ = check "invalid identity" (isError (Store.address "../escape" "x"));
-  _ = check "empty key" (isError (Store.address "one" ""));
-  _ = check "wire key admission" (isError (Store.address "one" (longKey 600)));
-  _ = check "no disk is not missing" (case Store.read 100 me 0 "one" "x" of Err why -> why == "no disk" | other -> False);
+  _ = check "escaped key" (AJ.storeAddress "counter" "a/../b" == Ok "app-data/counter/612f2e2e2f62");
+  _ = check "different identities" (AJ.storeAddress "one" "x" != AJ.storeAddress "two" "x");
+  _ = check "invalid identity" (isError (AJ.storeAddress "../escape" "x"));
+  _ = check "empty key" (isError (AJ.storeAddress "one" ""));
+  _ = check "wire key admission" (isError (AJ.storeAddress "one" (longKey 600)));
+  _ = check "no disk is not missing" (case AJ.storeRead 100 me 0 "one" "x" of Err why -> why == "no disk" | other -> False);
   block = B.serve me (device "blk");
   fs = get (FS.startBlock me block);
-  _ = get (Store.remove 1000 me fs "one" "x");
-  _ = get (Store.remove 1000 me fs "two" "x");
-  _ = check "missing is explicit" (Store.read 1000 me fs "one" "x" == Ok AW.StoreMissing);
-  _ = check "empty value saved" (Store.write 1000 me fs "one" "x" "" == Ok AW.StoreSaved);
-  _ = check "empty is present" (text (Store.read 1000 me fs "one" "x") == "");
-  _ = get (Store.write 1000 me fs "one" "x" "first");
-  _ = get (Store.write 1000 me fs "two" "x" "second");
-  _ = check "first namespace" (text (Store.read 1000 me fs "one" "x") == "first");
-  _ = check "second namespace" (text (Store.read 1000 me fs "two" "x") == "second");
-  _ = check "delete acknowledged" (Store.remove 1000 me fs "one" "x" == Ok AW.StoreRemoved);
-  _ = check "delete is missing" (Store.read 1000 me fs "one" "x" == Ok AW.StoreMissing);
-  _ = check "delete leaves other app" (text (Store.read 1000 me fs "two" "x") == "second");
+  _ = get (AJ.storeRemove 1000 me fs "one" "x");
+  _ = get (AJ.storeRemove 1000 me fs "two" "x");
+  _ = check "missing is explicit" (AJ.storeRead 1000 me fs "one" "x" == Ok AW.StoreMissing);
+  _ = check "empty value saved" (AJ.storeWrite 1000 me fs "one" "x" "" == Ok AW.StoreSaved);
+  _ = check "empty is present" (text (AJ.storeRead 1000 me fs "one" "x") == "");
+  _ = get (AJ.storeWrite 1000 me fs "one" "x" "first");
+  _ = get (AJ.storeWrite 1000 me fs "two" "x" "second");
+  _ = check "first namespace" (text (AJ.storeRead 1000 me fs "one" "x") == "first");
+  _ = check "second namespace" (text (AJ.storeRead 1000 me fs "two" "x") == "second");
+  _ = check "delete acknowledged" (AJ.storeRemove 1000 me fs "one" "x" == Ok AW.StoreRemoved);
+  _ = check "delete is missing" (AJ.storeRead 1000 me fs "one" "x" == Ok AW.StoreMissing);
+  _ = check "delete leaves other app" (text (AJ.storeRead 1000 me fs "two" "x") == "second");
   (unbound, vacant) = AJ.executeWith CP.defaultIo me 0 fs (AW.StoreRead "x") ES.Vacant;
   _ = ES.ended vacant;
   _ = check "legacy/unbound worker refused" (isError unbound);
   observer = spawn observe;
   slow = spawn (stalled observer);
-  answer = Store.write 50 me slow "one" "uncertain" "once";
+  answer = AJ.storeWrite 50 me slow "one" "uncertain" "once";
   _ = check "mutation outcome retained" (case answer of Err why -> strIndexOf "outcome unknown" why >= 0 | other -> False);
   _ = check "one write, no replay" (get (AC.callWithin 500 me observer Inspect) == 1);
   _ = kill slow;

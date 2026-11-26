@@ -710,7 +710,6 @@ runBuiltin con entry caps =
 # (docs/2026-10-01-PROCESS-IMAGES.md).  The pid is the launcher's, reserved
 # before placement so the namespace already holds the process's grants.
 Sys.placeImageAt : String -> List Int -> List Int -> String -> Int -> (String, String) -> (Int, String, Int) .
-Sys.checkImage : String -> List Int -> List Int -> String -> String -> Result Unit String .
 Sys.reservePid : Unit -> Int .
 Sys.bindNs : Int -> Unit .
 
@@ -743,9 +742,7 @@ runProcessChecked con qa load checked ioff iln rel caps =
 runProcessVerified : unsafe (Int, Int) -> String -> String -> QaImg.Img -> List Int -> Caps -> Unit .
 runProcessVerified con qa load m exts caps =
   nums = QaImg.nativeNums m load;
-  case Sys.checkImage qa exts nums (QaImg.sha m) (QaImg.relsha m) of
-    Err e -> putLn con "process load failed: {e}"
-  | Ok u -> runProcessLoaded con (placeGranted con qa exts nums (QaImg.sha m) (QaImg.relsha m) caps).
+  runProcessLoaded con (placeGranted con qa exts nums (QaImg.sha m) (QaImg.relsha m) caps).
 
 # the process's pid is reserved first and its grants recorded in the
 # namespace under it, so an open from its first instruction on is judged
