@@ -35,6 +35,6 @@ update (AW.Arrived token result) m = if token != m.token or not m.busy then (m, 
   | other -> ({m | busy = False, phase = AW.Failed "invalid clock result"}, Nil).
 update other m = (m, Nil).
 view vp m = (AV.clockWith vp (hms m.time) "{if m.swOn then "stopwatch " else "stopwatch paused "}{hms (elapsed m)}" m.laps
-  "SPACE START/STOP   L LAP   BKSP RESET   {m.keys} KEYS", Nil).
+  "SPACE START/STOP   L LAP   BKSP RESET   {m.keys} KEYS", Nil, AW.status m.phase).
 
 run me = AS.run me init update view.

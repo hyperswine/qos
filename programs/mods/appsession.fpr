@@ -1,5 +1,10 @@
-# Shared transport/lifecycle mechanics. App update/view functions stay named
-# in their own modules: this module never accepts an application callback.
+# Shared transport/lifecycle mechanics, and `run`: the one MVU loop of the
+# in-tree apps that have no control or preference sidecar. `run` takes the
+# app's init value and its update and view functions as arguments
+# (docs/2026-11-26-APP-LOOP-CALLBACKS.md): the calls are indirect, so the
+# compiler neither inlines them nor sees through them for the per-step work
+# bound. Installed SDK apps do not come through `run`; their generated adapter
+# (tools/desktop-adapter.fpr.in) calls the app's functions by name.
 unsafe module.
 CP = use "apppolicy".
 AW = use "appwire".
@@ -107,12 +112,19 @@ abandon me ctx = case finish me ctx of
 
 # Standard MVU actor loop for desktop apps without custom control/preference
 # sidecars. Keeps transport, sequencing, worker dispatch, and shutdown in one place.
+#   initVal  : (model, List AW.Cmd)
+#   updateFn : AW.Event -> model -> (model, List AW.Cmd)
+#   viewFn   : (width, height) -> model -> (scene, List String, status)
+# The same contract as the SDK adapter: the commands of init and of the first
+# Resize are both issued, in that order, and the frame's status text is what
+# view answers (AW.status turns an AW.Phase into the usual text).
 run me initVal updateFn viewFn = case start me of
     Err why -> Unit
   | Ok ctx ->
       (initial, commands) = initVal;
-      (model, ignored) = updateFn (AW.Resize ctx.w ctx.h) initial;
+      (model, resizedCommands) = updateFn (AW.Resize ctx.w ctx.h) initial;
       _ = issue me ctx commands;
+      _ = issue me ctx resizedCommands;
       _ = Sys.loop (ctx, model) (runStep me updateFn viewFn); Unit.
 runStep me updateFn viewFn state =
   (ctx, model) = state;
@@ -132,6 +144,6 @@ runStep me updateFn viewFn state =
           nextCtx = advance (resized ctx event) sequence;
           (fresh, commands) = updateFn event model;
           _ = issue me nextCtx commands;
-          (tree, vals) = viewFn (nextCtx.w, nextCtx.h) fresh;
-          _ = AC.reply ret (AW.Frame nextCtx.session nextCtx.revision tree vals (AW.status fresh.phase));
+          (tree, vals, status) = viewFn (nextCtx.w, nextCtx.h) fresh;
+          _ = AC.reply ret (AW.Frame nextCtx.session nextCtx.revision tree vals status);
           (True, (nextCtx, fresh)).

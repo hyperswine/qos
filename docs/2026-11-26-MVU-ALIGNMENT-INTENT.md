@@ -26,3 +26,11 @@ What it means for QOS:
    statistics, then move the effects out of editapp's and termapp's `update`.
 
 Unifying the MVU surfaces is a later step and not part of this.
+
+## Status (26 November, later)
+
+Item 3 is decided and done the simpler way: `AS.run` keeps its callbacks and
+the rule is changed. See
+[The shared app loop takes application callbacks](2026-11-26-APP-LOOP-CALLBACKS.md).
+Item 2 waits for a pin move: FP-RISC has `std/keys` on its
+`zero-cost-named-keys` branch.

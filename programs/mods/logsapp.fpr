@@ -42,6 +42,6 @@ sevPath 0 = "/logs/normal".
 sevPath 1 = "/logs/warns".
 sevPath 2 = "/logs/errors".
 sevPath other = "/logs/host".
-view vp m = (AV.frame vp "Logs" "{sevPath m.sev}   {m.total}   {ST.count m.rows} lines, newest first   {if m.paused then "PAUSED (P resumes)" else "N W E H severity   P pause"}" (rows m) m.scroll, Nil).
+view vp m = (AV.frame vp "Logs" "{sevPath m.sev}   {m.total}   {ST.count m.rows} lines, newest first   {if m.paused then "PAUSED (P resumes)" else "N W E H severity   P pause"}" (rows m) m.scroll, Nil, AW.status m.phase).
 
 run me = AS.run me init update view.

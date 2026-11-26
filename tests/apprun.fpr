@@ -1,0 +1,33 @@
+#: expect apprun: HOLDS
+# AS.run's contract (docs/2026-11-26-APP-LOOP-CALLBACKS.md): the commands of
+# init and of the first Resize are both issued, and the frame's status text is
+# what view answers. A probe app asks for the clock on its first Resize; its
+# view reports whether that answer arrived.
+unsafe program.
+AS = use "../programs/mods/appsession".
+AW = use "../programs/mods/appwire".
+S2 = use "../programs/mods/scene2d".
+AC = use "std/actor#2de24bf2bdd5cb87".
+check tag True = Unit.
+check tag False = error "apprun: {tag}".
+probeInit = ({got = False}, Nil).
+probeUpdate (AW.Resize w h) m = (m, AW.Fetch 9 AW.Clock :: Nil).
+probeUpdate (AW.Arrived 9 result) m = ({m | got = True}, Nil).
+probeUpdate other m = (m, Nil).
+probeView vp m = (S2.Lbl Nil "probe", Nil, if m.got then "resize command arrived" else "waiting").
+probe : unsafe Int -> Unit .
+probe me = AS.run me probeInit probeUpdate probeView.
+appMain : unsafe Int -> Unit .
+appMain me = probe me.
+main =
+  me = myself 0;
+  app = spawn probe;
+  boot = AC.callWithin 500 me app (AW.magic, AW, (3, (800, 480), (0, 0, 0, "")));
+  _ = check "bootstrap" (case boot of Ok (magic, schema, session) -> magic == AW.magic and session == 3 | other -> False);
+  _ = Sys.sleepUs 200000;
+  frame = AC.callWithin 500 me app (AW.Event 3 1 AW.Tick);
+  _ = check "the first Resize's commands are issued and the status is view's"
+    (case frame of Ok (AW.Frame session revision tree vals status) -> status == "resize command arrived" | other -> False);
+  closed = AC.callWithin 2000 me app (AW.Close 3);
+  _ = check "close" (case closed of Ok (AW.Closed session result) -> session == 3 | other -> False);
+  "apprun: HOLDS".

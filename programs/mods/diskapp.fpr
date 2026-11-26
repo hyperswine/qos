@@ -36,6 +36,6 @@ navigate k m | k == AW.keyPageDown = spec = AV.metrics m; AV.scroll (rows m) spe
 navigate k m | k == AW.keyHome = AV.seek (rows m) 0 m.
 navigate k m | k == AW.keyEnd = AV.seek (rows m) (ST.count (rows m)) m.
 navigate other m = m.
-view vp m = (AV.frame vp "Disk" "Read-only storage statistics" (rows m) m.scroll, Nil).
+view vp m = (AV.frame vp "Disk" "Read-only storage statistics" (rows m) m.scroll, Nil, AW.status m.phase).
 
 run me = AS.run me init update view.

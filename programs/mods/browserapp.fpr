@@ -114,6 +114,6 @@ pathRows ((name, kind) :: rest) cursor index =
 rows m = if m.mode == 0 then pathRows m.paths m.cursor 0 else ST.wrapWith (AV.metrics m) m.text.
 view vp m = (AV.frame vp "Files" (if m.mode == 0 then
     "{if m.dir == "" then "/" else m.dir}   {folders m.paths} folders, {ST.count m.paths - folders m.paths} files   ENTER OPEN   BKSP UP   R REFRESH"
-    else "{m.path}   {ST.count m.lines} lines, {strlen m.text} bytes   BKSP BACK") (rows m) m.scroll, Nil).
+    else "{m.path}   {ST.count m.lines} lines, {strlen m.text} bytes   BKSP BACK") (rows m) m.scroll, Nil, AW.status m.phase).
 
 run me = AS.run me init update view.

@@ -190,3 +190,7 @@ showed Count 0 and Count 1. See the checked-in
 [evidence summary](evidence/2026-10-29-installed-desktop-sdk.json).
 This is focused installed-SDK evidence, not full CI, Linux/x86-64, Pi deployment,
 package upgrade or power-loss installer validation.
+
+## 2026-11-26 note: the in-tree shared loop
+
+The in-tree `AS.run` loop takes application callbacks by an owner decision recorded in [The shared app loop takes application callbacks](2026-11-26-APP-LOOP-CALLBACKS.md). What this page says about callbacks is unchanged for what it covers; that page states how the two fit.

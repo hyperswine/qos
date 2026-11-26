@@ -272,3 +272,7 @@ were not run, and no deployment was made.
 [Runtime policy and explicit state types](2026-10-20-RUNTIME-POLICY.md) records
 the configurable-policy roadmap and begins with live, revisioned file-service
 policy. It builds on the shared reclamation deadline above.
+
+## 2026-11-26 note: the in-tree shared loop
+
+The in-tree `AS.run` loop takes application callbacks by an owner decision recorded in [The shared app loop takes application callbacks](2026-11-26-APP-LOOP-CALLBACKS.md). What this page says about callbacks is unchanged for what it covers; that page states how the two fit.
