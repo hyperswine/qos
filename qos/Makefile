@@ -24,7 +24,7 @@ QOSP_SRC = portable/host.c portable/sha256.c portable/haltab.c portable/store.c 
 QOSP_FPR = portable/qosp.fpr ../programs/mods/qar.fpr ../programs/mods/manifest.fpr ../programs/mods/qaimg.fpr
 QOSP_GL_SRC = $(QOSP_SRC) $(HAL)/unix/gfx.c
 RT_CORE = $(FRUNTIME)/runtime.c $(FRUNTIME)/actors.c $(FRUNTIME)/bits.c \
-          $(FRUNTIME)/vec.c $(FRUNTIME)/sstr.c $(FRUNTIME)/mod.c $(FRUNTIME)/buddy.c
+          $(FRUNTIME)/vec.c $(FRUNTIME)/i32.c $(FRUNTIME)/mod.c $(FRUNTIME)/buddy.c
 
 CODEGEN_REV := $(shell grep -m1 '^codegenRev = ' $(FPRISC_ROOT)/compiler/Codegen.hs 2>/dev/null | grep -o '[0-9]\+' | head -1)
 REV_FLAG := $(if $(CODEGEN_REV),-DQOSP_CODEGEN_REV=$(CODEGEN_REV),)

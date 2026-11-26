@@ -49,7 +49,7 @@ rtVirtKernel fpr =
 
 rtCoreKernel fpr actorsSrc =
   rt = "{fpr}/runtime";
-  ["{rt}/runtime.c", actorsSrc, "{rt}/bits.c", "{rt}/vec.c", "{rt}/sstr.c", "{rt}/mod.c", "{rt}/buddy.c"].
+  ["{rt}/runtime.c", actorsSrc, "{rt}/bits.c", "{rt}/vec.c", "{rt}/i32.c", "{rt}/mod.c", "{rt}/buddy.c"].
 
 rtProcessApp fpr root halDir buildDir xlen =
   virt = "{fpr}/machine/virt"; rt = "{fpr}/runtime";
