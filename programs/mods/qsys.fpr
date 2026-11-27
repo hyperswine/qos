@@ -254,7 +254,7 @@ fileSwept mgr me hs = live = sweepDead hs;
   _ = (case hs of Nil -> Unit | h :: rest -> (case live of Nil -> fileIdle mgr me | k :: more -> Unit));
   live.
 fileIdle : unsafe Int -> Int -> Unit .
-fileIdle mgr me = if mgr > 0 then _ = spawn (fileIdleNote mgr me); Unit else Unit.
+fileIdle mgr me = if mgr != 0 then _ = spawn (fileIdleNote mgr me); Unit else Unit.
 # sent from an actor of its own: the manager may be waiting on a reply
 # from the file actor itself (filesRetireAsk), and a note from the same
 # sender would be read as that reply
@@ -280,7 +280,7 @@ sweepDead hs = case hs of
 # while no Open can be in flight.
 fileRetire : unsafe Int -> Int -> String -> Int -> Result String String -> Int -> List (Int, Int, Int) -> AC.Tidy -> Unit .
 fileRetire mgr st path me body next hs tidy = case hs of
-    Nil -> (if mgr > 0 then fileIdle mgr me >> fileServeTidy mgr st path me body next hs tidy else Unit)
+    Nil -> (if mgr != 0 then fileIdle mgr me >> fileServeTidy mgr st path me body next hs tidy else Unit)
   | h :: rest -> fileServeTidy mgr st path me body next hs tidy.
 # Private retirement: Timed Write -1 (IInt marginMs); legacy Timed Close -1
 # uses the default margin. Retire
@@ -294,7 +294,7 @@ fileRetireAsk mgr st path me body next hs tidy ret sender until =
   fileRetireWith (FP.marginMs FP.defaults) mgr st path me body next hs tidy ret sender until.
 fileRetireWith margin mgr st path me body next hs tidy ret sender until =
   idle = case hs of Nil -> True | h :: rest -> False;
-  if mgr > 0 and sender == mgr and idle and margin > 0 and until - AC.nowMs Unit > margin
+  if mgr != 0 and sender == mgr and idle and margin > 0 and until - AC.nowMs Unit > margin
   then AC.reply ret (Ok 1) >> Unit
   else AC.reply ret (Ok 0) >> fileServeTidy mgr st path me body next hs tidy.
 # Load on the first operation that needs the previous bytes. Retry after a failed replay.
@@ -487,9 +487,9 @@ filesMsg deadline ctx me act ret from q =
   case q of
     EP.Timed until command -> if AC.nowMs Unit >= until then AC.reply ret (Err "endpoint: deadline exceeded before execution") >> filesServe ctx me act else filesMsg (if until < deadline then until else deadline) ctx me act ret from command
   | Open url mode -> filesOpen ctx me act ret from url mode
-  | Read h n -> if from == admin and admin > 0 then AC.reply ret (Ok (IStr (FP.snapshot revision policy (filesLive act)))) >> filesServe ctx me act
+  | Read h n -> if from == admin and admin != 0 then AC.reply ret (Ok (IStr (FP.snapshot revision policy (filesLive act)))) >> filesServe ctx me act
       else AC.reply ret (Err "a file namespace: open a path under it") >> filesServe ctx me act
-  | Write h v -> if from == admin and admin > 0 then filesConfigure deadline ctx me act ret h v
+  | Write h v -> if from == admin and admin != 0 then filesConfigure deadline ctx me act ret h v
       else AC.reply ret (Err "a file namespace: open a path under it") >> filesServe ctx me act
   | Close h -> if h < 0 then filesIdle ctx me act from else AC.reply ret (Ok 0) >> filesServe ctx me act.
 # a file actor says it holds no lease (fileIdle).  Only a hint: the
@@ -503,7 +503,7 @@ filesIdle ctx me act a =
 filesUrlOf : unsafe List (String, Int) -> Int -> List String .
 filesUrlOf act a = case act of
     Nil -> Nil
-  | (p, b) :: rest -> if b == a and a > 0 then [p] else filesUrlOf rest a.
+  | (p, b) :: rest -> if b == a and a != 0 then [p] else filesUrlOf rest a.
 # ask one file actor to retire; the manager waits for the answer, so no
 # Open is forwarded to it meanwhile, and one forwarded before is already
 # ahead of this request in its mailbox (it then holds a lease and says
@@ -531,11 +531,12 @@ filesReclaimUntil until me act = filesReclaimWith FP.defaults until me act.
 filesReclaimWith policy until me act = if AC.nowMs Unit >= until then act else case act of
     Nil -> Nil
   | (p, a) :: rest ->
-      if a <= 0 then (p, a) :: filesReclaimWith policy until me rest
+      if a == 0 then (p, a) :: filesReclaimWith policy until me rest
       else if not (Sys.alive a) then (p, 0) :: filesReclaimWith policy until me rest
       else if filesRetireWith policy until me a then (p, 0) :: rest
       else (p, a) :: filesReclaimWith policy until me rest.
-# the entry for a path: -1 unknown, 0 known with no actor, else its actor
+# the entry for a path: -1 unknown, 0 known with no actor, else its actor.
+# Actor handles are opaque values: compare them only with == / != (0 is none).
 filesEntry : unsafe List (String, Int) -> String -> Int .
 filesEntry act url = case act of
     Nil -> 0 - 1
@@ -554,9 +555,9 @@ filesOpen ctx me act ret from url mode =
   a0 = filesEntry act url;
   reading = strEq mode "read";
   deleting = strEq mode "delete";
-  if a0 > 0 and Sys.alive a0 then
+  if a0 != 0 and a0 != 0 - 1 and Sys.alive a0 then
     (if deleting then filesDelete ctx me act ret url a0 else filesHand ctx me act ret from url mode a0)
-  else if a0 >= 0 then
+  else if a0 != 0 - 1 then
     (if deleting then filesDelete ctx me act ret url 0 else filesSpawn ctx me act ret from url mode)
   else if not reading and not deleting then filesMake ctx me act ret from url mode
   else if filesStored st me url then
@@ -580,7 +581,7 @@ filesDelete : unsafe FilesCtx -> Int -> List (String, Int) -> (Int, Int) -> Stri
 filesDelete ctx me act ret url a =
   FilesCtx st ns policy revision admin tidy = ctx;
   # the actor may already have retired on its last close: only kill it live
-  _ = (if a > 0 and Sys.alive a then kill a else Unit);
+  _ = (if a != 0 and Sys.alive a then kill a else Unit);
   _ = EP.unregister me ns url;
   deleted = storage me st (SP.Delete url);
   _ = (if filesTransient url then Unit else filesNote st me "-{url}");
@@ -610,7 +611,7 @@ filesSpawn ctx me act ret from url mode =
   a = Wire.spawn 8 Wire.inboxBytes (fileActorOf me st p2);
   filesHand ctx me (filesSet act2 p2 a) ret from url mode a.
 filesLive Nil = 0.
-filesLive ((p, a) :: rest) = (if a > 0 and Sys.alive a then 1 else 0) + filesLive rest.
+filesLive ((p, a) :: rest) = (if a != 0 and Sys.alive a then 1 else 0) + filesLive rest.
 # forward the client's own envelope to the file and point the client at it
 filesHand : unsafe FilesCtx -> Int -> List (String, Int) -> (Int, Int) -> Int -> String -> String -> Int -> a .
 filesHand ctx me act ret from url mode a =
