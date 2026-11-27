@@ -22,7 +22,19 @@ splash root =
     _ = H.command ["touch",defaults];
     old = List.filter (fn line -> not (Str.endsWith "# QOSP_BOOT_SPLASH" line)) (H.rows (H.readText defaults));
     H.rewrite defaults (H.linesText old + "export FPR_BOOT_SPLASH=1 # QOSP_BOOT_SPLASH\n").
+# /data is the rest of the SD card (S05qosp-data makes it on the first boot);
+# QOS state is bind-mounted from it so /var/lib/qosp stays a real directory.
+# Until the first boot has made it, both lines fail and mount -a moves on.
+dataMounts = ["# QOSP_DATA: the data partition and the QOS state on it (S05qosp-data)",
+              "/dev/mmcblk0p3\t/data\t\text4\tdefaults,noatime\t0\t0",
+              "/data/qosp\t/var/lib/qosp\tnone\tbind\t0\t0"].
+fstab root =
+  table = "{root}/etc/fstab";
+  kept = List.filter (fn line -> not (List.has line dataMounts)) (H.rows (H.readText table));
+  _ = H.command ["mkdir","-p","{root}/data"];
+  H.rewrite table (H.linesText (List.append kept dataMounts)).
 configure root =
+  _ = fstab root;
   _ = List.map (privateMode root "-f" "0600") ["etc/wpa_supplicant.conf","etc/ssh/sshd_config","root/.ssh/authorized_keys"];
   _ = List.map (privateMode root "-d" "0700") ["root","root/.ssh"];
   path = H.setting "BR2_CONFIG";

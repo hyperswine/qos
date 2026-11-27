@@ -1,0 +1,68 @@
+#!/bin/sh
+# S05qosp-data -- first boot: the rest of the SD card becomes /data, and QOS
+# state (/var/lib/qosp) lives there.
+#
+# The image is boot (32 MiB) + root (512 MiB, BR2_TARGET_ROOTFS_EXT2_SIZE);
+# the card's size is unknown when the image is built. On the first boot this
+# adds partition 3 from the end of root to the end of the card and reboots
+# once (the kernel cannot reread the table of the disk it booted from). On
+# the next boot it makes an ext4 filesystem labelled `data`, mounts it at
+# /data, copies /var/lib/qosp to /data/qosp and bind-mounts it back, so the
+# state path stays a real directory. /etc/fstab mounts both on every later
+# boot, and this script then does nothing. Each step checks what is already
+# done, so a power cut part-way through is finished on the next boot.
+#
+# Runs before S98fprd and S99qosp. Not yet tested on a fresh card: see
+# tools/buildroot/README.md ("The data partition").
+
+DISK=/dev/mmcblk0
+PART=${DISK}p3
+LOG=/var/log/qosp-data.log
+
+case "$1" in start) ;; *) exit 0 ;; esac
+
+say() { echo "qosp-data: $*"; echo "qosp-data: $*" >> "$LOG"; }
+mounted() { grep -q " $1 " /proc/mounts; }
+has_ext() { [ "$(dd if="$1" bs=1 skip=1080 count=2 2>/dev/null | od -An -tx1 | tr -d ' ')" = 53ef ]; }
+
+[ -b "$DISK" ] || { say "no $DISK; nothing to do"; exit 0; }
+
+if [ ! -b "$PART" ]; then
+	if fdisk -l "$DISK" | grep -q "^$PART "; then
+		say "partition 3 is in the table but not yet seen by the kernel; rebooting"
+	else
+		p2=/sys/block/mmcblk0/mmcblk0p2
+		[ -r "$p2/start" ] || { say "no partition 2; leaving the card alone"; exit 1; }
+		end=$(( $(cat $p2/start) + $(cat $p2/size) ))
+		start=$(( (end + 2047) / 2048 * 2048 ))
+		say "adding partition 3 from sector $start to the end of the card"
+		printf 'n\np\n3\n%s\n\nw\n' "$start" | fdisk "$DISK" >> "$LOG" 2>&1
+		fdisk -l "$DISK" | grep -q "^$PART " || { say "fdisk did not add partition 3"; exit 1; }
+	fi
+	sync
+	reboot
+	exit 0
+fi
+
+if ! mounted /data; then
+	if ! has_ext "$PART"; then
+		say "making an ext4 filesystem on $PART"
+		mke2fs -q -F -t ext4 -L data "$PART" >> "$LOG" 2>&1 || { say "mke2fs failed"; exit 1; }
+	fi
+	mkdir -p /data
+	mount /data || { say "cannot mount /data"; exit 1; }
+fi
+
+if [ -L /var/lib/qosp ]; then
+	say "/var/lib/qosp is a symlink (a hand-made layout); leaving it"
+elif ! mounted /var/lib/qosp; then
+	if [ ! -d /data/qosp ]; then
+		say "copying /var/lib/qosp to /data/qosp"
+		rm -rf /data/qosp.copy
+		cp -a /var/lib/qosp /data/qosp.copy && sync && mv /data/qosp.copy /data/qosp || { say "copy failed"; exit 1; }
+		sync
+	fi
+	mount /var/lib/qosp || { say "cannot bind /data/qosp at /var/lib/qosp"; exit 1; }
+	say "QOS state is on /data"
+fi
+exit 0

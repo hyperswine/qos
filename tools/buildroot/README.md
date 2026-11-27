@@ -241,6 +241,36 @@ launch; runtime `mkdir -p` alone does not make new ancestor names durable.
 `python3 tools/buildroot/package-install-check.py` checks the package install
 macro against fresh, existing and volatile-link filesystem layouts.
 
+### The data partition
+
+The image is a 32 MiB boot partition and a 512 MiB root
+(`BR2_TARGET_ROOTFS_EXT2_SIZE`); the card's size is not known when the image
+is built. `board/qosp/rpi4/overlay/etc/init.d/S05qosp-data` gives the rest of
+the card to `/data` on the first boot, before `S98fprd` and `S99qosp`:
+
+1. If there is no partition 3, it adds one from the first 1 MiB boundary after
+   root to the end of the card (BusyBox `fdisk`) and reboots once: the kernel
+   cannot reread the table of the disk it booted from.
+2. Next boot: it makes an ext4 filesystem labelled `data` on `mmcblk0p3`
+   (`mke2fs` from `BR2_PACKAGE_E2FSPROGS`; BusyBox's makes only ext2) and
+   mounts `/data`.
+3. It copies `/var/lib/qosp` to `/data/qosp` and bind-mounts it back, so the
+   state path stays a real directory (the package refuses symlinked state).
+
+`post-build.sol` adds both mounts to `/etc/fstab`, so every later boot mounts
+them from `mount -a` and the script finds nothing to do. Each step checks what
+is already done, so a power cut part-way through finishes on the next boot.
+Root stays at 512 MiB. The script logs to `/var/log/qosp-data.log`.
+
+**Not yet tested on a fresh card.** Before relying on it, flash a new image to a
+spare SD card and check: two boots on the first power-up, `mmcblk0p3` filling
+the card, `df -h /data`, `/var/lib/qosp` bind-mounted (`grep qosp
+/proc/mounts`), Main ready, and a third boot doing nothing new. The
+primitives were checked on the installed Pi 4B (27 November: the ext4
+signature test, the start-sector arithmetic, BusyBox bind mounts), whose card
+was given the same layout by hand, with `/var/lib/qosp` as a symlink to
+`/data/qosp` that the script leaves alone.
+
 ### Readiness, restart and stop
 
 The service requires an explicit application readiness signal. After its own
