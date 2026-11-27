@@ -13,6 +13,13 @@ dependency dest state line =
           target = "{dest}/{name}";
           _ = (case Proc.streamNow (ProcessSpec ["cp","-pL",path,target] "" [] "" 0) of
               Ok 0 -> Unit | failed -> error "copy {name} failed: {failed}");
+          # a library's own dependencies do not use the executable's runpath:
+          # each bundled library finds its siblings beside it (the Pi has no
+          # libGLdispatch, which a bundled glvnd libEGL needs; 27 Nov 2026)
+          _ = (case Proc.streamNow (ProcessSpec ["chmod","u+w",target] "" [] "" 0) of
+              Ok 0 -> Unit | failed -> error "chmod {name} failed: {failed}");
+          _ = (case Proc.streamNow (ProcessSpec ["patchelf","--set-rpath","$ORIGIN",target] "" [] "" 0) of
+              Ok 0 -> Unit | failed -> error "patchelf --set-rpath on {name} failed (install patchelf in the builder): {failed}");
           (name :: seen,target :: pending)
       else if Str.contains "not found" line then error "unresolved SDK library: {line}" else state
   | _ -> if Str.contains "not found" line then error "unresolved SDK library: {line}" else state.

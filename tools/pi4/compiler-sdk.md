@@ -10,7 +10,7 @@ the compiler, using the pinned compiler's modules and existing build objects:
 
 ```sh
 cd /work/fprisc/compiler
-ghc -O0 -threaded -rtsopts -with-rtsopts=-V0.001 -i. -main-is PiEditorCompiler \
+ghc -O1 -threaded -rtsopts -with-rtsopts=-V0.001 -i. -main-is PiEditorCompiler \
   -o /out/fpr-editor /work/qos/tools/pi4/EditorCompiler.hs
 ```
 
@@ -29,7 +29,12 @@ list (`git ca-certificates make gcc libc6-dev pkg-config ghc cabal-install
 libghc-megaparsec-dev libghc-network-dev libghc-utf8-string-dev libgit2-dev
 libarchive-dev libcurl4-openssl-dev libegl-dev libgl-dev zip jq binutils file`)
 plus `clang lld llvm`, and for the Main bundle `libgles-dev libasound2-dev
-libdrm-dev libgbm-dev`. The former `qos-pi-builder:20261104` image (Ubuntu
+libdrm-dev libgbm-dev`, and `patchelf` (the packager sets each bundled
+library's runpath to `$ORIGIN`). Build the Editor entrypoint with `-O1`: at
+FP-RISC 0.15 an `-O0` build took over ten minutes on a program using
+`std/actor` that `-O1` compiles in a second (27 Nov 2026). The Editor entry
+hands `sol ...` to `$SOL`, because `qos-app.mk` runs its Sol tools as
+`$(FPRC) sol` and this entry has no Sol VM. The former `qos-pi-builder:20261104` image (Ubuntu
 24.04, GHC 9.4.7, libgit2 1.7) can no longer build the compiler, which needs
 `unix >= 2.8` and `libgit2 >= 1.9`. The packaging runs a Sol runner matching
 the pinned compiler (a `sol` link to its `fpr`).

@@ -690,7 +690,7 @@ selftest = do
   let cp = (proc exe ["daemon", "--socket", sock, "--work", dir]) {std_out = UseHandle logH, std_err = UseHandle logH, std_in = NoStream}
   outcome <- try $ bracket (createProcess cp) (\(_, _, _, ph) -> stopChild ph) $ \(_, _, _, ph) -> do
     awaitReady ph sock
-    let source = BC.pack "A = use \"std/actor#201a0e9bf98a5154\".\nadd a b = a + b.\nmain = \"native Pi SDK\".\n"
+    let source = BC.pack "A = use \"std/actor#32ab963a39ed95c4\".\nadd a b = a + b.\nmain = \"native Pi SDK\".\n"
         expect what ok reply = unless ok (throwIO (userError (what ++ ": " ++ BC.unpack (B.take 8192 reply))))
     checked <- request sock "check" source
     expect "check failed" (checked == BC.pack "ok\n") checked
