@@ -82,3 +82,31 @@ Not checked:
 - **Left for the owner:**
   - the four older rollback directories, about 20 MB each;
   - the unset clock (1970).
+
+## Files freeze and app reset (27 November)
+
+The owner reported that the 1024×600 GUI froze while using Files on the
+Pi 4 Model B Rev 1.4. SSH remained responsive. The installed host and app
+SHA-256 values matched the deployment above.
+
+- Before the reset, supervision still reported application PID 373
+  running. The final shell messages were `shell: open files` and
+  `shell: pane 1 R Refresh   ESC Home`, after visits to Disk and Browser.
+  The Files pane had completed its initial load. The captured app log
+  contained no panic or fault, and the kernel log tail showed no GPU
+  fault or OOM event.
+- In two samples 2.07 seconds apart, three QOS threads each accumulated
+  206 user CPU ticks. The process's I/O counters stayed unchanged.
+  This points to active spinning or repeated work after the pane load.
+  The samples do not locate the user-space instruction or establish the
+  triggering operation.
+- Restarting only `/etc/init.d/S99qosp` timed out the old process during
+  shutdown (status 124). PID 9568 then reopened `/data/qosp/Main.disk`,
+  loaded all six plugins, and reported `Main Profile ready`. The new
+  process had seven sleeping threads at both points of a short idle sample.
+  No Pi reboot, disk replacement, or compiler-daemon restart was needed.
+
+The restart restored Main readiness over SSH. Interactive Files behavior
+after the reset was not exercised. Raw captures are in the Codex
+workspace under `outputs/pi4-files-freeze-2026-11-27/`; the Pi's clock
+was unset, so use uptime to order its captured events.
