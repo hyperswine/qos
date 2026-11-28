@@ -10,6 +10,7 @@ J = use "std/json".
 L = use "std/list".
 M = use "std/map".
 O = use "std/option".
+Ord = use "std/order".
 S = use "std/string".
 B = use "std/binary".
 
@@ -249,7 +250,7 @@ imageChecks parts f want =
               Err e -> Err e
             | Ok _ -> (case importSpans imp image of
                 Err e -> Err e
-              | Ok sp -> (case spansApart (L.sortWith (fn a b -> case a of (x, _) -> (case b of (y, _) -> E.intOrder x y)) sp) offsets of
+              | Ok sp -> (case spansApart (L.sortWith (fn a b -> case a of (x, _) -> (case b of (y, _) -> Ord.int x y)) sp) offsets of
                   Err e -> Err e
                 | Ok _ -> (case want.desktop of
                     True -> checkEntry image (num f "entry") (num f "execsz") offsets sp

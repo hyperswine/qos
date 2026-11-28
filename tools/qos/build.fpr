@@ -265,7 +265,7 @@ projectPlatform sdk work cached overrides added clang triple log =
       C.mkdirs (C.parent dest) |>? (fn u -> C.copyFile source dest)) (C.walk platform) |>? (fn u1 ->
   rebuild = L.map (fn o -> case o of (n, _, _) -> includedBy n) overrides;
   C.mapR (fn iu -> case iu of (i, unit) -> (case L.member unit rebuild of
-      False -> Ok (O.withDefault "" (E.nth cached i))
+      False -> Ok (O.withDefault "" (L.get i cached))
     | True ->
         obj = C.join work (strcat "override-" (objName unit));
         C.run log (L.concat ((clang :: Nil) :: appFlags triple overlay :: ("-c" :: C.join overlay unit :: "-o" :: obj :: Nil) :: Nil)) "" |>? (fn u -> Ok obj)))
