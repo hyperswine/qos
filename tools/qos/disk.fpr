@@ -5,6 +5,7 @@ H = use "host".
 L = use "std/list".
 M = use "std/map".
 O = use "std/option".
+P = use "std/parse".
 R = use "std/result".
 S = use "std/string".
 OS = use "std/os".
@@ -39,33 +40,38 @@ firstLine raw =
   if n < 0 then Err "missing QLOG header newline" else Ok (substr raw 0 (n + 1)).
 
 # "0" or a digit string without a leading zero
-num t = strlen t > 0 and digits t 0 (strlen t) and (strlen t == 1 or charAt t 0 != 48).
-digits : String -> Int -> (rem : Int | measure rem) -> Bool .
-digits t i rem =
-  if rem <= 0 then True
-  else S.isDigit (charAt t i) and digits t (i + 1) (rem - 1).
-
+num t = strlen t > 0 and S.allChars S.isDigit t and (strlen t == 1 or charAt t 0 != 48).
 toNum t = S.toInt t |> R.withDefault (0 - 1).
 
-# a NUM after a one-letter tag: "w0" -> Some 0
-tagged tag t =
-  rest = substr t (strlen tag) (strlen t - strlen tag);
-  if S.startsWith tag t and num rest then O.Some (toNum rest) else O.None.
+isKeyChar c = c > 32 and c != 127.
+validKey k = strlen k > 0 and S.allChars isKeyChar k.
+
+tagNat tag = P.literal tag |> P.andThen (fn u -> P.natNoLeadZero).
+
+sealParser =
+  P.succeed (fn head w c d s m g j x ->
+    { head = head, w = w, c = c, dataEnd = d, swap = s, merkle = m, generation = g, stage = j })
+  |> P.skip (P.literal "QLOG ") |> P.andMap P.natNoLeadZero
+  |> P.skip (P.literal " v3 ")  |> P.andMap (tagNat "w")
+  |> P.skip (P.char 32)         |> P.andMap (tagNat "c")
+  |> P.skip (P.char 32)         |> P.andMap (tagNat "d")
+  |> P.skip (P.char 32)         |> P.andMap (tagNat "s")
+  |> P.skip (P.char 32)         |> P.andMap (tagNat "m")
+  |> P.skip (P.char 32)         |> P.andMap (tagNat "g")
+  |> P.skip (P.char 32)         |> P.andMap (tagNat "j")
+  |> P.skip (P.char 32)         |> P.andMap (tagNat "x").
 
 parseSeal : unsafe String -> Int -> Result Meta String .
 parseSeal raw pages =
   firstLine raw |> R.andThen (fn line ->
-    case substr line 0 (strlen line - 1) |> S.split " " of
-        ["QLOG", head, "v3", w, c, d, s, m, g, j, x] ->
-          (case (num head, tagged "w" w, tagged "c" c, tagged "d" d, tagged "s" s, tagged "m" m, tagged "g" g, tagged "j" j, tagged "x" x) of
-              (True, O.Some wv, O.Some cv, O.Some dv, O.Some sv, O.Some mv, O.Some gv, O.Some jv, O.Some _) ->
-                meta = { head = toNum head, w = wv, c = cv, dataEnd = dv, swap = sv, merkle = mv, generation = gv, stage = jv };
-                firstLine (sealPage meta) |> R.andThen (fn l ->
-                  if l != line then Err "superblock checksum mismatch"
-                  else if not (sealBounds meta pages) then Err "invalid superblock bounds/flags"
-                  else Ok meta)
-            | _ -> Err "invalid QLOG v3 superblock")
-      | _ -> Err "invalid QLOG v3 superblock").
+    substr line 0 (strlen line - 1)
+    |> P.run sealParser
+    |> R.mapError (fn u -> "invalid QLOG v3 superblock")
+    |> R.andThen (fn meta ->
+        firstLine (sealPage meta) |> R.andThen (fn l ->
+          if l != line then Err "superblock checksum mismatch"
+          else if not (sealBounds meta pages) then Err "invalid superblock bounds/flags"
+          else Ok meta))).
 
 sealBounds m pages =
   1 <= m.head and m.head <= m.dataEnd and m.dataEnd <= pages - 1 and pages >= 3
@@ -102,14 +108,6 @@ newest [a, b] = if b.generation > a.generation then b else a.
 newest (a :: _) = a.
 newest Nil = { head = 0, w = 0, c = 0, dataEnd = 0, swap = 0, merkle = 0, generation = 0, stage = 0 }.
 
-validKey k = strlen k > 0 and keyChars k 0 (strlen k).
-keyChars : String -> Int -> (rem : Int | measure rem) -> Bool .
-keyChars k i rem =
-  if rem <= 0 then True
-  else
-    c = charAt k i;
-    c > 32 and c != 127 and keyChars k (i + 1) (rem - 1).
-
 # the record headers from page 1 to head: key -> (offset, size) of the latest value
 scan : unsafe Int -> Meta -> Result (M.Map String (Int, Int)) String .
 scan fd meta = scanGo fd meta 1 (meta.head - 1) (M.empty S.compare).
@@ -137,14 +135,15 @@ scanGo fd meta at rem latest =
                     else scanGo fd meta (at + step) (rem - 1) l2))).
 
 # "TAG pages size key[ hN]"
-record line = case S.split " " line of
-    tag :: pages :: size :: key :: rest ->
-      if not ((tag == "QREC" or tag == "QDEL" or tag == "QBLK") and num pages and num size) then O.None
-      else (case rest of
-          Nil -> O.Some { tag = tag, pages = toNum pages, size = toNum size, key = key, hash = 0 - 1 }
-        | [h] -> tagged "h" h |> O.map (fn v -> { tag = tag, pages = toNum pages, size = toNum size, key = key, hash = v })
-        | _ -> O.None)
-  | _ -> O.None.
+recordParser =
+  P.succeed (fn tag pages size key hash -> { tag = tag, pages = pages, size = size, key = key, hash = hash })
+  |> P.andMap (P.oneOf [P.literal "QREC", P.literal "QDEL", P.literal "QBLK"])
+  |> P.skip (P.char 32) |> P.andMap P.natNoLeadZero
+  |> P.skip (P.char 32) |> P.andMap P.natNoLeadZero
+  |> P.skip (P.char 32) |> P.andMap (P.takeWhile1 isKeyChar "key")
+  |> P.andMap (P.withDefault (0 - 1) (P.literal " h" |> P.andThen (fn u -> P.natNoLeadZero))).
+
+record line = P.run recordParser line |> O.fromResult.
 
 apply r start value latest = case r.tag of
     "QDEL" -> if r.size == 0 then Ok (M.remove r.key latest) else Err "nonempty tombstone"
