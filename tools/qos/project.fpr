@@ -3,14 +3,14 @@
 C = use "common".
 H = use "host".
 Q = use "qa".
-T = use "toml".
+T = use "std/toml".
 J = use "std/json".
 L = use "std/list".
 M = use "std/map".
 O = use "std/option".
 R = use "std/result".
 S = use "std/string".
-V = use "version".
+V = use "std/semver".
 
 Project = { root : String, manifest : Int, app : J.Value, build : J.Value, run : J.Value, sdk : J.Value, platform : J.Value, entry : String }.
 

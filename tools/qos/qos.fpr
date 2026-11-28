@@ -2,6 +2,7 @@
 
 B = use "build".
 C = use "common".
+Cli = use "std/cli".
 H = use "host".
 I = use "install".
 P = use "project".
@@ -34,43 +35,16 @@ helpText = S.concat [
   "                                   run a kind = \"app\" project (default: this directory), or Main on DISK\n",
   "\noptions:\n  -h, --help  show this help message and exit\n  --version   show installed release and API versions\n"].
 
-usageError why =
-  _ = Sys.stderr (strcat usage "qos: error: {why}\n");
-  Sys.exit 2.
-
-# argv -> { positional, values : [(option, value)], flags : [option] }
-# valued: the options that take a value
-parseArgs args valued flags = argGo args valued flags Nil Nil Nil.
-argGo : (args : List String | measure args) -> List String -> List String -> List String -> List (String, String) -> List String -> Result { positional : List String, values : List (String, String), flags : List String } String .
-argGo args valued flags pos vals seen = case args of
-    Nil -> Ok { positional = L.reverse pos, values = vals, flags = seen }
-  | a :: rest ->
-      if L.member a valued then
-        case rest of
-            v :: more -> argGo more valued flags pos ((a, v) :: vals) seen
-          | Nil -> Err "argument {a}: expected one argument"
-      else if L.member a flags then argGo rest valued flags pos vals (a :: seen)
-      else if S.startsWith "--" a and strIndexOf "=" a > 0 and L.member (substr a 0 (strIndexOf "=" a)) valued then
-        eq = strIndexOf "=" a;
-        argGo rest valued flags pos ((substr a 0 eq, substr a (eq + 1) (strlen a)) :: vals) seen
-      else if S.startsWith "-" a and strlen a > 1 then Err "unrecognized arguments: {a}"
-      else argGo rest valued flags (a :: pos) vals seen.
-
-value parsed name = parsed.values |> L.find (fn kv -> (k, _) = kv; k == name) |> O.map (fn kv -> (_, v) = kv; v).
-flag parsed names = names |> L.any (fn n -> L.member n parsed.flags).
+usageError why = Cli.usageError "qos" usage why.
+value parsed name = Cli.option name parsed.
+flag parsed names = Cli.anyFlag names parsed.
+argOr parsed i d = Cli.argOr d i parsed.
 
 # argparse's contract: a usage error exits 2
 withArgs args valued flags most body =
-  case parseArgs args valued flags |> R.andThen (atMost most) of
+  case Cli.parse { flags = flags, options = valued } args |> R.andThen (Cli.atMost most) of
       Err e -> usageError e
     | Ok a -> body a.
-
-atMost n parsed =
-  if L.length parsed.positional > n
-    then Err "unrecognized arguments: {parsed.positional |> L.drop n |> S.join " "}"
-    else Ok parsed.
-
-argOr parsed i d = L.get i parsed.positional |> O.withDefault d.
 
 # str.title for ASCII: a letter after a non-letter is upper case, others lower
 title t = titleGo t 0 (strlen t) False Nil.

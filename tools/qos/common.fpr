@@ -13,19 +13,9 @@ session = "qos.app-session/6".
 api = "qos.desktop/2".
 
 # ---- results ------------------------------------------------------------------------
-check True _ = Ok Unit.
-check False why = Err why.
-
-each : (a -> Result b String) -> (xs : List a | measure xs) -> Result Unit String .
-each f xs = case xs of
-    Nil -> Ok Unit
-  | x :: rest -> f x |> R.andThen (fn u -> each f rest).
-
-mapR f xs = mapGo f xs Nil.
-mapGo : (a -> Result b String) -> (xs : List a | measure xs) -> List b -> Result (List b) String .
-mapGo f xs acc = case xs of
-    Nil -> Ok (L.reverse acc)
-  | x :: rest -> f x |> R.andThen (fn v -> mapGo f rest (v :: acc)).
+check = R.check.
+each = R.each.
+mapR = R.traverse.
 
 # ---- paths --------------------------------------------------------------------------
 join "" b = b.
@@ -133,13 +123,8 @@ hexDigit d = substr "0123456789abcdef" d 1.
 
 # shlex.join, for the build log
 shellWord w =
-  if strlen w > 0 and safeChars w 0 (strlen w) then w
+  if strlen w > 0 and S.allChars safeChar w then w
   else strcat "'" (strcat (S.replace "'" "'\"'\"'" w) "'").
-
-safeChars : String -> Int -> (rem : Int | measure rem) -> Bool .
-safeChars w i rem =
-  if rem <= 0 then True
-  else safeChar (charAt w i) and safeChars w (i + 1) (rem - 1).
 
 safeChar c = (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or S.isDigit c
   or c == 64 or c == 37 or c == 43 or c == 61 or c == 58 or c == 44 or c == 46 or c == 47 or c == 45 or c == 95.
@@ -203,11 +188,11 @@ run log (tool :: rest) cwd =
           Err "{baseName tool} failed; see {log.path}".
 
 # ---- sdk.json ----------------------------------------------------------------------------
-field k v = J.field k v.
-textField k v = case J.field k v of O.Some (J.Text t) -> O.Some t | _ -> O.None.
-textOr d k v = textField k v |> O.withDefault d.
-textIs k v want = textField k v == O.Some want.
-intField k v = case J.field k v of O.Some (J.Integer n) -> O.Some n | _ -> O.None.
-objectField k v = case J.field k v of O.Some (J.Object m) -> O.Some m | _ -> O.None.
-listField k v = case J.field k v of O.Some (J.Sequence xs) -> O.Some xs | _ -> O.None.
+field = J.field.
+textField = J.stringField.
+textOr = J.stringOr.
+textIs k v want = J.stringIs want k v.
+intField = J.intField.
+objectField = J.objectField.
+listField = J.listField.
 textMap m = M.fold (fn acc k v -> case v of J.Text t -> (k, t) :: acc | _ -> acc) Nil m |> L.reverse.

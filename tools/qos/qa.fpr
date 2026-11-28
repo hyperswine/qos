@@ -4,7 +4,7 @@
 
 E = use "elf".
 H = use "host".
-T = use "toml".
+T = use "std/toml".
 J = use "std/json".
 L = use "std/list".
 M = use "std/map".
@@ -16,14 +16,8 @@ B = use "std/binary".
 
 # ---- shared helpers -----------------------------------------------------------------
 
-require True _ = Ok Unit.
-require False why = Err why.
-
-allChars pred s i = allCharsGo pred s i (strlen s - i).
-allCharsGo : (Int -> Bool) -> String -> Int -> (rem : Int | measure rem) -> Bool .
-allCharsGo pred s i rem =
-  if rem <= 0 then True
-  else pred (charAt s i) and allCharsGo pred s (i + 1) (rem - 1).
+require = R.check.
+allChars pred s i = S.dropLeft i s |> S.allChars pred.
 
 # ---- writing ------------------------------------------------------------------------
 # opts: { relocatable : Bool, moved : O.Option String, delta : Int, imports : Bool }
@@ -162,8 +156,8 @@ part m name = M.getOr "" name m.
 manifestOf : unsafe String -> Result J.Value String .
 manifestOf raw = sections raw |> R.andThen (fn m -> T.parse (part m "MANIFEST")).
 
-text v k = case J.field k v of O.Some (J.Text t) -> O.Some t | _ -> O.None.
-textIs v k want = text v k == O.Some want.
+text v k = J.stringField k v.
+textIs v k want = J.stringIs want k v.
 plainField v k = case text v k of
     O.Some t -> strlen t > 0 and plainChars t 0
   | O.None -> False.
@@ -187,7 +181,7 @@ read raw want =
               version = text man "version" |> O.withDefault "" }))).
 
 checks man want =
-  firstErr [
+  R.firstErr [
     require (text man "id" |> O.map validId |> O.withDefault False) "invalid archive manifest ID",
     require (plainField man "name") "invalid archive name",
     require (plainField man "version") "invalid archive version",
@@ -199,12 +193,6 @@ checks man want =
     contract man "desktopSession" want.session want.bundled,
     contract man "desktopApi" want.api want.bundled,
     require (noPermissions man) "desktop SDK does not support archive permission declarations"].
-
-firstErr : (rs : List (Result Unit String) | measure rs) -> Result Unit String .
-firstErr rs = case rs of
-    Nil -> Ok Unit
-  | Err e :: _ -> Err e
-  | Ok _ :: rest -> firstErr rest.
 
 # Legacy onboard plugins come from the pinned profile with verified hashes;
 # external archives carry the whole desktop contract.
