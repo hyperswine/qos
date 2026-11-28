@@ -1,7 +1,6 @@
 # install.fpr -- installed Main disk/profile policy above disk.fpr's durable
 # block format (tools/desktop_install.py): qos disk create, qos install,
 # qos run DISK.
-unsafe base.
 
 C = use "common".
 D = use "disk".
@@ -11,35 +10,43 @@ J = use "std/json".
 L = use "std/list".
 M = use "std/map".
 O = use "std/option".
+R = use "std/result".
 S = use "std/string".
 OS = use "std/os".
 
 profileKey = "qos/profile".
 
-compatibleSdk sdk launchingMain = C.readFile (C.join sdk "sdk.json") |>? (fn raw -> case J.parse raw of
-    Err e -> Err "sdk.json: {e}"
-  | Ok meta ->
-      C.check (C.textIs "architecture" meta "aarch64") "installed desktop disk workflow currently supports AArch64 only" |>? (fn u1 ->
-      C.check ((case C.intField "diskLockContract" meta of O.Some 1 -> True | _ -> False) and nonEmpty (C.listField "profileApps" meta))
-        "SDK has no matching lock-capable Main profile; install the complete SDK" |>? (fn u2 ->
-      C.check (C.textIs "os" meta (H.system Unit)) "SDK targets a different host OS" |>? (fn u3 ->
-      files = C.textMap (O.withDefault (M.empty S.compare) (C.objectField "profileFiles" meta));
-      C.each (fn kv -> case kv of (name, expected) ->
+compatibleSdk : unsafe String -> Bool -> Result J.Value String .
+compatibleSdk sdk launchingMain =
+  C.readFile (C.join sdk "sdk.json")
+  |> R.andThen (fn raw -> J.parse raw |> R.mapError (fn e -> "sdk.json: {e}"))
+  |> R.andThen (fn meta ->
+      files = C.objectField "profileFiles" meta |> O.withDefault (M.empty S.compare) |> C.textMap;
+      C.check (C.textIs "architecture" meta "aarch64") "installed desktop disk workflow currently supports AArch64 only"
+      |> R.andThen (fn u -> C.check (C.intField "diskLockContract" meta == O.Some 1 and nonEmpty (C.listField "profileApps" meta))
+          "SDK has no matching lock-capable Main profile; install the complete SDK")
+      |> R.andThen (fn u -> C.check (C.textIs "os" meta (H.system Unit)) "SDK targets a different host OS")
+      |> R.andThen (fn u -> C.each (fn kv ->
+          (name, expected) = kv;
           p = C.join sdk (C.join "profile" name);
           # Main preflight checks unfamiliar bytes, and the host checks its
           # own archive buffer against the expected digest on every launch.
-          (case H.isFile p and (if launchingMain and name == "main.qa" then True else hashMatches (H.sha256File p) expected) of
-            True -> Ok Unit
-          | False -> Err "profile {name} changed; reinstall matching SDK")) files |>? (fn u4 ->
-      C.check (L.any (fn kv -> case kv of (n, _) -> n == "main.qa") files) "SDK has no verified Main entry archive" |>? (fn u5 ->
-      Ok meta)))))).
-nonEmpty o = case o of O.Some (_ :: _) -> True | _ -> False.
+          ok = H.isFile p and ((launchingMain and name == "main.qa") or hashMatches (H.sha256File p) expected);
+          C.check ok "profile {name} changed; reinstall matching SDK") files)
+      |> R.andThen (fn u -> C.check (L.any (fn kv -> (n, _) = kv; n == "main.qa") files) "SDK has no verified Main entry archive")
+      |> R.map (fn u -> meta)).
 
-hashMatches r expected = case r of Ok h -> h == expected | Err _ -> False.
+nonEmpty (O.Some (_ :: _)) = True.
+nonEmpty _ = False.
 
-want meta bundled desktop = { abi = C.textOr "" "abi" meta, architecture = C.textOr "" "architecture" meta,
-                              session = C.textOr "" "desktopSession" meta, api = C.textOr "" "desktopApi" meta,
-                              desktop = desktop, bundled = bundled }.
+hashMatches (Ok h) expected = h == expected.
+hashMatches (Err _) _ = False.
+
+want meta bundled desktop = {
+  abi = C.textOr "" "abi" meta, architecture = C.textOr "" "architecture" meta,
+  session = C.textOr "" "desktopSession" meta, api = C.textOr "" "desktopApi" meta,
+  desktop = desktop, bundled = bundled }.
+
 # Bind bundled privileges to the actual bytes going into the parser. The
 # earlier SDK scan can precede a file replacement or a change to profileApps.
 bundledDigest meta name = case C.objectField "profileFiles" meta of
@@ -48,129 +55,170 @@ bundledDigest meta name = case C.objectField "profileFiles" meta of
       O.Some (J.Text expected) -> Ok expected
     | _ -> Err "missing SDK profile digest for {name}".
 
-readBundled sdk meta name = bundledDigest meta name |>? (fn expected ->
-  C.readFile (C.join sdk (C.join "profile" name)) |>? (fn raw ->
-  C.check (H.sha256 raw == expected) "profile {name} changed; reinstall matching SDK" |>? (fn u -> Ok (raw, expected)))).
+readBundled : unsafe String -> J.Value -> String -> Result (String, String) String .
+readBundled sdk meta name =
+  bundledDigest meta name
+  |> R.andThen (fn expected ->
+      C.readFile (C.join sdk (C.join "profile" name))
+      |> R.andThen (fn raw ->
+          C.check (H.sha256 raw == expected) "profile {name} changed; reinstall matching SDK"
+          |> R.map (fn u -> (raw, expected)))).
 
+parse : unsafe String -> J.Value -> Bool -> Bool -> Result { raw : String, manifest : J.Value, id : String, version : String } String .
 parse raw meta bundled desktop = Q.read raw (want meta bundled desktop).
 
 # json.dumps(profile, sort_keys=True): the marker Main and this tool compare
-profileText meta = S.concat ("\{\"abi\": " :: C.jsonStr (C.textOr "" "abi" meta) ::
-  ", \"architecture\": " :: C.jsonStr (C.textOr "" "architecture" meta) ::
-  ", \"desktopApi\": " :: C.jsonStr (C.textOr "" "desktopApi" meta) ::
-  ", \"desktopSession\": " :: C.jsonStr (C.textOr "" "desktopSession" meta) ::
-  ", \"format\": 1, \"os\": " :: C.jsonStr (C.textOr "" "os" meta) :: ", \"profile\": \"Main\"}" :: Nil).
+profileText meta = S.concat [
+  "\{\"abi\": ", C.jsonStr (C.textOr "" "abi" meta),
+  ", \"architecture\": ", C.jsonStr (C.textOr "" "architecture" meta),
+  ", \"desktopApi\": ", C.jsonStr (C.textOr "" "desktopApi" meta),
+  ", \"desktopSession\": ", C.jsonStr (C.textOr "" "desktopSession" meta),
+  ", \"format\": 1, \"os\": ", C.jsonStr (C.textOr "" "os" meta), ", \"profile\": \"Main\"}"].
 
 # the app catalogue: one ID a line, canonical
-index raw = case asciiOnly raw 0 of
-    False -> Err "invalid app catalogue encoding"
-  | True ->
-      ids = S.lines raw;
-      C.check (L.all Q.validId ids and L.length (L.unique ids) == L.length ids) "invalid/duplicate app catalogue IDs" |>? (fn u ->
-      C.check (raw == S.concat (L.map (fn i -> strcat i "\n") ids)) "noncanonical app catalogue" |>? (fn u2 ->
-      Ok ids)).
-asciiOnly t i | i >= strlen t = True.
-asciiOnly t i | charAt t i < 128 = asciiOnly t (i + 1).
-asciiOnly t i = False.
+index raw =
+  if not (asciiOnly raw 0 (strlen raw)) then Err "invalid app catalogue encoding"
+  else
+    ids = S.lines raw;
+    C.check (L.all Q.validId ids and L.length (L.unique ids) == L.length ids) "invalid/duplicate app catalogue IDs"
+    |> R.andThen (fn u -> C.check (raw == catalogue ids) "noncanonical app catalogue")
+    |> R.map (fn u -> ids).
 
-catalogue ids = S.concat (L.map (fn i -> strcat i "\n") ids).
+asciiOnly : String -> Int -> (rem : Int | measure rem) -> Bool .
+asciiOnly t i rem =
+  if rem <= 0 then True
+  else charAt t i < 128 and asciiOnly t (i + 1) (rem - 1).
 
-openProfile fd meta = D.metadata fd |>? (fn current ->
-  D.scan fd current |>? (fn latest ->
-  C.check (M.member profileKey latest and M.member "apps/index" latest) "disk lacks Main profile metadata; use qos disk create" |>? (fn u ->
-  read fd latest profileKey |>? (fn marker ->
-  C.check (sameJson marker (profileText meta)) "disk/profile compatibility mismatch; rebuild installed apps for the matching SDK before migrating this disk" |>? (fn u2 ->
-  read fd latest "apps/index" |>? (fn raw ->
-  index raw |>? (fn ids ->
-  # every discovered native archive is verified before launching or updating
-  trusted = L.filterMap (fn kv -> case kv of (name, sha) -> (case name != "main.qa" and S.endsWith ".qa" name of
-      True -> O.Some (substr name 0 (strlen name - 3), sha)
-    | False -> O.None)) (C.textMap (O.withDefault (M.empty S.compare) (C.objectField "profileFiles" meta)));
-  staged = stagedPlugins meta;
-  C.each (fn aid ->
-      key = "apps/{aid}.qa";
-      C.check (M.member key latest) "catalogue references missing archive {aid}" |>? (fn u3 ->
-      read fd latest key |>? (fn raw2 ->
-      expected = (case L.find (fn t -> case t of (a, _) -> a == aid) trusted of O.Some (_, sha) -> sha | O.None -> "");
-      digest = if expected != "" or M.size staged > 0 then H.sha256 raw2 else "";
-      bundled = expected != "" and digest == expected;
-      if M.getOr "" digest staged == aid then Ok Unit else
-        parse raw2 meta bundled True |>? (fn app -> C.check (app.id == aid) "catalogue/manifest ID mismatch")))) ids |>? (fn u4 ->
-  Ok (current, latest, ids))))))))).
+catalogue ids = ids |> L.map (fn i -> strcat i "\n") |> S.concat.
 
+Meta = { head : Int, w : Int, c : Int, dataEnd : Int, swap : Int, merkle : Int, generation : Int, stage : Int }.
+
+openProfile : unsafe Int -> J.Value -> Result (Meta, M.Map String (Int, Int), List String) String .
+openProfile fd meta =
+  D.metadata fd |> R.andThen (fn current ->
+    D.scan fd current |> R.andThen (fn latest ->
+      C.check (M.member profileKey latest and M.member "apps/index" latest) "disk lacks Main profile metadata; use qos disk create"
+      |> R.andThen (fn u -> read fd latest profileKey)
+      |> R.andThen (fn marker -> C.check (sameJson marker (profileText meta)) "disk/profile compatibility mismatch; rebuild installed apps for the matching SDK before migrating this disk")
+      |> R.andThen (fn u -> read fd latest "apps/index")
+      |> R.andThen index
+      |> R.andThen (fn ids ->
+          # every discovered native archive is verified before launching or updating
+          trusted = C.objectField "profileFiles" meta
+            |> O.withDefault (M.empty S.compare)
+            |> C.textMap
+            |> L.filterMap (fn kv ->
+                (name, sha) = kv;
+                if name != "main.qa" and S.endsWith ".qa" name then O.Some (substr name 0 (strlen name - 3), sha) else O.None);
+          staged = stagedPlugins meta;
+          C.each (fn aid ->
+            key = "apps/{aid}.qa";
+            C.check (M.member key latest) "catalogue references missing archive {aid}"
+            |> R.andThen (fn u -> read fd latest key)
+            |> R.andThen (fn raw2 ->
+                expected = trusted |> L.find (fn t -> (a, _) = t; a == aid) |> O.map (fn t -> (_, sha) = t; sha) |> O.withDefault "";
+                digest = if expected != "" or M.size staged > 0 then H.sha256 raw2 else "";
+                bundled = expected != "" and digest == expected;
+                if M.getOr "" digest staged == aid then Ok Unit
+                else parse raw2 meta bundled True |> R.andThen (fn app -> C.check (app.id == aid) "catalogue/manifest ID mismatch"))) ids
+          |> R.map (fn u -> (current, latest, ids))))).
+
+read : unsafe Int -> M.Map String (Int, Int) -> String -> Result String String .
 read fd latest key = case M.get key latest of
     O.Some entry -> D.valueOf fd entry
   | O.None -> Err "missing {key}".
+
 sameJson a b = case (J.parse a, J.parse b) of
     (Ok x, Ok y) -> J.equal x y
   | _ -> False.
 
 # The stager only emits IDs accepted by Q.validId, which excludes both
 # delimiters. Index by inspected content so renamed archives keep their ID.
+stagedPlugins : unsafe J.Value -> M.Map String String .
 stagedPlugins meta =
   rows = case bundledDigest meta "main.qa" of
       Ok digest -> if stagedContract meta digest then S.split "|" (H.verifiedPlugins Unit) else Nil
     | Err _ -> Nil;
-  M.fromList S.compare (L.filterMap (fn row -> case S.split ":" row of
-      aid :: sha :: Nil -> O.Some (sha, aid)
-    | _ -> O.None) rows).
+  rows
+  |> L.filterMap (fn row -> case S.split ":" row of [aid, sha] -> O.Some (sha, aid) | _ -> O.None)
+  |> M.fromList S.compare.
 
-bundledApp sdk meta staged name = readBundled sdk meta name |>? (fn pair -> case pair of (raw, digest) ->
-  case M.get digest staged of
-      O.Some aid -> Ok { id = aid, raw = raw }
-    | O.None -> parse raw meta True True |>? (fn app -> Ok { id = app.id, raw = raw })).
+bundledApp : unsafe String -> J.Value -> M.Map String String -> String -> Result { id : String, raw : String } String .
+bundledApp sdk meta staged name =
+  readBundled sdk meta name |> R.andThen (fn pair ->
+    (raw, digest) = pair;
+    case M.get digest staged of
+        O.Some aid -> Ok { id = aid, raw = raw }
+      | O.None -> parse raw meta True True |> R.map (fn app -> { id = app.id, raw = raw })).
 
-create sdk destination size = compatibleSdk sdk False |>? (fn meta ->
-  names = L.filterMap (fn v -> case v of J.Text t -> O.Some t | _ -> O.None) (O.withDefault Nil (C.listField "profileApps" meta));
-  staged = stagedPlugins meta;
-  C.mapR (bundledApp sdk meta staged) names |>? (fn apps ->
-  ids = L.map (fn a -> a.id) apps;
-  C.check (L.length (L.unique ids) == L.length ids) "duplicate bundled app ID" |>? (fn u ->
-  items = L.append (L.map (fn a -> ("apps/{a.id}.qa", a.raw)) apps)
-                   (("apps/index", catalogue ids) :: (profileKey, profileText meta) :: Nil);
-  D.create (C.absolute destination) size items |>? (fn u2 ->
-  _ = C.say "Created Main disk {destination} ({L.length ids} apps)";
-  Ok Unit)))).
+create : unsafe String -> String -> Int -> Result Unit String .
+create sdk destination size =
+  compatibleSdk sdk False |> R.andThen (fn meta ->
+    names = C.listField "profileApps" meta |> O.withDefault Nil |> L.filterMap J.asString;
+    staged = stagedPlugins meta;
+    C.mapR (bundledApp sdk meta staged) names |> R.andThen (fn apps ->
+      ids = apps |> L.map (fn a -> a.id);
+      C.check (L.length (L.unique ids) == L.length ids) "duplicate bundled app ID"
+      |> R.andThen (fn u ->
+          items = L.append (apps |> L.map (fn a -> ("apps/{a.id}.qa", a.raw)))
+                           [("apps/index", catalogue ids), (profileKey, profileText meta)];
+          D.create (C.absolute destination) size items)
+      |> R.map (fn u -> _ = C.say "Created Main disk {destination} ({L.length ids} apps)"; Unit))).
 
-install sdk archive destination = compatibleSdk sdk False |>? (fn meta ->
-  C.readFile archive |>? (fn raw ->
-  parse raw meta False True |>? (fn app ->
-  D.locked destination |>? (fn held -> case held of (path, fd) ->
-    result = openProfile fd meta |>? (fn opened -> case opened of (current, latest, ids) ->
-      changed = L.member app.id ids;
-      ids2 = (case changed of True -> ids | False -> L.append ids (app.id :: Nil));
-      D.append fd current (("apps/{app.id}.qa", app.raw) :: ("apps/index", catalogue ids2) :: Nil) |>? (fn updated ->
-      _ = C.say "{(case changed of True -> "Updated" | False -> "Installed")} {app.id} {app.version} in {destination} (generation {updated.generation})";
-      Ok Unit));
-    _ = OS.close fd;
-    result)))).
+install : unsafe String -> String -> String -> Result Unit String .
+install sdk archive destination =
+  compatibleSdk sdk False |> R.andThen (fn meta ->
+    C.readFile archive |> R.andThen (fn raw ->
+      parse raw meta False True |> R.andThen (fn app ->
+        D.locked destination |> R.andThen (fn held ->
+          (_, fd) = held;
+          result = openProfile fd meta |> R.andThen (fn opened ->
+            (current, _, ids) = opened;
+            changed = L.member app.id ids;
+            ids2 = if changed then ids else L.append ids [app.id];
+            D.append fd current [("apps/{app.id}.qa", app.raw), ("apps/index", catalogue ids2)]
+            |> R.map (fn updated ->
+                verb = if changed then "Updated" else "Installed";
+                _ = C.say "{verb} {app.id} {app.version} in {destination} (generation {updated.generation})";
+                Unit));
+          _ = OS.close fd;
+          result)))).
 
 # The proof lives in the CLI binary. The host independently matches the
 # archive it actually reads to this digest before interpreting it.
+stagedContract : unsafe J.Value -> String -> Bool .
 stagedContract meta digest =
   abi = C.textOr "" "abi" meta;
   H.verifiedMain Unit == "{digest}:{abi}" and C.textIs "desktopApi" meta C.api and C.textIs "desktopSession" meta C.session.
-mainPreflight sdk meta digest = case stagedContract meta digest of
-    True -> Ok Unit
-  | False -> readBundled sdk meta "main.qa" |>? (fn pair -> case pair of (raw, _) -> parse raw meta True False |>? (fn app -> Ok Unit)).
+
+mainPreflight : unsafe String -> J.Value -> String -> Result Unit String .
+mainPreflight sdk meta digest =
+  if stagedContract meta digest then Ok Unit
+  else readBundled sdk meta "main.qa"
+    |> R.andThen (fn pair -> (raw, _) = pair; parse raw meta True False)
+    |> R.map (fn app -> Unit).
 
 # Main on a disk; the host takes over this same locked open file
-runMain sdk destination = compatibleSdk sdk True |>? (fn meta ->
-  entry = C.join sdk "profile/main.qa";
-  C.check (case C.intField "archiveDigestContract" meta of O.Some 1 -> True | _ -> False)
-    "matching archive-digest-capable Main host required; reinstall the SDK" |>? (fn checked ->
-  bundledDigest meta "main.qa" |>? (fn mainDigest ->
-  mainPreflight sdk meta mainDigest |>? (fn u ->
-  host = C.join sdk "runtime/qosp-gl";
-  expected = (case C.objectField "runtimeFiles" meta of O.Some m -> (case M.get "qosp-gl" m of O.Some (J.Text t) -> t | _ -> "") | O.None -> "");
-  C.check (strlen expected > 0 and H.isFile host and hashMatches (H.sha256File host) expected)
-    "matching prebuilt graphical host missing or changed; reinstall SDK" |>? (fn u2 ->
-  D.locked destination |>? (fn held -> case held of (path, fd) ->
-    case openProfile fd meta of
-      Err e ->
-        _ = OS.close fd;
-        Err e
-    | Ok _ ->
-        _ = H.setEnv "FPR_DISK" path;
-        _ = H.setEnv "FPR_DISK_LOCK_FD" (str fd);
-        OS.exec (host :: "--expect-archive-sha256" :: mainDigest :: "--yes" :: entry :: Nil))))))).
+runMain : unsafe String -> String -> Result Unit String .
+runMain sdk destination =
+  compatibleSdk sdk True |> R.andThen (fn meta ->
+    entry = C.join sdk "profile/main.qa";
+    host = C.join sdk "runtime/qosp-gl";
+    C.check (C.intField "archiveDigestContract" meta == O.Some 1)
+      "matching archive-digest-capable Main host required; reinstall the SDK"
+    |> R.andThen (fn u -> bundledDigest meta "main.qa")
+    |> R.andThen (fn mainDigest ->
+        mainPreflight sdk meta mainDigest
+        |> R.andThen (fn u ->
+            expected = C.objectField "runtimeFiles" meta |> O.andThen (M.get "qosp-gl") |> O.andThen J.asString |> O.withDefault "";
+            C.check (strlen expected > 0 and H.isFile host and hashMatches (H.sha256File host) expected)
+              "matching prebuilt graphical host missing or changed; reinstall SDK")
+        |> R.andThen (fn u -> D.locked destination)
+        |> R.andThen (fn held ->
+            (path, fd) = held;
+            case openProfile fd meta of
+                Err e -> _ = OS.close fd; Err e
+              | Ok _ ->
+                  _ = H.setEnv "FPR_DISK" path;
+                  _ = H.setEnv "FPR_DISK_LOCK_FD" (str fd);
+                  OS.exec [host, "--expect-archive-sha256", mainDigest, "--yes", entry]))).

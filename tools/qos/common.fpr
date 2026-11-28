@@ -1,11 +1,11 @@
 # common.fpr -- paths, files, text and processes for the `qos` command.
-unsafe base.
 
 H = use "host".
 J = use "std/json".
 L = use "std/list".
 M = use "std/map".
 O = use "std/option".
+R = use "std/result".
 S = use "std/string".
 OS = use "std/os".
 
@@ -13,173 +13,200 @@ session = "qos.app-session/6".
 api = "qos.desktop/2".
 
 # ---- results ------------------------------------------------------------------------
-check ok why = case ok of True -> Ok Unit | False -> Err why.
-not b = case b of True -> False | False -> True.
+check True _ = Ok Unit.
+check False why = Err why.
+
+each : (a -> Result b String) -> (xs : List a | measure xs) -> Result Unit String .
 each f xs = case xs of
     Nil -> Ok Unit
-  | x :: rest -> (case f x of Err e -> Err e | Ok _ -> each f rest).
+  | x :: rest -> f x |> R.andThen (fn u -> each f rest).
+
 mapR f xs = mapGo f xs Nil.
+mapGo : (a -> Result b String) -> (xs : List a | measure xs) -> List b -> Result (List b) String .
 mapGo f xs acc = case xs of
     Nil -> Ok (L.reverse acc)
-  | x :: rest -> (case f x of Err e -> Err e | Ok v -> mapGo f rest (v :: acc)).
+  | x :: rest -> f x |> R.andThen (fn v -> mapGo f rest (v :: acc)).
 
 # ---- paths --------------------------------------------------------------------------
-join a b = case a == "" of
-    True -> b
-  | False -> (case S.endsWith "/" a of True -> strcat a b | False -> "{a}/{b}").
-lastSlash p i | i < 0 = 0 - 1.
-lastSlash p i | charAt p i == 47 = i.
-lastSlash p i = lastSlash p (i - 1).
+join "" b = b.
+join a b | S.endsWith "/" a = strcat a b.
+join a b = "{a}/{b}".
+
+lastChar p ch = lastCharGo p ch (strlen p - 1) (strlen p).
+lastCharGo : String -> Int -> Int -> (rem : Int | measure rem) -> Int .
+lastCharGo p ch i rem =
+  if rem <= 0 then 0 - 1
+  else if charAt p i == ch then i
+  else lastCharGo p ch (i - 1) (rem - 1).
+
 parent p =
-  n = lastSlash p (strlen p - 1);
-  case n < 0 of
-    True -> "."
-  | False -> (case n == 0 of True -> "/" | False -> substr p 0 n).
+  n = lastChar p 47;
+  if n < 0 then "."
+  else if n == 0 then "/"
+  else substr p 0 n.
+
 baseName p =
-  n = lastSlash p (strlen p - 1);
+  n = lastChar p 47;
   substr p (n + 1) (strlen p - n - 1).
+
 # ".c" of "a/b.c"; "" when the name has no dot (a leading dot is not a suffix)
 suffix p =
   b = baseName p;
-  d = lastDot b (strlen b - 1);
-  case d <= 0 of True -> "" | False -> substr b d (strlen b - d).
-lastDot b i | i < 0 = 0 - 1.
-lastDot b i | charAt b i == 46 = i.
-lastDot b i = lastDot b (i - 1).
+  d = lastChar b 46;
+  if d <= 0 then "" else substr b d (strlen b - d).
+
 stem p =
   b = baseName p;
   substr b 0 (strlen b - strlen (suffix p)).
+
 withoutSuffix p = substr p 0 (strlen p - strlen (suffix p)).
 isAbsolute p = S.startsWith "/" p.
+
 # p is root or below it (both resolved)
 inside root p = p == root or (S.startsWith (join root "") p and strlen p > strlen root).
-relativeTo root p = case S.startsWith (join root "") p of
-    True -> substr p (strlen (join root "")) (strlen p - strlen (join root ""))
-  | False -> p.
+relativeTo root p =
+  prefix = join root "";
+  if S.startsWith prefix p then substr p (strlen prefix) (strlen p - strlen prefix) else p.
 
-absolute p = case isAbsolute p of True -> p | False -> join (OS.cwd Unit) p.
+absolute p = if isAbsolute p then p else join (OS.cwd Unit) p.
 
-mkdirs p = case H.isDir p or p == "" or p == "/" of
-    True -> Ok Unit
-  | False -> (case mkdirs (parent p) of
-      Err e -> Err e
-    | Ok _ -> (case OS.mkdir p of
+mkdirs : unsafe String -> Result Unit String .
+mkdirs p = mkdirsGo p (strlen p + 1).
+
+mkdirsGo : unsafe String -> (fuel : Int | measure fuel) -> Result Unit String .
+mkdirsGo p fuel =
+  if fuel <= 0 then Ok Unit
+  else if H.isDir p or p == "" or p == "/" then Ok Unit
+  else mkdirsGo (parent p) (fuel - 1) |> R.andThen (fn u ->
+    case OS.mkdir p of
         Ok _ -> Ok Unit
-      | Err e -> (case H.isDir p of True -> Ok Unit | False -> Err "{p}: {e}"))).
+      | Err e -> if H.isDir p then Ok Unit else Err "{p}: {e}").
 
 # every regular file under dir, as paths relative to it, sorted
-walk dir = walkGo dir "" |> (fn names -> L.sortWith S.compare names).
+walk : unsafe String -> List String .
+walk dir = walkGo dir "" |> L.sortWith S.compare.
+
+walkGo : unsafe String -> String -> List String .
 walkGo dir rel =
-  here = (case rel == "" of True -> dir | False -> join dir rel);
+  here = if rel == "" then dir else join dir rel;
   case OS.listDir here of
-    Err _ -> Nil
-  | Ok names -> L.concatMap (fn n ->
-      r = (case rel == "" of True -> n | False -> join rel n);
-      p = join dir r;
-      (case H.kind p of
-        0 -> r :: Nil
-      | 1 -> walkGo dir r
-      | _ -> Nil)) names.
+      Err _ -> Nil
+    | Ok names -> names |> L.concatMap (fn n ->
+        r = if rel == "" then n else join rel n;
+        case H.kind (join dir r) of
+            0 -> [r]
+          | 1 -> walkGo dir r
+          | _ -> Nil).
 
 # ---- files --------------------------------------------------------------------------
-readFile p = case OS.readFile p of
-    Ok t -> Ok t
-  | Err e -> Err "{p}: {e}".
-writeFile p bytes = case fileWrite p bytes of
-    Ok _ -> Ok Unit
-  | Err e -> Err "{p}: {e}".
-copyFile from to = readFile from |>? (fn b -> writeFile to b).
-digest p = case H.sha256File p of
-    Ok h -> Ok h
-  | Err e -> Err "{p}: {e}".
+readFile p = OS.readFile p |> R.mapError (fn e -> "{p}: {e}").
+writeFile p bytes = fileWrite p bytes |> R.mapError (fn e -> "{p}: {e}").
+copyFile from to = readFile from |> R.andThen (writeFile to).
+digest : unsafe String -> Result String String .
+digest p = H.sha256File p |> R.mapError (fn e -> "{p}: {e}").
 
 say t = print t.
 warn t = Sys.stderr (strcat t "\n").
 
 # ---- text ---------------------------------------------------------------------------
 # json.dumps of a string with ensure_ascii=False (what manifests are written with)
-jsonStr t = strJoin "" ("\"" :: jsonGo t 0 (strlen t) 0 Nil).
-jsonGo t start i n acc | i >= n = L.reverse ("\"" :: substr t start (i - start) :: acc).
-jsonGo t start i n acc = case jsonEscape (charAt t i) of
-    O.None -> jsonGo t start (i + 1) n acc
-  | O.Some e -> jsonGo t (i + 1) (i + 1) n (e :: substr t start (i - start) :: acc).
-jsonEscape c = case c of
-    34 -> O.Some "\\\""
-  | 92 -> O.Some "\\\\"
-  | 10 -> O.Some "\\n"
-  | 13 -> O.Some "\\r"
-  | 9 -> O.Some "\\t"
-  | 8 -> O.Some "\\b"
-  | 12 -> O.Some "\\f"
-  | _ -> (case c < 32 of True -> O.Some "\\u00{hex2 c}" | False -> O.None).
+jsonStr t = strJoin "" ("\"" :: jsonGo t 0 0 (strlen t) Nil).
+jsonGo : String -> Int -> Int -> (rem : Int | measure rem) -> List String -> List String .
+jsonGo t start i rem acc =
+  if rem <= 0 then L.reverse ("\"" :: substr t start (i - start) :: acc)
+  else case jsonEscape (charAt t i) of
+      O.None -> jsonGo t start (i + 1) (rem - 1) acc
+    | O.Some e -> jsonGo t (i + 1) (i + 1) (rem - 1) (e :: substr t start (i - start) :: acc).
+
+jsonEscape 34 = O.Some "\\\"".
+jsonEscape 92 = O.Some "\\\\".
+jsonEscape 10 = O.Some "\\n".
+jsonEscape 13 = O.Some "\\r".
+jsonEscape 9  = O.Some "\\t".
+jsonEscape 8  = O.Some "\\b".
+jsonEscape 12 = O.Some "\\f".
+jsonEscape c | c < 32 = O.Some "\\u00{hex2 c}".
+jsonEscape _ = O.None.
+
 hex2 c = strcat (hexDigit (c / 16)) (hexDigit (c - (c / 16) * 16)).
 hexDigit d = substr "0123456789abcdef" d 1.
 
 # shlex.join, for the build log
-shellWord w = case strlen w > 0 and safeChars w 0 of
-    True -> w
-  | False -> strcat "'" (strcat (S.replace "'" "'\"'\"'" w) "'").
-safeChars w i | i >= strlen w = True.
-safeChars w i | safeChar (charAt w i) = safeChars w (i + 1).
-safeChars w i = False.
-safeChar c = (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or (c >= 48 and c <= 57)
+shellWord w =
+  if strlen w > 0 and safeChars w 0 (strlen w) then w
+  else strcat "'" (strcat (S.replace "'" "'\"'\"'" w) "'").
+
+safeChars : String -> Int -> (rem : Int | measure rem) -> Bool .
+safeChars w i rem =
+  if rem <= 0 then True
+  else safeChar (charAt w i) and safeChars w (i + 1) (rem - 1).
+
+safeChar c = (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or S.isDigit c
   or c == 64 or c == 37 or c == 43 or c == 61 or c == 58 or c == 44 or c == 46 or c == 47 or c == 45 or c == 95.
-shellJoin args = S.join " " (L.map shellWord args).
+shellJoin args = args |> L.map shellWord |> S.join " ".
 
 lastLines n text =
   ls = S.lines text;
-  S.join "\n" (L.drop (L.length ls - n) ls).
+  ls |> L.drop (L.length ls - n) |> S.join "\n".
 
 # ---- the environment -----------------------------------------------------------------
 env name = case Sys.env name of Ok v -> O.Some v | Err _ -> O.None.
 
 # the first executable of that name on PATH
-which name = whichGo name (S.split ":" (O.withDefault "" (env "PATH"))).
+which : unsafe String -> O.Option String .
+which name = env "PATH" |> O.withDefault "" |> S.split ":" |> whichGo name.
+
+whichGo : unsafe String -> (dirs : List String | measure dirs) -> O.Option String .
 whichGo name dirs = case dirs of
     Nil -> O.None
   | d :: rest ->
-      p = join (case d == "" of True -> "." | False -> d) name;
-      (case H.isFile p or (H.kind p == 2 and H.isFile (O.withDefault "" (O.fromResult (H.realpath p)))) of
-        True -> O.Some p
-      | False -> whichGo name rest).
+      p = join (if d == "" then "." else d) name;
+      if H.isFile p or (H.kind p == 2 and H.isFile (H.realpath p |> O.fromResult |> O.withDefault ""))
+        then O.Some p
+        else whichGo name rest.
 
 # ---- commands and the build log ----------------------------------------------------------
 # log: { fd, path, verbose }
-openLog path verbose = case OS.open path "w" of
-    Err e -> Err "{path}: {e}"
-  | Ok fd -> Ok { fd = fd, path = path, verbose = verbose }.
-logWrite log t = writeAll log.fd t.
-writeAll fd t = case strlen t == 0 of
-    True -> Unit
-  | False -> (case OS.write fd t of
-      Ok n -> (case n >= strlen t of True -> Unit | False -> writeAll fd (substr t n (strlen t - n)))
-    | Err _ -> Unit).
+openLog path verbose =
+  OS.open path "w"
+  |> R.mapError (fn e -> "{path}: {e}")
+  |> R.map (fn fd -> { fd = fd, path = path, verbose = verbose }).
+
+logWrite log t = writeAll log.fd t (strlen t).
+
+writeAll : Int -> String -> (rem : Int | measure rem) -> Unit .
+writeAll fd t rem =
+  if rem <= 0 then Unit
+  else if strlen t == 0 then Unit
+  else case OS.write fd t of
+      Ok n -> if n <= 0 or n >= strlen t then Unit else writeAll fd (substr t n (strlen t - n)) (rem - 1)
+    | Err _ -> Unit.
+
 closeLog log = OS.close log.fd.
 
 # run a tool; its output goes to the log, and on failure its tail to stderr
-run log args cwd = case args of
-    Nil -> Err "no command"
-  | tool :: _ ->
-      line = strcat "+ " (shellJoin args);
-      _ = logWrite log (strcat line "\n");
-      _ = (case log.verbose of True -> say line | False -> Unit);
-      (case OS.run args cwd "" Nil 0 of
-        Err e -> Err "{baseName tool}: {e}"
-      | Ok (code, out, err) ->
-          output = strcat out err;
-          _ = logWrite log output;
-          _ = (case log.verbose and strlen output > 0 of True -> writeAll 1 output | False -> Unit);
-          (case code == 0 of
-            True -> Ok Unit
-          | False ->
-              _ = (case log.verbose of True -> Unit | False -> warn (lastLines 60 output));
-              Err "{baseName tool} failed; see {log.path}")).
+run _ Nil _ = Err "no command".
+run log (tool :: rest) cwd =
+  args = tool :: rest;
+  line = strcat "+ " (shellJoin args);
+  _ = logWrite log (strcat line "\n");
+  _ = if log.verbose then say line else Unit;
+  case OS.run args cwd "" Nil 0 of
+      Err e -> Err "{baseName tool}: {e}"
+    | Ok (code, out, err) ->
+        output = strcat out err;
+        _ = logWrite log output;
+        _ = if log.verbose and strlen output > 0 then writeAll 1 output (strlen output) else Unit;
+        if code == 0 then Ok Unit
+        else
+          _ = if log.verbose then Unit else warn (lastLines 60 output);
+          Err "{baseName tool} failed; see {log.path}".
 
 # ---- sdk.json ----------------------------------------------------------------------------
 field k v = J.field k v.
 textField k v = case J.field k v of O.Some (J.Text t) -> O.Some t | _ -> O.None.
-textOr d k v = O.withDefault d (textField k v).
-textIs k v want = case textField k v of O.Some t -> t == want | O.None -> False.
+textOr d k v = textField k v |> O.withDefault d.
+textIs k v want = textField k v == O.Some want.
 intField k v = case J.field k v of O.Some (J.Integer n) -> O.Some n | _ -> O.None.
 objectField k v = case J.field k v of O.Some (J.Object m) -> O.Some m | _ -> O.None.
 listField k v = case J.field k v of O.Some (J.Sequence xs) -> O.Some xs | _ -> O.None.

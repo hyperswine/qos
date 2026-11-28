@@ -1,252 +1,244 @@
-unsafe base.
+# disk.fpr -- durable QLOG v3 block disk format for Main profiles.
 
+C = use "common".
 H = use "host".
 L = use "std/list".
 M = use "std/map".
 O = use "std/option".
+R = use "std/result".
 S = use "std/string".
 OS = use "std/os".
 
 page = 4096.
 
 checksum data seed = sumGo data 0 (strlen data) seed.
-sumGo d i n h | i >= n = h.
-sumGo d i n h = sumGo d (i + 1) n ((h * 31 + charAt d i) - ((h * 31 + charAt d i) / 1000000007) * 1000000007).
-orOne n = case n == 0 of True -> 1 | False -> n.
+sumGo : String -> Int -> (rem : Int | measure rem) -> Int -> Int .
+sumGo d i rem h =
+  if rem <= 0 then h
+  else
+    x = h * 31 + charAt d i;
+    sumGo d (i + 1) (rem - 1) (x - (x / 1000000007) * 1000000007).
 
+orOne 0 = 1.
+orOne n = n.
+
+pad : unsafe String -> Int -> String .
 pad bytes n = strcat bytes (H.zeros (n - strlen bytes)).
 roundUp n = ((n + page - 1) / page) * page.
 
 # meta: { head, w, c, dataEnd, swap, merkle, generation, stage }
+Meta = { head : Int, w : Int, c : Int, dataEnd : Int, swap : Int, merkle : Int, generation : Int, stage : Int }.
+
+sealPage : unsafe Meta -> String .
 sealPage m =
   prefix = "QLOG {m.head} v3 w{m.w} c{m.c} d{m.dataEnd} s{m.swap} m{m.merkle} g{m.generation} j{m.stage}";
   pad (strcat prefix " x{orOne (checksum prefix 7)}\n") page.
 
-firstLine raw = case strIndexOf "\n" raw of
-    n -> (case n < 0 of True -> Err "missing QLOG header newline" | False -> Ok (substr raw 0 (n + 1))).
+firstLine raw =
+  n = strIndexOf "\n" raw;
+  if n < 0 then Err "missing QLOG header newline" else Ok (substr raw 0 (n + 1)).
 
 # "0" or a digit string without a leading zero
-num t = strlen t > 0 and digits t 0 and (strlen t == 1 or charAt t 0 != 48).
-digits t i | i >= strlen t = True.
-digits t i | charAt t i >= 48 and charAt t i <= 57 = digits t (i + 1).
-digits t i = False.
-toNum t = case S.toInt t of Ok n -> n | Err _ -> 0 - 1.
-# a NUM after a one-letter tag: "w0" -> Some 0
-tagged tag t = case S.startsWith tag t and num (substr t (strlen tag) (strlen t - strlen tag)) of
-    True -> O.Some (toNum (substr t (strlen tag) (strlen t - strlen tag)))
-  | False -> O.None.
+num t = strlen t > 0 and digits t 0 (strlen t) and (strlen t == 1 or charAt t 0 != 48).
+digits : String -> Int -> (rem : Int | measure rem) -> Bool .
+digits t i rem =
+  if rem <= 0 then True
+  else S.isDigit (charAt t i) and digits t (i + 1) (rem - 1).
 
-parseSeal raw pages = case firstLine raw of
-    Err e -> Err e
-  | Ok line -> (case S.split " " (substr line 0 (strlen line - 1)) of
-      "QLOG" :: head :: "v3" :: w :: c :: d :: s :: m :: g :: j :: x :: Nil ->
-        (case (num head, tagged "w" w, tagged "c" c, tagged "d" d, tagged "s" s, tagged "m" m, tagged "g" g, tagged "j" j, tagged "x" x) of
-          (True, O.Some wv, O.Some cv, O.Some dv, O.Some sv, O.Some mv, O.Some gv, O.Some jv, O.Some _) ->
-            meta = { head = toNum head, w = wv, c = cv, dataEnd = dv, swap = sv, merkle = mv, generation = gv, stage = jv };
-            (case firstLine (sealPage meta) of
-              Ok l -> (case l == line of
-                  False -> Err "superblock checksum mismatch"
-                | True -> (case sealBounds meta pages of
-                    True -> Ok meta
-                  | False -> Err "invalid superblock bounds/flags"))
-            | Err e -> Err e)
-        | _ -> Err "invalid QLOG v3 superblock")
-    | _ -> Err "invalid QLOG v3 superblock").
-sealBounds m pages = 1 <= m.head and m.head <= m.dataEnd and m.dataEnd <= pages - 1 and pages >= 3
+toNum t = S.toInt t |> R.withDefault (0 - 1).
+
+# a NUM after a one-letter tag: "w0" -> Some 0
+tagged tag t =
+  rest = substr t (strlen tag) (strlen t - strlen tag);
+  if S.startsWith tag t and num rest then O.Some (toNum rest) else O.None.
+
+parseSeal : unsafe String -> Int -> Result Meta String .
+parseSeal raw pages =
+  firstLine raw |> R.andThen (fn line ->
+    case substr line 0 (strlen line - 1) |> S.split " " of
+        ["QLOG", head, "v3", w, c, d, s, m, g, j, x] ->
+          (case (num head, tagged "w" w, tagged "c" c, tagged "d" d, tagged "s" s, tagged "m" m, tagged "g" g, tagged "j" j, tagged "x" x) of
+              (True, O.Some wv, O.Some cv, O.Some dv, O.Some sv, O.Some mv, O.Some gv, O.Some jv, O.Some _) ->
+                meta = { head = toNum head, w = wv, c = cv, dataEnd = dv, swap = sv, merkle = mv, generation = gv, stage = jv };
+                firstLine (sealPage meta) |> R.andThen (fn l ->
+                  if l != line then Err "superblock checksum mismatch"
+                  else if not (sealBounds meta pages) then Err "invalid superblock bounds/flags"
+                  else Ok meta)
+            | _ -> Err "invalid QLOG v3 superblock")
+      | _ -> Err "invalid QLOG v3 superblock").
+
+sealBounds m pages =
+  1 <= m.head and m.head <= m.dataEnd and m.dataEnd <= pages - 1 and pages >= 3
   and ((m.dataEnd <= m.swap and m.swap < pages - 1) or (m.swap == m.dataEnd and m.dataEnd == pages - 1))
   and 0 < m.generation and m.generation <= 1000000000 and m.merkle >= 0
   and ((m.w == 0 and m.c == 1) or (m.w == 1 and m.c == 0) or (m.w == 2 and m.c == 0)).
 
-sameMeta a b = a.head == b.head and a.w == b.w and a.c == b.c and a.dataEnd == b.dataEnd and a.swap == b.swap
+sameMeta a b =
+  a.head == b.head and a.w == b.w and a.c == b.c and a.dataEnd == b.dataEnd and a.swap == b.swap
   and a.merkle == b.merkle and a.generation == b.generation and a.stage == b.stage.
 
-oks rs = case rs of Nil -> Nil | Ok v :: r -> v :: oks r | Err _ :: r -> oks r.
-
-metadata fd = case H.fdSize fd of
-    Err e -> Err e
-  | Ok size -> (case size - (size / page) * page == 0 and size >= 3 * page of
-      False -> Err "invalid disk size"
-    | True ->
-        pages = size / page;
-        valid = oks (L.map (fn at -> case H.pread fd at page of Err e -> Err e | Ok raw -> parseSeal raw pages) (0 :: (pages - 1) * page :: Nil));
-        (case valid of
+metadata : unsafe Int -> Result Meta String .
+metadata fd =
+  H.fdSize fd |> R.andThen (fn size ->
+    if size - (size / page) * page != 0 or size < 3 * page then Err "invalid disk size"
+    else
+      pages = size / page;
+      valid = [0, (pages - 1) * page]
+        |> L.map (fn at -> H.pread fd at page |> R.andThen (fn raw -> parseSeal raw pages))
+        |> R.oks;
+      case valid of
           Nil -> Err "no valid durable QLOG v3 superblock; open/recover legacy disks in QOS first"
-        | _ -> (case conflicting valid of
-            True -> Err "conflicting superblock generations"
-          | False ->
+        | _ ->
+            if conflicting valid then Err "conflicting superblock generations"
+            else
               chosen = newest valid;
-              (case chosen.w == 0 and chosen.c == 1 and chosen.stage == 0 of
-                True -> Ok chosen
-              | False -> Err "pending disk operation; recover in QOS first")))).
-conflicting valid = case valid of
-    a :: b :: Nil -> a.generation == b.generation and not (sameMeta a b)
-  | _ -> False.
-not b = case b of True -> False | False -> True.
-newest valid = case valid of
-    a :: b :: Nil -> (case b.generation > a.generation of True -> b | False -> a)
-  | a :: _ -> a
-  | Nil -> { head = 0, w = 0, c = 0, dataEnd = 0, swap = 0, merkle = 0, generation = 0, stage = 0 }.
+              if chosen.w == 0 and chosen.c == 1 and chosen.stage == 0 then Ok chosen
+              else Err "pending disk operation; recover in QOS first").
 
-validKey k = strlen k > 0 and keyChars k 0.
-keyChars k i | i >= strlen k = True.
-keyChars k i | charAt k i > 32 and charAt k i != 127 = keyChars k (i + 1).
-keyChars k i = False.
+conflicting [a, b] = a.generation == b.generation and not (sameMeta a b).
+conflicting _ = False.
+
+newest [a, b] = if b.generation > a.generation then b else a.
+newest (a :: _) = a.
+newest Nil = { head = 0, w = 0, c = 0, dataEnd = 0, swap = 0, merkle = 0, generation = 0, stage = 0 }.
+
+validKey k = strlen k > 0 and keyChars k 0 (strlen k).
+keyChars : String -> Int -> (rem : Int | measure rem) -> Bool .
+keyChars k i rem =
+  if rem <= 0 then True
+  else
+    c = charAt k i;
+    c > 32 and c != 127 and keyChars k (i + 1) (rem - 1).
 
 # the record headers from page 1 to head: key -> (offset, size) of the latest value
-scan fd meta = scanGo fd meta 1 (M.empty S.compare).
-scanGo fd meta at latest | at >= meta.head = Ok latest.
-scanGo fd meta at latest = case H.pread fd (at * page) page of
-    Err e -> Err e
-  | Ok header -> (case firstLine header of
-      Err e -> Err e
-    | Ok line -> (case record (substr line 0 (strlen line - 1)) of
-        O.None -> Err "invalid record header at page {at}"
-      | O.Some r -> (case validKey r.key and r.pages == (r.size + page - 1) / page and at + r.pages + 1 <= meta.head of
-          False -> Err "record bounds/shape at page {at}"
-        | True ->
-            start = (at + 1) * page;
-            (case H.pread fd start r.size of
-              Err e -> Err e
-            | Ok value -> (case r.hash < 0 or r.hash == 0 or r.hash == orOne (checksum value 7) of
-                False -> Err "record checksum at page {at}"
-              | True -> (case apply fd r start value latest of
-                  Err e -> Err e
-                | Ok l2 -> scanGo fd meta (at + r.pages + 1) l2)))))).
+scan : unsafe Int -> Meta -> Result (M.Map String (Int, Int)) String .
+scan fd meta = scanGo fd meta 1 (meta.head - 1) (M.empty S.compare).
+
+scanGo : unsafe Int -> Meta -> Int -> (rem : Int | measure rem) -> M.Map String (Int, Int) -> Result (M.Map String (Int, Int)) String .
+scanGo fd meta at rem latest =
+  if rem <= 0 then Ok latest
+  else
+    H.pread fd (at * page) page
+    |> R.andThen firstLine
+    |> R.andThen (fn line ->
+        case substr line 0 (strlen line - 1) |> record of
+            O.None -> Err "invalid record header at page {at}"
+          | O.Some r ->
+              if not (validKey r.key and r.pages == (r.size + page - 1) / page and at + r.pages + 1 <= meta.head)
+                then Err "record bounds/shape at page {at}"
+              else
+                start = (at + 1) * page;
+                H.pread fd start r.size |> R.andThen (fn value ->
+                  if not (r.hash < 0 or r.hash == 0 or r.hash == orOne (checksum value 7))
+                    then Err "record checksum at page {at}"
+                  else apply r start value latest |> R.andThen (fn l2 ->
+                    step = r.pages + 1;
+                    if step <= 0 then Err "record bounds/shape at page {at}"
+                    else scanGo fd meta (at + step) (rem - 1) l2))).
 
 # "TAG pages size key[ hN]"
 record line = case S.split " " line of
-    tag :: pages :: size :: key :: rest -> (case (tag == "QREC" or tag == "QDEL" or tag == "QBLK") and num pages and num size of
-        False -> O.None
-      | True -> (case rest of
+    tag :: pages :: size :: key :: rest ->
+      if not ((tag == "QREC" or tag == "QDEL" or tag == "QBLK") and num pages and num size) then O.None
+      else (case rest of
           Nil -> O.Some { tag = tag, pages = toNum pages, size = toNum size, key = key, hash = 0 - 1 }
-        | h :: Nil -> (case tagged "h" h of
-            O.Some v -> O.Some { tag = tag, pages = toNum pages, size = toNum size, key = key, hash = v }
-          | O.None -> O.None)
-        | _ -> O.None))
+        | [h] -> tagged "h" h |> O.map (fn v -> { tag = tag, pages = toNum pages, size = toNum size, key = key, hash = v })
+        | _ -> O.None)
   | _ -> O.None.
 
-apply fd r start value latest = case r.tag of
-    "QDEL" -> (case r.size == 0 of True -> Ok (M.remove r.key latest) | False -> Err "nonempty tombstone")
+apply r start value latest = case r.tag of
+    "QDEL" -> if r.size == 0 then Ok (M.remove r.key latest) else Err "nonempty tombstone"
   | "QREC" -> Ok (M.insert r.key (start, r.size) latest)
-  | _ -> (case num r.key of
-      False -> Err "invalid bulk count"
-    | True -> frames value start 0 (toNum r.key) latest).
-frames value start pos count latest = case count == 0 of
-    True -> (case pos == strlen value of True -> Ok latest | False -> Err "bulk trailing bytes")
-  | False -> (case pos < strlen value of
-      False -> Err "truncated bulk frame"
-    | True ->
-        nl = strIndexFrom "\n" value pos;
-        (case nl < 0 of
-          True -> Err "bulk frame missing newline"
-        | False -> (case S.split " " (substr value pos (nl - pos)) of
-            len :: key :: Nil -> (case num len and validKey key of
-                False -> Err "invalid bulk frame"
-              | True -> (case toNum len <= strlen value - (nl + 1) of
-                  False -> Err "bulk frame bounds"
-                | True -> frames value start (nl + 1 + toNum len) (count - 1) (M.insert key (start + nl + 1, toNum len) latest)))
-          | _ -> Err "invalid bulk frame"))).
+  | _ ->
+      if not (num r.key) then Err "invalid bulk count"
+      else frames value start 0 (toNum r.key) latest.
 
-valueOf fd entry = case entry of (off, size) -> H.pread fd off size.
+frames : String -> Int -> Int -> (count : Int | measure count) -> M.Map String (Int, Int) -> Result (M.Map String (Int, Int)) String .
+frames value start pos count latest =
+  if count <= 0 then
+    if pos == strlen value then Ok latest else Err "bulk trailing bytes"
+  else if pos >= strlen value then Err "truncated bulk frame"
+  else
+    nl = strIndexFrom "\n" value pos;
+    if nl < 0 then Err "bulk frame missing newline"
+    else case substr value pos (nl - pos) |> S.split " " of
+        [len, key] ->
+          if not (num len and validKey key) then Err "invalid bulk frame"
+          else
+            n = toNum len;
+            if n > strlen value - (nl + 1) then Err "bulk frame bounds"
+            else frames value start (nl + 1 + n) (count - 1) (M.insert key (start + nl + 1, n) latest)
+      | _ -> Err "invalid bulk frame".
+
+valueOf : unsafe Int -> (Int, Int) -> Result String String .
+valueOf fd (off, size) = H.pread fd off size.
 
 # items: List (key, bytes)
+bulkRecord : unsafe List (String, String) -> Result String String .
 bulkRecord items =
-  keys = L.map (fn kv -> case kv of (k, _) -> k) items;
-  case (case items of Nil -> False | _ -> True) and L.length (uniq (L.sortWith (fn a b -> S.compare a b) keys)) == L.length keys of
-    False -> Err "duplicate/empty bulk keys"
-  | True -> (case L.all validKey keys of
-      False -> Err "invalid bulk key"
-    | True ->
-        payload = strJoin "" (L.concat (L.map (fn kv -> case kv of (k, v) -> str (strlen v) :: " " :: k :: "\n" :: v :: Nil) items));
-        header = "QBLK {(strlen payload + page - 1) / page} {strlen payload} {L.length items} h{orOne (checksum payload 7)}\n";
-        (case strlen header <= page of
-          False -> Err "bulk header too long"
-        | True -> Ok (strcat (pad header page) (pad payload (roundUp (strlen payload)))))).
-uniq xs = case xs of
-    a :: b :: r -> (case a == b of True -> uniq (b :: r) | False -> a :: uniq (b :: r))
-  | _ -> xs.
+  keys = items |> L.map (fn kv -> (k, _) = kv; k);
+  if L.isEmpty items or L.length (L.unique keys) != L.length keys then Err "duplicate/empty bulk keys"
+  else if not (L.all validKey keys) then Err "invalid bulk key"
+  else
+    payload = items |> L.concatMap (fn kv -> (k, v) = kv; [str (strlen v), " ", k, "\n", v]) |> strJoin "";
+    header = "QBLK {(strlen payload + page - 1) / page} {strlen payload} {L.length items} h{orOne (checksum payload 7)}\n";
+    if strlen header > page then Err "bulk header too long"
+    else Ok (strcat (pad header page) (pad payload (roundUp (strlen payload)))).
 
 # the disk at path, locked; Err "disk is in use..." when another process has it
-locked path = case H.realpath path of
-    Err e -> Err e
-  | Ok real -> (case H.lock real of
-      Err "in use" -> Err "disk is in use; close QOS before installing or starting another session"
-    | Err "not a regular file" -> Err "disk must be a regular file"
-    | Err e -> Err e
-    | Ok fd -> Ok (real, fd)).
+locked : unsafe String -> Result (String, Int) String .
+locked path =
+  H.realpath path |> R.andThen (fn real ->
+    case H.lock real of
+        Err "in use" -> Err "disk is in use; close QOS before installing or starting another session"
+      | Err "not a regular file" -> Err "disk must be a regular file"
+      | Err e -> Err e
+      | Ok fd -> Ok (real, fd)).
 
-writePages fd at record = H.pwrite fd at record.
-
-append fd meta items = case bulkRecord items of
-    Err e -> Err e
-  | Ok record ->
-      end = meta.head + strlen record / page;
-      (case end <= meta.dataEnd of
-        False -> Err "disk DATA partition full; compact in QOS or create a larger disk"
-      | True -> (case meta.generation < 1000000000 of
-          False -> Err "superblock generation exhausted"
-        | True -> (case writePages fd (meta.head * page) record of
-            Err e -> Err e
-          | Ok _ -> (case H.fullSync fd of
-              Err e -> Err e
-            | Ok _ ->
-                updated = { meta | head = end, generation = meta.generation + 1 };
-                (case H.fdSize fd of
-                  Err e -> Err e
-                | Ok size ->
-                    sealAt = (case updated.generation - (updated.generation / 2) * 2 == 0 of True -> 0 | False -> size - page);
-                    (case H.pwrite fd sealAt (sealPage updated) of
-                      Err e -> Err e
-                    | Ok _ -> (case H.fullSync fd of
-                        Err e -> Err e
-                      | Ok _ -> Ok updated))))))).
-
-parentOf path = case lastSlash path (strlen path - 1) of
-    n -> (case n <= 0 of True -> (case n == 0 of True -> "/" | False -> ".") | False -> substr path 0 n).
-lastSlash p i | i < 0 = 0 - 1.
-lastSlash p i | charAt p i == 47 = i.
-lastSlash p i = lastSlash p (i - 1).
+append : unsafe Int -> Meta -> List (String, String) -> Result Meta String .
+append fd meta items =
+  bulkRecord items |> R.andThen (fn rec ->
+    end = meta.head + strlen rec / page;
+    if end > meta.dataEnd then Err "disk DATA partition full; compact in QOS or create a larger disk"
+    else if meta.generation >= 1000000000 then Err "superblock generation exhausted"
+    else
+      H.pwrite fd (meta.head * page) rec
+      |> R.andThen (fn u -> H.fullSync fd)
+      |> R.andThen (fn u -> H.fdSize fd)
+      |> R.andThen (fn size ->
+          updated = { meta | head = end, generation = meta.generation + 1 };
+          sealAt = if updated.generation - (updated.generation / 2) * 2 == 0 then 0 else size - page;
+          H.pwrite fd sealAt (sealPage updated)
+          |> R.andThen (fn u -> H.fullSync fd)
+          |> R.map (fn u -> updated))).
 
 # A private inode is prepared and published by a no-clobber hard link only
 # after the complete seed is flushed: an empty disk path is never visible.
-create path sizeMib items = case sizeMib >= 1 of
-    False -> Err "disk size must be at least 1 MiB"
-  | True -> (case H.exists path of
-      True -> Err "disk already exists; refusing to overwrite"
-    | False -> (case H.tempFile (strcat (parentOf path) "/.qos-disk-XXXXXX") of
-        Err e -> Err e
-      | Ok (fd, name) ->
-          result = seed fd name path sizeMib items;
-          _ = OS.close fd;
-          _ = (case H.exists name of True -> OS.remove name | False -> Ok Unit);
-          result)).
+create : unsafe String -> Int -> List (String, String) -> Result Unit String .
+create _ sizeMib _ | sizeMib < 1 = Err "disk size must be at least 1 MiB".
+create path sizeMib items =
+  if H.exists path then Err "disk already exists; refusing to overwrite"
+  else H.tempFile (strcat (C.parent path) "/.qos-disk-XXXXXX") |> R.andThen (fn pair ->
+    (fd, name) = pair;
+    result = seed fd name path sizeMib items;
+    _ = OS.close fd;
+    _ = if H.exists name then OS.remove name else Ok Unit;
+    result).
+
+seed : unsafe Int -> String -> String -> Int -> List (String, String) -> Result Unit String .
 seed fd name path sizeMib items =
   pages = sizeMib * 1048576 / page;
   end = pages - pages / 8;
-  case H.truncate fd (pages * page) of
-    Err e -> Err e
-  | Ok _ -> (case bulkRecord items of
-      Err e -> Err e
-    | Ok record ->
-        head = 1 + strlen record / page;
-        (case head <= end of
-          False -> Err "profile does not fit in disk DATA partition"
-        | True ->
-            meta = { head = head, w = 0, c = 1, dataEnd = end, swap = end, merkle = 0, generation = 1, stage = 0 };
-            (case H.pwrite fd page record of
-              Err e -> Err e
-            | Ok _ -> (case H.pwrite fd ((pages - 1) * page) (sealPage meta) of
-                Err e -> Err e
-              | Ok _ -> (case H.pwrite fd 0 (sealPage { meta | generation = 2 }) of
-                  Err e -> Err e
-                | Ok _ -> (case H.fullSync fd of
-                    Err e -> Err e
-                  | Ok _ -> (case H.link name path of
-                      Err e -> Err e
-                    | Ok _ ->
-                        _ = OS.remove name;
-                        H.syncDir (parentOf path)))))))).
-firstErr rs = case rs of
-    Nil -> Ok Unit
-  | Err e :: _ -> Err e
-  | Ok _ :: rest -> firstErr rest.
+  H.truncate fd (pages * page)
+  |> R.andThen (fn u -> bulkRecord items)
+  |> R.andThen (fn rec ->
+      head = 1 + strlen rec / page;
+      if head > end then Err "profile does not fit in disk DATA partition"
+      else
+        meta = { head = head, w = 0, c = 1, dataEnd = end, swap = end, merkle = 0, generation = 1, stage = 0 };
+        H.pwrite fd page rec
+        |> R.andThen (fn u -> H.pwrite fd ((pages - 1) * page) (sealPage meta))
+        |> R.andThen (fn u -> H.pwrite fd 0 (sealPage { meta | generation = 2 }))
+        |> R.andThen (fn u -> H.fullSync fd)
+        |> R.andThen (fn u -> H.link name path)
+        |> R.andThen (fn u -> _ = OS.remove name; H.syncDir (C.parent path))).
